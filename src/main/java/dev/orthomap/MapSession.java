@@ -44,6 +44,7 @@ public final class MapSession {
 	private final MapLevel map;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
+	private MapStyle style = MapStyle.get();
 
 	private MapSession(ClientLevel level) {
 		this.level = level;
@@ -62,6 +63,9 @@ public final class MapSession {
 		}
 		if (BlockLooks.get() == null) {
 			BlockLooks.build();
+		} else if (session.style != MapStyle.get()) {
+			session.style = MapStyle.get();
+			session.map.colorsChanged();
 		} else if (BlockLooks.isStale()) {
 			BlockLooks.build();
 			session.map.colorsChanged();

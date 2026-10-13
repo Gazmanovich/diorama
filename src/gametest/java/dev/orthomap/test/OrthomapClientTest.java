@@ -2,6 +2,7 @@ package dev.orthomap.test;
 
 import dev.orthomap.MapScreen;
 import dev.orthomap.MapSession;
+import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
 import dev.orthomap.bake.TileKey;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
@@ -10,6 +11,9 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.tags.StructureTags;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Not an assertion test: it drives the real game through the map's views and saves screenshots,
@@ -33,6 +37,11 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			String tp = System.getProperty("orthomap.tp");
 			if (tp != null) {
 				world.getServer().runCommand("tp @a " + tp);
+			}
+
+			if ("1".equals(System.getenv("ORTHOMAP_STYLES"))) {
+				styleTour(context, world);
+				return;
 			}
 
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
@@ -125,6 +134,37 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 		});
 		settle(context, 60);
+	}
+
+	/**
+	 * Renders the same village under every look in {@link MapStyle#tour()}, close up and zoomed
+	 * out, so they can be compared side by side.
+	 */
+	private static void styleTour(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos village = world.getServer().computeOnServer(server ->
+			server.overworld().findNearestMapStructure(StructureTags.VILLAGE, BlockPos.ZERO, 100, false));
+		if (village == null) {
+			throw new AssertionError("No village near spawn");
+		}
+		int surface = world.getServer().computeOnServer(server ->
+			server.overworld().getChunk(village).getHeight(Heightmap.Types.MOTION_BLOCKING, village.getX() & 15, village.getZ() & 15));
+		world.getServer().runCommand("tp @a " + village.getX() + " " + (surface + 1) + " " + village.getZ());
+		context.waitTicks(200);
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		settle(context, 100);
+		for (MapStyle style : MapStyle.tour()) {
+			context.runOnClient(mc -> MapStyle.set(style));
+			String name = style.name().toLowerCase(java.util.Locale.ROOT).replace(' ', '-');
+			context.setScreen(MapScreen::new);
+			lookAtPlayer(context, 3.0, TileKey.SURFACE);
+			settle(context, 60);
+			context.takeScreenshot("style-" + name + "-near");
+			lookAtPlayer(context, 0.8, TileKey.SURFACE);
+			settle(context, 80);
+			context.takeScreenshot("style-" + name + "-far");
+			context.setScreen(() -> null);
+		}
+		context.runOnClient(mc -> MapStyle.set(MapStyle.DEFAULT));
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {

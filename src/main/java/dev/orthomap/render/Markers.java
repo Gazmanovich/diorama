@@ -18,7 +18,7 @@ public final class Markers {
 		double yaw = Math.toRadians(yawDegrees);
 		// Screen direction of travel. North-south distances look shorter under the tilted camera.
 		double dx = -Math.sin(yaw);
-		double dy = Math.cos(yaw) * 0.866;
+		double dy = Math.cos(yaw) * dev.orthomap.Projection.sin();
 		double len = Math.sqrt(dx * dx + dy * dy);
 		dx /= len;
 		dy /= len;

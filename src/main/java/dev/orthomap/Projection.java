@@ -1,19 +1,18 @@
 package dev.orthomap;
 
 /**
- * The fixed oblique camera every map pixel is traced through.
+ * The oblique camera every map pixel is traced through.
  *
- * <p>The camera looks north and down at {@link #PITCH_DEGREES} from the horizon, so the map shows
+ * <p>The camera looks north and down at the style's pitch from the horizon, so the map shows
  * block tops and their south faces. Map space is measured in blocks:
  * <ul>
  *   <li>{@code u = x} (east is right)</li>
- *   <li>{@code v = z * SIN - y * COS} (south is down, and higher blocks move up the screen)</li>
+ *   <li>{@code v = z * sin - y * cos} (south is down, and higher blocks move up the screen)</li>
  * </ul>
  */
 public final class Projection {
-	public static final double PITCH_DEGREES = 60.0;
-	public static final double SIN = Math.sin(Math.toRadians(PITCH_DEGREES));
-	public static final double COS = Math.cos(Math.toRadians(PITCH_DEGREES));
+	private static volatile double sin = Math.sin(Math.toRadians(60));
+	private static volatile double cos = Math.cos(Math.toRadians(60));
 
 	/** Map units per tile edge. */
 	public static final int TILE_UNITS = 128;
@@ -26,12 +25,26 @@ public final class Projection {
 	private Projection() {
 	}
 
+	/** Changes the camera angle. Everything baked before is wrong afterwards; see {@link MapStyle}. */
+	static void setPitch(double degrees) {
+		sin = Math.sin(Math.toRadians(degrees));
+		cos = Math.cos(Math.toRadians(degrees));
+	}
+
+	public static double sin() {
+		return sin;
+	}
+
+	public static double cos() {
+		return cos;
+	}
+
 	public static double v(double y, double z) {
-		return z * SIN - y * COS;
+		return z * sin - y * cos;
 	}
 
 	/** World z where a ray through map row {@code v} crosses height {@code y}. */
 	public static double zAt(double v, double y) {
-		return (v + y * COS) / SIN;
+		return (v + y * cos) / sin;
 	}
 }
