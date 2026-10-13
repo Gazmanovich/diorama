@@ -50,13 +50,21 @@ public final class MapViewport {
 		}
 	}
 
+	/** Below this zoom (GUI pixels per block) overlay lines and dots would blur into noise. */
+	private static final double OVERLAY_ZOOM = 1.0;
+
 	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view) {
+		this.draw(graphics, level, view, 0);
+	}
+
+	/** Same, with these {@link dev.orthomap.bake.Overlays} bits drawn over the tiles. */
+	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
 		ScreenRectangle scissor = new ScreenRectangle(view.x(), view.y(), view.width(), view.height());
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), cave ? 0xFF0C0E12 : 0xFF8C99AB);
 
-		this.drawTiles(graphics, level, view);
+		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0);
 		this.drawFog(graphics, level, view, scissor);
 		graphics.disableScissor();
 	}
@@ -79,7 +87,7 @@ public final class MapViewport {
 		return lod;
 	}
 
-	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view) {
+	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
@@ -117,6 +125,18 @@ public final class MapViewport {
 					-1,
 					graphics.scissorStack.peek()
 				));
+				GpuTextureView overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
+				if (overlay != null) {
+					graphics.guiRenderState.addGuiElement(QuadElement.rect(
+						RenderPipelines.GUI_TEXTURED,
+						TextureSetup.singleTexture(overlay, sampler),
+						new Matrix3x2f(graphics.pose()),
+						sx, sy, sx + size, sy + size,
+						0, 0, 1, 1,
+						-1,
+						graphics.scissorStack.peek()
+					));
+				}
 			}
 		}
 	}

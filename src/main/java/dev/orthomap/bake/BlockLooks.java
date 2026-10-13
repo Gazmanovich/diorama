@@ -1,5 +1,7 @@
 package dev.orthomap.bake;
 
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.level.NaturalSpawner;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.orthomap.Orthomap;
 import java.lang.reflect.Field;
@@ -78,6 +80,13 @@ public final class BlockLooks {
 	public final float[] sideTintWeight;
 	/** Fixed tint for blocks whose tint doesn't depend on the biome, or -1. */
 	public final int[] constantTint;
+	/** Whether a monster can spawn standing on this block (not on leaves or glass, say). */
+	public final boolean[] spawnOn;
+	/**
+	 * Whether a monster's body fits in this block's space: Minecraft's empty-spawn-block rule, and
+	 * no collision at all, since a slab at head height blocks a zombie too.
+	 */
+	public final boolean[] spawnIn;
 
 	private BlockLooks(int size) {
 		this.kind = new byte[size];
@@ -90,6 +99,8 @@ public final class BlockLooks {
 		this.sideTinted = new int[size];
 		this.sideTintWeight = new float[size];
 		this.constantTint = new int[size];
+		this.spawnOn = new boolean[size];
+		this.spawnIn = new boolean[size];
 	}
 
 	public static BlockLooks get() {
@@ -110,7 +121,10 @@ public final class BlockLooks {
 			&& this.sideTintWeight[a] == this.sideTintWeight[b]
 			&& this.tint[a] == this.tint[b]
 			&& this.constantTint[a] == this.constantTint[b]
-			&& this.emission[a] == this.emission[b];
+			&& this.emission[a] == this.emission[b]
+			// Spawn spots show on the map too: a slab becoming a double slab changes them.
+			&& this.spawnOn[a] == this.spawnOn[b]
+			&& this.spawnIn[a] == this.spawnIn[b];
 	}
 
 	public static void invalidate() {
@@ -141,6 +155,15 @@ public final class BlockLooks {
 			}
 			looks.emission[id] = (byte) state.getLightEmission();
 			looks.constantTint[id] = -1;
+			// Minecraft's own spawn rules, asked of the block alone: none of them look around it.
+			try {
+				looks.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
+				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
+					&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+			} catch (RuntimeException e) {
+				looks.spawnOn[id] = false;
+				looks.spawnIn[id] = false;
+			}
 			byte kind = classify(state);
 			looks.kind[id] = kind;
 			if (kind == AIR) {

@@ -3,6 +3,7 @@
 	"package": "dev.orthomap.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"ClientChunkCacheMixin",
 		"ClientPacketListenerMixin",
 		"DeathPacketMixin",
 		"GameRendererMixin",

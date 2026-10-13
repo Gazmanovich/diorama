@@ -77,6 +77,9 @@ public final class TileBaker {
 	private final int topY;
 	/** Cave slice that may only show blocks the player has seen. */
 	private final boolean fogOfWar;
+	/** What to record for the overlays, or null to record nothing. */
+	private final @Nullable Overlays overlays;
+	private final java.util.Map<Long, Boolean> slimeChunks = new java.util.HashMap<>();
 	private final ChunkSource source;
 	private final MapStyle style;
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
@@ -89,14 +92,25 @@ public final class TileBaker {
 	private float outB;
 	/** Camera depth of the last hit relative to {@link #depthOrigin}; larger is farther. */
 	private float outDepth;
+	// The block the last trace stopped on, when it was solid, for the overlays.
+	private boolean hitSolid;
+	private boolean hitTop;
+	private int hitId;
+	private int hitX;
+	private int hitY;
+	private int hitZ;
+	/** Where across the block the ray landed, 0..1: east-west, and north-south on a top face. */
+	private double hitFx;
+	private double hitFz;
 	/**
 	 * Camera depth of this tile's top-left ray start. Depths are kept relative to it so they stay
 	 * small enough for float precision anywhere in the world.
 	 */
 	private final double depthOrigin;
 
-	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
+	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
+		this.overlays = overlays;
 		this.looks = looks;
 		this.reader = new VoxelReader(source);
 		this.cave = key.isCave();
@@ -150,13 +164,21 @@ public final class TileBaker {
 	 * keeps a bake at the edge of loaded chunks from erasing what was saved.
 	 */
 	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
-		TileBaker baker = new TileBaker(key, source, looks, fogOfWar);
+		return bake(key, source, looks, blocks, fogOfWar, saved, null);
+	}
+
+	/** Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null. */
+	public static TileImage bake(
+		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
+	) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
-			baker.bakePixels(0, 0, size, size, pixels);
+			byte[] info = overlays == null ? null : new byte[size * size];
+			baker.bakePixels(0, 0, size, size, pixels, info);
 			merge(pixels, saved, 0, 0, size);
-			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size));
+			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
 		}
 		int perRow = size / TileImage.BLOCK;
 		List<TileImage.Patch> patches = new ArrayList<>();
@@ -164,9 +186,10 @@ public final class TileBaker {
 			int bx = i % perRow;
 			int by = i / perRow;
 			int[] pixels = new int[TileImage.BLOCK * TileImage.BLOCK];
-			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels);
+			byte[] info = overlays == null ? null : new byte[TileImage.BLOCK * TileImage.BLOCK];
+			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels, info);
 			merge(pixels, saved, bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK);
-			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK)));
+			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK), info));
 		}
 		if (VoxelReader.DEBUG && !baker.reader.missing.isEmpty()) {
 			StringBuilder sb = new StringBuilder();
@@ -203,7 +226,7 @@ public final class TileBaker {
 		}
 	}
 
-	private void bakePixels(int px0, int py0, int width, int height, int[] out) {
+	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info) {
 		if (this.startY <= this.limitY) {
 			return;
 		}
@@ -227,6 +250,13 @@ public final class TileBaker {
 					double u = minU + (px0 + x - border + SAMPLES[s][0]) * unitsPerPixel;
 					double v = minV + (py0 + y - border + SAMPLES[s][1]) * unitsPerPixel;
 					if (this.trace(u, v, s)) {
+						if (s == 0 && info != null && this.hitSolid) {
+							int ix = x - border;
+							int iy = y - border;
+							if (ix >= 0 && iy >= 0 && ix < width && iy < height) {
+								info[iy * width + ix] = (byte) this.overlayBits();
+							}
+						}
 						r += this.outR;
 						g += this.outG;
 						b += this.outB;
@@ -257,6 +287,41 @@ public final class TileBaker {
 				out[y * width + x] = pixel;
 			}
 		}
+	}
+
+	/** The {@link Overlays} bits for the block the last trace stopped on. */
+	private int overlayBits() {
+		int bits = 0;
+		// Lines one pixel wide: a pixel spans a quarter block across, and less of a top face down
+		// the screen, since top faces are foreshortened.
+		if ((this.hitX & 15) == 0 && this.hitFx < 1.0 / Projection.PIXELS_PER_UNIT) {
+			bits |= Overlays.CHUNK_WEST;
+		}
+		if (this.hitTop && (this.hitZ & 15) == 0 && this.hitFz < 1.0 / (Projection.PIXELS_PER_UNIT * this.sin)) {
+			bits |= Overlays.CHUNK_NORTH;
+		}
+		Long seed = this.overlays.slimeSeed();
+		if (seed != null) {
+			int cx = this.hitX >> 4;
+			int cz = this.hitZ >> 4;
+			if (this.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, cx, cz))) {
+				bits |= Overlays.SLIME;
+			}
+		}
+		// A dot in the middle of each top face a monster could spawn on: a block it can stand on,
+		// two blocks of room above, and no block light, the rule for most monsters since 1.18.
+		// By day the sky light there must be low too; at night any sky light is dark enough.
+		if (this.overlays.spawnSpots() && this.hitTop && this.looks.spawnOn[this.hitId]
+			&& this.hitFx >= 0.3 && this.hitFx < 0.7 && this.hitFz >= 0.3 && this.hitFz < 0.7) {
+			int feet = this.reader.state(this.hitX, this.hitY + 1, this.hitZ);
+			int head = this.reader.state(this.hitX, this.hitY + 2, this.hitZ);
+			if (feet != VoxelReader.UNKNOWN && head != VoxelReader.UNKNOWN && this.looks.spawnIn[feet] && this.looks.spawnIn[head]
+				&& this.reader.blockLight(this.hitX, this.hitY + 1, this.hitZ) == 0) {
+				int sky = this.reader.skyLight(this.hitX, this.hitY + 1, this.hitZ);
+				bits |= sky <= Overlays.DAYLIGHT_SPAWN_LIMIT ? Overlays.SPAWN_ANY_TIME : Overlays.SPAWN_AT_NIGHT;
+			}
+		}
+		return bits;
 	}
 
 	/** True if the neighbour is a much nearer surface, so this pixel sits just behind an edge. */
@@ -290,6 +355,7 @@ public final class TileBaker {
 		boolean enteredTop = true;
 
 		boolean skippingRock = this.cave;
+		this.hitSolid = false;
 		// Colour picked up from plants and glass on the way down, applied to the surface below.
 		float overR = 0;
 		float overG = 0;
@@ -334,6 +400,14 @@ public final class TileBaker {
 					}
 					double hitY = y0 - t * sin;
 					double hitZ = z0 - t * cos;
+					this.hitSolid = kind == BlockLooks.SOLID;
+					this.hitId = id;
+					this.hitTop = enteredTop;
+					this.hitX = x;
+					this.hitY = by;
+					this.hitZ = bz;
+					this.hitFx = fx;
+					this.hitFz = hitZ - bz;
 					this.outDepth = (float) (-(sin * hitY + cos * hitZ) - this.depthOrigin);
 					this.shade(id, x, by, bz, fx, hitY, hitZ, enteredTop, sample);
 					if (through < 1) {
@@ -491,7 +565,7 @@ public final class TileBaker {
 				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (SUN * lambert);
 			}
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
-			// blocks alone and light updates never make it stale.
+			// blocks alone and light updates never make its colours stale.
 			float ambient = AMBIENT * ao;
 			float[] sky = this.style.shadowTint();
 			float[] sun = this.style.sunTint();

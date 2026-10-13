@@ -1,6 +1,7 @@
 package dev.orthomap;
 
 import dev.orthomap.bake.BlockLooks;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.data.ChunkSnapshot;
 import dev.orthomap.render.MapLevel;
@@ -9,13 +10,16 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.client.player.LocalPlayer;
 import dev.orthomap.data.SeenBlocks;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
@@ -63,6 +67,18 @@ public final class MapSession {
 
 	public static @Nullable MapSession get() {
 		return current;
+	}
+
+	/**
+	 * The world seed, which places slime chunks. Only known in singleplayer, and slime chunks
+	 * only exist in the overworld.
+	 */
+	public @Nullable Long slimeSeed() {
+		IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
+		if (server == null || this.level.dimension() != Level.OVERWORLD) {
+			return null;
+		}
+		return server.overworld().getSeed();
 	}
 
 	/** Saves and ends the session. For closing the game; leaving a world is noticed by {@link #tick}. */
@@ -135,12 +151,13 @@ public final class MapSession {
 		}
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
-		int surface = current.visibleFromSky(pos) ? 1 : 0;
+		int surface = current.visibleFromSky(pos) ? MapLevel.CHANGED_SURFACE : 0;
 		int[] box = {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface};
 		current.schedule(cx, cz, CHANGE_DELAY_MS, box);
 		// A light source changing relights every neighbouring chunk, diagonals included. Other
 		// edits only reach a neighbour through shading that reads across the border.
 		boolean light = oldState.getLightEmission() != newState.getLightEmission();
+
 		int lx = pos.getX() & 15;
 		int lz = pos.getZ() & 15;
 		for (int dx = -1; dx <= 1; dx++) {
@@ -154,12 +171,31 @@ public final class MapSession {
 		}
 	}
 
-	/** The server sent new light for a chunk. Only cave slices draw light, so only they re-bake. */
+	/**
+	 * The server sent new light for a chunk. Cave slices draw light, and so do spawn spots, so the
+	 * surface re-bakes too while they're on.
+	 */
+	/**
+	 * The client's light engine changed a section's light, whether from a server packet or its
+	 * own work (a torch placed, a wall opened, a roof closed). Cave slices draw light, and so do
+	 * spawn spots, so the surface re-bakes too while they're on.
+	 */
+	public static void lightSectionChanged(ClientChunkCache source, SectionPos section) {
+		if (current != null && current.level.getChunkSource() == source) {
+			int x0 = section.minBlockX();
+			int y0 = section.minBlockY();
+			int z0 = section.minBlockZ();
+			int surface = current.map.spawnSpots() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
+		}
+	}
+
 	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
 		if (current != null && current.level == level) {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
-			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, 0});
+			int surface = current.map.spawnSpots() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
 	}
 
@@ -292,6 +328,10 @@ public final class MapSession {
 			Orthomap.LOGGER.info("Fog of war {}; underground={}", fog, this.underground);
 		}
 		this.map.setFogOfWar(fog);
+		Settings settings = Settings.get();
+		boolean spawnSpots = settings.spawnSpots != Settings.SpawnSpots.OFF;
+		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
+		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
 		this.map.update();
 		if (player != null) {
 			this.updateUnderground(player);
