@@ -80,6 +80,7 @@ public final class SettingsScreen extends Screen {
 		y = this.toggle(right, y, "orthomap.settings.deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 
 		y = this.header("orthomap.settings.look", right, y + 4);
+		y = this.toggle(right, y, "orthomap.settings.depth_shading", () -> s.depthShading, v -> s.depthShading = v);
 		y = this.toggle(right, y, "orthomap.settings.outlines", () -> s.outlines, v -> s.outlines = v);
 		y = this.toggle(right, y, "orthomap.settings.rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		this.toggle(right, y, "orthomap.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);

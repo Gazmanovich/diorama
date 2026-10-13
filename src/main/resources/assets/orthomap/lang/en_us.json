@@ -56,6 +56,7 @@
 	"orthomap.settings.waypoints_world": "In the world",
 	"orthomap.settings.deaths": "Death markers",
 	"orthomap.settings.look": "Look",
+	"orthomap.settings.depth_shading": "Depth shading",
 	"orthomap.settings.outlines": "Outlines",
 	"orthomap.settings.rounded_fog": "Rounded fog",
 	"orthomap.settings.fog_of_war": "Fog of war always",

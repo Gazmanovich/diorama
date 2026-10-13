@@ -63,6 +63,8 @@ public final class Settings {
 
 	public boolean outlines = true;
 	public boolean roundedFog = true;
+	/** The look with sky occlusion, deep shadows and a lower camera; off is the flatter look from before. */
+	public boolean depthShading = true;
 	public boolean alwaysFogOfWar = false;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
@@ -94,7 +96,8 @@ public final class Settings {
 
 	/** The map look these settings ask for. */
 	public MapStyle style() {
-		return MapStyle.BASELINE.withName("Settings")
+		MapStyle base = this.depthShading ? MapStyle.DEFAULT : MapStyle.FLAT;
+		return base.withName("Settings")
 			.withOutline(this.outlines ? MapStyle.DEFAULT.outline() : 0)
 			.withRoundedFog(this.roundedFog);
 	}

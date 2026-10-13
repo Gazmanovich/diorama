@@ -40,7 +40,8 @@ layout(location = 0) out vec4 fragColor;
 
 const float MASK_TEXELS = 256.0;
 const float NOISE_PERIOD = 512.0;
-const float COS_PITCH = 0.5;
+// The default camera angle (50 degrees). At other angles the banks sit slightly too far north or south.
+const float COS_PITCH = 0.643;
 const int LAYERS = 8;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
