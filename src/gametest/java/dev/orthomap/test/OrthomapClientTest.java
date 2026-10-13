@@ -34,8 +34,8 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
- * Not an assertion test: it drives the real game through the map's views and saves screenshots,
- * so a person can look at what the map actually draws.
+ * Drives the real game through the map's views and saves screenshots, so a person can look at
+ * what the map actually draws, and asserts what can be measured along the way.
  */
 public class OrthomapClientTest implements FabricClientGameTest {
 	@Override

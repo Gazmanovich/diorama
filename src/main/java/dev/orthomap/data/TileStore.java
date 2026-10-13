@@ -19,8 +19,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Iterator;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import org.jspecify.annotations.Nullable;
@@ -32,7 +35,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Saved tiles are merged in when baking: wherever a fresh bake has no data for a pixel, the
  * saved pixel is used. Opening a part of the map whose chunks aren't loaded is then just a bake
  * where everything is unknown, and re-baking near the edge of loaded chunks never erases what was
- * saved. Writes happen on one background thread, a few seconds after a tile first changes.
+ * saved. Writes happen a few seconds after a tile first changes, on one background thread shared
+ * by every world, so two writes of the same file never overlap, even when a world is closed and
+ * opened again while a slow write is still going.
  *
  * <p>File format: {@code OMT1}, the edge length, then the level-0 ABGR pixels deflated.
  */
@@ -43,14 +48,17 @@ public final class TileStore {
 	/** After a failed write (a full disk, say), try again this much later. */
 	private static final long RETRY_DELAY_SECONDS = 30;
 
-	private final Path folder;
-	/** The only thread that writes tiles, so two writes of one tile can never interleave. */
-	private final ScheduledThreadPoolExecutor writer = new ScheduledThreadPoolExecutor(1, task -> {
+	/** The only thread that writes tiles. */
+	private static final ScheduledThreadPoolExecutor WRITER = new ScheduledThreadPoolExecutor(1, task -> {
 		Thread thread = new Thread(task, "orthomap-tile-writer");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		return thread;
 	});
+
+	private final Path folder;
+	/** Set by close(), which writes everything itself; writes still scheduled then do nothing. */
+	private volatile boolean closed;
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
 	private final LinkedHashMap<TileKey, int[]> cache = new LinkedHashMap<>(16, 0.75F, true) {
 		@Override
@@ -58,17 +66,22 @@ public final class TileStore {
 			return this.size() > CACHED_TILES && !TileStore.this.unwritten.containsKey(eldest.getKey());
 		}
 	};
-	/** Tiles changed since they were last written. Guarded by {@code this}. */
+	/**
+	 * Tiles changed since they were last written, kept until a write of exactly these pixels
+	 * succeeds. They're never evicted from the cache meanwhile. Guarded by {@code this}.
+	 */
 	private final Map<TileKey, int[]> unwritten = new HashMap<>();
 
 	public TileStore(Path folder) {
 		this.folder = folder;
-		// close() writes everything itself; delayed writes still waiting then are dropped.
-		this.writer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
 	}
 
 	/** The saved pixels of a tile, or null if there are none. Any thread. Don't modify the array. */
 	public synchronized int @Nullable [] read(TileKey key) {
+		int[] pending = this.unwritten.get(key);
+		if (pending != null) {
+			return pending;
+		}
 		int[] pixels = this.cache.get(key);
 		if (pixels == null && !this.cache.containsKey(key)) {
 			pixels = this.load(key);
@@ -99,49 +112,62 @@ public final class TileStore {
 		boolean scheduled = this.unwritten.containsKey(key);
 		this.unwritten.put(key, pixels);
 		if (!scheduled) {
-			this.writer.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
+			WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
 		}
 	}
 
-	/** Writes everything pending on the writer thread, then stops it. Call when leaving the world. */
+	/**
+	 * Writes everything pending, waiting up to 15 seconds. Call when leaving the world. A slower
+	 * write still finishes later, before anything written after it.
+	 */
 	public void close() {
-		if (this.writer.isShutdown()) {
+		if (this.closed) {
 			return;
 		}
-		this.writer.execute(() -> {
+		this.closed = true;
+		Future<?> flush = WRITER.submit(() -> {
 			Map<TileKey, int[]> pending;
 			synchronized (this) {
 				pending = new HashMap<>(this.unwritten);
-				this.unwritten.clear();
 			}
 			for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
 				this.store(entry.getKey(), entry.getValue());
 			}
 		});
-		this.writer.shutdown();
 		try {
-			if (!this.writer.awaitTermination(15, TimeUnit.SECONDS)) {
-				Orthomap.LOGGER.warn("Saving map tiles took too long; some may not be saved");
-			}
+			flush.get(15, TimeUnit.SECONDS);
+		} catch (TimeoutException e) {
+			Orthomap.LOGGER.warn("Saving map tiles is taking long; it will finish in the background");
+		} catch (ExecutionException e) {
+			Orthomap.LOGGER.error("Couldn't save map tiles", e);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		}
 	}
 
+	/** Writes the newest pixels of a tile. Writer thread. */
 	private void write(TileKey key) {
+		if (this.closed) {
+			return;
+		}
 		int[] pixels;
 		synchronized (this) {
-			pixels = this.unwritten.remove(key);
+			pixels = this.unwritten.get(key);
 		}
-		if (pixels != null && !this.store(key, pixels)) {
-			synchronized (this) {
-				// Keep it pending, unless a newer bake already replaced it.
-				if (this.unwritten.putIfAbsent(key, pixels) == null && !this.writer.isShutdown()) {
-					this.writer.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
-				}
-			}
+		if (pixels == null) {
+			return;
 		}
+		boolean saved = this.store(key, pixels);
 		synchronized (this) {
+			if (this.unwritten.get(key) != pixels) {
+				// A newer bake arrived while this one was being written: write that too.
+				WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
+			} else if (saved) {
+				this.unwritten.remove(key);
+			} else {
+				// A full disk, say: keep it pending and try again.
+				WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+			}
 			this.trimCache();
 		}
 	}
