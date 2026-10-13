@@ -5,10 +5,10 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What a bake records for the map overlays: a few bits per pixel about the block it shows, so
- * switching overlays on and off only redraws them, without baking again. {@code slimeSeed} is the
- * world seed when slime chunks can be worked out (singleplayer, overworld), else null.
- * {@code spawnSpots} records spawn spots, which depend on light, so turning them on bakes again
- * and light changes refresh them.
+ * switching the chunk grid and slime chunks on and off only redraws them. {@code slimeSeed} is
+ * the world seed when slime chunks can be worked out (singleplayer, overworld), else null.
+ * {@code spawnSpots} records spawn spots, which depend on light, so turning them on or off bakes
+ * again and light changes refresh them.
  */
 public record Overlays(@Nullable Long slimeSeed, boolean spawnSpots) {
 	/** A line on the west edge of a chunk. */

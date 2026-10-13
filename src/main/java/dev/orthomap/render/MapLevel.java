@@ -203,7 +203,7 @@ public final class MapLevel implements ChunkSource {
 	/** Newly seen blocks: cave slices around them can show more now. */
 	public void revealed(int x0, int y0, int z0, int x1, int y1, int z1) {
 		if (this.fogOfWar) {
-			this.invalidate(x0, y0, y0, z0, x1, y1, z1, false);
+			this.invalidate(x0, y0, y0, z0, x1, y1, z1, false, true);
 		}
 	}
 
@@ -211,7 +211,7 @@ public final class MapLevel implements ChunkSource {
 	public void lightChanged(int chunkX, int chunkZ, int y0, int y1) {
 		int x0 = chunkX << 4;
 		int z0 = chunkZ << 4;
-		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false);
+		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false, true);
 	}
 
 	public int chunkCount() {
@@ -222,7 +222,8 @@ public final class MapLevel implements ChunkSource {
 	 * Stores a fresh snapshot and marks the parts of tiles that can look different because of it.
 	 *
 	 * @param changed the blocks that changed, as {x0, y0, z0, x1, y1, z1} inclusive plus a last
-	 *     element that is 1 if any of them can be seen from the sky; null when the whole chunk is new
+	 *     element of {@link #CHANGED_SURFACE} and {@link #CHANGED_SURFACE_LIGHT} flags; null when
+	 *     the whole chunk is new
 	 */
 	public void put(ChunkSnapshot snapshot, int @Nullable [] changed, int playerChunkX, int playerChunkZ) {
 		this.chunks.put(snapshot.key(), snapshot);
@@ -234,23 +235,31 @@ public final class MapLevel implements ChunkSource {
 			int z0 = snapshot.chunkZ << 4;
 			// Rays from any height could have stopped at this chunk while it was unknown. The sky
 			// view only reaches down to the surface; cave slices can be anywhere below it.
-			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true);
+			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
 		} else {
-			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], changed[6] != 0);
+			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0;
+			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
+			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], surface, terrain);
 		}
 		if (this.chunks.size() > MAX_CHUNKS) {
 			this.trimChunks(playerChunkX, playerChunkZ);
 		}
 	}
 
+	/** Change flag: blocks the sky view can show changed, so its tiles re-bake and get saved. */
+	public static final int CHANGED_SURFACE = 1;
+	/** Change flag: only light changed, which the sky view shows only through spawn spots. */
+	public static final int CHANGED_SURFACE_LIGHT = 2;
+
 	/** Light from a changed block reaches this far, which matters for cave slices. */
 	private static final int LIGHT_REACH = 15;
 
 	/**
 	 * Marks tile blocks that can look different after blocks in this box changed. {@code y0} is the
-	 * bottom of the box for the sky view and {@code caveY0} for cave slices.
+	 * bottom of the box for the sky view and {@code caveY0} for cave slices. {@code terrain} is
+	 * false when only light changed: the sky view's pixels stay the same, so nothing to save.
 	 */
-	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int z1, boolean visibleFromSky) {
+	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int z1, boolean visibleFromSky, boolean terrain) {
 		Set<Integer> layers = new HashSet<>();
 		for (TileKey key : this.tiles.keySet()) {
 			layers.add(key.layer());
@@ -283,11 +292,11 @@ public final class MapLevel implements ChunkSource {
 			double u1 = x1 + 2 + reachX;
 			double v0 = Projection.v(top, z0 - 1 - reachZ);
 			double v1 = Projection.v(bottom, z1 + 2 + (cave ? LIGHT_REACH : 0));
-			this.markDirty(layer, u0, v0, u1, v1, now);
+			this.markDirty(layer, u0, v0, u1, v1, now, terrain);
 		}
 	}
 
-	private void markDirty(int layer, double u0, double v0, double u1, double v1, long now) {
+	private void markDirty(int layer, double u0, double v0, double u1, double v1, long now, boolean terrain) {
 		double units = Projection.TILE_UNITS;
 		double blockUnits = (double) TileImage.BLOCK / Projection.PIXELS_PER_UNIT;
 		int perRow = Projection.TILE_PIXELS / TileImage.BLOCK;
@@ -298,7 +307,7 @@ public final class MapLevel implements ChunkSource {
 		for (int tu = tu0; tu <= tu1; tu++) {
 			for (int tv = tv0; tv <= tv1; tv++) {
 				TileKey key = new TileKey(layer, tu, tv);
-				if (layer == TileKey.SURFACE && this.store != null) {
+				if (layer == TileKey.SURFACE && this.store != null && terrain) {
 					this.unsaved.put(key, now);
 				}
 				if (!this.tiles.containsKey(key) && !this.inFlight.contains(key)) {

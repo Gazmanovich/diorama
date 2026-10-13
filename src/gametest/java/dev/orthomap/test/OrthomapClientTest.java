@@ -578,6 +578,8 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		int y = 150;
 		world.getServer().runCommand("fill " + x0 + " " + y + " " + z0 + " " + (x0 + 23) + " " + y + " " + (z0 + 15) + " stone");
 		world.getServer().runCommand("setblock " + (x0 + 12) + " " + (y + 1) + " " + (z0 + 8) + " torch");
+		// A bottom slab at head height over a dark floor block: a zombie doesn't fit.
+		world.getServer().runCommand("setblock " + (x0 + 1) + " " + (y + 2) + " " + (z0 + 4) + " stone_slab");
 		// Leaves on the dark west edge: monsters can't spawn on them or under them.
 		world.getServer().runCommand("fill " + (x0 + 1) + " " + (y + 1) + " " + (z0 + 11) + " " + (x0 + 3) + " " + (y + 1) + " " + (z0 + 13) + " oak_leaves[persistent=true]");
 		// A sealed room (5x2x5 inside) on the platform's south-east corner: its floor gets no sky light.
@@ -606,6 +608,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			assertOverlay(context, TileKey.SURFACE, farX + 0.5, y + 1, farZ + 0.6, Overlays.SPAWN_AT_NIGHT, true, "spawn spot far from the torch");
 			assertOverlay(context, TileKey.SURFACE, x0 + 13.5, y + 1, z0 + 8.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot next to the torch");
 			assertOverlay(context, TileKey.SURFACE, x0 + 2.5, y + 2, z0 + 12.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot on leaves");
+			assertOverlay(context, TileKey.SURFACE, x0 + 1.5, y + 1, z0 + 4.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot under a slab at head height");
 			// The chunk border is at x0 + 4: a line at its west edge, none mid-block.
 			assertOverlay(context, TileKey.SURFACE, x0 + 4.1, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, true, "chunk line on the border");
 			assertOverlay(context, TileKey.SURFACE, x0 + 4.6, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, false, "chunk line mid-block");
@@ -624,14 +627,22 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			if (slimes < 10 || slimes > 80) {
 				throw new AssertionError("Slime chunks are about a tenth of all chunks, found " + slimes + " of 400");
 			}
+			// Where the formula's int arithmetic overflows, out to the world border.
+			for (int c : new int[] {21, -21, 46341, -46341, 1874999, -1874999}) {
+				for (int d : new int[] {0, 7, -46341, 1874999}) {
+					if (Overlays.slimeChunk(seed, c, d) != legacySlimeChunk(seed, c, d) || Overlays.slimeChunk(seed, d, c) != legacySlimeChunk(seed, d, c)) {
+						throw new AssertionError("Slime chunk " + c + "," + d + " doesn't match the known formula");
+					}
+				}
+			}
 			for (int x : new int[] {x0 + 1, x0 + 8}) {
 				boolean slime = legacySlimeChunk(seed, x >> 4, (z0 + 2) >> 4);
 				assertOverlay(context, TileKey.SURFACE, x + 0.5, y + 1, z0 + 2.5, Overlays.SLIME, slime, "slime chunk at x=" + x);
 			}
 
-			// A torch placed now clears the dots around it once the light update arrives. It goes
-			// 12 blocks east, still in reach of its light but past the 8-block cells a block
-			// change re-bakes, so only the light update can clear this spot.
+			// A torch placed now clears the dots as far as its light reaches. It goes 12 blocks
+			// east: the client lights it itself, and the spot is past the cells a block change
+			// re-bakes for how it looks, so only the light refresh can clear it.
 			world.getServer().runCommand("setblock " + (farX + 12) + " " + (y + 1) + " " + farZ + " torch");
 			settle(context, 60);
 			assertOverlay(context, TileKey.SURFACE, farX + 0.5, y + 1, farZ + 0.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot after placing a torch");
@@ -644,7 +655,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			context.takeScreenshot("overlays-02-closed-room");
 			assertOverlay(context, layer, bx + 3.5, y + 2, bz + 3.6, Overlays.SPAWN_ANY_TIME, true, "spawn spot in the closed room");
 
-			// Spawn spots off: the tiles keep their bits, and only the grid and slime chunks show.
+			// Spawn spots off: the tiles bake again without them, and only the grid and slime chunks show.
 			context.runOnClient(mc -> Settings.get().spawnSpots = Settings.SpawnSpots.OFF);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x0 + 12, Projection.v(y + 1, z0 + 8), 4.0, TileKey.SURFACE));
 			settle(context, 20);

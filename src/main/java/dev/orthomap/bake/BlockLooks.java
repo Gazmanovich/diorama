@@ -1,8 +1,6 @@
 package dev.orthomap.bake;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.NaturalSpawner;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.orthomap.Orthomap;
@@ -84,7 +82,10 @@ public final class BlockLooks {
 	public final int[] constantTint;
 	/** Whether a monster can spawn standing on this block (not on leaves or glass, say). */
 	public final boolean[] spawnOn;
-	/** Whether a monster can spawn inside this block's space (air, grass, a torch can't count). */
+	/**
+	 * Whether a monster's body fits in this block's space: Minecraft's empty-spawn-block rule, and
+	 * no collision at all, since a slab at head height blocks a zombie too.
+	 */
 	public final boolean[] spawnIn;
 
 	private BlockLooks(int size) {
@@ -157,7 +158,8 @@ public final class BlockLooks {
 			// Minecraft's own spawn rules, asked of the block alone: none of them look around it.
 			try {
 				looks.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
-				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE);
+				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
+					&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
 			} catch (RuntimeException e) {
 				looks.spawnOn[id] = false;
 				looks.spawnIn[id] = false;
