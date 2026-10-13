@@ -379,8 +379,6 @@ public final class TileBaker {
 			lg *= fade;
 			lb *= fade;
 		} else {
-			int skyLight = this.reader.skyLight(x, frontY, frontZ);
-			float sky = 0.45F + 0.55F * skyLight / 15.0F;
 			double[] j = SUN_JITTER[sample];
 			double sx = SUN_X + j[0];
 			double sy = SUN_Y + j[1];
@@ -393,8 +391,9 @@ public final class TileBaker {
 				double oz = top ? hitZ : bz + 1 + 1e-4;
 				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (SUN * lambert);
 			}
-			float ambient = AMBIENT * ao * sky;
-			// The surface map is a daytime view, so torches don't light it.
+			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
+			// blocks alone and light updates never make it stale.
+			float ambient = AMBIENT * ao;
 			lr = ambient * 0.90F + direct * 1.06F;
 			lg = ambient * 0.95F + direct * 1.00F;
 			lb = ambient * 1.08F + direct * 0.90F;

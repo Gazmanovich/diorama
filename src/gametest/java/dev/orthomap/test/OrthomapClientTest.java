@@ -10,9 +10,6 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.LightLayer;
 
 /**
  * Not an assertion test: it drives the real game through the map's views and saves screenshots,
@@ -85,59 +82,49 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			context.takeScreenshot("orthomap-06-cave-close");
 			context.setScreen(() -> null);
 
-			// Fog of war: the server sends Xaero's fair-play code, then the player explores a cave.
-			BlockPos cave = world.getServer().computeOnServer(server -> findCave(server.overworld(), new BlockPos(0, 0, 0)));
-			if (cave == null) {
-				throw new AssertionError("No cave found near spawn");
-			}
-			world.getServer().runCommand("tellraw @a \"§f§a§i§r§x§a§e§r§o\"");
-			world.getServer().runCommand("tp @a " + cave.getX() + " " + cave.getY() + " " + cave.getZ());
-			settle(context, 80);
-			// Walk around a little so more of the cave gets seen.
-			for (float yaw : new float[] {0, 90, 180, 270}) {
-				context.getInput().lookAt(yaw, 10);
-				context.getInput().holdKeyFor(options -> options.keyUp, 40);
-			}
-			settle(context, 40);
+			// Fog of war. Build a known scene deep underground: a straight corridor through solid
+			// stone that turns north at its far end into a hidden room. From the corridor's start,
+			// the corridor must be revealed and the room must not, because it is around a corner.
+			world.getServer().runCommand("fill 100 -42 98 131 -34 120 minecraft:stone");
+			world.getServer().runCommand("fill 102 -40 115 128 -38 117 minecraft:air");
+			world.getServer().runCommand("fill 126 -40 110 128 -38 114 minecraft:air");
+			world.getServer().runCommand("fill 119 -40 100 128 -38 109 minecraft:air");
+			world.getServer().runCommand("tellraw @a \"\u00a7f\u00a7a\u00a7i\u00a7r\u00a7x\u00a7a\u00a7e\u00a7r\u00a7o\"");
+			world.getServer().runCommand("tp @a 103.5 -40 116.5 -90 0");
+			settle(context, 100);
 			context.takeScreenshot("orthomap-07-fog-of-war-minimap");
+			assertSeen(context, 115, -39, 116, true, "corridor in front of the player");
+			assertSeen(context, 123, -39, 104, false, "room around the corner");
+			showScene(context);
+			context.takeScreenshot("orthomap-08-fog-of-war-corridor");
+			context.setScreen(() -> null);
 
-			context.setScreen(MapScreen::new);
-			lookAtPlayer(context, 3.0, Integer.MIN_VALUE);
-			context.runOnClient(mc -> {
-				if (mc.gui.screen() instanceof MapScreen screen && mc.player != null) {
-					screen.lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), 3.0, MapSession.caveLayerFor(mc.player.getY()));
-				}
-			});
-			settle(context, 40);
-			context.takeScreenshot("orthomap-08-fog-of-war-map");
+			// Walk to the bend: now the room is in sight.
+			world.getServer().runCommand("tp @a 127.5 -40 112.5 0 0");
+			settle(context, 100);
+			assertSeen(context, 123, -39, 104, true, "room once the player reaches the bend");
+			showScene(context);
+			context.takeScreenshot("orthomap-09-fog-of-war-room");
 			context.setScreen(() -> null);
 		}
 	}
 
-	/** An open spot underground near {@code near}: three blocks of air over a solid floor, no sky light. */
-	private static BlockPos findCave(ServerLevel level, BlockPos near) {
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		for (int r = 0; r < 64; r += 2) {
-			for (int dx = -r; dx <= r; dx += 2) {
-				for (int dz = -r; dz <= r; dz += 2) {
-					if (Math.max(Math.abs(dx), Math.abs(dz)) != r) {
-						continue;
-					}
-					for (int y = 40; y > 0; y--) {
-						pos.set(near.getX() + dx, y, near.getZ() + dz);
-						if (level.getBlockState(pos.below()).isSolid()
-							&& level.getBlockState(pos).isAir()
-							&& level.getBlockState(pos.above()).isAir()
-							&& level.getBlockState(pos.above(2)).isAir()
-							&& level.getBrightness(LightLayer.SKY, pos) == 0
-							&& level.getFluidState(pos.below()).isEmpty()) {
-							return pos.immutable();
-						}
-					}
-				}
-			}
+	private static void assertSeen(ClientGameTestContext context, int x, int y, int z, boolean expected, String what) {
+		boolean seen = context.computeOnClient(mc -> MapSession.get().map().isSeen(x, y, z));
+		if (seen != expected) {
+			throw new AssertionError("Expected the " + what + " at " + x + "," + y + "," + z + (expected ? " to be seen" : " to stay hidden"));
 		}
-		return null;
+	}
+
+	/** Opens the map on the test scene's cave slice. */
+	private static void showScene(ClientGameTestContext context) {
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			if (mc.gui.screen() instanceof MapScreen screen) {
+				screen.lookAt(115, Projection.v(-40, 110), 3.5, MapSession.caveLayerFor(-40));
+			}
+		});
+		settle(context, 60);
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {

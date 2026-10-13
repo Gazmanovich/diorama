@@ -16,6 +16,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
@@ -64,6 +65,9 @@ public final class MapSession {
 		} else if (BlockLooks.isStale()) {
 			BlockLooks.build();
 			session.map.colorsChanged();
+			// Snapshots hold biome tints from the old colormaps. Retake every loaded chunk;
+			// chunks no longer loaded keep their old tints until you come back.
+			session.resnapshotLoaded();
 		}
 		session.tickSession(mc);
 	}
@@ -109,7 +113,7 @@ public final class MapSession {
 		}
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
-		int surface = current.visibleFromSky(pos, looks) ? 1 : 0;
+		int surface = current.visibleFromSky(pos) ? 1 : 0;
 		int[] box = {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface};
 		current.schedule(cx, cz, CHANGE_DELAY_MS, box);
 		// A light source changing relights every neighbouring chunk, diagonals included. Other
@@ -138,46 +142,26 @@ public final class MapSession {
 	}
 
 	/**
-	 * Whether a changed block can affect the sky view: true if a camera ray leaving its top face,
-	 * its south face, or the top of the block above reaches open sky. Walks real blocks, so it
-	 * handles overhangs, and it is cheap underground because the ray stops at the first rock.
+	 * Whether a changed block can affect the sky view. A camera ray only reaches a block through
+	 * open air connected to the sky, and vanilla sky light already tracks exactly that space, so
+	 * a block counts if it or any neighbour has sky light. This is deliberately loose: a few
+	 * changes the camera can't see still count, but buried ones (water and lava settling in
+	 * sealed caves) don't. It misses only blocks more than 15 blocks under an overhang.
 	 */
-	private boolean visibleFromSky(BlockPos pos, @Nullable BlockLooks looks) {
-		int top = this.map.topY();
-		if (looks == null || top == Integer.MIN_VALUE) {
+	private boolean visibleFromSky(BlockPos pos) {
+		if (!this.level.dimensionType().hasSkyLight()) {
 			return true;
 		}
-		int x = pos.getX();
-		return this.cameraRayClear(looks, x, pos.getY() + 1.0, pos.getZ() + 0.5, top)
-			|| this.cameraRayClear(looks, x, pos.getY() + 0.5, pos.getZ() + 1.0, top)
-			|| this.cameraRayClear(looks, x, pos.getY() + 2.0, pos.getZ() + 0.5, top);
-	}
-
-	/** Walks from a point back toward the camera (up and south) until open sky or a solid block. */
-	private boolean cameraRayClear(BlockLooks looks, int x, double y, double z, int top) {
-		double sin = Projection.SIN;
-		double cos = Projection.COS;
-		y += 1e-4 * sin;
-		z += 1e-4 * cos;
-		int by = Mth.floor(y);
-		int bz = Mth.floor(z);
-		double tMaxY = (by + 1 - y) / sin;
-		double tMaxZ = (bz + 1 - z) / cos;
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		for (int i = 0; i < 1024 && by < top; i++) {
-			int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(x, by, bz)));
-			if (id >= 0 && looks.kind[id] == BlockLooks.SOLID) {
-				return false;
-			}
-			if (tMaxY < tMaxZ) {
-				by++;
-				tMaxY += 1 / sin;
-			} else {
-				bz++;
-				tMaxZ += 1 / cos;
+		BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+		if (this.level.getBrightness(LightLayer.SKY, pos) > 0) {
+			return true;
+		}
+		for (Direction d : DIRECTIONS) {
+			if (this.level.getBrightness(LightLayer.SKY, p.setWithOffset(pos, d)) > 0) {
+				return true;
 			}
 		}
-		return true;
+		return false;
 	}
 
 	/**
@@ -225,6 +209,23 @@ public final class MapSession {
 			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
 				if (this.map.chunk(cx, cz) == null && !this.pending.containsKey(ChunkSnapshot.key(cx, cz))
 					&& this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false) != null) {
+					this.schedule(cx, cz, 0, null);
+				}
+			}
+		}
+	}
+
+	private void resnapshotLoaded() {
+		LocalPlayer player = mc().player;
+		if (player == null) {
+			return;
+		}
+		int radius = mc().options.renderDistance().get() + 2;
+		int pcx = player.blockPosition().getX() >> 4;
+		int pcz = player.blockPosition().getZ() >> 4;
+		for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
+			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
+				if (this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false) != null) {
 					this.schedule(cx, cz, 0, null);
 				}
 			}
@@ -281,9 +282,10 @@ public final class MapSession {
 	private int sightCooldown;
 
 	/**
-	 * Marks the blocks the player can see: spreads from their eyes through open space within
-	 * {@link #SIGHT_RADIUS}, stopping at solid blocks, which count as seen themselves. Spreading
-	 * cannot pass through rock, so a cave behind a wall stays hidden.
+	 * Marks the blocks the player can see. Spreads from their eyes through open space within
+	 * {@link #SIGHT_RADIUS}, but only into blocks a straight line from the eyes reaches without
+	 * passing through a solid block. Solid blocks on that line count as seen; the spread stops
+	 * there. So neither a cave behind a wall nor a room around a bend gets revealed.
 	 */
 	private void updateSight(LocalPlayer player) {
 		BlockLooks looks = BlockLooks.get();
@@ -293,6 +295,7 @@ public final class MapSession {
 		}
 		this.lastSightOrigin = eye;
 		this.sightCooldown = 40;
+		Vec3 eyes = player.getEyePosition();
 		SeenBlocks seen = this.map.seen();
 		LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
 		LongOpenHashSet visited = new LongOpenHashSet();
@@ -318,7 +321,7 @@ public final class MapSession {
 					continue;
 				}
 				long next = BlockPos.asLong(nx, ny, nz);
-				if (!visited.add(next)) {
+				if (!visited.add(next) || !this.inSight(looks, eyes, nx, ny, nz)) {
 					continue;
 				}
 				int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(nx, ny, nz)));
@@ -338,6 +341,46 @@ public final class MapSession {
 	}
 
 	private static final Direction[] DIRECTIONS = Direction.values();
+
+	/** True if the line from the eyes to the block's centre passes only through open blocks. */
+	private boolean inSight(BlockLooks looks, Vec3 eyes, int tx, int ty, int tz) {
+		double dx = tx + 0.5 - eyes.x;
+		double dy = ty + 0.5 - eyes.y;
+		double dz = tz + 0.5 - eyes.z;
+		int x = Mth.floor(eyes.x);
+		int y = Mth.floor(eyes.y);
+		int z = Mth.floor(eyes.z);
+		int stepX = dx > 0 ? 1 : -1;
+		int stepY = dy > 0 ? 1 : -1;
+		int stepZ = dz > 0 ? 1 : -1;
+		double deltaX = dx == 0 ? Double.MAX_VALUE : Math.abs(1 / dx);
+		double deltaY = dy == 0 ? Double.MAX_VALUE : Math.abs(1 / dy);
+		double deltaZ = dz == 0 ? Double.MAX_VALUE : Math.abs(1 / dz);
+		double maxX = dx == 0 ? Double.MAX_VALUE : (dx > 0 ? x + 1 - eyes.x : eyes.x - x) * deltaX;
+		double maxY = dy == 0 ? Double.MAX_VALUE : (dy > 0 ? y + 1 - eyes.y : eyes.y - y) * deltaY;
+		double maxZ = dz == 0 ? Double.MAX_VALUE : (dz > 0 ? z + 1 - eyes.z : eyes.z - z) * deltaZ;
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		for (int i = 0; i < 4 * SIGHT_RADIUS; i++) {
+			if (maxX < maxY && maxX < maxZ) {
+				x += stepX;
+				maxX += deltaX;
+			} else if (maxY < maxZ) {
+				y += stepY;
+				maxY += deltaY;
+			} else {
+				z += stepZ;
+				maxZ += deltaZ;
+			}
+			if (x == tx && y == ty && z == tz) {
+				return true;
+			}
+			int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(x, y, z)));
+			if (id >= 0 && looks.kind[id] == BlockLooks.SOLID) {
+				return false;
+			}
+		}
+		return false;
+	}
 
 	private static void reveal(SeenBlocks seen, int x, int y, int z, int[] box) {
 		if (seen.markSeen(x, y, z)) {
