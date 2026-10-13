@@ -68,6 +68,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			if (tests.contains("styles")) {
 				styleTour(context, world);
 			}
+			if (tests.contains("bench")) {
+				bench(context);
+			}
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
@@ -224,6 +227,37 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/**
+	 * Times baking the same nine tiles in each look, in rotation, keeping each one's best: the
+	 * first passes include warming up, and the map's own bakes run alongside.
+	 */
+	private static void bench(ClientGameTestContext context) {
+		String[] modes = {"default", "flat at 50 degrees", "flat at 60 degrees"};
+		java.util.Map<String, Long> best = new java.util.LinkedHashMap<>();
+		context.waitTicks(200);
+		for (int round = 0; round < 4; round++) {
+			for (String mode : modes) {
+				MapStyle style = mode.equals("default") ? MapStyle.DEFAULT : MapStyle.FLAT.withPitch(mode.contains("50") ? 50 : 60);
+				context.runOnClient(mc -> {
+					MapStyle.set(style);
+					double u = mc.player.getX();
+					double v = Projection.v(mc.player.getY(), mc.player.getZ());
+					int tu = (int) Math.floor(u / Projection.TILE_UNITS);
+					int tv = (int) Math.floor(v / Projection.TILE_UNITS);
+					long start = System.nanoTime();
+					for (int du = -1; du <= 1; du++) {
+						for (int dv = -1; dv <= 1; dv++) {
+							dev.orthomap.bake.TileBaker.bake(new TileKey(TileKey.SURFACE, tu + du, tv + dv), MapSession.get().map(), dev.orthomap.bake.BlockLooks.get(), null, false);
+						}
+					}
+					best.merge(mode, System.nanoTime() - start, Math::min);
+				});
+			}
+		}
+		best.forEach((mode, nanos) -> dev.orthomap.Orthomap.LOGGER.info("BENCH {}: {} ms per tile", mode, nanos / 9 / 1_000_000));
+		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
 	}
 
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */

@@ -21,25 +21,38 @@ public final class TileBaker {
 	/** Rotated-grid sample offsets inside a pixel. */
 	private static final double[][] SAMPLES = {{0.375, 0.125}, {0.875, 0.375}, {0.125, 0.625}, {0.625, 0.875}};
 
-	// Direction toward the sun: high in the west, slightly south, so shadows fall to the east.
-	private static final double SUN_X;
-	private static final double SUN_Y;
-	private static final double SUN_Z;
+	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
+	private static final double SUN_AZIMUTH_X = -0.878;
+	private static final double SUN_AZIMUTH_Z = 0.479;
 	/** Small per-sample nudges of the sun direction, which soften shadow edges. */
 	private static final double[][] SUN_JITTER = {{0.03, 0.0, -0.02}, {-0.02, 0.0, 0.03}, {0.02, 0.0, 0.02}, {-0.03, 0.0, -0.03}};
 
-	static {
-		double x = -0.55;
-		double y = 0.78;
-		double z = 0.30;
-		double len = Math.sqrt(x * x + y * y + z * z);
-		SUN_X = x / len;
-		SUN_Y = y / len;
-		SUN_Z = z / len;
-	}
 
-	private static final float AMBIENT = 0.50F;
-	private static final float SUN = 0.62F;
+	/**
+	 * Directions for sky occlusion: two rings round the sky and one straight up, weighted by how
+	 * much light each part of the sky sends onto flat ground.
+	 */
+	private static final double[][] SKY_RAYS;
+	private static final double[] SKY_WEIGHTS;
+	/** How far sky occlusion looks for something overhead, in blocks. */
+	public static final int SKY_REACH = 12;
+
+	static {
+		int ring = 6;
+		SKY_RAYS = new double[ring * 2 + 1][];
+		SKY_WEIGHTS = new double[ring * 2 + 1];
+		double[] elevations = {Math.toRadians(25), Math.toRadians(55)};
+		for (int r = 0; r < 2; r++) {
+			for (int i = 0; i < ring; i++) {
+				double azimuth = (i + r * 0.5) * 2 * Math.PI / ring;
+				double e = elevations[r];
+				SKY_RAYS[r * ring + i] = new double[] {Math.cos(e) * Math.cos(azimuth), Math.sin(e), Math.cos(e) * Math.sin(azimuth)};
+				SKY_WEIGHTS[r * ring + i] = Math.sin(e);
+			}
+		}
+		SKY_RAYS[ring * 2] = new double[] {0, 1, 0};
+		SKY_WEIGHTS[ring * 2] = 1.5;
+	}
 	private static final float[] AO_LEVELS = {0.6F, 0.74F, 0.87F, 1.0F};
 	/** How much nearer a neighbouring pixel has to be, in blocks, before an outline is drawn. */
 	private static final float OUTLINE_DEPTH = 1.5F;
@@ -48,10 +61,13 @@ public final class TileBaker {
 	private static final int SHADOW_STEPS = 96;
 	/** Longest shadow, in blocks along the sun direction. Bounds how far an edit can reach. */
 	public static final double SHADOW_DISTANCE = 40;
-	/** How far east, north and down from a block its shadow can land. */
-	public static final int SHADOW_REACH_X = (int) Math.ceil(SHADOW_DISTANCE * 0.58) + 1;
-	public static final int SHADOW_REACH_Z = (int) Math.ceil(SHADOW_DISTANCE * 0.32) + 1;
-	public static final int SHADOW_REACH_Y = (int) Math.ceil(SHADOW_DISTANCE * 0.82) + 1;
+	/**
+	 * How far east, north and down from a block its shadow can land, for the lowest and highest
+	 * sun a style can have.
+	 */
+	public static final int SHADOW_REACH_X = (int) Math.ceil(SHADOW_DISTANCE * Math.cos(Math.toRadians(dev.orthomap.MapStyle.MIN_SUN_ELEVATION)) * -SUN_AZIMUTH_X) + 1;
+	public static final int SHADOW_REACH_Z = (int) Math.ceil(SHADOW_DISTANCE * Math.cos(Math.toRadians(dev.orthomap.MapStyle.MIN_SUN_ELEVATION)) * SUN_AZIMUTH_Z) + 1;
+	public static final int SHADOW_REACH_Y = (int) Math.ceil(SHADOW_DISTANCE * Math.sin(Math.toRadians(dev.orthomap.MapStyle.MAX_SUN_ELEVATION))) + 1;
 
 	private static final float[] SRGB_TO_LINEAR = new float[256];
 	private static final int[] LINEAR_TO_SRGB = new int[4096];
@@ -74,7 +90,10 @@ public final class TileBaker {
 	private final boolean cave;
 	private final int startY;
 	private final int limitY;
+	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
 	private final int topY;
+	/** The same for shadow and sky rays, which reach further north. */
+	private final int rayTop;
 	/** Cave slice that may only show blocks the player has seen. */
 	private final boolean fogOfWar;
 	/** What to record for the overlays, or null to record nothing. */
@@ -85,6 +104,12 @@ public final class TileBaker {
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
 	private final double sin;
 	private final double cos;
+	// Direction toward the sun for this style.
+	private final double sunX;
+	private final double sunY;
+	private final double sunZ;
+	/** Sky visibility at block corners, 0..1, worked out once per bake. */
+	private final it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap skyAtCorner = new it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap();
 
 	// Result of the last trace, in linear light.
 	private float outR;
@@ -117,9 +142,14 @@ public final class TileBaker {
 		this.source = source;
 		this.fogOfWar = this.cave && fogOfWar;
 		this.style = MapStyle.get();
+		double elevation = Math.toRadians(this.style.sunElevation());
+		this.sunX = Math.cos(elevation) * SUN_AZIMUTH_X;
+		this.sunY = Math.sin(elevation);
+		this.sunZ = Math.cos(elevation) * SUN_AZIMUTH_Z;
 		this.sin = Projection.sin();
 		this.cos = Projection.cos();
-		this.topY = localTop(key, source);
+		this.topY = localTop(key, source, 0);
+		this.rayTop = localTop(key, source, SKY_REACH);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
@@ -130,13 +160,13 @@ public final class TileBaker {
 	 * One above the tallest block any ray or shadow ray of this tile can touch. Starting rays here
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
 	 */
-	static int localTop(TileKey key, ChunkSource source) {
+	static int localTop(TileKey key, ChunkSource source, int moreNorth) {
 		int globalTop = Math.min(source.maxY(), source.topY());
 		double minU = key.minU();
 		double minV = key.minV();
 		int x0 = Math.floorDiv((int) Math.floor(minU) - 1, 16);
 		int x1 = Math.floorDiv((int) Math.ceil(minU + Projection.TILE_UNITS) + SHADOW_REACH_X + 1, 16);
-		int z0 = Math.floorDiv((int) Math.floor(Projection.zAt(minV, source.minY())) - 1, 16);
+		int z0 = Math.floorDiv((int) Math.floor(Projection.zAt(minV, source.minY())) - 1 - moreNorth, 16);
 		int z1 = Math.floorDiv((int) Math.ceil(Projection.zAt(minV + Projection.TILE_UNITS, globalTop)) + SHADOW_REACH_Z + 1, 16);
 		int top = Integer.MIN_VALUE;
 		for (int cx = x0 - 2; cx <= x1; cx++) {
@@ -553,25 +583,43 @@ public final class TileBaker {
 			lb *= fade;
 		} else {
 			double[] j = SUN_JITTER[sample];
-			double sx = SUN_X + j[0];
-			double sy = SUN_Y + j[1];
-			double sz = SUN_Z + j[2];
-			double lambert = top ? sy : Math.max(0, sz);
+			double sx = this.sunX + j[0];
+			double sy = this.sunY + j[1];
+			double sz = this.sunZ + j[2];
+			// Relative to a top face, so tops stay as bright whatever the sun's height.
+			double lambert = top ? 1 : Math.max(0, sz) / sy;
 			float direct = 0;
 			if (lambert > 0) {
 				double ox = x + fx;
 				double oy = top ? by + 1 + 1e-4 : hitY;
 				double oz = top ? hitZ : bz + 1 + 1e-4;
-				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (SUN * lambert);
+				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (this.style.sunStrength() * lambert);
 			}
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
 			// blocks alone and light updates never make its colours stale.
-			float ambient = AMBIENT * ao;
+			float ambient = this.style.ambient() * ao;
+			float occlusion = this.style.skyOcclusion();
+			if (occlusion > 0) {
+				// Less sky overhead, less ambient light: under trees, down in valleys and at the
+				// foot of walls. This is what makes the levels of the world read apart.
+				float sky = top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by);
+				ambient *= 1 - occlusion * (1 - (0.15F + 0.85F * sky));
+			}
 			float[] sky = this.style.shadowTint();
 			float[] sun = this.style.sunTint();
 			lr = ambient * sky[0] + direct * sun[0];
 			lg = ambient * sky[1] + direct * sun[1];
 			lb = ambient * sky[2] + direct * sun[2];
+			float heightShade = this.style.heightShade();
+			if (heightShade != 0) {
+				// High ground a little brighter, low ground darker, so hills and valleys still read
+				// apart when zoomed out too far to see their shadows.
+				float above = (float) Math.max(-1, Math.min(1, (hitY - 64) / 64));
+				float f = 1 + heightShade * above;
+				lr *= f;
+				lg *= f;
+				lb *= f;
+			}
 		}
 		if (emission > 0) {
 			float e = 0.35F + emission * 0.85F;
@@ -601,12 +649,23 @@ public final class TileBaker {
 			int sl = this.reader.skyLight(x, by + 1, bz);
 			light = 0.42F + (float) Math.pow(Math.max(bl, sl * 0.8F) / 15.0F, 1.5) * 0.8F;
 		} else {
-			double sy = SUN_Y + SUN_JITTER[sample][1];
+			double sy = this.sunY + SUN_JITTER[sample][1];
 			double ox = u;
 			double oy = this.startY - tEntry * this.sin + 1e-4;
 			double oz = z0 - tEntry * this.cos;
-			boolean shadow = this.inShadow(ox, oy, oz, SUN_X, sy, SUN_Z);
-			light = AMBIENT + (shadow ? 0 : (float) (SUN * sy));
+			boolean shadow = this.inShadow(ox, oy, oz, this.sunX, sy, this.sunZ);
+			// Lit like the ground around it: the style's light, sky occlusion and height shade.
+			float ambient = this.style.ambient();
+			float occlusion = this.style.skyOcclusion();
+			if (occlusion > 0) {
+				float sky = this.skyTop(x, by + 1, bz, u - x, oz - bz);
+				ambient *= 1 - occlusion * (1 - (0.15F + 0.85F * sky));
+			}
+			light = ambient + (shadow ? 0 : this.style.sunStrength());
+			float heightShade = this.style.heightShade();
+			if (heightShade != 0) {
+				light *= 1 + heightShade * (float) Math.max(-1, Math.min(1, (by + 1 - 64) / 64.0));
+			}
 		}
 		double depth = Math.max(0, tHit - tEntry);
 		if (this.style.clearWater()) {
@@ -634,9 +693,49 @@ public final class TileBaker {
 
 	/** Walks from a point toward the sun; true if a solid block is in the way. */
 	private boolean inShadow(double ox, double oy, double oz, double dx, double dy, double dz) {
+		return this.blocked(ox, oy, oz, dx, dy, dz, SHADOW_DISTANCE, SHADOW_STEPS);
+	}
+
+	/** Sky visibility on a top face at {@code y}, blended from its four corners. */
+	private float skyTop(int x, int y, int z, double fx, double fz) {
+		return bilinear(this.skyAt(x, y, z), this.skyAt(x + 1, y, z), this.skyAt(x, y, z + 1), this.skyAt(x + 1, y, z + 1), fx, fz);
+	}
+
+	/** Sky visibility on a south face at {@code z}, blended from its four corners; {@code fy} runs bottom to top. */
+	private float skySouth(int x, int y, int z, double fx, double fy) {
+		return bilinear(this.skyAt(x, y + 1, z), this.skyAt(x + 1, y + 1, z), this.skyAt(x, y, z), this.skyAt(x + 1, y, z), fx, 1 - fy);
+	}
+
+	/** Share of the sky seen from a block corner, 0..1, from a few short rays upward. */
+	private float skyAt(int x, int y, int z) {
+		long key = ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | ((y + 2048) & 0xFFF);
+		float cached = this.skyAtCorner.getOrDefault(key, -1F);
+		if (cached >= 0) {
+			return cached;
+		}
+		double open = 0;
+		double total = 0;
+		for (int i = 0; i < SKY_RAYS.length; i++) {
+			double[] d = SKY_RAYS[i];
+			// Start a hair along the ray, so it begins in the block it heads into, not on a boundary.
+			if (!this.blocked(x + d[0] * 1e-3, y + d[1] * 1e-3, z + d[2] * 1e-3, d[0], d[1], d[2], SKY_REACH, SKY_REACH * 3)) {
+				open += SKY_WEIGHTS[i];
+			}
+			total += SKY_WEIGHTS[i];
+		}
+		float sky = (float) (open / total);
+		this.skyAtCorner.put(key, sky);
+		return sky;
+	}
+
+	/** Walks from a point along a direction for up to {@code distance} blocks; true if a solid block is in the way. */
+	private boolean blocked(double ox, double oy, double oz, double dx, double dy, double dz, double distance, int steps) {
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
+		if (cy < this.rayTop && this.occludes(cx, cy, cz)) {
+			return true;
+		}
 		int stepX = dx > 0 ? 1 : -1;
 		int stepY = dy > 0 ? 1 : -1;
 		int stepZ = dz > 0 ? 1 : -1;
@@ -646,8 +745,8 @@ public final class TileBaker {
 		double tMaxX = dx == 0 ? Double.MAX_VALUE : (dx > 0 ? cx + 1 - ox : ox - cx) * tDeltaX;
 		double tMaxY = dy == 0 ? Double.MAX_VALUE : (dy > 0 ? cy + 1 - oy : oy - cy) * tDeltaY;
 		double tMaxZ = dz == 0 ? Double.MAX_VALUE : (dz > 0 ? cz + 1 - oz : oz - cz) * tDeltaZ;
-		for (int i = 0; i < SHADOW_STEPS; i++) {
-			if (Math.min(tMaxX, Math.min(tMaxY, tMaxZ)) > SHADOW_DISTANCE) {
+		for (int i = 0; i < steps; i++) {
+			if (Math.min(tMaxX, Math.min(tMaxY, tMaxZ)) > distance) {
 				return false;
 			}
 			if (tMaxX < tMaxY && tMaxX < tMaxZ) {
@@ -660,7 +759,7 @@ public final class TileBaker {
 				cz += stepZ;
 				tMaxZ += tDeltaZ;
 			}
-			if (cy >= this.topY) {
+			if (cy >= this.rayTop) {
 				return false;
 			}
 			int id = this.reader.state(cx, cy, cz);

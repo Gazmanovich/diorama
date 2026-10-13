@@ -60,7 +60,10 @@ public final class MapLevel implements ChunkSource {
 	private final SeenBlocks seen;
 	/** Where this dimension's map is saved, or null when there's no world to save it for. */
 	private final @Nullable Path folder;
-	private final @Nullable TileStore store;
+	/** Saved tiles for the current camera angle, or null when nothing is saved. Render thread. */
+	private @Nullable TileStore store;
+	/** The camera angle, in whole degrees, that {@link #store} saves tiles for. */
+	private long storePitch;
 	private volatile boolean fogOfWar;
 	/** What bakes record for the map overlays, or null when no overlay is on. */
 	private volatile @Nullable Overlays overlays;
@@ -98,10 +101,7 @@ public final class MapLevel implements ChunkSource {
 		this.minY = minY;
 		this.maxY = maxY;
 		this.folder = folder;
-		this.store = folder == null ? null : new TileStore(folder.resolve("surface"));
-		if (this.store != null) {
-			this.store.onOverviewChanged(this.overviewChanged::add);
-		}
+		this.store = this.openStore();
 		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
 	}
 
@@ -177,11 +177,38 @@ public final class MapLevel implements ChunkSource {
 		return o != null && o.spawnSpots();
 	}
 
-	/** Block colours changed (a resource reload): every tile has to be baked again. */
+	/**
+	 * The saved tiles for the current camera angle. Where a tile's pixels land depends on the
+	 * angle, so tiles saved at one angle would merge into the wrong places at another.
+	 */
+	private @Nullable TileStore openStore() {
+		if (this.folder == null) {
+			return null;
+		}
+		this.storePitch = Math.round(dev.orthomap.MapStyle.get().pitchDegrees());
+		// 60 degrees was the only angle before others existed, and its tiles are in "surface".
+		TileStore opened = new TileStore(this.folder.resolve(this.storePitch == 60 ? "surface" : "surface-" + this.storePitch));
+		opened.onOverviewChanged(this.overviewChanged::add);
+		return opened;
+	}
+
+	/** Block colours or the map style changed: every tile has to be baked again. */
 	public void colorsChanged() {
 		this.surfaceGeneration++;
 		this.caveGeneration++;
 		this.dropTiles(false);
+		if (this.store != null && Math.round(dev.orthomap.MapStyle.get().pitchDegrees()) != this.storePitch) {
+			this.store.close();
+			this.store = this.openStore();
+			this.unsaved.clear();
+			this.emptyOverviews.clear();
+			// Everything loaded has to be saved again at the new angle, not just what a map shows.
+			for (ChunkSnapshot snapshot : this.chunks.values()) {
+				int x0 = snapshot.chunkX << 4;
+				int z0 = snapshot.chunkZ << 4;
+				this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+			}
+		}
 	}
 
 	private void dropTiles(boolean cavesOnly) {
@@ -288,10 +315,15 @@ public final class MapLevel implements ChunkSource {
 					continue;
 				}
 			}
-			double u0 = x0 - 1 - (cave ? LIGHT_REACH : 0);
-			double u1 = x1 + 2 + reachX;
-			double v0 = Projection.v(top, z0 - 1 - reachZ);
-			double v1 = Projection.v(bottom, z1 + 2 + (cave ? LIGHT_REACH : 0));
+			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
+			int around = cave ? LIGHT_REACH : TileBaker.SKY_REACH;
+			if (!cave) {
+				bottom = Math.min(bottom, (cave ? caveY0 : y0) - 1 - TileBaker.SKY_REACH);
+			}
+			double u0 = x0 - 1 - around;
+			double u1 = x1 + 2 + Math.max(reachX, cave ? 0 : TileBaker.SKY_REACH);
+			double v0 = Projection.v(top, z0 - 1 - Math.max(reachZ, cave ? 0 : TileBaker.SKY_REACH));
+			double v1 = Projection.v(bottom, z1 + 2 + around);
 			this.markDirty(layer, u0, v0, u1, v1, now, terrain);
 		}
 	}

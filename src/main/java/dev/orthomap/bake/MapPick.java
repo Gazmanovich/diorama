@@ -23,7 +23,7 @@ public final class MapPick {
 		double cos = Projection.cos();
 		// Start where the baker starts for this tile, so whatever the map draws can be picked.
 		TileKey tile = new TileKey(layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
-		int startY = cave ? Math.min(layer, source.maxY()) : TileBaker.localTop(tile, source);
+		int startY = cave ? Math.min(layer, source.maxY()) : TileBaker.localTop(tile, source, 0);
 		int limitY = cave ? Math.max(source.minY(), startY - TileBaker.CAVE_DEPTH) : source.minY();
 		int x = (int) Math.floor(u);
 		double z0 = (v + startY * cos) / sin;
