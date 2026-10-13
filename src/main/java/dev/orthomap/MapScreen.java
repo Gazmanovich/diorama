@@ -109,7 +109,13 @@ public final class MapScreen extends Screen {
 		graphics.text(this.font, status, 6, 3, 0xFFFFFFFF, false);
 		String help = "Drag pan · Scroll zoom · Right-click add waypoint · U waypoints · C caves · PgUp/PgDn slice · Space recenter";
 		graphics.fill(0, this.height - 14, this.width, this.height, 0x90000000);
-		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
+		// Shrink the help line rather than cut it off on narrow screens.
+		float helpScale = Math.min(1, (this.width - 12) / (float) this.font.width(help));
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(6, this.height - 7 - 4 * helpScale);
+		graphics.pose().scale(helpScale);
+		graphics.text(this.font, help, 0, 0, 0xFFC8D0DA, false);
+		graphics.pose().popMatrix();
 	}
 
 	@Override
