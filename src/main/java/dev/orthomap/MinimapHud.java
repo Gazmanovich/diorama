@@ -3,6 +3,8 @@ package dev.orthomap;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Markers;
 import dev.orthomap.render.Radar;
+import dev.orthomap.waypoint.WaypointOverlay;
+import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -41,6 +43,10 @@ public final class MinimapHud implements HudElement {
 		this.viewport.draw(graphics, session.map(), view);
 		if (ServerRules.radarAllowed()) {
 			Radar.draw(graphics, view, Radar.collect(view, partialTick, false), false);
+		}
+		WaypointStore store = WaypointStore.get();
+		if (store != null) {
+			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, store.in(mc.level.dimension().identifier().toString()), false), false, null);
 		}
 		Markers.player(graphics, x + SIZE / 2.0F, y + SIZE / 2.0F, player.getViewYRot(partialTick), 5);
 	}

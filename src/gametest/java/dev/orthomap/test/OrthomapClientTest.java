@@ -4,8 +4,14 @@ import dev.orthomap.MapScreen;
 import dev.orthomap.MapSession;
 import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
+import dev.orthomap.WorldKey;
 import dev.orthomap.bake.TileKey;
+import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Radar;
+import dev.orthomap.waypoint.Waypoint;
+import dev.orthomap.waypoint.WaypointListScreen;
+import dev.orthomap.waypoint.WaypointOverlay;
+import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
@@ -56,6 +62,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("radar")) {
 				radar(context, world);
+			}
+			if (tests.contains("waypoints")) {
+				waypoints(context, world);
 			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
@@ -218,14 +227,124 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.waitTicks(10);
 	}
 
-	/** Which scenarios to run: ORTHOMAP_TESTS=tour,radar,... (default tour, radar and fog-of-war). */
+	/**
+	 * Waypoints: one nearby and one far off, the in-world label, the map tooltip, adding one by
+	 * right-clicking the map, the list, a death marker, and the file on disk.
+	 */
+	private static void waypoints(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.onGround(), 600);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			BlockPos at = mc.player.blockPosition();
+			String dimension = mc.level.dimension().identifier().toString();
+			int hx = at.getX() + 24;
+			int hz = at.getZ() - 14;
+			int hy = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, hx, hz);
+			store.add(new Waypoint("Home", hx, hy, hz, dimension, Waypoint.PALETTE[5]));
+			store.add(new Waypoint("Iron Mine", at.getX() + 400, at.getY(), at.getZ() + 120, dimension, Waypoint.PALETTE[1]));
+		});
+		context.waitTicks(10);
+		context.takeScreenshot("waypoints-01-minimap");
+
+		// Face Home: its label shows in the world with its name and distance.
+		BlockPos home = context.computeOnClient(mc -> {
+			for (Waypoint w : WaypointStore.get().all()) {
+				if (w.name.equals("Home")) {
+					return new BlockPos(w.x, w.y, w.z);
+				}
+			}
+			throw new AssertionError("Home is missing");
+		});
+		context.getInput().lookAt(home);
+		context.waitTicks(10);
+		context.takeScreenshot("waypoints-02-in-world");
+
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 30);
+		float[] pin = context.computeOnClient(mc -> {
+			float scale = (float) mc.getWindow().getGuiScale();
+			for (WaypointOverlay.Pin p : ((MapScreen) mc.gui.screen()).pins()) {
+				if (p.waypoint().name.equals("Home")) {
+					return new float[] {p.x() * scale, p.y() * scale};
+				}
+			}
+			throw new AssertionError("Home is not on the map");
+		});
+		context.getInput().setCursorPos(pin[0], pin[1]);
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-03-map");
+
+		// Right-click a spot left of the player: the editor opens on the block shown there, which
+		// is the first solid block on the camera ray through that point (a canopy can hide the
+		// ground behind it).
+		double[] click = context.computeOnClient(mc -> {
+			MapScreen screen = (MapScreen) mc.gui.screen();
+			MapViewport.View view = screen.view();
+			double u = mc.player.getBlockX() - 15 + 0.5;
+			double v = Projection.v(mc.player.getY(), mc.player.getZ());
+			screen.addWaypointAt(view.screenX(u), view.screenY(v));
+			return new double[] {u, v};
+		});
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-04-editor");
+		context.clickScreenButton("orthomap.waypoint.save");
+		context.waitTicks(5);
+		int count = context.computeOnClient(mc -> WaypointStore.get().all().size());
+		if (count != 3) {
+			throw new AssertionError("Expected 3 waypoints after saving the picked one, found " + count);
+		}
+		Waypoint picked = context.computeOnClient(mc -> WaypointStore.get().all().get(2));
+		// The hit block sits under the waypoint; the ray crosses its top or south face.
+		int hitY = picked.y - 1;
+		double vTop = Projection.v(hitY + 1, picked.z);
+		double vBottom = Projection.v(hitY, picked.z + 1);
+		boolean onRay = picked.x == (int) Math.floor(click[0]) && click[1] >= vTop - 1e-6 && click[1] <= vBottom + 1e-6;
+		boolean solid = context.computeOnClient(mc -> !mc.level.getBlockState(new BlockPos(picked.x, hitY, picked.z)).isAir());
+		if (!onRay || !solid) {
+			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
+		}
+		context.setScreen(() -> null);
+
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-05-list");
+		context.setScreen(() -> null);
+
+		// Dying leaves a death marker.
+		world.getServer().runCommand("gamerule show_death_messages false");
+		world.getServer().runCommand("kill @a");
+		context.waitTicks(20);
+		boolean death = context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.DEATH));
+		if (!death) {
+			throw new AssertionError("No death marker after dying");
+		}
+		context.clickScreenButton("deathScreen.respawn");
+		context.waitFor(mc -> mc.player != null && mc.player.isAlive(), 200);
+		context.waitTicks(40);
+		context.takeScreenshot("waypoints-06-after-death");
+
+		String saved = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError("waypoints.json is missing", e);
+			}
+		});
+		if (!saved.contains("\"Home\"") || !saved.contains("\"Iron Mine\"") || !saved.contains("\"DEATH\"")) {
+			throw new AssertionError("waypoints.json doesn't have every waypoint:\n" + saved);
+		}
+	}
+
+	/** Which scenarios to run: ORTHOMAP_TESTS=tour,radar,... (default: all but styles). */
 	private static Set<String> selectedTests() {
 		String env = System.getenv("ORTHOMAP_TESTS");
 		if ("1".equals(System.getenv("ORTHOMAP_STYLES"))) {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "fog-of-war");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war");
 		}
 		return Set.of(env.split(","));
 	}

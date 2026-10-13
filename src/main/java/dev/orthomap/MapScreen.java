@@ -1,9 +1,18 @@
 package dev.orthomap;
 
+import dev.orthomap.bake.BlockLooks;
+import dev.orthomap.bake.MapPick;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Markers;
 import dev.orthomap.render.Radar;
+import dev.orthomap.waypoint.Waypoint;
+import dev.orthomap.waypoint.WaypointEditScreen;
+import dev.orthomap.waypoint.WaypointListScreen;
+import dev.orthomap.waypoint.WaypointOverlay;
+import dev.orthomap.waypoint.WaypointStore;
+import dev.orthomap.waypoint.Waypoints;
+import net.minecraft.core.BlockPos;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -12,9 +21,13 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
 import com.mojang.blaze3d.platform.InputConstants;
 
-/** The fullscreen map: drag to pan, scroll to zoom, C for caves, PgUp/PgDn to move the slice. */
+/**
+ * The fullscreen map: drag to pan, scroll to zoom, C for caves, PgUp/PgDn to move the slice,
+ * right-click to add a waypoint, click a waypoint to edit it.
+ */
 public final class MapScreen extends Screen {
 	private static final double MIN_ZOOM = 0.5;
 	private static final double MAX_ZOOM = 16;
@@ -26,6 +39,12 @@ public final class MapScreen extends Screen {
 	private int layer;
 	private boolean following = true;
 	private List<Radar.Blip> blips = List.of();
+	private List<WaypointOverlay.Pin> pins = List.of();
+	private MapViewport.@Nullable View lastView;
+	/** Where the current mouse press started, to tell a click from a drag. */
+	private double pressX;
+	private double pressY;
+	private boolean dragged;
 
 	public MapScreen() {
 		super(Component.translatable("orthomap.screen.title"));
@@ -66,8 +85,15 @@ public final class MapScreen extends Screen {
 			Radar.draw(graphics, view, this.blips, true);
 			hovered = Radar.under(this.blips, mouseX, mouseY);
 		}
+		WaypointStore store = WaypointStore.get();
+		this.pins = store == null ? List.of() : WaypointOverlay.layout(view, store.in(this.minecraft.level.dimension().identifier().toString()), true);
+		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
+		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
-		if (hovered != null) {
+		this.lastView = view;
+		if (hoveredPin != null) {
+			graphics.setTooltipForNextFrame(this.font, WaypointOverlay.describe(hoveredPin.waypoint(), player), mouseX, mouseY);
+		} else if (hovered != null) {
 			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
 		}
 
@@ -81,14 +107,64 @@ public final class MapScreen extends Screen {
 		);
 		graphics.fill(0, 0, this.width, 14, 0x90000000);
 		graphics.text(this.font, status, 6, 3, 0xFFFFFFFF, false);
-		String help = "Drag to pan · Scroll to zoom · C caves · PgUp/PgDn slice · Space recenter";
+		String help = "Drag pan · Scroll zoom · Right-click add waypoint · U waypoints · C caves · PgUp/PgDn slice · Space recenter";
 		graphics.fill(0, this.height - 14, this.width, this.height, 0x90000000);
 		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
 	}
 
 	@Override
-	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		this.pressX = event.x();
+		this.pressY = event.y();
+		this.dragged = false;
+		return true;
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		if (this.dragged) {
+			return true;
+		}
 		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, event.x(), event.y());
+			if (pin != null) {
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint(), false));
+			}
+			return true;
+		}
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
+			this.addWaypointAt(event.x(), event.y());
+			return true;
+		}
+		return super.mouseReleased(event);
+	}
+
+	/** Opens a new waypoint on the block shown under a screen point. */
+	public void addWaypointAt(double screenX, double screenY) {
+		MapSession session = MapSession.get();
+		BlockLooks looks = BlockLooks.get();
+		MapViewport.View view = this.lastView;
+		if (session == null || looks == null || view == null) {
+			return;
+		}
+		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
+		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
+		BlockPos spot = MapPick.standingSpot(session.map(), looks, u, v, this.layer);
+		if (spot == null) {
+			return;
+		}
+		Waypoint waypoint = Waypoints.at(spot);
+		if (waypoint != null) {
+			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, true));
+		}
+	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		if (Math.hypot(event.x() - this.pressX, event.y() - this.pressY) > 3) {
+			this.dragged = true;
+		}
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.dragged) {
 			this.centerU -= dx / this.zoom;
 			this.centerV -= dy / this.zoom;
 			this.following = false;
@@ -138,6 +214,10 @@ public final class MapScreen extends Screen {
 			default -> {
 			}
 		}
+		if (OrthomapClient.WAYPOINT_LIST.matches(event)) {
+			this.minecraft.gui.setScreen(new WaypointListScreen(this));
+			return true;
+		}
 		if (OrthomapClient.OPEN_MAP.matches(event)) {
 			this.onClose();
 			return true;
@@ -163,6 +243,16 @@ public final class MapScreen extends Screen {
 	@Override
 	public void removed() {
 		this.viewport.close();
+	}
+
+	/** For tests: the view drawn last frame. */
+	public MapViewport.@Nullable View view() {
+		return this.lastView;
+	}
+
+	/** For tests: the waypoint pins drawn last frame, in GUI coordinates. */
+	public List<WaypointOverlay.Pin> pins() {
+		return this.pins;
 	}
 
 	/** For tests: the radar markers drawn last frame, in GUI coordinates. */

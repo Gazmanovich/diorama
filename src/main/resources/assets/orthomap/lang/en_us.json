@@ -1,5 +1,26 @@
 {
 	"key.orthomap.open_map": "Open map",
 	"key.category.orthomap.map": "Orthomap",
-	"orthomap.screen.title": "Map"
+	"orthomap.screen.title": "Map",
+	"key.orthomap.new_waypoint": "Add waypoint here",
+	"key.orthomap.waypoints": "Waypoint list",
+	"orthomap.waypoint.new": "New waypoint",
+	"orthomap.waypoint.edit": "Edit waypoint",
+	"orthomap.waypoint.name": "Name",
+	"orthomap.waypoint.initials": "Initials",
+	"orthomap.waypoint.position": "Position (x, y, z)",
+	"orthomap.waypoint.x": "x",
+	"orthomap.waypoint.y": "y",
+	"orthomap.waypoint.z": "z",
+	"orthomap.waypoint.colour": "Colour",
+	"orthomap.waypoint.shown": "Shown on maps and in the world",
+	"orthomap.waypoint.hidden": "Hidden",
+	"orthomap.waypoint.save": "Save",
+	"orthomap.waypoint.delete": "Delete",
+	"orthomap.waypoints.title": "Waypoints",
+	"orthomap.waypoints.empty": "No waypoints in this dimension yet. Press B to add one where you stand.",
+	"orthomap.waypoints.edit": "Edit",
+	"orthomap.waypoints.hide": "Hide",
+	"orthomap.waypoints.show": "Show",
+	"orthomap.waypoints.tp": "TP"
 }
