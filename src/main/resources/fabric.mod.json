@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "orthomap",
+	"version": "${version}",
+	"name": "Orthomap",
+	"description": "A ray-traced, angled voxel map and minimap.",
+	"authors": [
+		"Dara Adedeji"
+	],
+	"license": "MIT",
+	"icon": "assets/orthomap/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"dev.orthomap.OrthomapClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	},
+	"mixins": [
+		"orthomap.mixins.json"
+	]
+}
