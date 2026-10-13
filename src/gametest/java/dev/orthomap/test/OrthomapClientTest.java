@@ -571,6 +571,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	 */
 	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
+		// No leaf decay or growth below the scene: a chunk changing for its own reasons would
+		// refresh its light and hide whether light changes alone reach the map.
+		world.getServer().runCommand("gamerule random_tick_speed 0");
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		// The platform's west part starts 4 blocks before a chunk border.
 		int x0 = Math.floorDiv(at.getX() + 40, 16) * 16 - 4;
@@ -578,6 +581,13 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		int y = 150;
 		world.getServer().runCommand("fill " + x0 + " " + y + " " + z0 + " " + (x0 + 23) + " " + y + " " + (z0 + 15) + " stone");
 		world.getServer().runCommand("setblock " + (x0 + 12) + " " + (y + 1) + " " + (z0 + 8) + " torch");
+		// A sealed room south of the platform, across the same chunk border, split by a wall in the
+		// east chunk with a torch behind it. Opening the wall lights the west half, in the other
+		// chunk, without any block there changing.
+		int rz = z0 + 24;
+		world.getServer().runCommand("fill " + x0 + " " + y + " " + rz + " " + (x0 + 10) + " " + (y + 3) + " " + (rz + 6) + " stone hollow");
+		world.getServer().runCommand("fill " + (x0 + 6) + " " + (y + 1) + " " + (rz + 1) + " " + (x0 + 6) + " " + (y + 2) + " " + (rz + 5) + " stone");
+		world.getServer().runCommand("setblock " + (x0 + 8) + " " + (y + 1) + " " + (rz + 3) + " torch");
 		// A bottom slab at head height over a dark floor block: a zombie doesn't fit.
 		world.getServer().runCommand("setblock " + (x0 + 1) + " " + (y + 2) + " " + (z0 + 4) + " stone_slab");
 		// Leaves on the dark west edge: monsters can't spawn on them or under them.
@@ -655,6 +665,16 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			context.takeScreenshot("overlays-02-closed-room");
 			assertOverlay(context, layer, bx + 3.5, y + 2, bz + 3.6, Overlays.SPAWN_ANY_TIME, true, "spawn spot in the closed room");
 
+			// The split room: dark west of the wall until the wall opens.
+			int splitLayer = y + 3;
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x0 + 5, Projection.v(y + 1, rz + 3), 4.0, splitLayer));
+			settle(context, 60);
+			assertOverlay(context, splitLayer, x0 + 2.5, y + 1, rz + 3.6, Overlays.SPAWN_ANY_TIME, true, "spawn spot behind the wall");
+			world.getServer().runCommand("setblock " + (x0 + 6) + " " + (y + 1) + " " + (rz + 3) + " air");
+			settle(context, 60);
+			context.takeScreenshot("overlays-02b-wall-opened");
+			assertOverlay(context, splitLayer, x0 + 2.5, y + 1, rz + 3.6, Overlays.SPAWN_ANY_TIME | Overlays.SPAWN_AT_NIGHT, false, "spawn spot once the torch shines through");
+
 			// Spawn spots off: the tiles bake again without them, and only the grid and slime chunks show.
 			context.runOnClient(mc -> Settings.get().spawnSpots = Settings.SpawnSpots.OFF);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x0 + 12, Projection.v(y + 1, z0 + 8), 4.0, TileKey.SURFACE));
@@ -668,6 +688,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			context.takeScreenshot("overlays-04-cave-always-dark");
 			context.setScreen(() -> null);
 		} finally {
+			world.getServer().runCommand("gamerule random_tick_speed 3");
 			context.runOnClient(mc -> {
 				Settings s = Settings.get();
 				s.chunkGrid = saved.chunkGrid;

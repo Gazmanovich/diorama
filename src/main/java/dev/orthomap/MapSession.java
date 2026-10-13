@@ -10,6 +10,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.client.player.LocalPlayer;
@@ -18,6 +19,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
@@ -155,17 +157,7 @@ public final class MapSession {
 		// A light source changing relights every neighbouring chunk, diagonals included. Other
 		// edits only reach a neighbour through shading that reads across the border.
 		boolean light = oldState.getLightEmission() != newState.getLightEmission();
-		if (light && current.map.spawnSpots()) {
-			// The client lights a placed torch itself, with no light packet, so spawn spots as far
-			// as its light reaches have to be refreshed from here.
-			int r = LIGHT_REACH;
-			int[] lit = {pos.getX() - r, pos.getY() - r, pos.getZ() - r, pos.getX() + r, pos.getY() + r, pos.getZ() + r, MapLevel.CHANGED_SURFACE_LIGHT};
-			for (int dx = -1; dx <= 1; dx++) {
-				for (int dz = -1; dz <= 1; dz++) {
-					current.schedule(cx + dx, cz + dz, CHANGE_DELAY_MS, lit);
-				}
-			}
-		}
+
 		int lx = pos.getX() & 15;
 		int lz = pos.getZ() & 15;
 		for (int dx = -1; dx <= 1; dx++) {
@@ -183,8 +175,20 @@ public final class MapSession {
 	 * The server sent new light for a chunk. Cave slices draw light, and so do spawn spots, so the
 	 * surface re-bakes too while they're on.
 	 */
-	/** How far block light spreads from its source. */
-	private static final int LIGHT_REACH = 15;
+	/**
+	 * The client's light engine changed a section's light, whether from a server packet or its
+	 * own work (a torch placed, a wall opened, a roof closed). Cave slices draw light, and so do
+	 * spawn spots, so the surface re-bakes too while they're on.
+	 */
+	public static void lightSectionChanged(ClientChunkCache source, SectionPos section) {
+		if (current != null && current.level.getChunkSource() == source) {
+			int x0 = section.minBlockX();
+			int y0 = section.minBlockY();
+			int z0 = section.minBlockZ();
+			int surface = current.map.spawnSpots() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
+		}
+	}
 
 	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
 		if (current != null && current.level == level) {
