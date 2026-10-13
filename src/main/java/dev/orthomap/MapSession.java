@@ -53,7 +53,9 @@ public final class MapSession {
 
 	private MapSession(ClientLevel level) {
 		this.level = level;
-		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, mapFolder(level));
+		// The Nether's roof: its sky view looks down from just under it.
+		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
+		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level));
 	}
 
 	/** {@code .minecraft/orthomap/<world>/<dimension>}, or null outside a world. */
@@ -185,7 +187,7 @@ public final class MapSession {
 			int x0 = section.minBlockX();
 			int y0 = section.minBlockY();
 			int z0 = section.minBlockZ();
-			int surface = current.map.spawnSpots() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
 			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
 		}
 	}
@@ -194,7 +196,7 @@ public final class MapSession {
 		if (current != null && current.level == level) {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
-			int surface = current.map.spawnSpots() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
 			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
 	}

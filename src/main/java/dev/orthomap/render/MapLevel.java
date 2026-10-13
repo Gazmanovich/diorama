@@ -97,9 +97,13 @@ public final class MapLevel implements ChunkSource {
 	private long frame;
 	private volatile boolean closed;
 
-	public MapLevel(int minY, int maxY, @Nullable Path folder) {
+	/** See {@link ChunkSource#roof()}. */
+	private final int roof;
+
+	public MapLevel(int minY, int maxY, int roof, @Nullable Path folder) {
 		this.minY = minY;
 		this.maxY = maxY;
+		this.roof = roof;
 		this.folder = folder;
 		this.store = this.openStore();
 		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
@@ -123,6 +127,16 @@ public final class MapLevel implements ChunkSource {
 	@Override
 	public int topY() {
 		return this.topY;
+	}
+
+	@Override
+	public int roof() {
+		return this.roof;
+	}
+
+	/** Whether the sky view is drawn from under a roof, lit like a cave. */
+	public boolean roofless() {
+		return this.roof != NO_ROOF;
 	}
 
 	public boolean fogOfWar() {
@@ -215,7 +229,7 @@ public final class MapLevel implements ChunkSource {
 		Iterator<Map.Entry<TileKey, MapTile>> it = this.tiles.entrySet().iterator();
 		while (it.hasNext()) {
 			Map.Entry<TileKey, MapTile> e = it.next();
-			if (!cavesOnly || e.getKey().isCave()) {
+			if (!cavesOnly || e.getKey().isCave() || this.roofless()) {
 				e.getValue().close();
 				it.remove();
 				this.dirty.remove(e.getKey());
@@ -224,7 +238,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	private int generation(TileKey key) {
-		return key.isCave() ? this.caveGeneration : this.surfaceGeneration;
+		return key.isCave() || this.roofless() ? this.caveGeneration : this.surfaceGeneration;
 	}
 
 	/** Newly seen blocks: cave slices around them can show more now. */
@@ -299,7 +313,8 @@ public final class MapLevel implements ChunkSource {
 		}
 		long now = System.currentTimeMillis();
 		for (int layer : layers) {
-			boolean cave = layer != TileKey.SURFACE;
+			// Under a roof the sky view is lit like a cave, so light reaches it the same way.
+			boolean cave = layer != TileKey.SURFACE || this.roofless();
 			if (!cave && !visibleFromSky) {
 				continue;
 			}
@@ -308,12 +323,14 @@ public final class MapLevel implements ChunkSource {
 			int reachY = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Y;
 			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
-			if (cave) {
+			if (layer != TileKey.SURFACE) {
 				top = Math.min(top, layer);
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
 				if (top < bottom) {
 					continue;
 				}
+			} else if (cave) {
+				top = Math.min(top, this.roof);
 			}
 			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
 			int around = cave ? LIGHT_REACH : TileBaker.SKY_REACH;

@@ -69,6 +69,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			if (tests.contains("styles")) {
 				styleTour(context, world);
 			}
+			if (tests.contains("dimensions")) {
+				dimensions(context, world);
+			}
 			if (tests.contains("bench")) {
 				bench(context);
 			}
@@ -228,6 +231,39 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/** The Nether and the End: the minimap, and the fullscreen map near and far. */
+	private static void dimensions(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 200, 2400);
+		settle(context, 100);
+		context.takeScreenshot("dimensions-01-nether-minimap");
+		context.setScreen(MapScreen::new);
+		settle(context, 60);
+		context.takeScreenshot("dimensions-02-nether-map");
+		// The sky view under the roof: the whole Nether from above, roof left out.
+		lookAtPlayer(context, 3.0, TileKey.SURFACE);
+		settle(context, 80);
+		context.takeScreenshot("dimensions-03-nether-under-roof");
+		lookAtPlayer(context, 0.8, TileKey.SURFACE);
+		settle(context, 80);
+		context.takeScreenshot("dimensions-03b-nether-under-roof-far");
+		context.setScreen(() -> null);
+
+		world.getServer().runCommand("execute in minecraft:the_end run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.END && MapSession.get().map().chunkCount() > 100, 2400);
+		settle(context, 100);
+		context.takeScreenshot("dimensions-04-end-minimap");
+		context.setScreen(MapScreen::new);
+		settle(context, 60);
+		context.takeScreenshot("dimensions-05-end-map");
+		lookAtPlayer(context, 0.8, TileKey.SURFACE);
+		settle(context, 80);
+		context.takeScreenshot("dimensions-06-end-far");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD, 1200);
 	}
 
 	/**
