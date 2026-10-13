@@ -249,6 +249,11 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		lookAtPlayer(context, 0.8, TileKey.SURFACE);
 		settle(context, 80);
 		context.takeScreenshot("dimensions-03b-nether-under-roof-far");
+		// Zoomed out past 0.5 the map draws overview tiles, built from the saved under-roof tiles.
+		context.waitTicks(200);
+		lookAtPlayer(context, 0.2, TileKey.SURFACE);
+		settle(context, 80);
+		context.takeScreenshot("dimensions-03c-nether-under-roof-overview");
 		context.setScreen(() -> null);
 
 		world.getServer().runCommand("execute in minecraft:the_end run tp @a 0 70 0");
