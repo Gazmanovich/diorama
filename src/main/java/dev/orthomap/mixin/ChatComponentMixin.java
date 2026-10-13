@@ -2,31 +2,21 @@ package dev.orthomap.mixin;
 
 import dev.orthomap.waypoint.WaypointShare;
 import net.minecraft.client.gui.components.ChatComponent;
-import net.minecraft.client.multiplayer.chat.GuiMessageSource;
-import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MessageSignature;
-import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 /**
- * Tells waypoint sharing about each message chat actually shows, right after it's added. Messages
- * Minecraft holds back (hidden chat, blocked players) never get this far, so a shared waypoint in
- * one of them is never offered.
+ * A chat line that carries a shared waypoint gets an "[Add]" link on the end as chat adds it. The
+ * link is part of the line, so it hides, trims and gets deleted with it, and Minecraft's own checks
+ * (hidden chat, blocked players) still decide whether the line shows at all. Only what's drawn
+ * changes: a signed message's signature, trust tag and chat report entry are untouched.
  */
 @Mixin(ChatComponent.class)
 public abstract class ChatComponentMixin {
-	@Inject(
-		method = "addMessage",
-		at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/components/ChatComponent;addMessageToQueue(Lnet/minecraft/client/multiplayer/chat/GuiMessage;)V", shift = At.Shift.AFTER)
-	)
-	private void orthomap$onMessageShown(Component contents, @Nullable MessageSignature signature, GuiMessageSource source, @Nullable GuiMessageTag tag, CallbackInfo ci) {
-		// The client's own lines include the offers themselves.
-		if (source != GuiMessageSource.SYSTEM_CLIENT) {
-			WaypointShare.shown(contents);
-		}
+	@ModifyVariable(method = "addMessage", at = @At("HEAD"), argsOnly = true)
+	private Component orthomap$linkSharedWaypoint(Component contents) {
+		return WaypointShare.withAddLink(contents);
 	}
 }

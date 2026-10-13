@@ -614,6 +614,12 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			if (!back.name().equals("Mine: east-2_b") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
 				throw new AssertionError("Round trip of " + text + " gave " + back);
 			}
+			// A name cut to the editor's 32 characters never ends in half an emoji.
+			String emoji = "a".repeat(31) + "\uD83D\uDE00";
+			WaypointShare.Shared cut = WaypointShare.parse("xaero-waypoint:" + emoji + ":E:1:64:2:6:false:0:Internal-overworld-waypoints").orElseThrow();
+			if (Character.isHighSurrogate(cut.name().charAt(cut.name().length() - 1))) {
+				throw new AssertionError("Cutting the name split a character: " + cut.name());
+			}
 			for (String bad : new String[] {
 				"xaero-waypoint:N:N:2147483648:64:0:6:false:0:Internal-overworld-waypoints",
 				"xaero-waypoint:N:N:1:64:0:99:false:0:Internal-overworld-waypoints",
@@ -635,13 +641,24 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-07-shared-in-chat");
-		// Run the [Add] link's command the way a chat click does: from the open chat screen,
-		// which Minecraft puts back after running the command.
+		// Run the command the line's [Add] link carries, the way a chat click does: from the open
+		// chat screen, which Minecraft puts back after running the command.
 		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
-			WaypointShare.Shared shared = WaypointShare.parse("xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints").orElseThrow();
-			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(WaypointShare.addCommand(shared, 40)), mc.gui.screen());
+			net.minecraft.network.chat.Component line = WaypointShare.withAddLink(net.minecraft.network.chat.Component.literal(
+				"<Alex> xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints"));
+			String[] command = new String[1];
+			line.visit((style, text) -> {
+				if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
+					command[0] = run.command();
+				}
+				return java.util.Optional.empty();
+			}, net.minecraft.network.chat.Style.EMPTY);
+			if (command[0] == null) {
+				throw new AssertionError("The shared line got no [Add] link: " + line.getString());
+			}
+			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command[0]), mc.gui.screen());
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
