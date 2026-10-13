@@ -23,7 +23,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import org.jspecify.annotations.Nullable;
@@ -35,9 +34,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Saved tiles are merged in when baking: wherever a fresh bake has no data for a pixel, the
  * saved pixel is used. Opening a part of the map whose chunks aren't loaded is then just a bake
  * where everything is unknown, and re-baking near the edge of loaded chunks never erases what was
- * saved. Writes happen a few seconds after a tile first changes, on one background thread shared
- * by every world, so two writes of the same file never overlap, even when a world is closed and
- * opened again while a slow write is still going.
+ * saved. Writes happen a few seconds after a tile first changes, on one background thread.
+ * Closing waits until everything is on disk, like Minecraft saving the world when you leave, so a
+ * store reopened on the same folder always reads what the last one wrote.
  *
  * <p>File format: {@code OMT1}, the edge length, then the level-0 ABGR pixels deflated.
  */
@@ -57,7 +56,7 @@ public final class TileStore {
 	});
 
 	private final Path folder;
-	/** Set by close(), which writes everything itself; writes still scheduled then do nothing. */
+	/** Set by close(), whose flush writes everything; writes still scheduled then do nothing. */
 	private volatile boolean closed;
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
 	private final LinkedHashMap<TileKey, int[]> cache = new LinkedHashMap<>(16, 0.75F, true) {
@@ -116,10 +115,7 @@ public final class TileStore {
 		}
 	}
 
-	/**
-	 * Writes everything pending, waiting up to 15 seconds. Call when leaving the world. A slower
-	 * write still finishes later, before anything written after it.
-	 */
+	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {
 			return;
@@ -131,13 +127,16 @@ public final class TileStore {
 				pending = new HashMap<>(this.unwritten);
 			}
 			for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
+				// Nothing to retry with once the world is closed; store() has logged the failure.
 				this.store(entry.getKey(), entry.getValue());
+			}
+			synchronized (this) {
+				this.unwritten.clear();
+				this.cache.clear();
 			}
 		});
 		try {
-			flush.get(15, TimeUnit.SECONDS);
-		} catch (TimeoutException e) {
-			Orthomap.LOGGER.warn("Saving map tiles is taking long; it will finish in the background");
+			flush.get();
 		} catch (ExecutionException e) {
 			Orthomap.LOGGER.error("Couldn't save map tiles", e);
 		} catch (InterruptedException e) {
