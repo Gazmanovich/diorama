@@ -58,12 +58,19 @@ public final class MapSession {
 		if (key == null) {
 			return null;
 		}
-		String dimension = level.dimension().identifier().toString().replaceAll("[^a-z0-9._-]+", "_");
-		return WorldKey.folder(key).resolve(dimension);
+		return WorldKey.folder(key).resolve(WorldKey.key("dim", level.dimension().identifier().toString()));
 	}
 
 	public static @Nullable MapSession get() {
 		return current;
+	}
+
+	/** Saves and ends the session. For closing the game; leaving a world is noticed by {@link #tick}. */
+	public static void close() {
+		if (current != null) {
+			current.map.close();
+			current = null;
+		}
 	}
 
 	/** Keeps the session in step with the client's level. Call every client tick. */

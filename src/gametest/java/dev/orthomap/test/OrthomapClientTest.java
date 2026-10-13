@@ -131,9 +131,10 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	private static void savedMap(ClientGameTestContext context, TestSingleplayerContext world, int[] spawnCell, boolean checkFogOfWar) {
 		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
 		settle(context, 60);
-		boolean spawnLoaded = context.computeOnClient(mc -> MapSession.get().map().chunk(0, 0) != null);
-		if (spawnLoaded) {
-			throw new AssertionError("Spawn chunks are loaded; the test can't tell disk from memory");
+		// Map u is block x, so a tile this far from the player has no loaded chunks under it.
+		double distance = context.computeOnClient(mc -> Math.abs(mc.player.getX() - (spawnCell[0] + 0.5) * Projection.TILE_UNITS));
+		if (distance < 1000) {
+			throw new AssertionError("The spawn tile is " + distance + " blocks away; the test can't tell disk from memory");
 		}
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {

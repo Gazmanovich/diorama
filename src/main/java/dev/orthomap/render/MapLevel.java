@@ -432,6 +432,12 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	public void close() {
+		if (this.closed) {
+			return;
+		}
+		if (this.store != null) {
+			this.saveLastBakes(this.store);
+		}
 		this.closed = true;
 		if (this.store != null) {
 			this.store.close();
@@ -442,6 +448,33 @@ public final class MapLevel implements ChunkSource {
 		}
 		this.tiles.clear();
 		this.chunks.clear();
+	}
+
+	/**
+	 * Saves surface bakes that finished since the last update, waiting a moment for the ones still
+	 * running: they hold the latest look of their tiles.
+	 */
+	private void saveLastBakes(TileStore store) {
+		long deadline = System.currentTimeMillis() + 3000;
+		while (true) {
+			TileImage image;
+			while ((image = this.finished.poll()) != null) {
+				this.inFlight.remove(image.key());
+				if (!image.key().isCave() && image.generation() == this.generation(image.key())) {
+					store.baked(image);
+				}
+			}
+			boolean surfaceBaking = this.inFlight.stream().anyMatch(key -> !key.isCave());
+			if (!surfaceBaking || System.currentTimeMillis() > deadline) {
+				return;
+			}
+			try {
+				Thread.sleep(5);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return;
+			}
+		}
 	}
 
 	public int bakingCount() {

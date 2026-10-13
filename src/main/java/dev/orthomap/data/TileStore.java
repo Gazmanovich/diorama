@@ -18,8 +18,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.Iterator;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -32,7 +32,7 @@ import org.jspecify.annotations.Nullable;
  * <p>Saved tiles are merged in when baking: wherever a fresh bake has no data for a pixel, the
  * saved pixel is used. Opening a part of the map whose chunks aren't loaded is then just a bake
  * where everything is unknown, and re-baking near the edge of loaded chunks never erases what was
- * saved. Writes happen on a background thread a few seconds after a tile last changed.
+ * saved. Writes happen on one background thread, a few seconds after a tile first changes.
  *
  * <p>File format: {@code OMT1}, the edge length, then the level-0 ABGR pixels deflated.
  */
@@ -40,9 +40,12 @@ public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
 	private static final int CACHED_TILES = 24;
 	private static final long WRITE_DELAY_SECONDS = 3;
+	/** After a failed write (a full disk, say), try again this much later. */
+	private static final long RETRY_DELAY_SECONDS = 30;
 
 	private final Path folder;
-	private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(task -> {
+	/** The only thread that writes tiles, so two writes of one tile can never interleave. */
+	private final ScheduledThreadPoolExecutor writer = new ScheduledThreadPoolExecutor(1, task -> {
 		Thread thread = new Thread(task, "orthomap-tile-writer");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
@@ -60,6 +63,8 @@ public final class TileStore {
 
 	public TileStore(Path folder) {
 		this.folder = folder;
+		// close() writes everything itself; delayed writes still waiting then are dropped.
+		this.writer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
 	}
 
 	/** The saved pixels of a tile, or null if there are none. Any thread. Don't modify the array. */
@@ -98,21 +103,28 @@ public final class TileStore {
 		}
 	}
 
-	/** Writes everything pending now and stops the writer. Call when leaving the world. */
+	/** Writes everything pending on the writer thread, then stops it. Call when leaving the world. */
 	public void close() {
-		this.writer.shutdown();
-		Map<TileKey, int[]> pending;
-		synchronized (this) {
-			pending = new HashMap<>(this.unwritten);
-			this.unwritten.clear();
+		if (this.writer.isShutdown()) {
+			return;
 		}
+		this.writer.execute(() -> {
+			Map<TileKey, int[]> pending;
+			synchronized (this) {
+				pending = new HashMap<>(this.unwritten);
+				this.unwritten.clear();
+			}
+			for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
+				this.store(entry.getKey(), entry.getValue());
+			}
+		});
+		this.writer.shutdown();
 		try {
-			this.writer.awaitTermination(5, TimeUnit.SECONDS);
+			if (!this.writer.awaitTermination(15, TimeUnit.SECONDS)) {
+				Orthomap.LOGGER.warn("Saving map tiles took too long; some may not be saved");
+			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-		}
-		for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
-			this.store(entry.getKey(), entry.getValue());
 		}
 	}
 
@@ -121,8 +133,26 @@ public final class TileStore {
 		synchronized (this) {
 			pixels = this.unwritten.remove(key);
 		}
-		if (pixels != null) {
-			this.store(key, pixels);
+		if (pixels != null && !this.store(key, pixels)) {
+			synchronized (this) {
+				// Keep it pending, unless a newer bake already replaced it.
+				if (this.unwritten.putIfAbsent(key, pixels) == null && !this.writer.isShutdown()) {
+					this.writer.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+				}
+			}
+		}
+		synchronized (this) {
+			this.trimCache();
+		}
+	}
+
+	/** Drops the least recently used written tiles until the cache is back under its limit. */
+	private void trimCache() {
+		Iterator<TileKey> it = this.cache.keySet().iterator();
+		while (this.cache.size() > CACHED_TILES && it.hasNext()) {
+			if (!this.unwritten.containsKey(it.next())) {
+				it.remove();
+			}
 		}
 	}
 
@@ -153,8 +183,11 @@ public final class TileStore {
 		}
 	}
 
-	/** Writes to a temporary file and moves it over the old one, so a crash can't leave half a tile. */
-	private void store(TileKey key, int[] pixels) {
+	/**
+	 * Writes to a temporary file and moves it over the old one, so a crash can't leave half a tile.
+	 * Returns whether it worked.
+	 */
+	private boolean store(TileKey key, int[] pixels) {
 		Path file = this.file(key);
 		try {
 			Files.createDirectories(this.folder);
@@ -171,8 +204,10 @@ public final class TileStore {
 			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
 			Files.write(temp, bytes.toByteArray());
 			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			return true;
 		} catch (IOException | RuntimeException e) {
 			Orthomap.LOGGER.error("Couldn't save tile {}", file, e);
+			return false;
 		}
 	}
 }
