@@ -168,12 +168,16 @@ public final class MapSession {
 		}
 	}
 
-	/** The server sent new light for a chunk. Only cave slices draw light, so only they re-bake. */
+	/**
+	 * The server sent new light for a chunk. Cave slices draw light, and so do spawn spots, so the
+	 * surface re-bakes too while they're on.
+	 */
 	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
 		if (current != null && current.level == level) {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
-			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, 0});
+			int surface = current.map.spawnSpots() ? 1 : 0;
+			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
 	}
 
@@ -309,7 +313,7 @@ public final class MapSession {
 		Settings settings = Settings.get();
 		boolean spawnSpots = settings.spawnSpots != Settings.SpawnSpots.OFF;
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
-		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed()) : null, spawnSpots);
+		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
 		this.map.update();
 		if (player != null) {
 			this.updateUnderground(player);

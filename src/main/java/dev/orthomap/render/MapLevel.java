@@ -64,8 +64,6 @@ public final class MapLevel implements ChunkSource {
 	private volatile boolean fogOfWar;
 	/** What bakes record for the map overlays, or null when no overlay is on. */
 	private volatile @Nullable Overlays overlays;
-	/** Light changes refresh the surface too while the light overlay is on. */
-	private volatile boolean lightOverlay;
 	/**
 	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
 	 * switching to or from fog of war. Bakes that started under an older value are dropped.
@@ -151,11 +149,11 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Which overlays are on. Turning them on, or a new slime seed, bakes the tiles in view again
-	 * so they record the overlay bits; switching between overlays needs no bake.
+	 * What bakes record for the overlays. Turning overlays on, turning spawn spots on, or a new
+	 * slime seed bakes the tiles in view again, including any bake already under way, so they
+	 * record current bits. Switching between overlays a bake already recorded needs no bake.
 	 */
-	public void setOverlays(@Nullable Overlays overlays, boolean lightOverlay) {
-		this.lightOverlay = lightOverlay;
+	public void setOverlays(@Nullable Overlays overlays) {
 		if (java.util.Objects.equals(overlays, this.overlays)) {
 			return;
 		}
@@ -164,11 +162,19 @@ public final class MapLevel implements ChunkSource {
 			return;
 		}
 		int blocks = (Projection.TILE_PIXELS / TileImage.BLOCK) * (Projection.TILE_PIXELS / TileImage.BLOCK);
-		for (TileKey key : this.tiles.keySet()) {
+		Set<TileKey> keys = new HashSet<>(this.tiles.keySet());
+		keys.addAll(this.inFlight);
+		for (TileKey key : keys) {
 			if (key.lod() == 0) {
 				this.dirty.computeIfAbsent(key, k -> new Dirty(0)).blocks.set(0, blocks);
 			}
 		}
+	}
+
+	/** Whether spawn spots are recorded, so light changes have to refresh the surface. */
+	public boolean spawnSpots() {
+		Overlays o = this.overlays;
+		return o != null && o.spawnSpots();
 	}
 
 	/** Block colours changed (a resource reload): every tile has to be baked again. */
@@ -205,7 +211,7 @@ public final class MapLevel implements ChunkSource {
 	public void lightChanged(int chunkX, int chunkZ, int y0, int y1) {
 		int x0 = chunkX << 4;
 		int z0 = chunkZ << 4;
-		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, this.lightOverlay);
+		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false);
 	}
 
 	public int chunkCount() {

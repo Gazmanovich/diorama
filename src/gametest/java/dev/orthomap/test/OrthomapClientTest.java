@@ -610,10 +610,31 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			assertOverlay(context, TileKey.SURFACE, x0 + 4.1, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, true, "chunk line on the border");
 			assertOverlay(context, TileKey.SURFACE, x0 + 4.6, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, false, "chunk line mid-block");
 			long seed = context.computeOnClient(mc -> MapSession.get().slimeSeed());
+			// The well-known slime chunk formula, written out independently of the mod's.
+			int slimes = 0;
+			for (int cx = -10; cx < 10; cx++) {
+				for (int cz = -10; cz < 10; cz++) {
+					boolean expected = legacySlimeChunk(seed, cx, cz);
+					if (Overlays.slimeChunk(seed, cx, cz) != expected) {
+						throw new AssertionError("Slime chunk " + cx + "," + cz + " doesn't match the known formula");
+					}
+					slimes += expected ? 1 : 0;
+				}
+			}
+			if (slimes < 10 || slimes > 80) {
+				throw new AssertionError("Slime chunks are about a tenth of all chunks, found " + slimes + " of 400");
+			}
 			for (int x : new int[] {x0 + 1, x0 + 8}) {
-				boolean slime = Overlays.slimeChunk(seed, x >> 4, (z0 + 2) >> 4);
+				boolean slime = legacySlimeChunk(seed, x >> 4, (z0 + 2) >> 4);
 				assertOverlay(context, TileKey.SURFACE, x + 0.5, y + 1, z0 + 2.5, Overlays.SLIME, slime, "slime chunk at x=" + x);
 			}
+
+			// A torch placed now clears the dots around it once the light update arrives. It goes
+			// 12 blocks east, still in reach of its light but past the 8-block cells a block
+			// change re-bakes, so only the light update can clear this spot.
+			world.getServer().runCommand("setblock " + (farX + 12) + " " + (y + 1) + " " + farZ + " torch");
+			settle(context, 60);
+			assertOverlay(context, TileKey.SURFACE, farX + 0.5, y + 1, farZ + 0.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot after placing a torch");
 
 			// A cave slice just under the room's roof shows its floor (the box's bottom layer, so
 			// its top face is at y + 2): dark any time.
@@ -643,6 +664,11 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				s.spawnSpots = saved.spawnSpots;
 			});
 		}
+	}
+
+	private static boolean legacySlimeChunk(long seed, int x, int z) {
+		java.util.Random random = new java.util.Random(seed + (long) (x * x * 0x4c1906) + (long) (x * 0x5ac0db) + (long) (z * z) * 0x4307a7L + (long) (z * 0x5f24f) ^ 0x3ad8025fL);
+		return random.nextInt(10) == 0;
 	}
 
 	/** Checks the overlay bits at a world point on the map (its top face, for a block). */

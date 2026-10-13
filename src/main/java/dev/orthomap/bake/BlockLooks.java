@@ -120,7 +120,10 @@ public final class BlockLooks {
 			&& this.sideTintWeight[a] == this.sideTintWeight[b]
 			&& this.tint[a] == this.tint[b]
 			&& this.constantTint[a] == this.constantTint[b]
-			&& this.emission[a] == this.emission[b];
+			&& this.emission[a] == this.emission[b]
+			// Spawn spots show on the map too: a slab becoming a double slab changes them.
+			&& this.spawnOn[a] == this.spawnOn[b]
+			&& this.spawnIn[a] == this.spawnIn[b];
 	}
 
 	public static void invalidate() {

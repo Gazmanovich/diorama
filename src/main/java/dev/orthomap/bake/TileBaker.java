@@ -309,13 +309,16 @@ public final class TileBaker {
 			}
 		}
 		// A dot in the middle of each top face a monster could spawn on: a block it can stand on,
-		// room above, and no block light there, the rule for most monsters since 1.18.
-		if (this.hitTop && this.looks.spawnOn[this.hitId] && this.hitFx >= 0.3 && this.hitFx < 0.7 && this.hitFz >= 0.3 && this.hitFz < 0.7) {
-			int above = this.reader.state(this.hitX, this.hitY + 1, this.hitZ);
-			if (above != VoxelReader.UNKNOWN) {
-				if (this.looks.spawnIn[above] && this.reader.blockLight(this.hitX, this.hitY + 1, this.hitZ) == 0) {
-					bits |= this.reader.skyLight(this.hitX, this.hitY + 1, this.hitZ) == 0 ? Overlays.SPAWN_ANY_TIME : Overlays.SPAWN_AT_NIGHT;
-				}
+		// two blocks of room above, and no block light, the rule for most monsters since 1.18.
+		// By day the sky light there must be low too; at night any sky light is dark enough.
+		if (this.overlays.spawnSpots() && this.hitTop && this.looks.spawnOn[this.hitId]
+			&& this.hitFx >= 0.3 && this.hitFx < 0.7 && this.hitFz >= 0.3 && this.hitFz < 0.7) {
+			int feet = this.reader.state(this.hitX, this.hitY + 1, this.hitZ);
+			int head = this.reader.state(this.hitX, this.hitY + 2, this.hitZ);
+			if (feet != VoxelReader.UNKNOWN && head != VoxelReader.UNKNOWN && this.looks.spawnIn[feet] && this.looks.spawnIn[head]
+				&& this.reader.blockLight(this.hitX, this.hitY + 1, this.hitZ) == 0) {
+				int sky = this.reader.skyLight(this.hitX, this.hitY + 1, this.hitZ);
+				bits |= sky <= Overlays.DAYLIGHT_SPAWN_LIMIT ? Overlays.SPAWN_ANY_TIME : Overlays.SPAWN_AT_NIGHT;
 			}
 		}
 		return bits;
@@ -562,7 +565,7 @@ public final class TileBaker {
 				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (SUN * lambert);
 			}
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
-			// blocks alone and light updates never make it stale.
+			// blocks alone and light updates never make its colours stale.
 			float ambient = AMBIENT * ao;
 			float[] sky = this.style.shadowTint();
 			float[] sun = this.style.sunTint();
