@@ -1,5 +1,6 @@
 package dev.orthomap.waypoint;
 
+import dev.orthomap.Settings;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ThreadLocalRandom;
@@ -40,6 +41,9 @@ public final class Waypoints {
 
 	/** Adds a death marker where the player stands. Called when the server reports their death. */
 	public static void died(LocalPlayer player) {
+		if (!Settings.get().deathMarkers) {
+			return;
+		}
 		WaypointStore store = WaypointStore.get();
 		String dimension = dimension();
 		if (store == null || dimension == null) {

@@ -1,6 +1,7 @@
 package dev.orthomap.render;
 
 import dev.orthomap.Projection;
+import dev.orthomap.Settings;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -27,8 +28,6 @@ import org.jspecify.annotations.Nullable;
 public final class Radar {
 	/** Vertical distance, in blocks, past which a caret shows. */
 	private static final double CARET_HEIGHT = 3;
-	/** Entities farther above or below than this are left off; otherwise cave mobs crowd the surface view. */
-	private static final double VERTICAL_RANGE = 32;
 
 	public enum Kind {
 		PASSIVE(0xFF62D96B),
@@ -77,17 +76,21 @@ public final class Radar {
 			return blips;
 		}
 		double selfY = self.getPosition(partialTick).y;
+		Settings settings = Settings.get();
+		// Entities farther above or below than the range are left off; otherwise cave mobs crowd
+		// the surface view.
+		double range = settings.radarRange;
 		float margin = 12;
 		for (Entity entity : level.entitiesForRendering()) {
 			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
 				continue;
 			}
 			Kind kind = kind(entity);
-			if (kind == null) {
+			if (kind == null || !shown(kind, settings)) {
 				continue;
 			}
 			Vec3 pos = entity.getPosition(partialTick);
-			if (Math.abs(pos.y - selfY) > VERTICAL_RANGE) {
+			if (Math.abs(pos.y - selfY) > range) {
 				continue;
 			}
 			float x = view.screenX(pos.x);
@@ -99,6 +102,15 @@ public final class Radar {
 		}
 		blips.sort(Comparator.comparingInt(b -> b.kind().ordinal()));
 		return blips;
+	}
+
+	private static boolean shown(Kind kind, Settings settings) {
+		return switch (kind) {
+			case PLAYER -> settings.radarPlayers;
+			case HOSTILE -> settings.radarHostile;
+			case NEUTRAL -> settings.radarNeutral;
+			case PASSIVE -> settings.radarPassive;
+		};
 	}
 
 	private static float size(Kind kind, double zoom, boolean fullscreen) {
