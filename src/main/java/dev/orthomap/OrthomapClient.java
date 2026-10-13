@@ -3,6 +3,7 @@ package dev.orthomap;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.orthomap.render.OrthomapPipelines;
 import dev.orthomap.waypoint.Waypoint;
+import dev.orthomap.waypoint.WaypointShare;
 import dev.orthomap.waypoint.WaypointEditScreen;
 import dev.orthomap.waypoint.WaypointHud;
 import dev.orthomap.waypoint.WaypointListScreen;
@@ -12,6 +13,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -51,6 +53,7 @@ public class OrthomapClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Orthomap.id("minimap"), new MinimapHud());
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> ServerRules.onDisconnect());
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
 		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MapSession.close());

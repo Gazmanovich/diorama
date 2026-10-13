@@ -16,6 +16,7 @@ import dev.orthomap.waypoint.Waypoint;
 import dev.orthomap.waypoint.WaypointEditScreen;
 import dev.orthomap.waypoint.WaypointListScreen;
 import dev.orthomap.waypoint.WaypointOverlay;
+import dev.orthomap.waypoint.WaypointShare;
 import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -593,6 +594,163 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		if (!saved.contains("\"Home\"") || !saved.contains("\"Iron Mine\"") || !saved.contains("\"DEATH\"")) {
 			throw new AssertionError("waypoints.json doesn't have every waypoint:\n" + saved);
 		}
+		shareAndTeleport(context, world);
+	}
+
+	/** Sharing a waypoint through chat, picking one up from chat, and teleporting to one. */
+	private static void shareAndTeleport(ClientGameTestContext context, TestSingleplayerContext world) {
+		// The chat line is one a client may send, with names escaped the way Xaero's Minimap does,
+		// and it survives a round trip.
+		context.runOnClient(mc -> {
+			Waypoint sent = new Waypoint("Mine: east-2_b", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
+			String text = WaypointShare.format(sent).orElseThrow(() -> new AssertionError("Couldn't format a short waypoint"));
+			if (text.length() > 256 || !text.codePoints().allMatch(net.minecraft.util.StringUtil::isAllowedChatCharacter)) {
+				throw new AssertionError("Chat would refuse " + text);
+			}
+			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
+			if (!text.startsWith("xaero-waypoint:Mine^col^ east^min^2-b:")) {
+				throw new AssertionError("Not escaped like Xaero's Minimap: " + text);
+			}
+			if (!back.name().equals("Mine: east-2_b") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
+				throw new AssertionError("Round trip of " + text + " gave " + back);
+			}
+			// A name cut to the editor's 32 characters never ends in half an emoji.
+			String emoji = "a".repeat(31) + "\uD83D\uDE00";
+			WaypointShare.Shared cut = WaypointShare.parse("xaero-waypoint:" + emoji + ":E:1:64:2:6:false:0:Internal-overworld-waypoints").orElseThrow();
+			if (Character.isHighSurrogate(cut.name().charAt(cut.name().length() - 1))) {
+				throw new AssertionError("Cutting the name split a character: " + cut.name());
+			}
+			for (String bad : new String[] {
+				"xaero-waypoint:N:N:2147483648:64:0:6:false:0:Internal-overworld-waypoints",
+				"xaero-waypoint:N:N:1:64:0:99:false:0:Internal-overworld-waypoints",
+				"xaero-waypoint:N:N:1:64:0:6:false:0:Internal-dim%bad-waypoints",
+				"xaero-waypoint: :N:1:64:0:6:false:0:Internal-overworld-waypoints"
+			}) {
+				if (WaypointShare.parse(bad).isPresent()) {
+					throw new AssertionError("Accepted " + bad);
+				}
+			}
+		});
+
+		// A share with a number out of range arrives: nothing breaks, the player stays connected.
+		world.getServer().runCommand("tellraw @a \"xaero-waypoint:N:N:2147483648:64:0:6:false:0:Internal-overworld-waypoints\"");
+		context.waitTicks(10);
+		assertConnected(context, "a share with an out-of-range number");
+
+		// Someone else's share arrives: its line gets an [Add] link.
+		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
+		context.waitTicks(10);
+		context.takeScreenshot("waypoints-07-shared-in-chat");
+		// Take the command from the [Add] link on the line chat actually received, and run it the
+		// way a chat click does: from the open chat screen, which Minecraft puts back after
+		// running the command. The malformed share's line has no link.
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			String command = null;
+			for (net.minecraft.client.multiplayer.chat.GuiMessage message : chatMessages(mc)) {
+				String text = message.content().getString();
+				String link = linkIn(message.content());
+				if (text.contains("2147483648") && link != null) {
+					throw new AssertionError("The malformed share got a link: " + text);
+				}
+				if (text.contains("xaero-waypoint:Old Mine:")) {
+					command = link;
+				}
+			}
+			if (command == null) {
+				throw new AssertionError("The shared line in chat has no [Add] link");
+			}
+			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command), mc.gui.screen());
+		});
+		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			// What the editor shows: name, initials, x, y, z.
+			java.util.List<String> shown = new java.util.ArrayList<>();
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+					shown.add(box.getValue());
+				}
+			}
+			if (!shown.equals(java.util.List.of("Old Mine", "O", "120", "40", "-80"))) {
+				throw new AssertionError("The editor shows " + shown);
+			}
+		});
+		context.takeScreenshot("waypoints-08-add-shared");
+		context.setScreen(() -> null);
+
+		// Teleport from an existing waypoint's editor, after changing its x in the editor: the
+		// player goes where the editor says.
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		Waypoint target = new Waypoint("Lookout: north", at.getX() + 40, at.getY() + 30, at.getZ(), "minecraft:overworld", Waypoint.PALETTE[5]);
+		int editedX = target.x + 5;
+		context.setScreen(() -> new WaypointEditScreen(null, target, false));
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+					boxes.add(box);
+				}
+			}
+			// Name, initials, x, y, z.
+			boxes.get(2).setValue(Integer.toString(editedX));
+			net.minecraft.client.gui.components.Button teleport = buttonLabelled(mc.gui.screen(), "Teleport");
+			if (!teleport.active) {
+				throw new AssertionError("Teleport is off in a world where the player may use /tp");
+			}
+			teleport.onPress(null);
+		});
+		context.waitFor(mc -> mc.player.distanceToSqr(editedX + 0.5, target.y, target.z + 0.5) < 4, 100);
+
+		// Share it: a name with a colon goes out without upsetting the server.
+		context.setScreen(() -> new WaypointEditScreen(null, target, false));
+		context.waitTicks(2);
+		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress(null));
+		context.waitTicks(20);
+		assertConnected(context, "sharing a name with a colon");
+		context.takeScreenshot("waypoints-09-shared-own");
+	}
+
+	/** Every line in chat, newest first. Read through reflection: chat keeps them private. */
+	@SuppressWarnings("unchecked")
+	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
+		try {
+			java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
+			field.setAccessible(true);
+			return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** The command a line's click-to-run link carries, or null. */
+	private static @org.jspecify.annotations.Nullable String linkIn(net.minecraft.network.chat.Component line) {
+		String[] command = new String[1];
+		line.visit((style, text) -> {
+			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
+				command[0] = run.command();
+			}
+			return java.util.Optional.empty();
+		}, net.minecraft.network.chat.Style.EMPTY);
+		return command[0];
+	}
+
+	private static void assertConnected(ClientGameTestContext context, String after) {
+		boolean connected = context.computeOnClient(mc -> mc.getConnection() != null && mc.level != null && mc.player != null);
+		if (!connected) {
+			throw new AssertionError("Disconnected after " + after);
+		}
+	}
+
+	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
+				return button;
+			}
+		}
+		throw new AssertionError("No " + label + " button on " + screen.getClass().getSimpleName());
 	}
 
 	/**
