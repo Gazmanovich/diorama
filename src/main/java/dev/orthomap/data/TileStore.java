@@ -2,6 +2,7 @@ package dev.orthomap.data;
 
 import dev.orthomap.Orthomap;
 import dev.orthomap.Projection;
+import dev.orthomap.bake.Mipmaps;
 import dev.orthomap.bake.TileImage;
 import dev.orthomap.bake.TileKey;
 import java.io.ByteArrayOutputStream;
@@ -16,13 +17,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.Iterator;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import org.jspecify.annotations.Nullable;
@@ -38,7 +42,13 @@ import org.jspecify.annotations.Nullable;
  * Closing waits until everything is on disk, like Minecraft saving the world when you leave, so a
  * store reopened on the same folder always reads what the last one wrote.
  *
- * <p>File format: {@code OMT1}, the edge length, then the level-0 ABGR pixels deflated.
+ * <p>Overview tiles for zooming far out ({@link TileKey#lod()} above 0) live in {@code lod<n>}
+ * folders. Each is its four children shrunk to a quarter. A couple of seconds after tiles are
+ * written, the writer rebuilds the overview tiles above them, each once however many of its
+ * children changed. A missing one is built from its children the first time it's asked for, so
+ * zooming out shows everything explored without baking anything.
+ *
+ * <p>File format: {@code OMT1}, the edge length, then the ABGR pixels deflated.
  */
 public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
@@ -46,6 +56,8 @@ public final class TileStore {
 	private static final long WRITE_DELAY_SECONDS = 3;
 	/** After a failed write (a full disk, say), try again this much later. */
 	private static final long RETRY_DELAY_SECONDS = 30;
+	/** Overview tiles are rebuilt this long after the first tile under them is written. */
+	private static final long OVERVIEW_DELAY_SECONDS = 2;
 
 	/** The only thread that writes tiles. */
 	private static final ScheduledThreadPoolExecutor WRITER = new ScheduledThreadPoolExecutor(1, task -> {
@@ -71,8 +83,126 @@ public final class TileStore {
 	 */
 	private final Map<TileKey, int[]> unwritten = new HashMap<>();
 
+	/**
+	 * Held while building an overview tile until it's cached and queued or written, so a build
+	 * from older children can never replace one from newer children.
+	 */
+	private final Object overviews = new Object();
+	/** Level-1 overview tiles above tiles written since the last rebuild. Guarded by {@code this}. */
+	private final Set<TileKey> staleOverviews = new HashSet<>();
+	private boolean rebuildScheduled;
+	/** Told about overview tiles the writer rebuilt. Called on the writer thread. */
+	private volatile Consumer<TileKey> overviewChanged = key -> {
+	};
+
 	public TileStore(Path folder) {
 		this.folder = folder;
+	}
+
+	public void onOverviewChanged(Consumer<TileKey> listener) {
+		this.overviewChanged = listener;
+	}
+
+	/**
+	 * An overview tile, building it from its children if it was never saved, or null if nothing
+	 * under it was ever mapped. Any thread; a built tile is queued for writing like a bake.
+	 */
+	public int @Nullable [] readOrBuild(TileKey key) {
+		synchronized (this.overviews) {
+			return this.readOrBuildLocked(key);
+		}
+	}
+
+	private int @Nullable [] readOrBuildLocked(TileKey key) {
+		int[] pixels = this.read(key);
+		if (pixels != null || key.lod() == 0) {
+			return pixels;
+		}
+		pixels = this.shrinkChildren(key, true);
+		if (pixels != null) {
+			synchronized (this) {
+				this.cache.put(key, pixels);
+				if (this.unwritten.put(key, pixels) == null && !this.closed) {
+					WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
+				}
+			}
+		}
+		return pixels;
+	}
+
+	/** One level up from four children, each shrunk to a quarter; null if none exist. */
+	private int @Nullable [] shrinkChildren(TileKey key, boolean build) {
+		int size = Projection.TILE_PIXELS;
+		int half = size / 2;
+		int[] out = null;
+		for (int dy = 0; dy < 2; dy++) {
+			for (int dx = 0; dx < 2; dx++) {
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
+				int[] c = build ? this.readOrBuildLocked(child) : this.read(child);
+				if (c == null) {
+					continue;
+				}
+				if (out == null) {
+					out = new int[size * size];
+				}
+				for (int y = 0; y < half; y++) {
+					int row = (2 * y) * size;
+					for (int x = 0; x < half; x++) {
+						int i = row + 2 * x;
+						out[(dy * half + y) * size + dx * half + x] = Mipmaps.average(c[i], c[i + 1], c[i + size], c[i + size + 1]);
+					}
+				}
+			}
+		}
+		return out;
+	}
+
+	/** A tile was written: the overview tiles above it are now out of date. */
+	private synchronized void overviewsStale(TileKey key) {
+		if (key.lod() >= TileKey.MAX_LOD) {
+			return;
+		}
+		this.staleOverviews.add(key.parent());
+		if (!this.rebuildScheduled && !this.closed) {
+			this.rebuildScheduled = true;
+			WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
+		}
+	}
+
+	/** Rebuilds and writes every out-of-date overview tile, one level at a time. Writer thread. */
+	private void rebuildOverviews() {
+		Set<TileKey> level;
+		synchronized (this) {
+			level = new HashSet<>(this.staleOverviews);
+			this.staleOverviews.clear();
+			this.rebuildScheduled = false;
+		}
+		while (!level.isEmpty()) {
+			Set<TileKey> above = new HashSet<>();
+			for (TileKey key : level) {
+				int[] pixels;
+				synchronized (this.overviews) {
+					pixels = this.shrinkChildren(key, false);
+					if (pixels == null) {
+						continue;
+					}
+					synchronized (this) {
+						this.cache.put(key, pixels);
+						// This is newer than any build still waiting to be written.
+						this.unwritten.remove(key);
+					}
+					this.store(key, pixels);
+				}
+				this.overviewChanged.accept(key);
+				if (key.lod() < TileKey.MAX_LOD) {
+					above.add(key.parent());
+				}
+				synchronized (this) {
+					this.trimCache();
+				}
+			}
+			level = above;
+		}
 	}
 
 	/** The saved pixels of a tile, or null if there are none. Any thread. Don't modify the array. */
@@ -128,8 +258,13 @@ public final class TileStore {
 			}
 			for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
 				// Nothing to retry with once the world is closed; store() has logged the failure.
-				this.store(entry.getKey(), entry.getValue());
+				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0) {
+					synchronized (this) {
+						this.staleOverviews.add(entry.getKey().parent());
+					}
+				}
 			}
+			this.rebuildOverviews();
 			synchronized (this) {
 				this.unwritten.clear();
 				this.cache.clear();
@@ -157,6 +292,9 @@ public final class TileStore {
 			return;
 		}
 		boolean saved = this.store(key, pixels);
+		if (saved && key.lod() == 0) {
+			this.overviewsStale(key);
+		}
 		synchronized (this) {
 			if (this.unwritten.get(key) != pixels) {
 				// A newer bake arrived while this one was being written: write that too.
@@ -182,7 +320,8 @@ public final class TileStore {
 	}
 
 	private Path file(TileKey key) {
-		return this.folder.resolve(key.tileU() + "_" + key.tileV() + ".omt");
+		Path dir = key.lod() == 0 ? this.folder : this.folder.resolve("lod" + key.lod());
+		return dir.resolve(key.tileU() + "_" + key.tileV() + ".omt");
 	}
 
 	private int @Nullable [] load(TileKey key) {
@@ -215,7 +354,7 @@ public final class TileStore {
 	private boolean store(TileKey key, int[] pixels) {
 		Path file = this.file(key);
 		try {
-			Files.createDirectories(this.folder);
+			Files.createDirectories(file.getParent());
 			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4).order(ByteOrder.LITTLE_ENDIAN);
 			buffer.asIntBuffer().put(pixels);
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(pixels.length);

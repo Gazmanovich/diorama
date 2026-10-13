@@ -41,8 +41,9 @@ public final class MapLevel implements ChunkSource {
 	private static final long MAX_WAIT_MS = 1500;
 
 	private static final AtomicInteger THREAD_ID = new AtomicInteger();
+	private static final int BAKER_COUNT = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 3));
 	private static final ExecutorService BAKERS = Executors.newFixedThreadPool(
-		Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 3)),
+		BAKER_COUNT,
 		task -> {
 			Thread thread = new Thread(task, "orthomap-baker-" + THREAD_ID.incrementAndGet());
 			thread.setDaemon(true);
@@ -73,6 +74,20 @@ public final class MapLevel implements ChunkSource {
 	private final Map<TileKey, Double> wanted = new HashMap<>();
 	private final Set<TileKey> inFlight = new HashSet<>();
 	private final ConcurrentLinkedQueue<TileImage> finished = new ConcurrentLinkedQueue<>();
+	/** Overview tiles the writer rebuilt; reloaded when next wanted. */
+	private final ConcurrentLinkedQueue<TileKey> overviewChanged = new ConcurrentLinkedQueue<>();
+	/** Overview tiles with nothing saved under them; not asked for again until that changes. */
+	private final Set<TileKey> emptyOverviews = new HashSet<>();
+	/**
+	 * Surface tiles whose chunks changed since the tile was last baked, and when. They're baked in
+	 * the background and saved, so the saved map covers everywhere the player has been, not only
+	 * the parts some map happened to show.
+	 */
+	private final Map<TileKey, Long> unsaved = new HashMap<>();
+	/** Background bakes in flight: saved when done, but not kept on the GPU. */
+	private final Set<TileKey> backgroundBakes = new HashSet<>();
+	/** A changed tile waits this long for more changes before a background bake. */
+	private static final long BACKGROUND_QUIET_MS = 2000;
 	private long frame;
 	private volatile boolean closed;
 
@@ -81,6 +96,9 @@ public final class MapLevel implements ChunkSource {
 		this.maxY = maxY;
 		this.folder = folder;
 		this.store = folder == null ? null : new TileStore(folder.resolve("surface"));
+		if (this.store != null) {
+			this.store.onOverviewChanged(this.overviewChanged::add);
+		}
 		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
 	}
 
@@ -208,6 +226,9 @@ public final class MapLevel implements ChunkSource {
 		for (TileKey key : this.inFlight) {
 			layers.add(key.layer());
 		}
+		if (this.store != null) {
+			layers.add(TileKey.SURFACE);
+		}
 		long now = System.currentTimeMillis();
 		for (int layer : layers) {
 			boolean cave = layer != TileKey.SURFACE;
@@ -245,6 +266,9 @@ public final class MapLevel implements ChunkSource {
 		for (int tu = tu0; tu <= tu1; tu++) {
 			for (int tv = tv0; tv <= tv1; tv++) {
 				TileKey key = new TileKey(layer, tu, tv);
+				if (layer == TileKey.SURFACE && this.store != null) {
+					this.unsaved.put(key, now);
+				}
 				if (!this.tiles.containsKey(key) && !this.inFlight.contains(key)) {
 					continue;
 				}
@@ -303,12 +327,25 @@ public final class MapLevel implements ChunkSource {
 		return this.tiles.get(key);
 	}
 
+	/** Whether overview tiles exist for zooming far out: only when the map is saved. */
+	public boolean hasOverviews() {
+		return this.store != null;
+	}
+
 	/** Uploads finished bakes and starts new ones. Call regularly on the render thread. */
 	public void update() {
 		this.frame++;
+		TileKey changedOverview;
+		while ((changedOverview = this.overviewChanged.poll()) != null) {
+			this.emptyOverviews.remove(changedOverview);
+			if (this.tiles.containsKey(changedOverview)) {
+				this.dirty.computeIfAbsent(changedOverview, k -> new Dirty(0)).blocks.set(0);
+			}
+		}
 		TileImage image;
 		while ((image = this.finished.poll()) != null) {
 			this.inFlight.remove(image.key());
+			boolean background = this.backgroundBakes.remove(image.key());
 			if (this.closed) {
 				continue;
 			}
@@ -318,10 +355,23 @@ public final class MapLevel implements ChunkSource {
 				if (stale != null) {
 					stale.close();
 				}
+				if (background) {
+					this.unsaved.put(image.key(), 0L);
+				}
 				continue;
 			}
 			MapTile tile = this.tiles.get(image.key());
+			if (background && tile == null) {
+				// Baked only to be saved; a map that wants it will bake it again.
+				if (this.store != null) {
+					this.store.baked(image);
+				}
+				continue;
+			}
 			if (tile == null) {
+				if (image.key().lod() > 0 && !image.isFull()) {
+					this.emptyOverviews.add(image.key());
+				}
 				if (!image.isFull()) {
 					// The tile was evicted while its patch baked.
 					continue;
@@ -330,7 +380,7 @@ public final class MapLevel implements ChunkSource {
 				this.tiles.put(image.key(), tile);
 			}
 			tile.upload(image);
-			if (this.store != null && !image.key().isCave()) {
+			if (this.store != null && !image.key().isCave() && image.key().lod() == 0) {
 				this.store.baked(image);
 			}
 		}
@@ -350,31 +400,84 @@ public final class MapLevel implements ChunkSource {
 					continue;
 				}
 				boolean missing = !this.tiles.containsKey(key);
+				if (key.lod() > 0) {
+					// Overview tiles come from disk, shrunk from saved tiles; nothing to bake.
+					if ((missing || this.dirty.containsKey(key)) && this.store != null && !this.emptyOverviews.contains(key)) {
+						this.dirty.remove(key);
+						this.loadOverview(key, this.store);
+					}
+					continue;
+				}
 				Dirty d = this.dirty.get(key);
 				boolean ready = d != null && (now - d.last > QUIET_MS || now - d.first > MAX_WAIT_MS);
 				if (missing || ready) {
 					this.dirty.remove(key);
-					this.inFlight.add(key);
-					BitSet blocks = missing || d.blocks.cardinality() > 160 ? null : d.blocks;
-					int generation = this.generation(key);
-					boolean fog = this.fogOfWar;
-					TileStore store = key.isCave() ? null : this.store;
-					BAKERS.execute(() -> {
-						try {
-							long start = System.nanoTime();
-							int[] saved = store == null ? null : store.read(key);
-							this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved).withGeneration(generation));
-							logBakeTime(System.nanoTime() - start, blocks == null);
-						} catch (Throwable t) {
-							Orthomap.LOGGER.error("Failed to bake tile {}", key, t);
-							this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
-						}
-					});
+					this.unsaved.remove(key);
+					this.bake(key, looks, missing || d.blocks.cardinality() > 160 ? null : d.blocks);
 				}
 			}
+			this.bakeUnsaved(looks, now);
 		}
 		this.wanted.clear();
 		this.evict();
+	}
+
+	/** Bakes one tile on a baker thread: all of it if {@code blocks} is null, else those blocks. */
+	private void bake(TileKey key, BlockLooks looks, @Nullable BitSet blocks) {
+		this.inFlight.add(key);
+		int generation = this.generation(key);
+		boolean fog = this.fogOfWar;
+		TileStore store = key.isCave() ? null : this.store;
+		BAKERS.execute(() -> {
+			try {
+				long start = System.nanoTime();
+				int[] saved = store == null ? null : store.read(key);
+				this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved).withGeneration(generation));
+				logBakeTime(System.nanoTime() - start, blocks == null);
+			} catch (Throwable t) {
+				Orthomap.LOGGER.error("Failed to bake tile {}", key, t);
+				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+			}
+		});
+	}
+
+	private void loadOverview(TileKey key, TileStore store) {
+		this.inFlight.add(key);
+		int generation = this.generation(key);
+		BAKERS.execute(() -> {
+			int[] pixels = null;
+			try {
+				pixels = store.readOrBuild(key);
+			} catch (Throwable t) {
+				Orthomap.LOGGER.error("Failed to load overview tile {}", key, t);
+			}
+			this.finished.add((pixels == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, pixels)).withGeneration(generation));
+		});
+	}
+
+	/**
+	 * Bakes changed surface tiles no map is showing, so they get saved. Leaves one baker free, so
+	 * tiles a map is waiting for still come first.
+	 */
+	private void bakeUnsaved(BlockLooks looks, long now) {
+		if (this.unsaved.isEmpty() || this.inFlight.size() >= Math.max(1, BAKER_COUNT - 1)) {
+			return;
+		}
+		Iterator<Map.Entry<TileKey, Long>> it = this.unsaved.entrySet().iterator();
+		while (it.hasNext()) {
+			Map.Entry<TileKey, Long> e = it.next();
+			TileKey key = e.getKey();
+			if (now - e.getValue() < BACKGROUND_QUIET_MS || this.inFlight.contains(key)) {
+				continue;
+			}
+			it.remove();
+			this.dirty.remove(key);
+			if (!this.tiles.containsKey(key)) {
+				this.backgroundBakes.add(key);
+			}
+			this.bake(key, looks, null);
+			return;
+		}
 	}
 
 	private static final java.util.concurrent.atomic.AtomicLong BAKE_NANOS = new java.util.concurrent.atomic.AtomicLong();
@@ -420,7 +523,10 @@ public final class MapLevel implements ChunkSource {
 			}
 			e.getValue().close();
 			this.tiles.remove(e.getKey());
-			this.dirty.remove(e.getKey());
+			if (this.dirty.remove(e.getKey()) != null && this.store != null && !e.getKey().isCave() && e.getKey().lod() == 0) {
+				// Changed since it was last baked: bake it once more in the background so the change is saved.
+				this.unsaved.put(e.getKey(), 0L);
+			}
 		}
 	}
 
@@ -460,11 +566,11 @@ public final class MapLevel implements ChunkSource {
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
 				this.inFlight.remove(image.key());
-				if (!image.key().isCave() && image.generation() == this.generation(image.key())) {
+				if (!image.key().isCave() && image.key().lod() == 0 && image.generation() == this.generation(image.key())) {
 					store.baked(image);
 				}
 			}
-			boolean surfaceBaking = this.inFlight.stream().anyMatch(key -> !key.isCave());
+			boolean surfaceBaking = this.inFlight.stream().anyMatch(key -> !key.isCave() && key.lod() == 0);
 			if (!surfaceBaking || System.currentTimeMillis() > deadline) {
 				return;
 			}

@@ -26,7 +26,8 @@ public final class Mipmaps {
 		return levels;
 	}
 
-	private static int average(int p0, int p1, int p2, int p3) {
+	/** Alpha-weighted average of four ABGR pixels. */
+	public static int average(int p0, int p1, int p2, int p3) {
 		int a0 = p0 >>> 24;
 		int a1 = p1 >>> 24;
 		int a2 = p2 >>> 24;

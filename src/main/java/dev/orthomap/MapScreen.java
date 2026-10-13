@@ -30,7 +30,9 @@ import com.mojang.blaze3d.platform.InputConstants;
  * right-click to add a waypoint, click a waypoint to edit it.
  */
 public final class MapScreen extends Screen {
-	private static final double MIN_ZOOM = 0.5;
+	/** How far out the saved surface map zooms; overview tiles make it cheap. */
+	private static final double MIN_ZOOM = 0.04;
+
 	private static final double MAX_ZOOM = 16;
 
 	private final MapViewport viewport = new MapViewport();
@@ -83,6 +85,8 @@ public final class MapScreen extends Screen {
 			this.centerU = playerU;
 			this.centerV = playerV;
 		}
+		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
+		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
 		this.viewport.draw(graphics, session.map(), view);
 		Radar.Blip hovered = null;
@@ -196,7 +200,7 @@ public final class MapScreen extends Screen {
 	@Override
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
 		double before = this.zoom;
-		double after = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, before * Math.pow(1.25, scrollY)));
+		double after = Math.max(this.minZoom(), Math.min(MAX_ZOOM, before * Math.pow(1.25, scrollY)));
 		if (after != before) {
 			// Keep the map point under the cursor where it is.
 			double mapU = this.centerU + (x - this.width / 2.0) / before;
@@ -281,6 +285,13 @@ public final class MapScreen extends Screen {
 	}
 
 	/** For tests: put the view at a spot without following the player. */
+	/** Cave slices and unsaved maps have no overview tiles, so they stop at the detailed zoom. */
+	private double minZoom() {
+		MapSession session = MapSession.get();
+		boolean overviews = this.layer == TileKey.SURFACE && session != null && session.map().hasOverviews();
+		return overviews ? MIN_ZOOM : MapViewport.DETAILED_ZOOM;
+	}
+
 	public void lookAt(double u, double v, double zoom, int layer) {
 		this.centerU = u;
 		this.centerV = v;
