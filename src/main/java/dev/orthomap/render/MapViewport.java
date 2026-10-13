@@ -170,7 +170,8 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}
 		}
-		if (MapStyle.get().roundedFog()) {
+		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
+		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);

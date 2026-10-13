@@ -87,8 +87,13 @@ public final class TileBaker {
 	private float outR;
 	private float outG;
 	private float outB;
-	/** Camera depth of the last hit; larger is farther. */
+	/** Camera depth of the last hit relative to {@link #depthOrigin}; larger is farther. */
 	private float outDepth;
+	/**
+	 * Camera depth of this tile's top-left ray start. Depths are kept relative to it so they stay
+	 * small enough for float precision anywhere in the world.
+	 */
+	private final double depthOrigin;
 
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
 		this.key = key;
@@ -102,6 +107,8 @@ public final class TileBaker {
 		this.cos = Projection.cos();
 		this.topY = localTop(key, source);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
+		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
+		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
 	}
 
@@ -293,7 +300,7 @@ public final class TileBaker {
 					}
 					double hitY = y0 - t * sin;
 					double hitZ = z0 - t * cos;
-					this.outDepth = (float) -(sin * hitY + cos * hitZ);
+					this.outDepth = (float) (-(sin * hitY + cos * hitZ) - this.depthOrigin);
 					this.shade(id, x, by, bz, fx, hitY, hitZ, enteredTop, sample);
 					if (through < 1) {
 						// The overlay tints the albedo; approximate by mixing it in after lighting.
@@ -343,7 +350,7 @@ public final class TileBaker {
 		if (this.fogOfWar && (skippingRock || waterId < 0 || !this.source.isSeen(x, waterBy, waterBz))) {
 			return false;
 		}
-		this.outDepth = (float) -(sin * (y0 - t * sin) + cos * (z0 - t * cos));
+		this.outDepth = (float) (-(sin * (y0 - t * sin) + cos * (z0 - t * cos)) - this.depthOrigin);
 		if (skippingRock) {
 			// Solid rock all the way down the slice: draw the cut face.
 			this.outR = 0.0065F;
