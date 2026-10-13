@@ -62,8 +62,8 @@ public final class MapLevel implements ChunkSource {
 	private final @Nullable Path folder;
 	/** Saved tiles for the current camera angle, or null when nothing is saved. Render thread. */
 	private @Nullable TileStore store;
-	/** The camera angle, in whole degrees, that {@link #store} saves tiles for. */
-	private long storePitch;
+	/** The folder {@link #store} saves into; see {@link #storeName()}. */
+	private String storeName = "";
 	private volatile boolean fogOfWar;
 	/** What bakes record for the map overlays, or null when no overlay is on. */
 	private volatile @Nullable Overlays overlays;
@@ -97,9 +97,13 @@ public final class MapLevel implements ChunkSource {
 	private long frame;
 	private volatile boolean closed;
 
-	public MapLevel(int minY, int maxY, @Nullable Path folder) {
+	/** See {@link ChunkSource#roof()}. */
+	private final int roof;
+
+	public MapLevel(int minY, int maxY, int roof, @Nullable Path folder) {
 		this.minY = minY;
 		this.maxY = maxY;
+		this.roof = roof;
 		this.folder = folder;
 		this.store = this.openStore();
 		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
@@ -125,6 +129,16 @@ public final class MapLevel implements ChunkSource {
 		return this.topY;
 	}
 
+	@Override
+	public int roof() {
+		return this.roof;
+	}
+
+	/** Whether the sky view is drawn from under a roof, lit like a cave. */
+	public boolean roofless() {
+		return this.roof != NO_ROOF;
+	}
+
 	public boolean fogOfWar() {
 		return this.fogOfWar;
 	}
@@ -146,6 +160,8 @@ public final class MapLevel implements ChunkSource {
 		this.fogOfWar = value;
 		this.caveGeneration++;
 		this.dropTiles(true);
+		// Under a roof the sky view follows fog of war too, and keeps its own saved tiles for it.
+		this.switchStoreIfNeeded();
 	}
 
 	/**
@@ -185,11 +201,41 @@ public final class MapLevel implements ChunkSource {
 		if (this.folder == null) {
 			return null;
 		}
-		this.storePitch = Math.round(dev.orthomap.MapStyle.get().pitchDegrees());
-		// 60 degrees was the only angle before others existed, and its tiles are in "surface".
-		TileStore opened = new TileStore(this.folder.resolve(this.storePitch == 60 ? "surface" : "surface-" + this.storePitch));
+		this.storeName = this.storeName();
+		TileStore opened = new TileStore(this.folder.resolve(this.storeName));
 		opened.onOverviewChanged(this.overviewChanged::add);
 		return opened;
+	}
+
+	/**
+	 * Where the sky view's tiles are saved: one folder per kind of view, since their pixels mean
+	 * different things and saved pixels are merged into fresh bakes. The camera angle moves where
+	 * pixels land. Under a roof, the view is a different picture, and with fog of war it may only
+	 * hold what the player has seen. 60 degrees was the only angle before others existed, and its
+	 * sky view tiles are in "surface".
+	 */
+	private String storeName() {
+		long pitch = Math.round(dev.orthomap.MapStyle.get().pitchDegrees());
+		if (this.roofless()) {
+			return "under-roof-" + pitch + (this.fogOfWar ? "-fog" : "");
+		}
+		return pitch == 60 ? "surface" : "surface-" + pitch;
+	}
+
+	/** Moves to another folder if the kind of view changed, and queues everything loaded to be saved there. */
+	private void switchStoreIfNeeded() {
+		if (this.store == null || this.storeName().equals(this.storeName)) {
+			return;
+		}
+		this.store.close();
+		this.store = this.openStore();
+		this.unsaved.clear();
+		this.emptyOverviews.clear();
+		for (ChunkSnapshot snapshot : this.chunks.values()) {
+			int x0 = snapshot.chunkX << 4;
+			int z0 = snapshot.chunkZ << 4;
+			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+		}
 	}
 
 	/** Block colours or the map style changed: every tile has to be baked again. */
@@ -197,25 +243,14 @@ public final class MapLevel implements ChunkSource {
 		this.surfaceGeneration++;
 		this.caveGeneration++;
 		this.dropTiles(false);
-		if (this.store != null && Math.round(dev.orthomap.MapStyle.get().pitchDegrees()) != this.storePitch) {
-			this.store.close();
-			this.store = this.openStore();
-			this.unsaved.clear();
-			this.emptyOverviews.clear();
-			// Everything loaded has to be saved again at the new angle, not just what a map shows.
-			for (ChunkSnapshot snapshot : this.chunks.values()) {
-				int x0 = snapshot.chunkX << 4;
-				int z0 = snapshot.chunkZ << 4;
-				this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
-			}
-		}
+		this.switchStoreIfNeeded();
 	}
 
 	private void dropTiles(boolean cavesOnly) {
 		Iterator<Map.Entry<TileKey, MapTile>> it = this.tiles.entrySet().iterator();
 		while (it.hasNext()) {
 			Map.Entry<TileKey, MapTile> e = it.next();
-			if (!cavesOnly || e.getKey().isCave()) {
+			if (!cavesOnly || e.getKey().isCave() || this.roofless()) {
 				e.getValue().close();
 				it.remove();
 				this.dirty.remove(e.getKey());
@@ -224,7 +259,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	private int generation(TileKey key) {
-		return key.isCave() ? this.caveGeneration : this.surfaceGeneration;
+		return key.isCave() || this.roofless() ? this.caveGeneration : this.surfaceGeneration;
 	}
 
 	/** Newly seen blocks: cave slices around them can show more now. */
@@ -264,7 +299,8 @@ public final class MapLevel implements ChunkSource {
 			// view only reaches down to the surface; cave slices can be anywhere below it.
 			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
 		} else {
-			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0;
+			// Under a roof the sky view is lit by block light, so light is part of what's saved.
+			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], surface, terrain);
 		}
@@ -299,7 +335,8 @@ public final class MapLevel implements ChunkSource {
 		}
 		long now = System.currentTimeMillis();
 		for (int layer : layers) {
-			boolean cave = layer != TileKey.SURFACE;
+			// Under a roof the sky view is lit like a cave, so light reaches it the same way.
+			boolean cave = layer != TileKey.SURFACE || this.roofless();
 			if (!cave && !visibleFromSky) {
 				continue;
 			}
@@ -308,12 +345,14 @@ public final class MapLevel implements ChunkSource {
 			int reachY = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Y;
 			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
-			if (cave) {
+			if (layer != TileKey.SURFACE) {
 				top = Math.min(top, layer);
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
 				if (top < bottom) {
 					continue;
 				}
+			} else if (cave) {
+				top = Math.min(top, this.roof);
 			}
 			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
 			int around = cave ? LIGHT_REACH : TileBaker.SKY_REACH;

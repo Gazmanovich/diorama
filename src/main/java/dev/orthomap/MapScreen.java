@@ -109,9 +109,9 @@ public final class MapScreen extends Screen {
 			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
 		}
 
-		String mode = this.layer == TileKey.SURFACE
-			? "Surface"
-			: "Cave slice at y=" + this.layer;
+		String mode = this.layer != TileKey.SURFACE
+			? "Cave slice at y=" + this.layer
+			: session.map().roofless() ? "Under the roof" : "Surface";
 		String status = String.format(
 			"%s   ·   %d, %d, %d   ·   %d chunks%s",
 			mode, player.getBlockX(), player.getBlockY(), player.getBlockZ(), session.map().chunkCount(),

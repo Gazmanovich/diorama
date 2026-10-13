@@ -88,6 +88,10 @@ public final class TileBaker {
 	private final BlockLooks looks;
 	private final VoxelReader reader;
 	private final boolean cave;
+	/** The sky view of a dimension with a roof: it starts under the roof, skips rock and is lit like a cave. */
+	private final boolean roofless;
+	/** Lit by block light and the sky light that reaches in, not the sun: caves, and under a roof. */
+	private final boolean lit;
 	private final int startY;
 	private final int limitY;
 	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
@@ -139,8 +143,10 @@ public final class TileBaker {
 		this.looks = looks;
 		this.reader = new VoxelReader(source);
 		this.cave = key.isCave();
+		this.roofless = !this.cave && source.roof() != ChunkSource.NO_ROOF;
+		this.lit = this.cave || this.roofless;
 		this.source = source;
-		this.fogOfWar = this.cave && fogOfWar;
+		this.fogOfWar = this.lit && fogOfWar;
 		this.style = MapStyle.get();
 		double elevation = Math.toRadians(this.style.sunElevation());
 		this.sunX = Math.cos(elevation) * SUN_AZIMUTH_X;
@@ -150,7 +156,7 @@ public final class TileBaker {
 		this.cos = Projection.cos();
 		this.topY = localTop(key, source, 0);
 		this.rayTop = localTop(key, source, SKY_REACH);
-		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
+		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.roofless ? Math.min(source.roof(), source.maxY()) : this.topY;
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
@@ -384,7 +390,7 @@ public final class TileBaker {
 		double t = 0;
 		boolean enteredTop = true;
 
-		boolean skippingRock = this.cave;
+		boolean skippingRock = this.lit;
 		this.hitSolid = false;
 		// Colour picked up from plants and glass on the way down, applied to the surface below.
 		float overR = 0;
@@ -561,11 +567,17 @@ public final class TileBaker {
 			? this.ambientOcclusionTop(x, by + 1, bz, fx, hitZ - bz)
 			: this.ambientOcclusionSouth(x, by, bz + 1, fx, hitY - by);
 		float emission = this.looks.emission[id] / 15.0F;
+		if (this.looks.kind[id] == BlockLooks.LAVA) {
+			float crust = 1 + 0.3F * blockNoise(x, by, bz);
+			this.albedoR *= crust;
+			this.albedoG *= crust * crust;
+			this.albedoB *= crust;
+		}
 
 		float lr;
 		float lg;
 		float lb;
-		if (this.cave) {
+		if (this.lit) {
 			int skyLight = this.reader.skyLight(x, frontY, frontZ);
 			float bl = this.reader.blockLight(x, frontY, frontZ) / 15.0F;
 			float sl = skyLight / 15.0F * 0.8F;
@@ -576,11 +588,14 @@ public final class TileBaker {
 			lr = (base * 0.92F + warm * 0.9F + cool * 0.6F) * ao;
 			lg = (base * 0.96F + warm * 0.75F + cool * 0.65F) * ao;
 			lb = (base * 1.08F + warm * 0.5F + cool * 0.75F) * ao;
-			float depth = (float) (this.startY - hitY);
-			float fade = 1 - Math.min(0.5F, depth / 60.0F);
-			lr *= fade;
-			lg *= fade;
-			lb *= fade;
+			if (this.cave) {
+				// Deeper below the cut reads darker; under a roof the whole view is one level.
+				float depth = (float) (this.startY - hitY);
+				float fade = 1 - Math.min(0.5F, depth / 60.0F);
+				lr *= fade;
+				lg *= fade;
+				lb *= fade;
+			}
 		} else {
 			double[] j = SUN_JITTER[sample];
 			double sx = this.sunX + j[0];
@@ -644,7 +659,7 @@ public final class TileBaker {
 		float wg = this.albedoG;
 		float wb = this.albedoB;
 		float light;
-		if (this.cave) {
+		if (this.lit) {
 			int bl = this.reader.blockLight(x, by + 1, bz);
 			int sl = this.reader.skyLight(x, by + 1, bz);
 			light = 0.42F + (float) Math.pow(Math.max(bl, sl * 0.8F) / 15.0F, 1.5) * 0.8F;
