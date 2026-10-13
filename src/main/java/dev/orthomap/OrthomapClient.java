@@ -21,6 +21,19 @@ public class OrthomapClient implements ClientModInitializer {
 	public static final KeyMapping OPEN_MAP = new KeyMapping("key.orthomap.open_map", InputConstants.KEY_M, CATEGORY);
 	public static final KeyMapping NEW_WAYPOINT = new KeyMapping("key.orthomap.new_waypoint", InputConstants.KEY_B, CATEGORY);
 	public static final KeyMapping WAYPOINT_LIST = new KeyMapping("key.orthomap.waypoints", InputConstants.KEY_U, CATEGORY);
+	public static final KeyMapping ZOOM_IN = new KeyMapping("key.orthomap.zoom_in", InputConstants.KEY_EQUALS, CATEGORY);
+	public static final KeyMapping ZOOM_OUT = new KeyMapping("key.orthomap.zoom_out", InputConstants.KEY_MINUS, CATEGORY);
+	public static final KeyMapping SETTINGS = new KeyMapping("key.orthomap.settings", InputConstants.UNKNOWN.getValue(), CATEGORY);
+	public static final KeyMapping TOGGLE_MINIMAP = new KeyMapping("key.orthomap.toggle_minimap", InputConstants.UNKNOWN.getValue(), CATEGORY);
+
+	private static void changeZoom(int step) {
+		Settings s = Settings.get();
+		int next = Math.max(0, Math.min(Settings.ZOOMS.length - 1, s.minimapZoom + step));
+		if (next != s.minimapZoom) {
+			s.minimapZoom = next;
+			s.save();
+		}
+	}
 
 	@Override
 	public void onInitializeClient() {
@@ -28,6 +41,11 @@ public class OrthomapClient implements ClientModInitializer {
 		KeyMappingHelper.registerKeyMapping(OPEN_MAP);
 		KeyMappingHelper.registerKeyMapping(NEW_WAYPOINT);
 		KeyMappingHelper.registerKeyMapping(WAYPOINT_LIST);
+		KeyMappingHelper.registerKeyMapping(ZOOM_IN);
+		KeyMappingHelper.registerKeyMapping(ZOOM_OUT);
+		KeyMappingHelper.registerKeyMapping(SETTINGS);
+		KeyMappingHelper.registerKeyMapping(TOGGLE_MINIMAP);
+		Settings.get();
 		HudElementRegistry.addLast(Orthomap.id("waypoints"), new WaypointHud());
 		HudElementRegistry.addLast(Orthomap.id("minimap"), new MinimapHud());
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
@@ -45,6 +63,22 @@ public class OrthomapClient implements ClientModInitializer {
 				if (mc.gui.screen() == null && waypoint != null) {
 					mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true));
 				}
+			}
+			while (ZOOM_IN.consumeClick()) {
+				changeZoom(1);
+			}
+			while (ZOOM_OUT.consumeClick()) {
+				changeZoom(-1);
+			}
+			while (SETTINGS.consumeClick()) {
+				if (mc.gui.screen() == null) {
+					mc.gui.setScreen(new SettingsScreen(null));
+				}
+			}
+			while (TOGGLE_MINIMAP.consumeClick()) {
+				Settings s = Settings.get();
+				s.minimap = !s.minimap;
+				s.save();
 			}
 			while (WAYPOINT_LIST.consumeClick()) {
 				if (mc.gui.screen() == null && mc.level != null) {

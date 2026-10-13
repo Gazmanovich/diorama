@@ -4,6 +4,8 @@ import dev.orthomap.MapScreen;
 import dev.orthomap.MapSession;
 import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
+import dev.orthomap.Settings;
+import dev.orthomap.SettingsScreen;
 import dev.orthomap.WorldKey;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapViewport;
@@ -70,6 +72,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
+			}
+			if (tests.contains("settings")) {
+				settings(context, world);
 			}
 		}
 	}
@@ -409,6 +414,54 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/**
+	 * Settings: the default minimap with its compass and info lines, the settings screen, the
+	 * minimap moved to another corner at another size, and the effect icons pushing it down.
+	 */
+	private static void settings(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("time set noon");
+		context.waitTicks(20);
+		context.takeScreenshot("settings-01-default-minimap");
+
+		context.setScreen(() -> new SettingsScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("settings-02-screen");
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
+			s.minimapSize = Settings.Size.LARGE;
+			s.minimapZoom = 1;
+			s.save();
+		});
+		settle(context, 20);
+		context.takeScreenshot("settings-03-bottom-left-large");
+		String saved = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(mc.gameDirectory.toPath().resolve("orthomap").resolve("config.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError("config.json is missing", e);
+			}
+		});
+		if (!saved.contains("\"BOTTOM_LEFT\"") || !saved.contains("\"LARGE\"")) {
+			throw new AssertionError("config.json doesn't have the new settings:\n" + saved);
+		}
+
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			s.minimapCorner = Settings.Corner.TOP_RIGHT;
+			s.minimapSize = Settings.Size.MEDIUM;
+			s.minimapZoom = 3;
+			s.save();
+		});
+		world.getServer().runCommand("effect give @a speed 60 0");
+		world.getServer().runCommand("effect give @a weakness 60 0");
+		context.waitTicks(20);
+		context.takeScreenshot("settings-04-below-effects");
+		world.getServer().runCommand("effect clear @a");
+	}
+
 	/** Which scenarios to run: ORTHOMAP_TESTS=tour,radar,... (default: all but styles). */
 	private static Set<String> selectedTests() {
 		String env = System.getenv("ORTHOMAP_TESTS");
@@ -416,7 +469,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings");
 		}
 		return Set.of(env.split(","));
 	}
@@ -467,7 +520,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			context.takeScreenshot("style-" + name + "-far");
 			context.setScreen(() -> null);
 		}
-		context.runOnClient(mc -> MapStyle.set(MapStyle.DEFAULT));
+		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {

@@ -60,6 +60,19 @@ public record MapStyle(
 		Projection.setPitch(style.pitchDegrees);
 	}
 
+	/** True when tiles baked under one style look the same under the other; the name doesn't count. */
+	public boolean looksLike(MapStyle other) {
+		return this.pitchDegrees == other.pitchDegrees
+			&& this.saturation == other.saturation
+			&& this.exposure == other.exposure
+			&& java.util.Arrays.equals(this.sunTint, other.sunTint)
+			&& java.util.Arrays.equals(this.shadowTint, other.shadowTint)
+			&& this.outline == other.outline
+			&& this.blockVariation == other.blockVariation
+			&& this.roundedFog == other.roundedFog
+			&& this.clearWater == other.clearWater;
+	}
+
 	public MapStyle withName(String name) {
 		return new MapStyle(name, this.pitchDegrees, this.saturation, this.exposure, this.sunTint, this.shadowTint, this.outline, this.blockVariation, this.roundedFog, this.clearWater);
 	}

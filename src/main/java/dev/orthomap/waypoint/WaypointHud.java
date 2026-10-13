@@ -1,6 +1,7 @@
 package dev.orthomap.waypoint;
 
 import dev.orthomap.ServerRules;
+import dev.orthomap.Settings;
 import dev.orthomap.render.MapIcons;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
@@ -27,7 +28,7 @@ public final class WaypointHud implements HudElement {
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
 		WaypointStore store = WaypointStore.get();
-		if (player == null || mc.level == null || store == null || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
+		if (player == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
 			return;
 		}
 		Vec3 eye = WorldProjection.camera();

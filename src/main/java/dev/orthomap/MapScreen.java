@@ -15,6 +15,7 @@ import dev.orthomap.waypoint.Waypoints;
 import net.minecraft.core.BlockPos;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -54,6 +55,12 @@ public final class MapScreen extends Screen {
 	}
 
 	@Override
+	protected void init() {
+		this.addRenderableWidget(Button.builder(Component.translatable("orthomap.settings.button"), b ->
+			this.minecraft.gui.setScreen(new SettingsScreen(this))).bounds(this.width - 64, 0, 64, 14).build());
+	}
+
+	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 	}
 
@@ -86,7 +93,7 @@ public final class MapScreen extends Screen {
 			hovered = Radar.under(this.blips, mouseX, mouseY);
 		}
 		WaypointStore store = WaypointStore.get();
-		this.pins = store == null ? List.of() : WaypointOverlay.layout(view, store.in(this.minecraft.level.dimension().identifier().toString()), true);
+		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : WaypointOverlay.layout(view, store.in(this.minecraft.level.dimension().identifier().toString()), true);
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
@@ -116,10 +123,17 @@ public final class MapScreen extends Screen {
 		graphics.pose().scale(helpScale);
 		graphics.text(this.font, help, 0, 0, 0xFFC8D0DA, false);
 		graphics.pose().popMatrix();
+		// Widgets (the settings button) draw over the map.
+		super.extractRenderState(graphics, mouseX, mouseY, a);
 	}
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (super.mouseClicked(event, doubleClick)) {
+			// A widget took the click.
+			this.dragged = true;
+			return true;
+		}
 		this.pressX = event.x();
 		this.pressY = event.y();
 		this.dragged = false;
