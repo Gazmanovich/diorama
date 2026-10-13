@@ -22,8 +22,11 @@ public final class ChunkSnapshot {
 	public final int chunkX;
 	public final int chunkZ;
 	public final int minSectionY;
-	/** Block states per section, or null for sections that are only air. */
+	/** Block states per section, or null for sections that are only air or a single block. */
 	private final @Nullable PalettedContainer<BlockState>[] states;
+	/** The one block filling a section, for sections made of a single block. */
+	private final @Nullable BlockState[] uniform;
+	private final boolean hasSkyLight;
 	private final @Nullable DataLayer[] blockLight;
 	private final @Nullable DataLayer[] skyLight;
 	/** Per-column biome tints, indexed {@code (z << 4) | x}. */
@@ -43,13 +46,23 @@ public final class ChunkSnapshot {
 		this.minSectionY = chunk.getMinSectionY();
 		LevelChunkSection[] sections = chunk.getSections();
 		this.states = new PalettedContainer[sections.length];
+		this.uniform = new BlockState[sections.length];
+		this.hasSkyLight = level.dimensionType().hasSkyLight();
 		this.blockLight = new DataLayer[sections.length];
 		this.skyLight = new DataLayer[sections.length];
 		LevelLightEngine light = level.getLightEngine();
 		for (int i = 0; i < sections.length; i++) {
 			LevelChunkSection section = sections[i];
 			if (section != null && !section.hasOnlyAir()) {
-				this.states[i] = section.getStates().copy();
+				PalettedContainer<BlockState> states = section.getStates();
+				// A single-block section's palette copies as itself, and a later chunk packet can
+				// rewrite it in place. Keep just the block so the snapshot never changes under a bake.
+				BlockState single = Sections.singleValue(states);
+				if (single != null) {
+					this.uniform[i] = single;
+				} else {
+					this.states[i] = states.copy();
+				}
 			}
 			SectionPos pos = SectionPos.of(this.chunkX, this.minSectionY + i, this.chunkZ);
 			DataLayer block = light.getLayerListener(LightLayer.BLOCK).getDataLayerData(pos);
@@ -94,15 +107,31 @@ public final class ChunkSnapshot {
 		return this.states[index];
 	}
 
+	public @Nullable BlockState uniformSection(int index) {
+		return this.uniform[index];
+	}
+
 	public int blockLight(int sectionIndex, int x, int y, int z) {
 		DataLayer layer = this.blockLight[sectionIndex];
 		return layer == null ? 0 : layer.get(x, y, z);
 	}
 
 	public int skyLight(int sectionIndex, int x, int y, int z) {
+		if (!this.hasSkyLight) {
+			return 0;
+		}
 		DataLayer layer = this.skyLight[sectionIndex];
-		// Sections without stored sky light are open air above the terrain.
-		return layer == null ? 15 : layer.get(x, y, z);
+		if (layer != null) {
+			return layer.get(x, y, z);
+		}
+		// Same as vanilla: a section without stored sky light takes the bottom layer of the
+		// nearest stored section above it, and is fully lit if there is none.
+		for (int i = sectionIndex + 1; i < this.skyLight.length; i++) {
+			if (this.skyLight[i] != null) {
+				return this.skyLight[i].get(x, 0, z);
+			}
+		}
+		return 15;
 	}
 
 	public long key() {

@@ -50,9 +50,9 @@ float unitsPerUv;
 vec2 noiseOrigin;
 float seconds;
 
-// Known share blurred over roughly a chunk, so chunk-shaped edges melt away.
-float knownSoft(vec2 uv) {
-    float r = max(blurUnits / unitsPerUv, 1.0 / MASK_TEXELS);
+// Known share blurred over a radius in map units, so chunk-shaped edges melt away.
+float knownBlur(vec2 uv, float units) {
+    float r = max(units / unitsPerUv, 1.0 / MASK_TEXELS);
     float k = texture(Sampler0, uv).r * 0.2;
     k += texture(Sampler0, uv + vec2(r, 0.0)).r * 0.1;
     k += texture(Sampler0, uv - vec2(r, 0.0)).r * 0.1;
@@ -64,6 +64,15 @@ float knownSoft(vec2 uv) {
     k += texture(Sampler0, uv + vec2(d, -d)).r * 0.1;
     k += texture(Sampler0, uv + vec2(-d, -d)).r * 0.1;
     return k;
+}
+
+// Surface fog blends a near and a wide blur, so banks reach well over the edge of known land
+// and the noise has room to billow. Cave fog stays tight to the explored tunnels.
+float knownSoft(vec2 uv) {
+    if (blurUnits < 5.0) {
+        return knownBlur(uv, blurUnits);
+    }
+    return 0.5 * knownBlur(uv, blurUnits) + 0.5 * knownBlur(uv, blurUnits * 2.4);
 }
 
 float noiseAt(vec2 uv) {
@@ -78,8 +87,8 @@ float noiseAt(vec2 uv) {
 float thicknessFrom(float known, float n) {
     float unknown = 1.0 - known;
     // Noise only shapes the edge; where everything is known there is no fog at all.
-    float edge = smoothstep(0.0, 0.3, unknown);
-    float amount = smoothstep(0.08, 0.78, unknown + (n - 0.5) * 1.2 * edge);
+    float edge = smoothstep(0.0, 0.35, unknown);
+    float amount = smoothstep(0.12, 0.75, unknown + (n - 0.5) * 1.5 * edge);
     return fogHeight * amount * (0.45 + 0.75 * n);
 }
 
@@ -133,9 +142,18 @@ void main() {
     color += (1.0 - alpha) * floorFog * shade;
     alpha += (1.0 - alpha) * floorFog;
 
-    // Ground that is known right here stays visible; fog only rolls over its edges.
-    float here = texture(Sampler0, maskUv).r;
+    // Ground that is known right here stays visible; fog only rolls over its edges. Caves use the
+    // sharp mask so narrow tunnels stay clear; the surface uses the blurred one so banks stay soft.
+    float here = cave ? texture(Sampler0, maskUv).r : knownSoft(maskUv);
     alpha *= 1.0 - 0.85 * smoothstep(0.45, 0.95, here);
+
+    // Where there is no map at all, nothing should show through, or the edge of the data would
+    // read as a hard line inside the bank.
+    // The cover takes the colour the layers already have here, so it doesn't show as a band.
+    float empty = 1.0 - smoothstep(0.3, 0.85, texture(Sampler0, maskUv).r);
+    vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
+    color += (1.0 - alpha) * empty * coverColor;
+    alpha += (1.0 - alpha) * empty;
 
     if (alpha <= 0.002) {
         discard;

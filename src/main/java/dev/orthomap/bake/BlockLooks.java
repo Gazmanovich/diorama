@@ -62,6 +62,8 @@ public final class BlockLooks {
 	private static final Set<Block> WATER_TINTED = Set.of(Blocks.WATER, Blocks.BUBBLE_COLUMN, Blocks.WATER_CAULDRON);
 
 	private static volatile BlockLooks current;
+	/** The models the current table was built from; a resource reload replaces them. */
+	private static Object builtFrom;
 
 	public final byte[] kind;
 	public final byte[] tint;
@@ -104,12 +106,20 @@ public final class BlockLooks {
 			&& this.topTinted[a] == this.topTinted[b]
 			&& this.side[a] == this.side[b]
 			&& this.sideTinted[a] == this.sideTinted[b]
+			&& this.topTintWeight[a] == this.topTintWeight[b]
+			&& this.sideTintWeight[a] == this.sideTintWeight[b]
 			&& this.tint[a] == this.tint[b]
+			&& this.constantTint[a] == this.constantTint[b]
 			&& this.emission[a] == this.emission[b];
 	}
 
 	public static void invalidate() {
 		current = null;
+	}
+
+	/** True when resource packs were reloaded since the table was built. */
+	public static boolean isStale() {
+		return current != null && builtFrom != Minecraft.getInstance().getModelManager().getBlockStateModelSet();
 	}
 
 	/** Builds the table. Must run on the client thread, after models are loaded. */
@@ -219,6 +229,7 @@ public final class BlockLooks {
 			}
 		}
 		current = looks;
+		builtFrom = models;
 		Orthomap.LOGGER.info("Built block colors for {} states in {} ms", size, (System.nanoTime() - start) / 1_000_000);
 		return looks;
 	}

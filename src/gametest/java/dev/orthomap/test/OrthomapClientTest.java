@@ -54,6 +54,27 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			settle(context, 80);
 			context.takeScreenshot("orthomap-04-map-far");
 
+			if ("1".equals(System.getenv("ORTHOMAP_GIF"))) {
+				// Frames for a GIF: a slow pan east across the edge of the loaded area, so the fog's
+				// drift and the zoomed-out map show in motion.
+				for (int frame = 0; frame < 60; frame++) {
+					double offset = 90 + frame * 1.5;
+					context.runOnClient(mc -> {
+						if (mc.gui.screen() instanceof MapScreen screen && mc.player != null) {
+							screen.lookAt(mc.player.getX() + offset, Projection.v(mc.player.getY(), mc.player.getZ()), 1.4, TileKey.SURFACE);
+						}
+					});
+					context.waitTicks(3);
+					context.takeScreenshot(String.format("orthomap-gif-%03d", frame));
+				}
+			}
+
+			// A resource reload (F3+T) must rebuild block colours and re-bake what is on screen.
+			context.runOnClient(Minecraft::reloadResourcePacks);
+			context.waitTicks(60);
+			settle(context, 40);
+			context.takeScreenshot("orthomap-04b-after-reload");
+
 			int caveY = Integer.getInteger("orthomap.caveY", 24);
 			lookAtPlayer(context, 2.0, caveY);
 			settle(context, 80);

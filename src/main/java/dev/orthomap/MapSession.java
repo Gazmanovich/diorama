@@ -22,7 +22,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -62,6 +61,9 @@ public final class MapSession {
 		}
 		if (BlockLooks.get() == null) {
 			BlockLooks.build();
+		} else if (BlockLooks.isStale()) {
+			BlockLooks.build();
+			session.map.colorsChanged();
 		}
 		session.tickSession(mc);
 	}
@@ -107,25 +109,76 @@ public final class MapSession {
 		}
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
-		// Changes buried under the surface can't show in the sky view: it only sees exposed blocks.
-		int exposedFrom = Integer.MAX_VALUE;
-		for (int[] d : NEIGHBOURS) {
-			exposedFrom = Math.min(exposedFrom, level.getHeight(Heightmap.Types.WORLD_SURFACE, pos.getX() + d[0], pos.getZ() + d[1]));
-		}
-		int surface = pos.getY() >= exposedFrom - 2 ? 1 : 0;
+		int surface = current.visibleFromSky(pos, looks) ? 1 : 0;
 		int[] box = {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface};
 		current.schedule(cx, cz, CHANGE_DELAY_MS, box);
-		// A light source changing relights the neighbouring chunks too.
+		// A light source changing relights every neighbouring chunk, diagonals included. Other
+		// edits only reach a neighbour through shading that reads across the border.
 		boolean light = oldState.getLightEmission() != newState.getLightEmission();
 		int lx = pos.getX() & 15;
 		int lz = pos.getZ() & 15;
-		if (light || lx == 0) current.schedule(cx - 1, cz, CHANGE_DELAY_MS, box);
-		if (light || lx == 15) current.schedule(cx + 1, cz, CHANGE_DELAY_MS, box);
-		if (light || lz == 0) current.schedule(cx, cz - 1, CHANGE_DELAY_MS, box);
-		if (light || lz == 15) current.schedule(cx, cz + 1, CHANGE_DELAY_MS, box);
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				boolean touches = (dx == 0 || dx == -1 && lx == 0 || dx == 1 && lx == 15)
+					&& (dz == 0 || dz == -1 && lz == 0 || dz == 1 && lz == 15);
+				if ((dx != 0 || dz != 0) && (light || touches)) {
+					current.schedule(cx + dx, cz + dz, CHANGE_DELAY_MS, box);
+				}
+			}
+		}
 	}
 
-	private static final int[][] NEIGHBOURS = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+	/** The server sent new light for a chunk. Only cave slices draw light, so only they re-bake. */
+	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
+		if (current != null && current.level == level) {
+			int x0 = chunkX << 4;
+			int z0 = chunkZ << 4;
+			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, 0});
+		}
+	}
+
+	/**
+	 * Whether a changed block can affect the sky view: true if a camera ray leaving its top face,
+	 * its south face, or the top of the block above reaches open sky. Walks real blocks, so it
+	 * handles overhangs, and it is cheap underground because the ray stops at the first rock.
+	 */
+	private boolean visibleFromSky(BlockPos pos, @Nullable BlockLooks looks) {
+		int top = this.map.topY();
+		if (looks == null || top == Integer.MIN_VALUE) {
+			return true;
+		}
+		int x = pos.getX();
+		return this.cameraRayClear(looks, x, pos.getY() + 1.0, pos.getZ() + 0.5, top)
+			|| this.cameraRayClear(looks, x, pos.getY() + 0.5, pos.getZ() + 1.0, top)
+			|| this.cameraRayClear(looks, x, pos.getY() + 2.0, pos.getZ() + 0.5, top);
+	}
+
+	/** Walks from a point back toward the camera (up and south) until open sky or a solid block. */
+	private boolean cameraRayClear(BlockLooks looks, int x, double y, double z, int top) {
+		double sin = Projection.SIN;
+		double cos = Projection.COS;
+		y += 1e-4 * sin;
+		z += 1e-4 * cos;
+		int by = Mth.floor(y);
+		int bz = Mth.floor(z);
+		double tMaxY = (by + 1 - y) / sin;
+		double tMaxZ = (bz + 1 - z) / cos;
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		for (int i = 0; i < 1024 && by < top; i++) {
+			int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(x, by, bz)));
+			if (id >= 0 && looks.kind[id] == BlockLooks.SOLID) {
+				return false;
+			}
+			if (tMaxY < tMaxZ) {
+				by++;
+				tMaxY += 1 / sin;
+			} else {
+				bz++;
+				tMaxZ += 1 / cos;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * Queues a chunk for a fresh snapshot. {@code box} is the changed blocks as

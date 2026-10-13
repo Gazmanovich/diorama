@@ -83,13 +83,13 @@ public final class TileBaker {
 	private float outG;
 	private float outB;
 
-	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks) {
+	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
 		this.key = key;
 		this.looks = looks;
 		this.reader = new VoxelReader(source);
 		this.cave = key.isCave();
 		this.source = source;
-		this.fogOfWar = this.cave && source.fogOfWar();
+		this.fogOfWar = this.cave && fogOfWar;
 		this.topY = localTop(key, source);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
@@ -119,9 +119,12 @@ public final class TileBaker {
 		return top == Integer.MIN_VALUE ? globalTop : Math.min(globalTop, top);
 	}
 
-	/** Bakes the whole tile, or only the {@link TileImage#BLOCK}-pixel blocks set in {@code blocks}. */
-	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks) {
-		TileBaker baker = new TileBaker(key, source, looks);
+	/**
+	 * Bakes the whole tile, or only the {@link TileImage#BLOCK}-pixel blocks set in {@code blocks}.
+	 * {@code fogOfWar} is the cave mode when the bake was scheduled, so it matches its generation.
+	 */
+	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar);
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
@@ -354,7 +357,6 @@ public final class TileBaker {
 		float ao = top
 			? this.ambientOcclusionTop(x, by + 1, bz, fx, hitZ - bz)
 			: this.ambientOcclusionSouth(x, by, bz + 1, fx, hitY - by);
-		int blockLight = this.reader.blockLight(x, frontY, frontZ);
 		float emission = this.looks.emission[id] / 15.0F;
 
 		float lr;
@@ -362,7 +364,7 @@ public final class TileBaker {
 		float lb;
 		if (this.cave) {
 			int skyLight = this.reader.skyLight(x, frontY, frontZ);
-			float bl = blockLight / 15.0F;
+			float bl = this.reader.blockLight(x, frontY, frontZ) / 15.0F;
 			float sl = skyLight / 15.0F * 0.8F;
 			float warm = (float) Math.pow(bl, 1.5);
 			float cool = (float) Math.pow(sl, 1.5);
@@ -392,14 +394,10 @@ public final class TileBaker {
 				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (SUN * lambert);
 			}
 			float ambient = AMBIENT * ao * sky;
+			// The surface map is a daytime view, so torches don't light it.
 			lr = ambient * 0.90F + direct * 1.06F;
 			lg = ambient * 0.95F + direct * 1.00F;
 			lb = ambient * 1.08F + direct * 0.90F;
-			float glow = blockLight / 15.0F;
-			glow = glow * glow * 0.25F;
-			lr += glow;
-			lg += glow * 0.8F;
-			lb += glow * 0.5F;
 		}
 		if (emission > 0) {
 			float e = 0.35F + emission * 0.85F;

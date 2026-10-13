@@ -115,7 +115,12 @@ final class VoxelReader {
 			if (!this.decoded[index]) {
 				this.decoded[index] = true;
 				PalettedContainer<BlockState> states = this.snapshot.section(index);
-				if (states != null) {
+				BlockState uniform = this.snapshot.uniformSection(index);
+				if (uniform != null) {
+					char[] ids = new char[4096];
+					java.util.Arrays.fill(ids, (char) Block.BLOCK_STATE_REGISTRY.getId(uniform));
+					this.sections[index] = ids;
+				} else if (states != null) {
 					char[] ids = new char[4096];
 					BlockState lastState = null;
 					char lastId = 0;

@@ -16,8 +16,5 @@ public interface ChunkSource {
 	/** One above the highest non-air block seen so far. */
 	int topY();
 
-	/** True when cave slices may only show blocks the player has had line of sight to. */
-	boolean fogOfWar();
-
 	boolean isSeen(int x, int y, int z);
 }

@@ -55,6 +55,12 @@ public final class MapLevel implements ChunkSource {
 	private volatile int topY = Integer.MIN_VALUE;
 	private final SeenBlocks seen = new SeenBlocks();
 	private volatile boolean fogOfWar;
+	/**
+	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
+	 * switching to or from fog of war. Bakes that started under an older value are dropped.
+	 */
+	private int surfaceGeneration;
+	private int caveGeneration;
 
 	// Render thread only below here.
 	private final Map<TileKey, MapTile> tiles = new HashMap<>();
@@ -90,7 +96,6 @@ public final class MapLevel implements ChunkSource {
 		return this.topY;
 	}
 
-	@Override
 	public boolean fogOfWar() {
 		return this.fogOfWar;
 	}
@@ -110,10 +115,22 @@ public final class MapLevel implements ChunkSource {
 			return;
 		}
 		this.fogOfWar = value;
+		this.caveGeneration++;
+		this.dropTiles(true);
+	}
+
+	/** Block colours changed (a resource reload): every tile has to be baked again. */
+	public void colorsChanged() {
+		this.surfaceGeneration++;
+		this.caveGeneration++;
+		this.dropTiles(false);
+	}
+
+	private void dropTiles(boolean cavesOnly) {
 		Iterator<Map.Entry<TileKey, MapTile>> it = this.tiles.entrySet().iterator();
 		while (it.hasNext()) {
 			Map.Entry<TileKey, MapTile> e = it.next();
-			if (e.getKey().isCave()) {
+			if (!cavesOnly || e.getKey().isCave()) {
 				e.getValue().close();
 				it.remove();
 				this.dirty.remove(e.getKey());
@@ -121,11 +138,22 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
+	private int generation(TileKey key) {
+		return key.isCave() ? this.caveGeneration : this.surfaceGeneration;
+	}
+
 	/** Newly seen blocks: cave slices around them can show more now. */
 	public void revealed(int x0, int y0, int z0, int x1, int y1, int z1) {
 		if (this.fogOfWar) {
-			this.invalidate(x0, y0, z0, x1, y1, z1, false);
+			this.invalidate(x0, y0, y0, z0, x1, y1, z1, false);
 		}
+	}
+
+	/** Light changed in these sections; only cave slices use block and sky light. */
+	public void lightChanged(int chunkX, int chunkZ, int y0, int y1) {
+		int x0 = chunkX << 4;
+		int z0 = chunkZ << 4;
+		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false);
 	}
 
 	public int chunkCount() {
@@ -146,10 +174,11 @@ public final class MapLevel implements ChunkSource {
 		if (changed == null) {
 			int x0 = snapshot.chunkX << 4;
 			int z0 = snapshot.chunkZ << 4;
-			// Rays from any height could have stopped at this chunk while it was unknown.
-			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), z0, x0 + 15, this.topY, z0 + 15, true);
+			// Rays from any height could have stopped at this chunk while it was unknown. The sky
+			// view only reaches down to the surface; cave slices can be anywhere below it.
+			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true);
 		} else {
-			this.invalidate(changed[0], changed[1], changed[2], changed[3], changed[4], changed[5], changed[6] != 0);
+			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], changed[6] != 0);
 		}
 		if (this.chunks.size() > MAX_CHUNKS) {
 			this.trimChunks(playerChunkX, playerChunkZ);
@@ -159,7 +188,11 @@ public final class MapLevel implements ChunkSource {
 	/** Light from a changed block reaches this far, which matters for cave slices. */
 	private static final int LIGHT_REACH = 15;
 
-	private void invalidate(int x0, int y0, int z0, int x1, int y1, int z1, boolean visibleFromSky) {
+	/**
+	 * Marks tile blocks that can look different after blocks in this box changed. {@code y0} is the
+	 * bottom of the box for the sky view and {@code caveY0} for cave slices.
+	 */
+	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int z1, boolean visibleFromSky) {
 		Set<Integer> layers = new HashSet<>();
 		for (TileKey key : this.tiles.keySet()) {
 			layers.add(key.layer());
@@ -177,7 +210,7 @@ public final class MapLevel implements ChunkSource {
 			int reachZ = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Z;
 			int reachY = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Y;
 			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
-			double bottom = y0 - 1 - reachY;
+			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (cave) {
 				top = Math.min(top, layer);
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
@@ -271,6 +304,14 @@ public final class MapLevel implements ChunkSource {
 			if (this.closed) {
 				continue;
 			}
+			if (image.generation() != this.generation(image.key())) {
+				// Baked under old colours or the other cave mode; bake it again.
+				MapTile stale = this.tiles.remove(image.key());
+				if (stale != null) {
+					stale.close();
+				}
+				continue;
+			}
 			MapTile tile = this.tiles.get(image.key());
 			if (tile == null) {
 				if (!image.isFull()) {
@@ -304,14 +345,16 @@ public final class MapLevel implements ChunkSource {
 					this.dirty.remove(key);
 					this.inFlight.add(key);
 					BitSet blocks = missing || d.blocks.cardinality() > 160 ? null : d.blocks;
+					int generation = this.generation(key);
+					boolean fog = this.fogOfWar;
 					BAKERS.execute(() -> {
 						try {
 							long start = System.nanoTime();
-							this.finished.add(TileBaker.bake(key, this, looks, blocks));
+							this.finished.add(TileBaker.bake(key, this, looks, blocks, fog).withGeneration(generation));
 							logBakeTime(System.nanoTime() - start, blocks == null);
 						} catch (Throwable t) {
 							Orthomap.LOGGER.error("Failed to bake tile {}", key, t);
-							this.finished.add(TileImage.partial(key, List.of()));
+							this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 						}
 					});
 				}
