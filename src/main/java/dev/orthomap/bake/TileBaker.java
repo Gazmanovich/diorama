@@ -116,7 +116,7 @@ public final class TileBaker {
 	 * One above the tallest block any ray or shadow ray of this tile can touch. Starting rays here
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
 	 */
-	private static int localTop(TileKey key, ChunkSource source) {
+	static int localTop(TileKey key, ChunkSource source) {
 		int globalTop = Math.min(source.maxY(), source.topY());
 		double minU = key.minU();
 		double minV = key.minV();

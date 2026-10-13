@@ -35,7 +35,6 @@ public class OrthomapClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> ServerRules.onDisconnect());
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
 			MapSession.tick(mc);
-			Waypoints.tick();
 			while (OPEN_MAP.consumeClick()) {
 				if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
 					mc.gui.setScreen(new MapScreen());

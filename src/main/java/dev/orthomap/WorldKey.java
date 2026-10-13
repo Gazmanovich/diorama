@@ -1,6 +1,10 @@
 package dev.orthomap;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
@@ -20,11 +24,11 @@ public final class WorldKey {
 		Minecraft mc = Minecraft.getInstance();
 		IntegratedServer server = mc.getSingleplayerServer();
 		if (server != null) {
-			return "singleplayer-" + sanitize(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			return key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
 		}
 		ServerData data = mc.getCurrentServer();
 		if (data != null) {
-			return (data.isRealm() ? "realms-" : "server-") + sanitize(data.ip);
+			return key(data.isRealm() ? "realms" : "server", data.ip);
 		}
 		return null;
 	}
@@ -32,6 +36,23 @@ public final class WorldKey {
 	/** {@code .minecraft/orthomap/<world>}. */
 	public static Path folder(String key) {
 		return Minecraft.getInstance().gameDirectory.toPath().resolve(Orthomap.MOD_ID).resolve(key);
+	}
+
+	/**
+	 * A readable folder name plus a short hash of the exact identity, so worlds whose names clean
+	 * up the same ("My World", "My_World") still get separate folders.
+	 */
+	public static String key(String kind, String identity) {
+		return kind + "-" + sanitize(identity) + "-" + hash(kind + ":" + identity);
+	}
+
+	private static String hash(String text) {
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+			return HexFormat.of().formatHex(digest, 0, 4);
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
 	}
 
 	private static String sanitize(String name) {

@@ -9,6 +9,7 @@ import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Radar;
 import dev.orthomap.waypoint.Waypoint;
+import dev.orthomap.waypoint.WaypointEditScreen;
 import dev.orthomap.waypoint.WaypointListScreen;
 import dev.orthomap.waypoint.WaypointOverlay;
 import dev.orthomap.waypoint.WaypointStore;
@@ -16,6 +17,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import com.mojang.authlib.GameProfile;
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -276,6 +278,19 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-03-map");
 
+		// A quick drag that starts on Home must pan, not open its editor, even when it's released
+		// before the game dispatches any drag event.
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.getInput().moveCursor(80, 40);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		boolean dragOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		if (dragOpenedEditor) {
+			throw new AssertionError("Dragging from a waypoint opened its editor");
+		}
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		context.waitTicks(3);
+
 		// Right-click a spot left of the player: the editor opens on the block shown there, which
 		// is the first solid block on the camera ray through that point (a canopy can hide the
 		// ground behind it).
@@ -284,9 +299,16 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			MapViewport.View view = screen.view();
 			double u = mc.player.getBlockX() - 15 + 0.5;
 			double v = Projection.v(mc.player.getY(), mc.player.getZ());
-			screen.addWaypointAt(view.screenX(u), view.screenY(v));
-			return new double[] {u, v};
+			float scale = (float) mc.getWindow().getGuiScale();
+			return new double[] {u, v, view.screenX(u) * scale, view.screenY(v) * scale};
 		});
+		context.getInput().setCursorPos(click[2], click[3]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(3);
+		boolean editorOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		if (!editorOpen) {
+			throw new AssertionError("Right-clicking the map didn't open the waypoint editor");
+		}
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-04-editor");
 		context.clickScreenButton("orthomap.waypoint.save");
@@ -324,6 +346,56 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.waitFor(mc -> mc.player != null && mc.player.isAlive(), 200);
 		context.waitTicks(40);
 		context.takeScreenshot("waypoints-06-after-death");
+
+		// With instant respawn there is no death screen, and the death marker must still appear.
+		world.getServer().runCommand("gamerule immediate_respawn true");
+		long deathsBefore = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH).count());
+		world.getServer().runCommand("kill @a");
+		context.waitTicks(40);
+		long deathsAfter = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH).count());
+		world.getServer().runCommand("gamerule immediate_respawn false");
+		if (deathsAfter != deathsBefore + 1) {
+			throw new AssertionError("Instant respawn left " + (deathsAfter - deathsBefore) + " new death markers instead of 1");
+		}
+
+		// Worlds whose names clean up the same must not share a folder.
+		if (WorldKey.key("singleplayer", "My World").equals(WorldKey.key("singleplayer", "My_World"))) {
+			throw new AssertionError("Two different worlds got the same key");
+		}
+
+		// A damaged file: one bad entry is skipped, a null field is filled in, a copy of the
+		// original is kept, and saving doesn't drop the good entries.
+		context.runOnClient(mc -> {
+			String key = "test-damaged-file";
+			java.nio.file.Path folder = WorldKey.folder(key);
+			try {
+				java.nio.file.Files.createDirectories(folder);
+				java.nio.file.Files.writeString(folder.resolve("waypoints.json"), """
+					[
+					  {"id": "00000000-0000-0000-0000-000000000001", "name": "Home", "initials": null, "x": 1, "y": 2, "z": 3, "dimension": "minecraft:overworld"},
+					  {"id": "not-a-uuid", "name": "Broken", "x": 4, "y": 5, "z": 6, "dimension": "minecraft:overworld"}
+					]
+					""");
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+			WaypointStore damaged = WaypointStore.open(key);
+			if (damaged.all().size() != 1 || !damaged.all().get(0).label().equals("H")) {
+				throw new AssertionError("Expected only Home, with initials H, from the damaged file; got " + damaged.all().size());
+			}
+			damaged.add(new Waypoint("New", 0, 0, 0, "minecraft:overworld", Waypoint.PALETTE[0]));
+			WaypointStore reopened = WaypointStore.open(key);
+			if (reopened.all().size() != 2) {
+				throw new AssertionError("Saving after a damaged load kept " + reopened.all().size() + " waypoints instead of 2");
+			}
+			try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(folder)) {
+				if (files.noneMatch(f -> f.getFileName().toString().startsWith("waypoints.json.unreadable-"))) {
+					throw new AssertionError("No copy of the damaged file was kept");
+				}
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
 
 		String saved = context.computeOnClient(mc -> {
 			try {

@@ -122,7 +122,7 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		if (this.dragged) {
+		if (this.dragged || Math.hypot(event.x() - this.pressX, event.y() - this.pressY) > 3) {
 			return true;
 		}
 		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
@@ -149,7 +149,7 @@ public final class MapScreen extends Screen {
 		}
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
 		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
-		BlockPos spot = MapPick.standingSpot(session.map(), looks, u, v, this.layer);
+		BlockPos spot = MapPick.standingSpot(session.map(), looks, u, v, this.layer, session.map().fogOfWar());
 		if (spot == null) {
 			return;
 		}

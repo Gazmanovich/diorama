@@ -3,7 +3,8 @@ package dev.orthomap.waypoint;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
-import com.google.gson.reflect.TypeToken;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import dev.orthomap.Orthomap;
@@ -69,6 +70,11 @@ public final class WaypointStore {
 		return current;
 	}
 
+	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests and tools. */
+	public static WaypointStore open(String worldKey) {
+		return new WaypointStore(worldKey);
+	}
+
 	public List<Waypoint> all() {
 		return this.waypoints;
 	}
@@ -105,22 +111,68 @@ public final class WaypointStore {
 		this.save();
 	}
 
+	/**
+	 * Reads the file one entry at a time, so a single bad entry costs only itself. If anything
+	 * couldn't be read, the file is copied aside first: the next save rewrites it, and the copy
+	 * keeps whatever was lost.
+	 */
 	private void load() {
 		if (!Files.isRegularFile(this.file)) {
 			return;
 		}
+		boolean damaged = false;
 		try (Reader reader = Files.newBufferedReader(this.file, StandardCharsets.UTF_8)) {
-			List<Waypoint> loaded = GSON.fromJson(reader, new TypeToken<List<Waypoint>>() {}.getType());
-			if (loaded != null) {
-				for (Waypoint waypoint : loaded) {
-					if (waypoint != null && waypoint.id != null && waypoint.name != null && waypoint.dimension != null) {
-						this.waypoints.add(waypoint);
+			JsonElement root = JsonParser.parseReader(reader);
+			if (!root.isJsonArray()) {
+				damaged = true;
+			} else {
+				for (JsonElement element : root.getAsJsonArray()) {
+					try {
+						Waypoint waypoint = normalise(GSON.fromJson(element, Waypoint.class));
+						if (waypoint != null) {
+							this.waypoints.add(waypoint);
+						} else {
+							damaged = true;
+						}
+					} catch (RuntimeException e) {
+						damaged = true;
+						Orthomap.LOGGER.warn("Skipping a waypoint in {} that couldn't be read: {}", this.file, element, e);
 					}
 				}
 			}
 		} catch (Exception e) {
+			damaged = true;
 			Orthomap.LOGGER.error("Couldn't read waypoints from {}", this.file, e);
 		}
+		if (damaged) {
+			Path backup = this.file.resolveSibling("waypoints.json.unreadable-" + System.currentTimeMillis());
+			try {
+				Files.copy(this.file, backup);
+				Orthomap.LOGGER.warn("Kept a copy of the unreadable waypoints file at {}", backup);
+			} catch (IOException e) {
+				Orthomap.LOGGER.error("Couldn't back up {}", this.file, e);
+			}
+		}
+	}
+
+	/** Fills in anything a hand-edited or older file left out; null if the entry is unusable. */
+	private static @Nullable Waypoint normalise(@Nullable Waypoint waypoint) {
+		if (waypoint == null || waypoint.dimension == null) {
+			return null;
+		}
+		if (waypoint.id == null) {
+			waypoint.id = UUID.randomUUID();
+		}
+		if (waypoint.name == null || waypoint.name.isBlank()) {
+			waypoint.name = "Waypoint";
+		}
+		if (waypoint.initials == null) {
+			waypoint.initials = "";
+		}
+		if (waypoint.kind == null) {
+			waypoint.kind = Waypoint.Kind.MANUAL;
+		}
+		return waypoint;
 	}
 
 	/** Writes to a temporary file and moves it over the old one, so a crash can't leave half a file. */
@@ -132,7 +184,8 @@ public final class WaypointStore {
 				GSON.toJson(this.waypoints, writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-		} catch (IOException e) {
+		} catch (IOException | RuntimeException e) {
+			// Gson wraps writer failures (a full disk, say) in unchecked exceptions.
 			Orthomap.LOGGER.error("Couldn't save waypoints to {}", this.file, e);
 		}
 	}

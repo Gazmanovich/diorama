@@ -4,14 +4,12 @@ import dev.orthomap.ServerRules;
 import dev.orthomap.render.MapIcons;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
-import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Vector3fc;
 
 /**
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
@@ -32,15 +30,12 @@ public final class WaypointHud implements HudElement {
 		if (player == null || mc.level == null || store == null || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
 			return;
 		}
-		Camera camera = mc.gameRenderer.mainCamera();
-		Vec3 eye = camera.position();
-		Vector3fc forward = camera.forwardVector();
-		Vector3fc up = camera.upVector();
-		Vector3fc left = camera.leftVector();
+		Vec3 eye = WorldProjection.camera();
+		if (eye == null) {
+			return;
+		}
 		float width = graphics.guiWidth();
 		float height = graphics.guiHeight();
-		double tanHalf = Math.tan(Math.toRadians(camera.getFov() / 2.0));
-		double aspect = width / height;
 		Font font = mc.font;
 		List<Waypoint> waypoints = store.in(mc.level.dimension().identifier().toString());
 		for (Waypoint waypoint : waypoints) {
@@ -50,14 +45,12 @@ public final class WaypointHud implements HudElement {
 			double dx = waypoint.x + 0.5 - eye.x;
 			double dy = waypoint.y + 1.0 - eye.y;
 			double dz = waypoint.z + 0.5 - eye.z;
-			double ahead = dx * forward.x() + dy * forward.y() + dz * forward.z();
-			if (ahead <= 0.1) {
+			float[] screen = WorldProjection.project(waypoint.x + 0.5, waypoint.y + 1.0, waypoint.z + 0.5, width, height);
+			if (screen == null) {
 				continue;
 			}
-			double side = -(dx * left.x() + dy * left.y() + dz * left.z());
-			double rise = dx * up.x() + dy * up.y() + dz * up.z();
-			float sx = (float) (width / 2 + side / ahead / (tanHalf * aspect) * width / 2);
-			float sy = (float) (height / 2 - rise / ahead / tanHalf * height / 2);
+			float sx = screen[0];
+			float sy = screen[1];
 			if (sx < -20 || sy < -20 || sx > width + 20 || sy > height + 20) {
 				continue;
 			}

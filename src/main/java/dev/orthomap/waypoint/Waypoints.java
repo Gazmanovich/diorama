@@ -11,7 +11,6 @@ import org.jspecify.annotations.Nullable;
 /** Making waypoints: where the player stands, at a picked spot, and where they die. */
 public final class Waypoints {
 	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
-	private static boolean wasDead;
 
 	private Waypoints() {
 	}
@@ -39,24 +38,16 @@ public final class Waypoints {
 		return new Waypoint("Waypoint " + count, pos.getX(), pos.getY(), pos.getZ(), dimension, color);
 	}
 
-	/** Adds a death marker the moment the player dies. Call every client tick. */
-	public static void tick() {
-		LocalPlayer player = Minecraft.getInstance().player;
-		if (player == null) {
-			wasDead = false;
+	/** Adds a death marker where the player stands. Called when the server reports their death. */
+	public static void died(LocalPlayer player) {
+		WaypointStore store = WaypointStore.get();
+		String dimension = dimension();
+		if (store == null || dimension == null) {
 			return;
 		}
-		boolean dead = player.isDeadOrDying();
-		if (dead && !wasDead) {
-			WaypointStore store = WaypointStore.get();
-			String dimension = dimension();
-			if (store != null && dimension != null) {
-				BlockPos pos = player.blockPosition();
-				Waypoint death = new Waypoint("Death " + LocalTime.now().format(TIME), pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFF60646C);
-				death.kind = Waypoint.Kind.DEATH;
-				store.add(death);
-			}
-		}
-		wasDead = dead;
+		BlockPos pos = player.blockPosition();
+		Waypoint death = new Waypoint("Death " + LocalTime.now().format(TIME), pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFF60646C);
+		death.kind = Waypoint.Kind.DEATH;
+		store.add(death);
 	}
 }

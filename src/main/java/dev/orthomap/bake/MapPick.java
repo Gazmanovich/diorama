@@ -16,12 +16,14 @@ public final class MapPick {
 	 * The position just above the first solid block or water surface the ray through map point
 	 * {@code (u, v)} reaches, or null where the map has no data.
 	 */
-	public static @Nullable BlockPos standingSpot(ChunkSource source, BlockLooks looks, double u, double v, int layer) {
+	public static @Nullable BlockPos standingSpot(ChunkSource source, BlockLooks looks, double u, double v, int layer, boolean fogOfWar) {
 		VoxelReader reader = new VoxelReader(source);
 		boolean cave = layer != TileKey.SURFACE;
 		double sin = Projection.sin();
 		double cos = Projection.cos();
-		int startY = cave ? Math.min(layer, source.maxY()) : Math.min(source.maxY(), source.topY());
+		// Start where the baker starts for this tile, so whatever the map draws can be picked.
+		TileKey tile = new TileKey(layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
+		int startY = cave ? Math.min(layer, source.maxY()) : TileBaker.localTop(tile, source);
 		int limitY = cave ? Math.max(source.minY(), startY - TileBaker.CAVE_DEPTH) : source.minY();
 		int x = (int) Math.floor(u);
 		double z0 = (v + startY * cos) / sin;
@@ -40,6 +42,10 @@ public final class MapPick {
 				skippingRock = false;
 			}
 			if (!skippingRock && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
+				// Fog of war: a cave the player hasn't seen can't be picked, or its floor would leak.
+				if (cave && fogOfWar && !source.isSeen(x, by, bz) && !source.isSeen(x, by + 1, bz)) {
+					return null;
+				}
 				return new BlockPos(x, by + 1, bz);
 			}
 			if (tMaxY < tMaxZ) {
