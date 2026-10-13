@@ -300,9 +300,36 @@ public final class MapLevel implements ChunkSource {
 	private void trimChunks(int playerChunkX, int playerChunkZ) {
 		List<ChunkSnapshot> all = new ArrayList<>(this.chunks.values());
 		all.sort(Comparator.comparingLong(s -> -(sq(s.chunkX - playerChunkX) + sq(s.chunkZ - playerChunkZ))));
-		for (int i = 0; i < all.size() - MAX_CHUNKS * 3 / 4; i++) {
-			this.chunks.remove(all.get(i).key());
+		int excess = all.size() - MAX_CHUNKS * 3 / 4;
+		for (int i = 0; i < all.size() && excess > 0; i++) {
+			// A chunk under a tile still waiting for its background bake stays until it's saved.
+			if (!this.waitingToSave(all.get(i))) {
+				this.chunks.remove(all.get(i).key());
+				excess--;
+			}
 		}
+	}
+
+	/** Whether a surface tile this chunk shows in is still waiting for its background bake. */
+	private boolean waitingToSave(ChunkSnapshot snapshot) {
+		if (this.unsaved.isEmpty() || snapshot.maxY == Integer.MIN_VALUE) {
+			return false;
+		}
+		double units = Projection.TILE_UNITS;
+		int x0 = snapshot.chunkX << 4;
+		int z0 = snapshot.chunkZ << 4;
+		int tu0 = (int) Math.floor(x0 / units);
+		int tu1 = (int) Math.floor((x0 + 16) / units);
+		int tv0 = (int) Math.floor(Projection.v(snapshot.maxY + 1, z0) / units);
+		int tv1 = (int) Math.floor(Projection.v(snapshot.floorY, z0 + 16) / units);
+		for (int tu = tu0; tu <= tu1; tu++) {
+			for (int tv = tv0; tv <= tv1; tv++) {
+				if (this.unsaved.containsKey(new TileKey(TileKey.SURFACE, tu, tv))) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private static long sq(long v) {
