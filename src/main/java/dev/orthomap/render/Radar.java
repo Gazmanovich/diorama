@@ -21,8 +21,9 @@ import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Other players and mobs on the map. Players show as their skin's face; mobs as dots coloured by
- * how they treat you. Anything well above or below you gets a caret and fades a little, since the
+ * Other players and mobs on the map. Players show as their skin's face. Mobs show as their own
+ * face (see {@link MobFaces}) framed in a colour by how they treat you, or as a dot of that colour
+ * when they have no face icon. Anything well above or below you gets a caret and fades a little, since the
  * map is a top view and can't otherwise show height.
  */
 public final class Radar {
@@ -142,6 +143,16 @@ public final class Radar {
 					int ty = Math.round(blip.y() + s * 0.75F + 2);
 					graphics.fill(tx - 2, ty - 1, tx + w + 2, ty + 9, 0x90000000);
 					graphics.text(font, name, tx, ty, withAlpha(0xFFFFFFFF, alpha), false);
+				}
+			} else if (MobFaces.has(blip.entity())) {
+				// The mob's own face in a dark square, framed in its kind's colour.
+				int box = Math.round(s * 1.6F);
+				int x0 = Math.round(blip.x() - box / 2.0F);
+				int y0 = Math.round(blip.y() - box / 2.0F);
+				graphics.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
+				graphics.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
+				if (!MobFaces.draw(graphics, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
+					MapIcons.dot(graphics, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
 				}
 			} else {
 				MapIcons.dot(graphics, blip.x(), blip.y(), s + 2, withAlpha(0xE0101418, alpha));

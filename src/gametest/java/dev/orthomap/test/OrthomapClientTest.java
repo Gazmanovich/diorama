@@ -403,6 +403,63 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.takeScreenshot("radar-02-map");
 		context.setScreen(() -> null);
 
+		// A lineup of mobs, hostile in one row and the rest in another, babies at the ends: each
+		// shows its own face on the radar.
+		String[] hostile = {"zombie", "skeleton", "creeper", "spider", "enderman", "witch", "pillager", "blaze", "drowned", "stray", "zombie_villager"};
+		String[] others = {"cow", "pig", "sheep", "chicken", "cat", "fox", "rabbit", "villager", "iron_golem", "panda", "bee"};
+		String immune = "{NoAI:1b,PersistenceRequired:1b,Silent:1b,IsImmuneToZombification:1b}";
+		for (int i = 0; i < hostile.length; i++) {
+			world.getServer().runCommand("summon " + hostile[i] + " " + (x - 11 + 2 * i) + " " + y + " " + (z - 11) + " " + still);
+		}
+		world.getServer().runCommand("summon zombie " + (x + 11) + " " + y + " " + (z - 11) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,IsBaby:1b}");
+		world.getServer().runCommand("summon piglin " + (x + 11) + " " + y + " " + (z - 9) + " " + immune);
+		for (int i = 0; i < others.length; i++) {
+			world.getServer().runCommand("summon " + others[i] + " " + (x - 11 + 2 * i) + " " + y + " " + (z + 11) + " " + still);
+		}
+		world.getServer().runCommand("summon cow " + (x + 11) + " " + y + " " + (z + 11) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Age:-24000}");
+		context.waitTicks(20);
+		context.runOnClient(mc -> {
+			// Every summoned kind is there with a face that draws, a baby zombie and a calf included.
+			java.util.List<String> expected = new java.util.ArrayList<>(java.util.List.of(hostile));
+			expected.addAll(java.util.List.of(others));
+			expected.add("piglin");
+			StringBuilder wrong = new StringBuilder();
+			for (String name : expected) {
+				boolean found = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType().toShortString().equals(name) && entity.distanceToSqr(mc.player) < 30 * 30) {
+						found |= dev.orthomap.render.MobFaces.canDraw(entity);
+					}
+				}
+				if (!found) {
+					wrong.append(' ').append(name);
+				}
+			}
+			for (net.minecraft.world.entity.EntityType<?> type : new net.minecraft.world.entity.EntityType<?>[] {EntityTypes.ZOMBIE, EntityTypes.COW}) {
+				boolean baby = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType() == type && entity instanceof net.minecraft.world.entity.LivingEntity living && living.isBaby()
+						&& entity.distanceToSqr(mc.player) < 30 * 30) {
+						baby |= dev.orthomap.render.MobFaces.canDraw(entity);
+					}
+				}
+				if (!baby) {
+					wrong.append(" baby ").append(type.toShortString());
+				}
+			}
+			if (!wrong.isEmpty()) {
+				throw new AssertionError("No drawable face for:" + wrong);
+			}
+		});
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x + 0.5, Projection.v(y, z - 11), 9.0, TileKey.SURFACE));
+		settle(context, 40);
+		context.takeScreenshot("radar-04-faces-hostile");
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x + 0.5, Projection.v(y, z + 11), 9.0, TileKey.SURFACE));
+		settle(context, 20);
+		context.takeScreenshot("radar-05-faces-others");
+		context.setScreen(() -> null);
+
 		world.getServer().runCommand("tellraw @a \"§f§a§i§r§x§a§e§r§o\"");
 		context.waitTicks(20);
 		context.takeScreenshot("radar-03-fair-play-hides-radar");
