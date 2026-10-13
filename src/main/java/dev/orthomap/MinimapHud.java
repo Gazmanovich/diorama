@@ -2,6 +2,7 @@ package dev.orthomap;
 
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Markers;
+import dev.orthomap.render.Radar;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -23,7 +24,7 @@ public final class MinimapHud implements HudElement {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
 		LocalPlayer player = mc.player;
-		if (session == null || player == null || mc.gui.hud.isHidden() || mc.gui.screen() instanceof MapScreen) {
+		if (session == null || player == null || mc.gui.hud.isHidden() || mc.gui.screen() instanceof MapScreen || !ServerRules.minimapAllowed()) {
 			return;
 		}
 		float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
@@ -36,7 +37,11 @@ public final class MinimapHud implements HudElement {
 
 		graphics.fill(x - 2, y - 2, x + SIZE + 2, y + SIZE + 2, 0xC0101418);
 		graphics.fill(x - 1, y - 1, x + SIZE + 1, y + SIZE + 1, 0x60FFFFFF);
-		this.viewport.draw(graphics, session.map(), new MapViewport.View(x, y, SIZE, SIZE, centerU, centerV, ZOOM, layer));
+		MapViewport.View view = new MapViewport.View(x, y, SIZE, SIZE, centerU, centerV, ZOOM, layer);
+		this.viewport.draw(graphics, session.map(), view);
+		if (ServerRules.radarAllowed()) {
+			Radar.draw(graphics, view, Radar.collect(view, partialTick, false), false);
+		}
 		Markers.player(graphics, x + SIZE / 2.0F, y + SIZE / 2.0F, player.getViewYRot(partialTick), 5);
 	}
 }
