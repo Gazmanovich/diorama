@@ -153,20 +153,28 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		}
 
 		// Zoom far out: overview tiles shrunk from the saved ones show both spawn and here.
-		// The spot 160 blocks east of the player is loaded but no map shows it, so only the
-		// background bakes can save it.
-		double[] away = context.computeOnClient(mc -> new double[] {mc.player.getX() + 160, Projection.v(mc.player.getY(), mc.player.getZ())});
-		// Travel back toward spawn, so there's a trail of explored land to zoom out over.
+		// Travel back toward spawn, so there's a trail of explored land to zoom out over. The
+		// minimap is off, so no map draws the trail: only the background bakes can save it.
+		double[] far = context.computeOnClient(mc -> new double[] {mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ())});
+		double[] away = new double[2];
 		context.setScreen(() -> null);
+		context.runOnClient(mc -> Settings.get().minimap = false);
 		for (int stop = 2750; stop >= 750; stop -= 250) {
 			world.getServer().runCommand("tp @a " + stop + " 200 " + stop);
 			// New terrain generates around the player a few chunks at a time.
 			context.waitTicks(200);
+			if (stop == 1750) {
+				context.runOnClient(mc -> {
+					away[0] = mc.player.getX();
+					away[1] = Projection.v(mc.player.getY(), mc.player.getZ());
+				});
+			}
 		}
+		context.runOnClient(mc -> Settings.get().minimap = true);
 		double spawnU = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
 		double spawnV = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
 		context.setScreen(MapScreen::new);
-		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt((spawnU + away[0]) / 2, (spawnV + away[1]) / 2, 0.06, TileKey.SURFACE));
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt((spawnU + far[0]) / 2, (spawnV + far[1]) / 2, 0.06, TileKey.SURFACE));
 		context.waitFor(mc -> overviewKnown(spawnU, spawnV) >= 0.9F && overviewKnown(away[0], away[1]) >= 0.9F, 1200);
 		settle(context, 20);
 		context.takeScreenshot("saved-map-02-zoomed-out");
@@ -177,8 +185,8 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				context.runOnClient(mc -> {
 					double su = (spawnCell[0] + 0.5) * Projection.TILE_UNITS;
 					double sv = (spawnCell[1] + 0.5) * Projection.TILE_UNITS;
-					double pu = (spawnU + away[0]) / 2;
-					double pv = (spawnV + away[1]) / 2;
+					double pu = (spawnU + far[0]) / 2;
+					double pv = (spawnV + far[1]) / 2;
 					double ease = t * t * (3 - 2 * t);
 					((MapScreen) mc.gui.screen()).lookAt(su + (pu - su) * ease, sv + (pv - sv) * ease, Math.pow(0.06, t), TileKey.SURFACE);
 				});

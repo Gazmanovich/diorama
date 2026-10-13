@@ -180,18 +180,28 @@ public final class TileStore {
 		while (!level.isEmpty()) {
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
-				int[] pixels;
 				synchronized (this.overviews) {
-					pixels = this.shrinkChildren(key, false);
+					// Children never built (saves from before overviews existed) are built from
+					// their own children first, so the parent can't leave their land out.
+					int[] pixels = this.shrinkChildren(key, true);
 					if (pixels == null) {
 						continue;
 					}
 					synchronized (this) {
 						this.cache.put(key, pixels);
-						// This is newer than any build still waiting to be written.
-						this.unwritten.remove(key);
+						// Newer than any build still waiting to be written; pending until written.
+						this.unwritten.put(key, pixels);
 					}
-					this.store(key, pixels);
+					boolean saved = this.store(key, pixels);
+					synchronized (this) {
+						if (this.unwritten.get(key) == pixels) {
+							if (saved) {
+								this.unwritten.remove(key);
+							} else if (!this.closed) {
+								WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+							}
+						}
+					}
 				}
 				this.overviewChanged.accept(key);
 				if (key.lod() < TileKey.MAX_LOD) {

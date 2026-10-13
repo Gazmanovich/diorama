@@ -284,7 +284,6 @@ public final class MapScreen extends Screen {
 		return this.blips;
 	}
 
-	/** For tests: put the view at a spot without following the player. */
 	/** Cave slices and unsaved maps have no overview tiles, so they stop at the detailed zoom. */
 	private double minZoom() {
 		MapSession session = MapSession.get();
@@ -292,6 +291,7 @@ public final class MapScreen extends Screen {
 		return overviews ? MIN_ZOOM : MapViewport.DETAILED_ZOOM;
 	}
 
+	/** For tests: put the view at a spot without following the player. */
 	public void lookAt(double u, double v, double zoom, int layer) {
 		this.centerU = u;
 		this.centerV = v;

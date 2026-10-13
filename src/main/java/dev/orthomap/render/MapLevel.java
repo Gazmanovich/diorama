@@ -338,7 +338,8 @@ public final class MapLevel implements ChunkSource {
 		TileKey changedOverview;
 		while ((changedOverview = this.overviewChanged.poll()) != null) {
 			this.emptyOverviews.remove(changedOverview);
-			if (this.tiles.containsKey(changedOverview)) {
+			// A load still in flight may have read the old pixels: load it again after.
+			if (this.tiles.containsKey(changedOverview) || this.inFlight.contains(changedOverview)) {
 				this.dirty.computeIfAbsent(changedOverview, k -> new Dirty(0)).blocks.set(0);
 			}
 		}
@@ -370,7 +371,9 @@ public final class MapLevel implements ChunkSource {
 			}
 			if (tile == null) {
 				if (image.key().lod() > 0 && !image.isFull()) {
-					this.emptyOverviews.add(image.key());
+					if (!this.dirty.containsKey(image.key())) {
+						this.emptyOverviews.add(image.key());
+					}
 				}
 				if (!image.isFull()) {
 					// The tile was evicted while its patch baked.
@@ -561,7 +564,18 @@ public final class MapLevel implements ChunkSource {
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
-		long deadline = System.currentTimeMillis() + 3000;
+		// Changed tiles still waiting for a background bake get baked now, while their chunks
+		// are still here.
+		BlockLooks looks = BlockLooks.get();
+		if (looks != null && this.topY != Integer.MIN_VALUE) {
+			for (TileKey key : this.unsaved.keySet()) {
+				if (!this.inFlight.contains(key)) {
+					this.bake(key, looks, null);
+				}
+			}
+		}
+		this.unsaved.clear();
+		long deadline = System.currentTimeMillis() + 5000;
 		while (true) {
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
