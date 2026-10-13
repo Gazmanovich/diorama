@@ -141,11 +141,21 @@ public final class TileBaker {
 	 * {@code fogOfWar} is the cave mode when the bake was scheduled, so it matches its generation.
 	 */
 	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar) {
+		return bake(key, source, looks, blocks, fogOfWar, null);
+	}
+
+	/**
+	 * Same, merging in {@code saved}, the tile as last saved to disk: wherever this bake has no
+	 * data for a pixel, the saved pixel stays. That shows places whose chunks aren't loaded, and
+	 * keeps a bake at the edge of loaded chunks from erasing what was saved.
+	 */
+	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar);
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
 			baker.bakePixels(0, 0, size, size, pixels);
+			merge(pixels, saved, 0, 0, size);
 			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size));
 		}
 		int perRow = size / TileImage.BLOCK;
@@ -155,6 +165,7 @@ public final class TileBaker {
 			int by = i / perRow;
 			int[] pixels = new int[TileImage.BLOCK * TileImage.BLOCK];
 			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels);
+			merge(pixels, saved, bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK);
 			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK)));
 		}
 		if (VoxelReader.DEBUG && !baker.reader.missing.isEmpty()) {
@@ -167,6 +178,23 @@ public final class TileBaker {
 			dev.orthomap.Orthomap.LOGGER.info("Partial bake of {} ({} blocks) hit unknown chunks:{}", key, blocks.cardinality(), sb);
 		}
 		return TileImage.partial(key, patches);
+	}
+
+	/** Keeps the saved pixel wherever the fresh one is less known; square areas only. */
+	private static void merge(int[] pixels, int @Nullable [] saved, int px0, int py0, int edge) {
+		if (saved == null) {
+			return;
+		}
+		int size = Projection.TILE_PIXELS;
+		for (int y = 0; y < edge; y++) {
+			for (int x = 0; x < edge; x++) {
+				int i = y * edge + x;
+				int old = saved[(py0 + y) * size + px0 + x];
+				if ((old >>> 24) > (pixels[i] >>> 24)) {
+					pixels[i] = old;
+				}
+			}
+		}
 	}
 
 	private void bakePixels(int px0, int py0, int width, int height, int[] out) {

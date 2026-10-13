@@ -9,6 +9,8 @@ import dev.orthomap.bake.TileImage;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.data.ChunkSnapshot;
 import dev.orthomap.data.SeenBlocks;
+import dev.orthomap.data.TileStore;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
@@ -53,7 +55,10 @@ public final class MapLevel implements ChunkSource {
 	private final int maxY;
 	private final ConcurrentHashMap<Long, ChunkSnapshot> chunks = new ConcurrentHashMap<>();
 	private volatile int topY = Integer.MIN_VALUE;
-	private final SeenBlocks seen = new SeenBlocks();
+	private final SeenBlocks seen;
+	/** Where this dimension's map is saved, or null when there's no world to save it for. */
+	private final @Nullable Path folder;
+	private final @Nullable TileStore store;
 	private volatile boolean fogOfWar;
 	/**
 	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
@@ -71,9 +76,12 @@ public final class MapLevel implements ChunkSource {
 	private long frame;
 	private volatile boolean closed;
 
-	public MapLevel(int minY, int maxY) {
+	public MapLevel(int minY, int maxY, @Nullable Path folder) {
 		this.minY = minY;
 		this.maxY = maxY;
+		this.folder = folder;
+		this.store = folder == null ? null : new TileStore(folder.resolve("surface"));
+		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
 	}
 
 	@Override
@@ -322,6 +330,9 @@ public final class MapLevel implements ChunkSource {
 				this.tiles.put(image.key(), tile);
 			}
 			tile.upload(image);
+			if (this.store != null && !image.key().isCave()) {
+				this.store.baked(image);
+			}
 		}
 
 		BlockLooks looks = BlockLooks.get();
@@ -347,10 +358,12 @@ public final class MapLevel implements ChunkSource {
 					BitSet blocks = missing || d.blocks.cardinality() > 160 ? null : d.blocks;
 					int generation = this.generation(key);
 					boolean fog = this.fogOfWar;
+					TileStore store = key.isCave() ? null : this.store;
 					BAKERS.execute(() -> {
 						try {
 							long start = System.nanoTime();
-							this.finished.add(TileBaker.bake(key, this, looks, blocks, fog).withGeneration(generation));
+							int[] saved = store == null ? null : store.read(key);
+							this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved).withGeneration(generation));
 							logBakeTime(System.nanoTime() - start, blocks == null);
 						} catch (Throwable t) {
 							Orthomap.LOGGER.error("Failed to bake tile {}", key, t);
@@ -411,8 +424,19 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
+	/** Saves fog-of-war progress if it changed. Call now and then; tiles save themselves. */
+	public void saveSeen() {
+		if (this.folder != null) {
+			this.seen.save(this.folder.resolve("seen.bin"));
+		}
+	}
+
 	public void close() {
 		this.closed = true;
+		if (this.store != null) {
+			this.store.close();
+		}
+		this.saveSeen();
 		for (MapTile tile : this.tiles.values()) {
 			tile.close();
 		}

@@ -8,6 +8,7 @@ import dev.orthomap.Settings;
 import dev.orthomap.SettingsScreen;
 import dev.orthomap.WorldKey;
 import dev.orthomap.bake.TileKey;
+import dev.orthomap.render.MapTile;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Radar;
 import dev.orthomap.waypoint.Waypoint;
@@ -18,6 +19,7 @@ import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
 import com.mojang.authlib.GameProfile;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Set;
@@ -41,6 +43,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.getInput().resizeWindow(1600, 900);
 		context.runOnClient(mc -> mc.options.renderDistance().set(12));
 		String seed = System.getProperty("orthomap.seed", "orthomap");
+		Set<String> tests = selectedTests();
+		TestWorldSave save = null;
+		int[] spawnCell = null;
 		try (TestSingleplayerContext world = context.worldBuilder()
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> {
@@ -55,9 +60,10 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				world.getServer().runCommand("tp @a " + tp);
 			}
 
-			Set<String> tests = selectedTests();
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 			settle(context, 100);
+			save = world.getWorldSave();
+			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
 				styleTour(context, world);
 			}
@@ -75,6 +81,80 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("settings")) {
 				settings(context, world);
+			}
+			if (spawnCell != null) {
+				// Go far from spawn, so its chunks are long gone once the world is reopened.
+				world.getServer().runCommand("tp @a 3000 200 3000");
+				context.waitTicks(100);
+			}
+		}
+		if (spawnCell != null && save != null) {
+			try (TestSingleplayerContext reopened = save.open()) {
+				savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+			}
+		}
+	}
+
+	/**
+	 * A spawn tile with a fully known coverage cell: {tileU, tileV, cellX, cellY}. The map was
+	 * baked there in this session, so it should come back from disk after a restart.
+	 */
+	private static int[] knownSpawnCell(ClientGameTestContext context) {
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 60);
+		int[] cell = context.computeOnClient(mc -> {
+			double u = mc.player.getX();
+			double v = Projection.v(mc.player.getY(), mc.player.getZ());
+			int tu = (int) Math.floor(u / Projection.TILE_UNITS);
+			int tv = (int) Math.floor(v / Projection.TILE_UNITS);
+			MapTile tile = MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv));
+			if (tile == null || !tile.hasCoverage()) {
+				throw new AssertionError("The spawn tile wasn't baked");
+			}
+			double cellUnits = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+			int cx = (int) ((u - tu * Projection.TILE_UNITS) / cellUnits);
+			int cy = (int) ((v - tv * Projection.TILE_UNITS) / cellUnits);
+			if (tile.coverage(cx, cy) < 0.9F) {
+				throw new AssertionError("The spawn tile isn't known under the player");
+			}
+			return new int[] {tu, tv, cx, cy};
+		});
+		context.setScreen(() -> null);
+		return cell;
+	}
+
+	/**
+	 * After leaving and reopening the world 3000 blocks from spawn: the spawn tile shows from disk
+	 * alone, and the fog-of-war corridor is still seen.
+	 */
+	private static void savedMap(ClientGameTestContext context, TestSingleplayerContext world, int[] spawnCell, boolean checkFogOfWar) {
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+		settle(context, 60);
+		boolean spawnLoaded = context.computeOnClient(mc -> MapSession.get().map().chunk(0, 0) != null);
+		if (spawnLoaded) {
+			throw new AssertionError("Spawn chunks are loaded; the test can't tell disk from memory");
+		}
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			double u = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			double v = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			((MapScreen) mc.gui.screen()).lookAt(u, v, 1.0, TileKey.SURFACE);
+		});
+		settle(context, 60);
+		context.takeScreenshot("saved-map-01-spawn-after-restart");
+		float known = context.computeOnClient(mc -> {
+			MapTile tile = MapSession.get().map().peek(new TileKey(TileKey.SURFACE, spawnCell[0], spawnCell[1]));
+			return tile == null || !tile.hasCoverage() ? 0 : tile.coverage(spawnCell[2], spawnCell[3]);
+		});
+		if (known < 0.9F) {
+			throw new AssertionError("The spawn tile didn't come back from disk (known share " + known + ")");
+		}
+		context.setScreen(() -> null);
+		if (checkFogOfWar) {
+			boolean seen = context.computeOnClient(mc -> MapSession.get().map().isSeen(115, -39, 116));
+			if (!seen) {
+				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
 	}
@@ -534,7 +614,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "saved-map");
 		}
 		return Set.of(env.split(","));
 	}

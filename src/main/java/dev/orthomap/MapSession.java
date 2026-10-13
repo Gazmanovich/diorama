@@ -4,6 +4,7 @@ import dev.orthomap.bake.BlockLooks;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.data.ChunkSnapshot;
 import dev.orthomap.render.MapLevel;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -48,7 +49,17 @@ public final class MapSession {
 
 	private MapSession(ClientLevel level) {
 		this.level = level;
-		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1);
+		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, mapFolder(level));
+	}
+
+	/** {@code .minecraft/orthomap/<world>/<dimension>}, or null outside a world. */
+	private static @Nullable Path mapFolder(ClientLevel level) {
+		String key = WorldKey.current();
+		if (key == null) {
+			return null;
+		}
+		String dimension = level.dimension().identifier().toString().replaceAll("[^a-z0-9._-]+", "_");
+		return WorldKey.folder(key).resolve(dimension);
 	}
 
 	public static @Nullable MapSession get() {
@@ -244,6 +255,9 @@ public final class MapSession {
 		LocalPlayer player = mc.player;
 		if (player != null && this.ticks++ % 40 == 0) {
 			this.sweepLoadedChunks(player);
+		}
+		if (this.ticks % 600 == 0) {
+			this.map.saveSeen();
 		}
 		int playerChunkX = player == null ? 0 : player.blockPosition().getX() >> 4;
 		int playerChunkZ = player == null ? 0 : player.blockPosition().getZ() >> 4;
