@@ -419,14 +419,37 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("summon cow " + (x + 11) + " " + y + " " + (z + 11) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Age:-24000}");
 		context.waitTicks(20);
 		context.runOnClient(mc -> {
-			StringBuilder missing = new StringBuilder();
-			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
-				if (entity.distanceToSqr(mc.player) < 30 * 30 && dev.orthomap.render.MobFaces.has(entity) && !dev.orthomap.render.MobFaces.canDraw(entity)) {
-					missing.append(' ').append(entity.getType().toShortString());
+			// Every summoned kind is there with a face that draws, a baby zombie and a calf included.
+			java.util.List<String> expected = new java.util.ArrayList<>(java.util.List.of(hostile));
+			expected.addAll(java.util.List.of(others));
+			expected.add("piglin");
+			StringBuilder wrong = new StringBuilder();
+			for (String name : expected) {
+				boolean found = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType().toShortString().equals(name) && entity.distanceToSqr(mc.player) < 30 * 30) {
+						found |= dev.orthomap.render.MobFaces.canDraw(entity);
+					}
+				}
+				if (!found) {
+					wrong.append(' ').append(name);
 				}
 			}
-			if (!missing.isEmpty()) {
-				throw new AssertionError("No texture for the face of:" + missing);
+			int babies = 0;
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity instanceof net.minecraft.world.entity.LivingEntity living && living.isBaby()
+					&& (entity.getType() == EntityTypes.ZOMBIE || entity.getType() == EntityTypes.COW)) {
+					babies++;
+					if (!dev.orthomap.render.MobFaces.canDraw(entity)) {
+						wrong.append(" baby ").append(entity.getType().toShortString());
+					}
+				}
+			}
+			if (babies < 2) {
+				wrong.append(" (only ").append(babies).append(" of the baby zombie and calf are here)");
+			}
+			if (!wrong.isEmpty()) {
+				throw new AssertionError("No drawable face for:" + wrong);
 			}
 		});
 		context.setScreen(MapScreen::new);

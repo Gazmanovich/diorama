@@ -41,15 +41,26 @@ public final class MobFaces {
 	}
 
 	private static final Map<EntityType<?>, Faces> FACES = new HashMap<>();
-	/** Texture per entity, refreshed now and then: working it out builds a render state. */
-	private static final Map<Integer, Identifier> TEXTURES = new HashMap<>();
-	private static long texturesTick = Long.MIN_VALUE;
+	/**
+	 * The texture each entity was last drawn with, and the entity's age then. Working it out builds
+	 * a render state, so it's redone every two seconds of each entity's own life: often enough for
+	 * a wolf turning angry or a calf growing up, and spread out rather than all at once. Keyed by
+	 * the entity itself, which also keeps one world's entities from answering for another's.
+	 */
+	private static final Map<Entity, Looked> TEXTURES = new java.util.WeakHashMap<>();
+	private static final int REFRESH_TICKS = 40;
+
+	private record Looked(@Nullable Identifier texture, int age) {
+	}
 
 	private static final Piece HUMANOID_HAT = new Piece(40, 8, 8, 8, 0, 0);
 	private static final Piece BABY_ZOMBIE_HAT = new Piece(41, 9, 6, 6, 0, 0);
 	private static final Piece VILLAGER_HAT = new Piece(40, 8, 8, 10, 0, 0);
 	/** Villager-style noses stick out from the lower middle of a 10-pixel-tall face. */
 	private static final Piece VILLAGER_NOSE = new Piece(26, 2, 2, 3, 3, 7);
+	private static final Face COW = new Face(64, 64, 6, 6, 8, 8, null, new Piece(2, 34, 6, 3, 1, 5));
+	/** Cold cows keep their muzzle elsewhere in the texture: their model moves its texture origin. */
+	private static final Piece COLD_COW_MUZZLE = new Piece(10, 34, 6, 3, 1, 5);
 
 	static {
 		Face zombie = new Face(64, 64, 8, 8, 8, 8, HUMANOID_HAT, null);
@@ -73,7 +84,7 @@ public final class MobFaces {
 		FACES.put(EntityTypes.BLAZE, new Faces(new Face(64, 32, 8, 8, 8, 8), null));
 		// Piglin snouts: a 4x4 box from the face's middle, rows 4 to 8 of 8.
 		Face piglin = new Face(64, 64, 8, 8, 10, 8, null, new Piece(32, 2, 4, 4, 3, 4));
-		Face babyPiglin = new Face(64, 64, 7, 7, 9, 6);
+		Face babyPiglin = new Face(64, 64, 7, 7, 9, 6, null, new Piece(22, 31, 3, 3, 3, 3));
 		FACES.put(EntityTypes.PIGLIN, new Faces(piglin, babyPiglin));
 		FACES.put(EntityTypes.PIGLIN_BRUTE, new Faces(piglin, null));
 		FACES.put(EntityTypes.ZOMBIFIED_PIGLIN, new Faces(piglin, babyPiglin));
@@ -87,8 +98,8 @@ public final class MobFaces {
 			new Face(64, 64, 7, 7, 8, 8, new Piece(7, 37, 8, 8, 0, 0), null)));
 		FACES.put(EntityTypes.WANDERING_TRADER, new Faces(new Face(64, 64, 8, 8, 8, 10, VILLAGER_HAT, VILLAGER_NOSE), null));
 		FACES.put(EntityTypes.IRON_GOLEM, new Faces(new Face(128, 128, 8, 8, 8, 10, null, VILLAGER_NOSE), null));
-		// Cow muzzles sit under the eyes, rows 5 to 8 of 8.
-		Faces cow = new Faces(new Face(64, 64, 6, 6, 8, 8, null, new Piece(2, 34, 6, 3, 1, 5)), new Face(64, 64, 5, 23, 6, 6));
+		// Cow muzzles sit under the eyes, rows 5 to 8 of 8; a calf's at rows 3 to 6 of 6.
+		Faces cow = new Faces(COW, new Face(64, 64, 5, 23, 6, 6, null, new Piece(13, 30, 4, 3, 1, 3)));
 		FACES.put(EntityTypes.COW, cow);
 		FACES.put(EntityTypes.MOOSHROOM, cow);
 		// The pig's snout covers the middle of its face, rows 4 to 7 of 8.
@@ -98,10 +109,10 @@ public final class MobFaces {
 		FACES.put(EntityTypes.CHICKEN, new Faces(new Face(64, 32, 3, 3, 4, 6, null, new Piece(16, 2, 4, 2, 0, 2)), new Face(16, 16, 4, 4, 4, 4)));
 		FACES.put(EntityTypes.WOLF, new Faces(new Face(64, 32, 4, 4, 6, 6), new Face(32, 32, 5, 17, 6, 5)));
 		FACES.put(EntityTypes.CAT, new Faces(new Face(64, 32, 5, 5, 5, 4), new Face(32, 32, 4, 4, 5, 4)));
-		FACES.put(EntityTypes.FOX, new Faces(new Face(48, 32, 7, 11, 8, 6), new Face(32, 32, 5, 5, 6, 5)));
+		FACES.put(EntityTypes.FOX, new Faces(new Face(48, 32, 7, 11, 8, 6, null, new Piece(9, 21, 4, 2, 2, 4)), new Face(32, 32, 5, 5, 6, 5)));
 		FACES.put(EntityTypes.RABBIT, new Faces(new Face(64, 64, 5, 21, 5, 5), new Face(32, 32, 4, 4, 5, 4)));
 		FACES.put(EntityTypes.POLAR_BEAR, new Faces(new Face(128, 64, 7, 7, 7, 7), new Face(64, 64, 4, 4, 6, 5)));
-		FACES.put(EntityTypes.PANDA, new Faces(new Face(64, 64, 9, 15, 13, 10), new Face(64, 64, 5, 5, 7, 6)));
+		FACES.put(EntityTypes.PANDA, new Faces(new Face(64, 64, 9, 15, 13, 10, null, new Piece(47, 18, 7, 5, 3, 5)), new Face(64, 64, 5, 5, 7, 6)));
 		FACES.put(EntityTypes.ALLAY, new Faces(new Face(32, 32, 5, 5, 5, 5), null));
 		FACES.put(EntityTypes.BREEZE, new Faces(new Face(32, 32, 8, 8, 8, 8), null));
 		FACES.put(EntityTypes.CREAKING, new Faces(new Face(64, 64, 6, 6, 6, 10), null));
@@ -149,8 +160,9 @@ public final class MobFaces {
 		graphics.pose().translate(x - w / 2, y - h / 2);
 		graphics.pose().scale(scale);
 		blit(graphics, texture, face, face.u(), face.v(), face.w(), face.h(), 0, 0, color);
-		if (face.feature() != null) {
-			Piece p = face.feature();
+		Piece feature = face == COW && texture.getPath().contains("cold") ? COLD_COW_MUZZLE : face.feature();
+		if (feature != null) {
+			Piece p = feature;
 			blit(graphics, texture, face, p.u(), p.v(), p.w(), p.h(), p.dx(), p.dy(), color);
 		}
 		if (face.hat() != null) {
@@ -166,26 +178,27 @@ public final class MobFaces {
 	}
 
 	/** The texture the game draws this entity with, from its renderer. */
-	@SuppressWarnings({"unchecked", "rawtypes"})
 	private static @Nullable Identifier texture(Entity entity) {
-		Minecraft mc = Minecraft.getInstance();
-		long tick = mc.level == null ? 0 : mc.level.getGameTime();
-		if (tick - texturesTick > 40 || tick < texturesTick) {
-			// Variants (a sheared sheep, an angry wolf) change now and then; look again every 2 s.
-			TEXTURES.clear();
-			texturesTick = tick;
+		Looked looked = TEXTURES.get(entity);
+		int age = entity.tickCount;
+		if (looked == null || age - looked.age() >= REFRESH_TICKS || age < looked.age()) {
+			looked = new Looked(lookUp(entity), age);
+			TEXTURES.put(entity, looked);
 		}
-		return TEXTURES.computeIfAbsent(entity.getId(), id -> {
-			EntityRenderer<?, ?> renderer = mc.getEntityRenderDispatcher().getRenderer(entity);
-			if (!(renderer instanceof LivingEntityRenderer living)) {
-				return null;
-			}
-			try {
-				LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
-				return ((LivingEntityRenderer) living).getTextureLocation(state);
-			} catch (RuntimeException e) {
-				return null;
-			}
-		});
+		return looked.texture();
+	}
+
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	private static @Nullable Identifier lookUp(Entity entity) {
+		EntityRenderer<?, ?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
+		if (!(renderer instanceof LivingEntityRenderer living)) {
+			return null;
+		}
+		try {
+			LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
+			return ((LivingEntityRenderer) living).getTextureLocation(state);
+		} catch (RuntimeException e) {
+			return null;
+		}
 	}
 }
