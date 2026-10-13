@@ -2,6 +2,11 @@ package dev.orthomap;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.orthomap.render.OrthomapPipelines;
+import dev.orthomap.waypoint.Waypoint;
+import dev.orthomap.waypoint.WaypointEditScreen;
+import dev.orthomap.waypoint.WaypointHud;
+import dev.orthomap.waypoint.WaypointListScreen;
+import dev.orthomap.waypoint.Waypoints;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -14,11 +19,16 @@ import net.minecraft.client.KeyMapping;
 public class OrthomapClient implements ClientModInitializer {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Orthomap.id("map"));
 	public static final KeyMapping OPEN_MAP = new KeyMapping("key.orthomap.open_map", InputConstants.KEY_M, CATEGORY);
+	public static final KeyMapping NEW_WAYPOINT = new KeyMapping("key.orthomap.new_waypoint", InputConstants.KEY_B, CATEGORY);
+	public static final KeyMapping WAYPOINT_LIST = new KeyMapping("key.orthomap.waypoints", InputConstants.KEY_U, CATEGORY);
 
 	@Override
 	public void onInitializeClient() {
 		OrthomapPipelines.init();
 		KeyMappingHelper.registerKeyMapping(OPEN_MAP);
+		KeyMappingHelper.registerKeyMapping(NEW_WAYPOINT);
+		KeyMappingHelper.registerKeyMapping(WAYPOINT_LIST);
+		HudElementRegistry.addLast(Orthomap.id("waypoints"), new WaypointHud());
 		HudElementRegistry.addLast(Orthomap.id("minimap"), new MinimapHud());
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
@@ -28,6 +38,17 @@ public class OrthomapClient implements ClientModInitializer {
 			while (OPEN_MAP.consumeClick()) {
 				if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
 					mc.gui.setScreen(new MapScreen());
+				}
+			}
+			while (NEW_WAYPOINT.consumeClick()) {
+				Waypoint waypoint = Waypoints.atPlayer();
+				if (mc.gui.screen() == null && waypoint != null) {
+					mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true));
+				}
+			}
+			while (WAYPOINT_LIST.consumeClick()) {
+				if (mc.gui.screen() == null && mc.level != null) {
+					mc.gui.setScreen(new WaypointListScreen(null));
 				}
 			}
 		});
