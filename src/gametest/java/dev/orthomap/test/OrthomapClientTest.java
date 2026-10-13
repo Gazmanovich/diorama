@@ -151,6 +151,53 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		if (known < 0.9F) {
 			throw new AssertionError("The spawn tile didn't come back from disk (known share " + known + ")");
 		}
+
+		// Zoom far out: overview tiles shrunk from the saved ones show both spawn and here.
+		// Travel back toward spawn, so there's a trail of explored land to zoom out over. The
+		// minimap is off, so no map draws the trail: only the background bakes can save it.
+		double[] far = context.computeOnClient(mc -> new double[] {mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ())});
+		double[] away = new double[2];
+		context.setScreen(() -> null);
+		boolean minimapWasOn = context.computeOnClient(mc -> Settings.get().minimap);
+		context.runOnClient(mc -> Settings.get().minimap = false);
+		try {
+			for (int stop = 2750; stop >= 750; stop -= 250) {
+				world.getServer().runCommand("tp @a " + stop + " 200 " + stop);
+				// New terrain generates around the player a few chunks at a time.
+				context.waitTicks(200);
+				if (stop == 1750) {
+					context.runOnClient(mc -> {
+						away[0] = mc.player.getX();
+						away[1] = Projection.v(mc.player.getY(), mc.player.getZ());
+					});
+				}
+			}
+		} finally {
+			context.runOnClient(mc -> Settings.get().minimap = minimapWasOn);
+		}
+		double spawnU = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+		double spawnV = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt((spawnU + far[0]) / 2, (spawnV + far[1]) / 2, 0.06, TileKey.SURFACE));
+		context.waitFor(mc -> overviewKnown(spawnU, spawnV) >= 0.9F && overviewKnown(away[0], away[1]) >= 0.9F, 1200);
+		settle(context, 20);
+		context.takeScreenshot("saved-map-02-zoomed-out");
+		if ("1".equals(System.getenv("ORTHOMAP_GIF"))) {
+			// Frames for a GIF: a steady zoom out from spawn until both spawn and the player show.
+			for (int frame = 0; frame < 70; frame++) {
+				double t = frame / 69.0;
+				context.runOnClient(mc -> {
+					double su = (spawnCell[0] + 0.5) * Projection.TILE_UNITS;
+					double sv = (spawnCell[1] + 0.5) * Projection.TILE_UNITS;
+					double pu = (spawnU + far[0]) / 2;
+					double pv = (spawnV + far[1]) / 2;
+					double ease = t * t * (3 - 2 * t);
+					((MapScreen) mc.gui.screen()).lookAt(su + (pu - su) * ease, sv + (pv - sv) * ease, Math.pow(0.06, t), TileKey.SURFACE);
+				});
+				context.waitTicks(2);
+				context.takeScreenshot("saved-map-zoom-" + String.format("%02d", frame));
+			}
+		}
 		context.setScreen(() -> null);
 		if (checkFogOfWar) {
 			boolean seen = context.computeOnClient(mc -> MapSession.get().map().isSeen(115, -39, 116));
@@ -158,6 +205,21 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
+	}
+
+	/** Known share of the overview tile drawn at a map point, or 0 if none is loaded. */
+	private static float overviewKnown(double u, double v) {
+		for (int lod = 1; lod <= TileKey.MAX_LOD; lod++) {
+			double units = (double) Projection.TILE_UNITS * (1 << lod);
+			int tu = (int) Math.floor(u / units);
+			int tv = (int) Math.floor(v / units);
+			MapTile tile = MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv, lod));
+			if (tile != null && tile.hasCoverage()) {
+				double cell = units / Projection.COVERAGE_CELLS;
+				return tile.coverage((int) ((u - tu * units) / cell), (int) ((v - tv * units) / cell));
+			}
+		}
+		return 0F;
 	}
 
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */

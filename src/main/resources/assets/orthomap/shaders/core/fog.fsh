@@ -32,7 +32,8 @@ uniform sampler2D Sampler0;
 uniform sampler2D Sampler1;
 
 layout(location = 0) in vec2 maskUv;
-// rg: noise offset in eighths of a period; b: 1 for cave fog; a: mask texel size code.
+// rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code.
 layout(location = 1) in vec4 params;
 
 layout(location = 0) out vec4 fragColor;
@@ -48,6 +49,12 @@ float fogHeight;
 float blurUnits;
 float unitsPerUv;
 vec2 noiseOrigin;
+// The noise pattern grows by this when zoomed far out, so it keeps its size on screen instead of
+// repeating every few pixels. The banks keep their size in blocks, so they stay a thin fringe
+// around explored land and never bury it.
+float fogScale;
+float scaleSteps;
+float scaleFraction;
 float seconds;
 
 // Known share blurred over a radius in map units, so chunk-shaped edges melt away.
@@ -75,13 +82,20 @@ float knownSoft(vec2 uv) {
     return 0.5 * knownBlur(uv, blurUnits) + 0.5 * knownBlur(uv, blurUnits * 2.4);
 }
 
-float noiseAt(vec2 uv) {
-    vec2 n = noiseOrigin + uv * unitsPerUv / NOISE_PERIOD;
+float noiseLayer(vec2 n) {
     // Speeds are whole periods per 1200 s, so the loop of GameTime wraps without a jump.
     float a = texture(Sampler1, n + vec2(5.0, 2.0) * seconds / 1200.0).r;
     float b = texture(Sampler1, n + vec2(-8.0, 3.0) * seconds / 1200.0).g;
     float c = texture(Sampler1, n + vec2(13.0, -9.0) * seconds / 1200.0).b;
     return a * 0.55 + b * 0.3 + c * 0.15;
+}
+
+// Noise at the two whole scale steps around fogScale, blended, so zooming never pops.
+float noiseAt(vec2 uv) {
+    float coarsePeriod = NOISE_PERIOD * exp2(scaleSteps + 1.0);
+    vec2 coarse = noiseOrigin + uv * unitsPerUv / coarsePeriod;
+    // The fine noise has half the period, so it runs twice as far from the same origin.
+    return mix(noiseLayer(coarse * 2.0), noiseLayer(coarse), scaleFraction);
 }
 
 float thicknessFrom(float known, float n) {
@@ -104,13 +118,18 @@ void main() {
     seconds = GameTime * 1200.0;
     noiseOrigin = floor(params.rg * 255.0 / 32.0 + 0.5) / 8.0;
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(params.a * 255.0 / 16.0 + 0.5));
-    bool cave = params.b > 0.5;
+    float fogCode = floor(params.b * 255.0 + 0.5);
+    bool cave = fogCode >= 128.0;
+    fogCode = mod(fogCode, 128.0);
+    scaleSteps = floor(fogCode / 16.0);
+    scaleFraction = mod(fogCode, 16.0) / 16.0;
+    fogScale = exp2(scaleSteps + scaleFraction);
     fogHeight = cave ? 4.0 : 10.0;
     blurUnits = cave ? 2.5 : 7.0;
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
-    vec2 toSun = vec2(-1.0, -0.4) * (9.0 / unitsPerUv);
+    vec2 toSun = vec2(-1.0, -0.4) * (9.0 * fogScale / unitsPerUv);
 
     vec3 color = vec3(0.0);
     float alpha = 0.0;

@@ -180,6 +180,12 @@ public final class TileBaker {
 		return TileImage.partial(key, patches);
 	}
 
+	/** A full tile image from level-0 pixels: mips and fog coverage. */
+	public static TileImage image(TileKey key, int[] pixels) {
+		int size = Projection.TILE_PIXELS;
+		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size));
+	}
+
 	/** Keeps the saved pixel wherever the fresh one is less known; square areas only. */
 	private static void merge(int[] pixels, int @Nullable [] saved, int px0, int py0, int edge) {
 		if (saved == null) {

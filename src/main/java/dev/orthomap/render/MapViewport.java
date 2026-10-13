@@ -9,6 +9,7 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
 import dev.orthomap.bake.TileKey;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.render.TextureSetup;
@@ -23,6 +24,8 @@ import org.jspecify.annotations.Nullable;
 public final class MapViewport {
 	private static final int MASK = 256;
 	private static final double MASK_MARGIN = 24;
+	/** Zooming out past this (GUI pixels per block) switches to overview tiles. */
+	public static final double DETAILED_ZOOM = 0.5;
 
 	private @Nullable GpuTexture maskTexture;
 	private @Nullable GpuTextureView maskView;
@@ -58,8 +61,27 @@ public final class MapViewport {
 		graphics.disableScissor();
 	}
 
+	/**
+	 * The overview level to draw: the coarsest one that still has at least one texture pixel per
+	 * screen pixel. Overviews only exist for the saved surface map, and are only used below
+	 * {@link #DETAILED_ZOOM}: above it the live tiles' own mipmaps look the same and never lag
+	 * behind recent changes.
+	 */
+	public static int lodFor(MapLevel level, View view) {
+		if (view.layer() != TileKey.SURFACE || !level.hasOverviews() || view.zoom() >= DETAILED_ZOOM) {
+			return 0;
+		}
+		double screenPixelsPerUnit = view.zoom() * Minecraft.getInstance().getWindow().getGuiScale();
+		int lod = 0;
+		while (lod < TileKey.MAX_LOD && Projection.PIXELS_PER_UNIT / (double) (2 << lod) >= screenPixelsPerUnit) {
+			lod++;
+		}
+		return lod;
+	}
+
 	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view) {
-		double units = Projection.TILE_UNITS;
+		int lod = lodFor(level, view);
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
 		double v0 = view.minV();
 		double u1 = u0 + view.width() / view.zoom();
@@ -75,7 +97,7 @@ public final class MapViewport {
 		float size = (float) (units * view.zoom());
 		for (int tu = tu0 - 1; tu <= tu1 + 1; tu++) {
 			for (int tv = tv0 - 1; tv <= tv1 + 1; tv++) {
-				TileKey key = new TileKey(view.layer(), tu, tv);
+				TileKey key = new TileKey(view.layer(), tu, tv, lod);
 				double du = (tu + 0.5) * units - view.centerU();
 				double dv = (tv + 0.5) * units - view.centerV();
 				boolean visible = tu >= tu0 && tu <= tu1 && tv >= tv0 && tv <= tv1;
@@ -102,15 +124,23 @@ public final class MapViewport {
 	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, ScreenRectangle scissor) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
-		double need = Math.max(viewW, viewH) + MASK_MARGIN * 2 + 64;
+		// Zoomed out past the detailed zoom, the fog's noise grows with the view so it keeps its
+		// size on screen instead of repeating every few pixels. The scale is 2^(steps + fraction);
+		// the shader blends the noise of two whole steps by the fraction.
+		double scaleLog = Math.min(7.99, Math.log(Math.max(1, DETAILED_ZOOM / view.zoom())) / Math.log(2));
+		int steps = (int) Math.floor(scaleLog);
+		int fraction = (int) Math.floor((scaleLog - steps) * 16);
+		// The noise offset is in eighths of the coarser noise's period, so the origin snaps to that.
+		double snap = 64.0 * (1 << (steps + 1));
+		double need = Math.max(viewW, viewH) + MASK_MARGIN * 2 + snap;
 		int scaleCode = 0;
 		double texel = 2;
 		while (MASK * texel < need) {
 			texel *= 2;
 			scaleCode++;
 		}
-		double originU = Math.floor((view.minU() - MASK_MARGIN) / 64) * 64;
-		double originV = Math.floor((view.minV() - MASK_MARGIN) / 64) * 64;
+		double originU = Math.floor((view.minU() - MASK_MARGIN) / snap) * snap;
+		double originV = Math.floor((view.minV() - MASK_MARGIN) / snap) * snap;
 		this.buildMask(level, view, originU, originV, texel);
 
 		double span = MASK * texel;
@@ -118,10 +148,11 @@ public final class MapViewport {
 		float mv0 = (float) ((view.minV() - originV) / span);
 		float mu1 = (float) ((view.minU() + viewW - originU) / span);
 		float mv1 = (float) ((view.minV() + viewH - originV) / span);
-		int noiseU = Math.floorMod((long) (originU / 64), 8);
-		int noiseV = Math.floorMod((long) (originV / 64), 8);
+		int noiseU = Math.floorMod((long) (originU / snap), 8);
+		int noiseV = Math.floorMod((long) (originV / snap), 8);
 		boolean cave = view.layer() != TileKey.SURFACE;
-		int params = (scaleCode * 16) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | (cave ? 255 : 0);
+		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
+		int params = (scaleCode * 16) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		TextureSetup textures = TextureSetup.doubleTexture(
 			this.maskView,
@@ -145,7 +176,8 @@ public final class MapViewport {
 			this.maskTexture = FogTextures.createTexture("orthomap fog mask", MASK);
 			this.maskView = RenderSystem.getDevice().createTextureView(this.maskTexture);
 		}
-		double units = Projection.TILE_UNITS;
+		int lod = lodFor(level, view);
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double cellUnits = units / Projection.COVERAGE_CELLS;
 		int lastTu = Integer.MIN_VALUE;
 		int lastTv = Integer.MIN_VALUE;
@@ -158,7 +190,7 @@ public final class MapViewport {
 				double u = originU + (i + 0.5) * texel;
 				int tu = (int) Math.floor(u / units);
 				if (tu != lastTu || tv != lastTv) {
-					tile = level.peek(new TileKey(view.layer(), tu, tv));
+					tile = level.peek(new TileKey(view.layer(), tu, tv, lod));
 					lastTu = tu;
 					lastTv = tv;
 				}
@@ -171,7 +203,9 @@ public final class MapViewport {
 			}
 		}
 		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
-		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE) {
+		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
+		// only eat small explored areas that are a few texels across.
+		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
