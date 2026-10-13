@@ -158,19 +158,23 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		double[] far = context.computeOnClient(mc -> new double[] {mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ())});
 		double[] away = new double[2];
 		context.setScreen(() -> null);
+		boolean minimapWasOn = context.computeOnClient(mc -> Settings.get().minimap);
 		context.runOnClient(mc -> Settings.get().minimap = false);
-		for (int stop = 2750; stop >= 750; stop -= 250) {
-			world.getServer().runCommand("tp @a " + stop + " 200 " + stop);
-			// New terrain generates around the player a few chunks at a time.
-			context.waitTicks(200);
-			if (stop == 1750) {
-				context.runOnClient(mc -> {
-					away[0] = mc.player.getX();
-					away[1] = Projection.v(mc.player.getY(), mc.player.getZ());
-				});
+		try {
+			for (int stop = 2750; stop >= 750; stop -= 250) {
+				world.getServer().runCommand("tp @a " + stop + " 200 " + stop);
+				// New terrain generates around the player a few chunks at a time.
+				context.waitTicks(200);
+				if (stop == 1750) {
+					context.runOnClient(mc -> {
+						away[0] = mc.player.getX();
+						away[1] = Projection.v(mc.player.getY(), mc.player.getZ());
+					});
+				}
 			}
+		} finally {
+			context.runOnClient(mc -> Settings.get().minimap = minimapWasOn);
 		}
-		context.runOnClient(mc -> Settings.get().minimap = true);
 		double spawnU = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
 		double spawnV = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
 		context.setScreen(MapScreen::new);

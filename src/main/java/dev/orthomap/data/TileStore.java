@@ -45,8 +45,8 @@ import org.jspecify.annotations.Nullable;
  * <p>Overview tiles for zooming far out ({@link TileKey#lod()} above 0) live in {@code lod<n>}
  * folders. Each is its four children shrunk to a quarter. A couple of seconds after tiles are
  * written, the writer rebuilds the overview tiles above them, each once however many of its
- * children changed. A missing one is built from its children the first time it's asked for, so
- * zooming out shows everything explored without baking anything.
+ * children changed, so zooming out shows everything explored without baking anything. Only the
+ * writer builds them: a missing overview tile means nothing under it was ever mapped.
  *
  * <p>File format: {@code OMT1}, the edge length, then the ABGR pixels deflated.
  */
@@ -83,11 +83,6 @@ public final class TileStore {
 	 */
 	private final Map<TileKey, int[]> unwritten = new HashMap<>();
 
-	/**
-	 * Held while building an overview tile until it's cached and queued or written, so a build
-	 * from older children can never replace one from newer children.
-	 */
-	private final Object overviews = new Object();
 	/** Level-1 overview tiles above tiles written since the last rebuild. Guarded by {@code this}. */
 	private final Set<TileKey> staleOverviews = new HashSet<>();
 	private boolean rebuildScheduled;
@@ -103,42 +98,15 @@ public final class TileStore {
 		this.overviewChanged = listener;
 	}
 
-	/**
-	 * An overview tile, building it from its children if it was never saved, or null if nothing
-	 * under it was ever mapped. Any thread; a built tile is queued for writing like a bake.
-	 */
-	public int @Nullable [] readOrBuild(TileKey key) {
-		synchronized (this.overviews) {
-			return this.readOrBuildLocked(key);
-		}
-	}
-
-	private int @Nullable [] readOrBuildLocked(TileKey key) {
-		int[] pixels = this.read(key);
-		if (pixels != null || key.lod() == 0) {
-			return pixels;
-		}
-		pixels = this.shrinkChildren(key, true);
-		if (pixels != null) {
-			synchronized (this) {
-				this.cache.put(key, pixels);
-				if (this.unwritten.put(key, pixels) == null && !this.closed) {
-					WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
-				}
-			}
-		}
-		return pixels;
-	}
-
 	/** One level up from four children, each shrunk to a quarter; null if none exist. */
-	private int @Nullable [] shrinkChildren(TileKey key, boolean build) {
+	private int @Nullable [] shrinkChildren(TileKey key) {
 		int size = Projection.TILE_PIXELS;
 		int half = size / 2;
 		int[] out = null;
 		for (int dy = 0; dy < 2; dy++) {
 			for (int dx = 0; dx < 2; dx++) {
 				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
-				int[] c = build ? this.readOrBuildLocked(child) : this.read(child);
+				int[] c = this.read(child);
 				if (c == null) {
 					continue;
 				}
@@ -180,26 +148,22 @@ public final class TileStore {
 		while (!level.isEmpty()) {
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
-				synchronized (this.overviews) {
-					// Children never built (saves from before overviews existed) are built from
-					// their own children first, so the parent can't leave their land out.
-					int[] pixels = this.shrinkChildren(key, true);
-					if (pixels == null) {
-						continue;
-					}
-					synchronized (this) {
-						this.cache.put(key, pixels);
-						// Newer than any build still waiting to be written; pending until written.
-						this.unwritten.put(key, pixels);
-					}
-					boolean saved = this.store(key, pixels);
-					synchronized (this) {
-						if (this.unwritten.get(key) == pixels) {
-							if (saved) {
-								this.unwritten.remove(key);
-							} else if (!this.closed) {
-								WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
-							}
+				int[] pixels = this.shrinkChildren(key);
+				if (pixels == null) {
+					continue;
+				}
+				synchronized (this) {
+					this.cache.put(key, pixels);
+					// Pending until written, like a bake.
+					this.unwritten.put(key, pixels);
+				}
+				boolean saved = this.store(key, pixels);
+				synchronized (this) {
+					if (this.unwritten.get(key) == pixels) {
+						if (saved) {
+							this.unwritten.remove(key);
+						} else if (!this.closed) {
+							WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
 						}
 					}
 				}

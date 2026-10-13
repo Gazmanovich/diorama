@@ -450,7 +450,7 @@ public final class MapLevel implements ChunkSource {
 		BAKERS.execute(() -> {
 			int[] pixels = null;
 			try {
-				pixels = store.readOrBuild(key);
+				pixels = store.read(key);
 			} catch (Throwable t) {
 				Orthomap.LOGGER.error("Failed to load overview tile {}", key, t);
 			}
@@ -564,18 +564,7 @@ public final class MapLevel implements ChunkSource {
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
-		// Changed tiles still waiting for a background bake get baked now, while their chunks
-		// are still here.
-		BlockLooks looks = BlockLooks.get();
-		if (looks != null && this.topY != Integer.MIN_VALUE) {
-			for (TileKey key : this.unsaved.keySet()) {
-				if (!this.inFlight.contains(key)) {
-					this.bake(key, looks, null);
-				}
-			}
-		}
-		this.unsaved.clear();
-		long deadline = System.currentTimeMillis() + 5000;
+		long deadline = System.currentTimeMillis() + 3000;
 		while (true) {
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
