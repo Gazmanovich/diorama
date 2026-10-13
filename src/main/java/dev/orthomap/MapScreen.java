@@ -3,6 +3,8 @@ package dev.orthomap;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Markers;
+import dev.orthomap.render.Radar;
+import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -23,6 +25,7 @@ public final class MapScreen extends Screen {
 	private double zoom = 2.0;
 	private int layer;
 	private boolean following = true;
+	private List<Radar.Blip> blips = List.of();
 
 	public MapScreen() {
 		super(Component.translatable("orthomap.screen.title"));
@@ -51,7 +54,17 @@ public final class MapScreen extends Screen {
 		}
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
 		this.viewport.draw(graphics, session.map(), view);
+		Radar.Blip hovered = null;
+		this.blips = List.of();
+		if (ServerRules.radarAllowed()) {
+			this.blips = Radar.collect(view, a, true);
+			Radar.draw(graphics, view, this.blips, true);
+			hovered = Radar.under(this.blips, mouseX, mouseY);
+		}
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
+		if (hovered != null) {
+			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+		}
 
 		String mode = this.layer == TileKey.SURFACE
 			? "Surface"
@@ -145,6 +158,11 @@ public final class MapScreen extends Screen {
 	@Override
 	public void removed() {
 		this.viewport.close();
+	}
+
+	/** For tests: the radar markers drawn last frame, in GUI coordinates. */
+	public List<Radar.Blip> blips() {
+		return this.blips;
 	}
 
 	/** For tests: put the view at a spot without following the player. */

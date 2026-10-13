@@ -266,7 +266,7 @@ public final class MapSession {
 				budget--;
 			}
 		}
-		boolean fog = CaveRules.fogOfWar(this.level.dimension() == Level.NETHER);
+		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER);
 		if (Orthomap.DEBUG && fog != this.map.fogOfWar()) {
 			Orthomap.LOGGER.info("Fog of war {}; underground={}", fog, this.underground);
 		}

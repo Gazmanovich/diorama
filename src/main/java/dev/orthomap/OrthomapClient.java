@@ -21,12 +21,12 @@ public class OrthomapClient implements ClientModInitializer {
 		KeyMappingHelper.registerKeyMapping(OPEN_MAP);
 		HudElementRegistry.addLast(Orthomap.id("minimap"), new MinimapHud());
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
-		ClientReceiveMessageEvents.GAME.register((message, overlay) -> CaveRules.onServerMessage(message));
-		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> CaveRules.onDisconnect());
+		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
+		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> ServerRules.onDisconnect());
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
 			MapSession.tick(mc);
 			while (OPEN_MAP.consumeClick()) {
-				if (mc.gui.screen() == null && mc.level != null) {
+				if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
 					mc.gui.setScreen(new MapScreen());
 				}
 			}
