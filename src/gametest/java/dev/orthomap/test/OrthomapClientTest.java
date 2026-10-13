@@ -435,18 +435,17 @@ public class OrthomapClientTest implements FabricClientGameTest {
 					wrong.append(' ').append(name);
 				}
 			}
-			int babies = 0;
-			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
-				if (entity instanceof net.minecraft.world.entity.LivingEntity living && living.isBaby()
-					&& (entity.getType() == EntityTypes.ZOMBIE || entity.getType() == EntityTypes.COW)) {
-					babies++;
-					if (!dev.orthomap.render.MobFaces.canDraw(entity)) {
-						wrong.append(" baby ").append(entity.getType().toShortString());
+			for (net.minecraft.world.entity.EntityType<?> type : new net.minecraft.world.entity.EntityType<?>[] {EntityTypes.ZOMBIE, EntityTypes.COW}) {
+				boolean baby = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType() == type && entity instanceof net.minecraft.world.entity.LivingEntity living && living.isBaby()
+						&& entity.distanceToSqr(mc.player) < 30 * 30) {
+						baby |= dev.orthomap.render.MobFaces.canDraw(entity);
 					}
 				}
-			}
-			if (babies < 2) {
-				wrong.append(" (only ").append(babies).append(" of the baby zombie and calf are here)");
+				if (!baby) {
+					wrong.append(" baby ").append(type.toShortString());
+				}
 			}
 			if (!wrong.isEmpty()) {
 				throw new AssertionError("No drawable face for:" + wrong);

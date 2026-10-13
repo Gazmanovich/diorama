@@ -42,15 +42,16 @@ public final class MobFaces {
 
 	private static final Map<EntityType<?>, Faces> FACES = new HashMap<>();
 	/**
-	 * The texture each entity was last drawn with, and the entity's age then. Working it out builds
-	 * a render state, so it's redone every two seconds of each entity's own life: often enough for
-	 * a wolf turning angry or a calf growing up, and spread out rather than all at once. Keyed by
-	 * the entity itself, which also keeps one world's entities from answering for another's.
+	 * The texture each entity was last drawn with, its age then, and whether it was a baby.
+	 * Working it out builds a render state, so it's redone every two seconds of the entity's own
+	 * life, often enough for a wolf turning angry, and straight away when a baby grows up, since
+	 * the face layout changes with it. Keyed by the entity object itself (entities compare equal
+	 * by id, which another world can reuse), and dropped once the entity is gone.
 	 */
-	private static final Map<Entity, Looked> TEXTURES = new java.util.WeakHashMap<>();
+	private static final Map<Entity, Looked> TEXTURES = new com.google.common.collect.MapMaker().weakKeys().makeMap();
 	private static final int REFRESH_TICKS = 40;
 
-	private record Looked(@Nullable Identifier texture, int age) {
+	private record Looked(@Nullable Identifier texture, int age, boolean baby) {
 	}
 
 	private static final Piece HUMANOID_HAT = new Piece(40, 8, 8, 8, 0, 0);
@@ -160,7 +161,7 @@ public final class MobFaces {
 		graphics.pose().translate(x - w / 2, y - h / 2);
 		graphics.pose().scale(scale);
 		blit(graphics, texture, face, face.u(), face.v(), face.w(), face.h(), 0, 0, color);
-		Piece feature = face == COW && texture.getPath().contains("cold") ? COLD_COW_MUZZLE : face.feature();
+		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
 		if (feature != null) {
 			Piece p = feature;
 			blit(graphics, texture, face, p.u(), p.v(), p.w(), p.h(), p.dx(), p.dy(), color);
@@ -177,12 +178,19 @@ public final class MobFaces {
 		graphics.blit(RenderPipelines.GUI_TEXTURED, texture, dx, dy, u, v, w, h, w, h, face.texW(), face.texH(), color);
 	}
 
+	/** Cold cows use a different model, with the muzzle elsewhere in the texture. */
+	private static boolean coldCow(Entity entity) {
+		return entity instanceof net.minecraft.world.entity.animal.cow.Cow cow
+			&& cow.getVariant().value().modelAndTexture().model() == net.minecraft.world.entity.animal.cow.CowVariant.ModelType.COLD;
+	}
+
 	/** The texture the game draws this entity with, from its renderer. */
 	private static @Nullable Identifier texture(Entity entity) {
 		Looked looked = TEXTURES.get(entity);
 		int age = entity.tickCount;
-		if (looked == null || age - looked.age() >= REFRESH_TICKS || age < looked.age()) {
-			looked = new Looked(lookUp(entity), age);
+		boolean baby = entity instanceof LivingEntity living && living.isBaby();
+		if (looked == null || age - looked.age() >= REFRESH_TICKS || age < looked.age() || baby != looked.baby()) {
+			looked = new Looked(lookUp(entity), age, baby);
 			TEXTURES.put(entity, looked);
 		}
 		return looked.texture();
