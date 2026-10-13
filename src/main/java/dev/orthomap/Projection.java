@@ -11,8 +11,9 @@ package dev.orthomap;
  * </ul>
  */
 public final class Projection {
-	private static volatile double sin = Math.sin(Math.toRadians(60));
-	private static volatile double cos = Math.cos(Math.toRadians(60));
+	// The default style's angle until a style is applied; Settings only applies one that differs.
+	private static volatile double sin = Math.sin(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
+	private static volatile double cos = Math.cos(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
 
 	/** Map units per tile edge. */
 	public static final int TILE_UNITS = 128;

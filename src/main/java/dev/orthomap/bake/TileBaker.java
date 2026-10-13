@@ -27,9 +27,6 @@ public final class TileBaker {
 	/** Small per-sample nudges of the sun direction, which soften shadow edges. */
 	private static final double[][] SUN_JITTER = {{0.03, 0.0, -0.02}, {-0.02, 0.0, 0.03}, {0.02, 0.0, 0.02}, {-0.03, 0.0, -0.03}};
 
-	private static final float AMBIENT = 0.50F;
-	/** Direct sun on a top face. Kept the same whatever the sun's height, so a lower sun only lengthens shadows. */
-	private static final float SUN_ON_TOP = 0.484F;
 
 	/**
 	 * Directions for sky occlusion: two rings round the sky and one straight up, weighted by how
@@ -93,7 +90,10 @@ public final class TileBaker {
 	private final boolean cave;
 	private final int startY;
 	private final int limitY;
+	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
 	private final int topY;
+	/** The same for shadow and sky rays, which reach further north. */
+	private final int rayTop;
 	/** Cave slice that may only show blocks the player has seen. */
 	private final boolean fogOfWar;
 	/** What to record for the overlays, or null to record nothing. */
@@ -148,7 +148,8 @@ public final class TileBaker {
 		this.sunZ = Math.cos(elevation) * SUN_AZIMUTH_Z;
 		this.sin = Projection.sin();
 		this.cos = Projection.cos();
-		this.topY = localTop(key, source);
+		this.topY = localTop(key, source, 0);
+		this.rayTop = localTop(key, source, SKY_REACH);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
@@ -159,13 +160,13 @@ public final class TileBaker {
 	 * One above the tallest block any ray or shadow ray of this tile can touch. Starting rays here
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
 	 */
-	static int localTop(TileKey key, ChunkSource source) {
+	static int localTop(TileKey key, ChunkSource source, int moreNorth) {
 		int globalTop = Math.min(source.maxY(), source.topY());
 		double minU = key.minU();
 		double minV = key.minV();
 		int x0 = Math.floorDiv((int) Math.floor(minU) - 1, 16);
 		int x1 = Math.floorDiv((int) Math.ceil(minU + Projection.TILE_UNITS) + SHADOW_REACH_X + 1, 16);
-		int z0 = Math.floorDiv((int) Math.floor(Projection.zAt(minV, source.minY())) - 1, 16);
+		int z0 = Math.floorDiv((int) Math.floor(Projection.zAt(minV, source.minY())) - 1 - moreNorth, 16);
 		int z1 = Math.floorDiv((int) Math.ceil(Projection.zAt(minV + Projection.TILE_UNITS, globalTop)) + SHADOW_REACH_Z + 1, 16);
 		int top = Integer.MIN_VALUE;
 		for (int cx = x0 - 2; cx <= x1; cx++) {
@@ -653,7 +654,18 @@ public final class TileBaker {
 			double oy = this.startY - tEntry * this.sin + 1e-4;
 			double oz = z0 - tEntry * this.cos;
 			boolean shadow = this.inShadow(ox, oy, oz, this.sunX, sy, this.sunZ);
-			light = AMBIENT + (shadow ? 0 : SUN_ON_TOP);
+			// Lit like the ground around it: the style's light, sky occlusion and height shade.
+			float ambient = this.style.ambient();
+			float occlusion = this.style.skyOcclusion();
+			if (occlusion > 0) {
+				float sky = this.skyTop(x, by + 1, bz, u - x, oz - bz);
+				ambient *= 1 - occlusion * (1 - (0.15F + 0.85F * sky));
+			}
+			light = ambient + (shadow ? 0 : this.style.sunStrength());
+			float heightShade = this.style.heightShade();
+			if (heightShade != 0) {
+				light *= 1 + heightShade * (float) Math.max(-1, Math.min(1, (by + 1 - 64) / 64.0));
+			}
 		}
 		double depth = Math.max(0, tHit - tEntry);
 		if (this.style.clearWater()) {
@@ -705,8 +717,8 @@ public final class TileBaker {
 		double total = 0;
 		for (int i = 0; i < SKY_RAYS.length; i++) {
 			double[] d = SKY_RAYS[i];
-			// Start just off the corner, so the ray doesn't begin on a block boundary.
-			if (!this.blocked(x + 1e-3, y + 1e-3, z + 1e-3, d[0], d[1], d[2], SKY_REACH, SKY_REACH * 3)) {
+			// Start a hair along the ray, so it begins in the block it heads into, not on a boundary.
+			if (!this.blocked(x + d[0] * 1e-3, y + d[1] * 1e-3, z + d[2] * 1e-3, d[0], d[1], d[2], SKY_REACH, SKY_REACH * 3)) {
 				open += SKY_WEIGHTS[i];
 			}
 			total += SKY_WEIGHTS[i];
@@ -721,6 +733,9 @@ public final class TileBaker {
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
+		if (cy < this.rayTop && this.occludes(cx, cy, cz)) {
+			return true;
+		}
 		int stepX = dx > 0 ? 1 : -1;
 		int stepY = dy > 0 ? 1 : -1;
 		int stepZ = dz > 0 ? 1 : -1;
@@ -744,7 +759,7 @@ public final class TileBaker {
 				cz += stepZ;
 				tMaxZ += tDeltaZ;
 			}
-			if (cy >= this.topY) {
+			if (cy >= this.rayTop) {
 				return false;
 			}
 			int id = this.reader.state(cx, cy, cz);

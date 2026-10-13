@@ -186,7 +186,8 @@ public final class MapLevel implements ChunkSource {
 			return null;
 		}
 		this.storePitch = Math.round(dev.orthomap.MapStyle.get().pitchDegrees());
-		TileStore opened = new TileStore(this.folder.resolve("surface-" + this.storePitch));
+		// 60 degrees was the only angle before others existed, and its tiles are in "surface".
+		TileStore opened = new TileStore(this.folder.resolve(this.storePitch == 60 ? "surface" : "surface-" + this.storePitch));
 		opened.onOverviewChanged(this.overviewChanged::add);
 		return opened;
 	}
@@ -201,6 +202,12 @@ public final class MapLevel implements ChunkSource {
 			this.store = this.openStore();
 			this.unsaved.clear();
 			this.emptyOverviews.clear();
+			// Everything loaded has to be saved again at the new angle, not just what a map shows.
+			for (ChunkSnapshot snapshot : this.chunks.values()) {
+				int x0 = snapshot.chunkX << 4;
+				int z0 = snapshot.chunkZ << 4;
+				this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+			}
 		}
 	}
 
