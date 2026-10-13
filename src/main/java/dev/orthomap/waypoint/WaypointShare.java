@@ -23,14 +23,19 @@ import org.jspecify.annotations.Nullable;
 /**
  * Sharing waypoints through chat, in the format Xaero's Minimap uses, so players of either mod
  * can pick up each other's waypoints: {@code xaero-waypoint:Name:N:x:y:z:colour:false:0:Internal-overworld-waypoints}.
- * A shared waypoint in chat gets an "Add" link that opens the waypoint editor filled in.
+ * A shared waypoint in chat gets a line after it with an "Add" link that opens the waypoint
+ * editor filled in. Chat can carry anything, so everything read from it is checked.
  */
 public final class WaypointShare {
 	private static final Pattern SHARED = Pattern.compile(
-		"xaero-waypoint:([^:]*):([^:]*):(-?\\d+):(~|-?\\d+):(-?\\d+):(\\d+):(?:true|false):-?\\d+:(Internal-[^\\s]+-waypoints)"
+		"xaero-waypoint:([^:]{1,64}):([^:]{0,4}):(-?\\d{1,9}):(~|-?\\d{1,5}):(-?\\d{1,9}):(\\d{1,2}):(?:true|false):-?\\d{1,5}:(Internal-[^\\s]{1,200}-waypoints)"
 	);
-	/** Xaero writes a colon in a name as this. */
-	private static final String COLON = "§§";
+	/** Further out than the world border, or outside any world's height, isn't a real place. */
+	private static final int MAX_HORIZONTAL = 30_000_000;
+	private static final int MAX_VERTICAL = 4096;
+	/** The longest chat message a client may send. */
+	private static final int MAX_CHAT = 256;
+	private static final Pattern DIMENSION_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
 
 	/** A waypoint someone shared. {@code y} is null when the sender didn't know the height. */
 	public record Shared(String name, String initials, int x, Integer y, int z, int colorIndex, String dimension) {
@@ -39,50 +44,74 @@ public final class WaypointShare {
 	private WaypointShare() {
 	}
 
-	/** The chat text for a waypoint. */
-	public static String format(Waypoint waypoint) {
-		return "xaero-waypoint:" + waypoint.name.replace(":", COLON) + ":" + waypoint.label().replace(":", "") + ":"
-			+ waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":" + colorIndex(waypoint.color) + ":false:0:"
-			+ "Internal-" + xaeroDimension(waypoint.dimension) + "-waypoints";
+	/**
+	 * The chat text for a waypoint, or empty if it can't be sent: chat allows at most 256
+	 * characters. A colon in the name becomes a semicolon, since colons separate the fields, and
+	 * anything chat refuses (formatting codes, control characters) is dropped.
+	 */
+	public static Optional<String> format(Waypoint waypoint) {
+		String tail = ":" + chatSafe(waypoint.label()).replace(":", "") + ":" + waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":"
+			+ colorIndex(waypoint.color) + ":false:0:Internal-" + xaeroDimension(waypoint.dimension) + "-waypoints";
+		String name = chatSafe(waypoint.name).replace(':', ';').trim();
+		int room = MAX_CHAT - "xaero-waypoint:".length() - tail.length();
+		if (room < 1) {
+			return Optional.empty();
+		}
+		if (name.isEmpty()) {
+			name = "Waypoint";
+		}
+		return Optional.of("xaero-waypoint:" + name.substring(0, Math.min(name.length(), Math.min(room, 64))) + tail);
 	}
 
-	/** The first shared waypoint in a chat message, if there is one. */
+	private static String chatSafe(String text) {
+		StringBuilder out = new StringBuilder();
+		text.codePoints().filter(c -> c >= ' ' && c != '§' && c != 127).forEach(out::appendCodePoint);
+		return out.toString();
+	}
+
+	/** The first shared waypoint in a chat message, if there's a well-formed one. */
 	public static Optional<Shared> parse(String text) {
 		Matcher m = SHARED.matcher(text);
 		if (!m.find()) {
 			return Optional.empty();
 		}
-		String name = m.group(1).replace(COLON, ":");
+		String name = m.group(1).trim();
+		int x = Integer.parseInt(m.group(3));
+		int z = Integer.parseInt(m.group(5));
 		Integer y = "~".equals(m.group(4)) ? null : Integer.parseInt(m.group(4));
-		int color = Math.min(15, Integer.parseInt(m.group(6)));
-		String dimension = m.group(7).substring("Internal-".length(), m.group(7).length() - "-waypoints".length());
-		return Optional.of(new Shared(name, m.group(2), Integer.parseInt(m.group(3)), y, Integer.parseInt(m.group(5)), color, ourDimension(dimension)));
+		int color = Integer.parseInt(m.group(6));
+		String xaero = m.group(7).substring("Internal-".length(), m.group(7).length() - "-waypoints".length());
+		String dimension = ourDimension(xaero);
+		if (name.isEmpty() || Math.abs(x) > MAX_HORIZONTAL || Math.abs(z) > MAX_HORIZONTAL || (y != null && Math.abs(y) > MAX_VERTICAL)
+			|| color > 15 || dimension == null) {
+			return Optional.empty();
+		}
+		return Optional.of(new Shared(name, m.group(2), x, y, z, color, dimension));
 	}
 
 	/**
-	 * Called for every chat and server message. If it carries a waypoint, shows a readable line
-	 * in its place that offers to add it, and returns true so the raw line is hidden.
+	 * Called for every chat and server message. If it carries a waypoint someone else shared,
+	 * adds a line after it offering to add it. The message itself stays as it is.
 	 */
-	public static boolean received(Component message, @Nullable GameProfile sender) {
-		Optional<Shared> shared = parse(message.getString());
-		if (shared.isEmpty()) {
-			return false;
-		}
+	public static void received(Component message, @Nullable GameProfile sender) {
 		Minecraft mc = Minecraft.getInstance();
-		boolean own = sender != null && mc.player != null && sender.id().equals(mc.player.getUUID());
-		if (own) {
-			mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("orthomap.share.sent", shared.get().name()).withStyle(ChatFormatting.GRAY));
-		} else {
-			offer(shared.get(), sender == null ? null : sender.name());
+		if (sender != null && mc.player != null && sender.id().equals(mc.player.getUUID())) {
+			return;
 		}
-		return true;
+		// Queued for later, so it lands after the message itself; execute() would run it now.
+		parse(message.getString()).ifPresent(shared -> mc.schedule(() -> offer(shared, sender == null ? null : sender.name())));
+	}
+
+	/** The command the "Add" link runs for a shared waypoint. */
+	public static String addCommand(Shared shared, int y) {
+		return "/orthomap waypoint add " + shared.x() + " " + y + " " + shared.z() + " " + shared.colorIndex()
+			+ " \"" + shared.dimension() + "\" " + shared.name();
 	}
 
 	private static void offer(Shared shared, @Nullable String from) {
 		Minecraft mc = Minecraft.getInstance();
 		int y = shared.y() != null ? shared.y() : mc.player != null ? mc.player.getBlockY() : 64;
-		String command = "/orthomap waypoint add " + shared.x() + " " + y + " " + shared.z() + " " + shared.colorIndex()
-			+ " \"" + shared.dimension() + "\" " + shared.name();
+		String command = addCommand(shared, y);
 		MutableComponent add = Component.translatable("orthomap.share.add").withStyle(style -> style
 			.withColor(ChatFormatting.GREEN)
 			.withClickEvent(new ClickEvent.RunCommand(command))
@@ -117,8 +146,8 @@ public final class WaypointShare {
 			paletteColor(IntegerArgumentType.getInteger(context, "colour"))
 		);
 		Minecraft mc = Minecraft.getInstance();
-		// After the chat screen that ran the command has closed.
-		mc.execute(() -> mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true)));
+		// Queued for later: a chat click puts the chat screen back right after running this.
+		mc.schedule(() -> mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true)));
 		return 1;
 	}
 
@@ -168,12 +197,14 @@ public final class WaypointShare {
 		};
 	}
 
-	static String ourDimension(String xaero) {
-		return switch (xaero.toLowerCase(Locale.ROOT)) {
+	/** Our dimension id for Xaero's name, or null if it isn't one we can read. */
+	static @Nullable String ourDimension(String xaero) {
+		String id = switch (xaero.toLowerCase(Locale.ROOT)) {
 			case "overworld" -> "minecraft:overworld";
 			case "the-nether" -> "minecraft:the_nether";
 			case "the-end" -> "minecraft:the_end";
-			default -> xaero.startsWith("dim%") ? xaero.substring(4).replace('$', ':').replace('%', '/') : "minecraft:overworld";
+			default -> xaero.startsWith("dim%") ? xaero.substring(4).replace('$', ':').replace('%', '/') : null;
 		};
+		return id != null && DIMENSION_ID.matcher(id).matches() ? id : null;
 	}
 }

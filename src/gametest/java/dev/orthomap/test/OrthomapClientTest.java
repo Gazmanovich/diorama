@@ -599,22 +599,44 @@ public class OrthomapClientTest implements FabricClientGameTest {
 
 	/** Sharing a waypoint through chat, picking one up from chat, and teleporting to one. */
 	private static void shareAndTeleport(ClientGameTestContext context, TestSingleplayerContext world) {
-		// The chat format survives a round trip, a colon in the name included.
+		// The chat line is one a client may send: a colon in the name becomes a semicolon, and
+		// the rest survives a round trip.
 		context.runOnClient(mc -> {
 			Waypoint sent = new Waypoint("Mine: east", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
-			String text = WaypointShare.format(sent);
+			String text = WaypointShare.format(sent).orElseThrow(() -> new AssertionError("Couldn't format a short waypoint"));
+			if (text.length() > 256 || !text.codePoints().allMatch(net.minecraft.util.StringUtil::isAllowedChatCharacter)) {
+				throw new AssertionError("Chat would refuse " + text);
+			}
 			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
-			if (!back.name().equals("Mine: east") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
+			if (!back.name().equals("Mine; east") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
 				throw new AssertionError("Round trip of " + text + " gave " + back);
+			}
+			for (String bad : new String[] {
+				"xaero-waypoint:N:N:2147483648:64:0:6:false:0:Internal-overworld-waypoints",
+				"xaero-waypoint:N:N:1:64:0:99:false:0:Internal-overworld-waypoints",
+				"xaero-waypoint:N:N:1:64:0:6:false:0:Internal-dim%bad-waypoints",
+				"xaero-waypoint: :N:1:64:0:6:false:0:Internal-overworld-waypoints"
+			}) {
+				if (WaypointShare.parse(bad).isPresent()) {
+					throw new AssertionError("Accepted " + bad);
+				}
 			}
 		});
 
-		// Someone else's share arrives: the chat line offers to add it.
+		// A share with a number out of range arrives: nothing breaks, the player stays connected.
+		world.getServer().runCommand("tellraw @a \"xaero-waypoint:N:N:2147483648:64:0:6:false:0:Internal-overworld-waypoints\"");
+		context.waitTicks(10);
+		assertConnected(context, "a share with an out-of-range number");
+
+		// Someone else's share arrives: a line after it offers to add it.
 		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-07-shared-in-chat");
-		// The [Add] link runs this, the same way a chat click does.
-		context.runOnClient(mc -> mc.player.connection.sendUnattendedCommand("orthomap waypoint add 120 40 -80 6 \"minecraft:overworld\" Old Mine", null));
+		// Run the [Add] link's command the way a chat click does.
+		context.runOnClient(mc -> {
+			WaypointShare.Shared shared = WaypointShare.parse("xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints").orElseThrow();
+			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(WaypointShare.addCommand(shared, 40)), null);
+		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.runOnClient(mc -> {
 			Waypoint added = ((WaypointEditScreen) mc.gui.screen()).waypoint();
@@ -625,26 +647,44 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.takeScreenshot("waypoints-08-add-shared");
 		context.setScreen(() -> null);
 
-		// Teleport to an existing waypoint 40 blocks away, from its editor.
+		// Teleport from an existing waypoint's editor, after changing its x in the editor: the
+		// player goes where the editor says.
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
-		Waypoint target = new Waypoint("Lookout", at.getX() + 40, at.getY() + 30, at.getZ(), "minecraft:overworld", Waypoint.PALETTE[5]);
+		Waypoint target = new Waypoint("Lookout: north", at.getX() + 40, at.getY() + 30, at.getZ(), "minecraft:overworld", Waypoint.PALETTE[5]);
+		int editedX = target.x + 5;
 		context.setScreen(() -> new WaypointEditScreen(null, target, false));
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
+			java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+					boxes.add(box);
+				}
+			}
+			// Name, initials, x, y, z.
+			boxes.get(2).setValue(Integer.toString(editedX));
 			net.minecraft.client.gui.components.Button teleport = buttonLabelled(mc.gui.screen(), "Teleport");
 			if (!teleport.active) {
 				throw new AssertionError("Teleport is off in a world where the player may use /tp");
 			}
 			teleport.onPress(null);
 		});
-		context.waitFor(mc -> mc.player.distanceToSqr(target.x + 0.5, target.y, target.z + 0.5) < 4, 100);
+		context.waitFor(mc -> mc.player.distanceToSqr(editedX + 0.5, target.y, target.z + 0.5) < 4, 100);
 
-		// Share it: the line goes to chat for everyone.
+		// Share it: a name with a colon goes out without upsetting the server.
 		context.setScreen(() -> new WaypointEditScreen(null, target, false));
 		context.waitTicks(2);
 		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress(null));
-		context.waitTicks(10);
+		context.waitTicks(20);
+		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
+	}
+
+	private static void assertConnected(ClientGameTestContext context, String after) {
+		boolean connected = context.computeOnClient(mc -> mc.getConnection() != null && mc.level != null && mc.player != null);
+		if (!connected) {
+			throw new AssertionError("Disconnected after " + after);
+		}
 	}
 
 	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
