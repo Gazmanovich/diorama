@@ -40,6 +40,11 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		if (!ServerRules.minimapAllowed()) {
+			// The server can switch maps off while this screen is open.
+			this.onClose();
+			return;
+		}
 		MapSession session = MapSession.get();
 		LocalPlayer player = this.minecraft.player;
 		if (session == null || player == null) {

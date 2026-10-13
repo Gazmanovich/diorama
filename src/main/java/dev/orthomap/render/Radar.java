@@ -54,11 +54,12 @@ public final class Radar {
 		if (entity instanceof AbstractClientPlayer) {
 			return Kind.PLAYER;
 		}
-		if (entity instanceof Enemy) {
-			return Kind.HOSTILE;
-		}
+		// Neutral first: endermen and zombified piglins are both, and they only attack when provoked.
 		if (entity instanceof NeutralMob) {
 			return Kind.NEUTRAL;
+		}
+		if (entity instanceof Enemy) {
+			return Kind.HOSTILE;
 		}
 		if (entity instanceof Mob) {
 			return Kind.PASSIVE;

@@ -147,12 +147,15 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	 */
 	private static void radar(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set midnight");
-		// Summon relative to where the player actually stands, not mid-fall after spawning.
+		// Summon relative to where the player actually stands, not mid-fall after spawning, on a
+		// cleared flat patch so no mob spawns inside a block and suffocates.
 		context.waitFor(mc -> mc.player.onGround(), 600);
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		int x = at.getX();
 		int y = at.getY();
 		int z = at.getZ();
+		world.getServer().runCommand("fill " + (x - 12) + " " + y + " " + (z - 12) + " " + (x + 12) + " " + (y + 4) + " " + (z + 12) + " air");
+		world.getServer().runCommand("fill " + (x - 12) + " " + (y - 1) + " " + (z - 12) + " " + (x + 12) + " " + (y - 1) + " " + (z + 12) + " grass_block");
 		String still = "{NoAI:1b,PersistenceRequired:1b,Silent:1b}";
 		world.getServer().runCommand("summon husk " + (x + 6) + " " + y + " " + (z - 4) + " " + still);
 		world.getServer().runCommand("summon creeper " + (x - 7) + " " + y + " " + (z + 3) + " " + still);
@@ -187,7 +190,15 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
 				found.append(' ').append(blip.entity().getType().toShortString()).append('@').append(blip.entity().blockPosition().toShortString());
 			}
-			throw new AssertionError("The husk is not on the radar. Player at " + mc.player.blockPosition().toShortString() + ", radar has:" + found);
+			StringBuilder husks = new StringBuilder();
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.HUSK) {
+					husks.append(' ').append(entity.blockPosition().toShortString()).append(" alive=").append(entity.isAlive())
+						.append(" dy=").append(Math.round(entity.getY() - mc.player.getY()));
+				}
+			}
+			throw new AssertionError("The husk is not on the radar. Player at " + mc.player.blockPosition().toShortString()
+				+ ", husks in the level:" + husks + ", radar has:" + found);
 		});
 		context.getInput().setCursorPos(husk[0], husk[1]);
 		context.waitTicks(10);
