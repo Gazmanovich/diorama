@@ -25,6 +25,9 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class MinimapHud implements HudElement {
 	private static final int MARGIN = 6;
+	/** Half the hotbar's width; hearts and hunger sit in the same columns just above it. */
+	private static final int HOTBAR_HALF_WIDTH = 91;
+	private static final int SMALLEST = 64;
 
 	private final MapViewport viewport = new MapViewport();
 
@@ -46,8 +49,10 @@ public final class MinimapHud implements HudElement {
 		int infoHeight = info.size() * 10;
 		boolean right = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.BOTTOM_RIGHT;
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
+		int effects = top ? this.effectRows(player, right) : 0;
+		size = this.fit(size, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
-		int y = top ? MARGIN + this.effectRows(player, right) : graphics.guiHeight() - size - MARGIN - infoHeight;
+		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int layer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 
 		graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, 0xC0101418);
@@ -72,6 +77,21 @@ public final class MinimapHud implements HudElement {
 			graphics.text(font, line, tx, textY, 0xFFFFFFFF, true);
 			textY += 10;
 		}
+	}
+
+	/**
+	 * Shrinks the minimap so it and its info lines stay on screen and, in a bottom corner, beside
+	 * the hotbar instead of over the hearts or hunger bar.
+	 */
+	private int fit(int size, int width, int height, boolean top, int effects, int infoHeight) {
+		int fitted = size;
+		if (top) {
+			fitted = Math.min(fitted, height - MARGIN - effects - infoHeight - MARGIN - 4);
+		} else {
+			fitted = Math.min(fitted, width / 2 - HOTBAR_HALF_WIDTH - 2 * MARGIN - 4);
+			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);
+		}
+		return Math.max(SMALLEST, Math.min(size, fitted));
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */

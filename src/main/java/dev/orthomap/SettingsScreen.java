@@ -12,8 +12,12 @@ import org.jspecify.annotations.Nullable;
 
 /** Every setting as a button that cycles its value, in three columns: Minimap, Radar, and Waypoints with Look. */
 public final class SettingsScreen extends Screen {
-	private static final int BUTTON_WIDTH = 158;
-	private static final int ROW = 22;
+	private static final int MAX_BUTTON_WIDTH = 158;
+
+	/** Sized in init() to fit the screen: at 427x240 the full-size layout would run off it. */
+	private int buttonWidth = MAX_BUTTON_WIDTH;
+	private int row = 22;
+	private int buttonHeight = 20;
 
 	private final @Nullable Screen parent;
 	private final List<Header> headers = new ArrayList<>();
@@ -30,11 +34,16 @@ public final class SettingsScreen extends Screen {
 	protected void init() {
 		this.headers.clear();
 		Settings s = Settings.get();
-		int gap = 8;
-		int left = this.width / 2 - BUTTON_WIDTH * 3 / 2 - gap;
-		int middle = left + BUTTON_WIDTH + gap;
-		int right = middle + BUTTON_WIDTH + gap;
-		int top = 30;
+		int gap = 6;
+		this.buttonWidth = Math.min(MAX_BUTTON_WIDTH, (this.width - 2 * gap - 16) / 3);
+		// The tallest column is the minimap's: a header and eight rows, which must clear Done.
+		boolean compact = 30 + 18 + 8 * 22 > this.height - 34;
+		this.row = compact ? 20 : 22;
+		this.buttonHeight = compact ? 18 : 20;
+		int left = this.width / 2 - this.buttonWidth * 3 / 2 - gap;
+		int middle = left + this.buttonWidth + gap;
+		int right = middle + this.buttonWidth + gap;
+		int top = compact ? 22 : 30;
 
 		int y = this.header("orthomap.settings.minimap", left, top);
 		y = this.toggle(left, y, "orthomap.settings.minimap_shown", () -> s.minimap, v -> s.minimap = v);
@@ -54,7 +63,7 @@ public final class SettingsScreen extends Screen {
 		y = this.toggle(middle, y, "orthomap.settings.hostile", () -> s.radarHostile, v -> s.radarHostile = v);
 		y = this.toggle(middle, y, "orthomap.settings.neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
 		y = this.toggle(middle, y, "orthomap.settings.passive", () -> s.radarPassive, v -> s.radarPassive = v);
-		int[] ranges = {16, 32, 64, 128};
+		int[] ranges = Settings.RANGES;
 		y = this.cycle(middle, y, "orthomap.settings.range", () -> indexOf(ranges, s.radarRange), ranges.length,
 			i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
 
@@ -69,12 +78,12 @@ public final class SettingsScreen extends Screen {
 		this.toggle(right, y, "orthomap.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
 
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
-			.bounds(this.width / 2 - 100, this.height - 28, 200, 20).build());
+			.bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
 	}
 
 	private int header(String key, int x, int y) {
-		this.headers.add(new Header(Component.translatable(key), x, y + 6));
-		return y + 18;
+		this.headers.add(new Header(Component.translatable(key), x, y + 5));
+		return y + 16;
 	}
 
 	private int toggle(int x, int y, String key, Supplier<Boolean> get, java.util.function.Consumer<Boolean> set) {
@@ -89,9 +98,9 @@ public final class SettingsScreen extends Screen {
 			set.accept(next);
 			Settings.get().save();
 			b.setMessage(label(label, name.apply(next)));
-		}).bounds(x, y, BUTTON_WIDTH, 20).build();
+		}).bounds(x, y, this.buttonWidth, this.buttonHeight).build();
 		this.addRenderableWidget(button);
-		return y + ROW;
+		return y + this.row;
 	}
 
 	private static Component label(Component name, Component value) {
@@ -110,7 +119,7 @@ public final class SettingsScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		super.extractRenderState(graphics, mouseX, mouseY, a);
-		graphics.centeredText(this.font, this.title, this.width / 2, 14, 0xFFFFFFFF);
+		graphics.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
 		for (Header header : this.headers) {
 			graphics.text(this.font, header.text(), header.x(), header.y(), 0xFFFFD870, false);
 		}

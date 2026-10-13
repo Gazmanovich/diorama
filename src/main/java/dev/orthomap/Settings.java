@@ -36,6 +36,8 @@ public final class Settings {
 
 	/** Minimap zoom steps, in GUI pixels per block. */
 	public static final double[] ZOOMS = {0.75, 1, 1.5, 2, 3, 4};
+	/** Radar height ranges, in blocks. */
+	public static final int[] RANGES = {16, 32, 64, 128};
 
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static Settings current;
@@ -67,6 +69,12 @@ public final class Settings {
 		if (current == null) {
 			current = load();
 		}
+		return current;
+	}
+
+	/** Reads the file again. For tests and tools. */
+	public static Settings reload() {
+		current = load();
 		return current;
 	}
 
@@ -125,6 +133,15 @@ public final class Settings {
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;
 		}
+		// Hand-edited numbers: snap to a value the settings screen can show.
+		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
+		int nearest = RANGES[0];
+		for (int range : RANGES) {
+			if (Math.abs(range - settings.radarRange) < Math.abs(nearest - settings.radarRange)) {
+				nearest = range;
+			}
+		}
+		settings.radarRange = nearest;
 		settings.apply();
 		return settings;
 	}
