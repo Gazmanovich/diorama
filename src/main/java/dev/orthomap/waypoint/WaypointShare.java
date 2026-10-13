@@ -16,26 +16,33 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
-import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Sharing waypoints through chat, in the format Xaero's Minimap uses, so players of either mod
  * can pick up each other's waypoints: {@code xaero-waypoint:Name:N:x:y:z:colour:false:0:Internal-overworld-waypoints}.
- * A shared waypoint in chat gets a line after it with an "Add" link that opens the waypoint
- * editor filled in. Chat can carry anything, so everything read from it is checked.
+ * Each shared waypoint chat shows gets a line under it with an "Add" link that opens the waypoint
+ * editor filled in. The message itself is left alone. Chat can carry anything, so everything read
+ * from it is checked.
  */
 public final class WaypointShare {
 	private static final Pattern SHARED = Pattern.compile(
-		"xaero-waypoint:([^:]{1,64}):([^:]{0,4}):(-?\\d{1,9}):(~|-?\\d{1,5}):(-?\\d{1,9}):(\\d{1,2}):(?:true|false):-?\\d{1,5}:(Internal-[^\\s]{1,200}-waypoints)"
+		"xaero-waypoint:([^:]{1,160}):([^:]{0,20}):(-?\\d{1,9}):(~|-?\\d{1,5}):(-?\\d{1,9}):(\\d{1,2}):(?:true|false):-?\\d{1,5}:(Internal-[^\\s]{1,200}-waypoints)"
 	);
 	/** Further out than the world border, or outside any world's height, isn't a real place. */
 	private static final int MAX_HORIZONTAL = 30_000_000;
 	private static final int MAX_VERTICAL = 4096;
 	/** The longest chat message a client may send. */
 	private static final int MAX_CHAT = 256;
+	/** The waypoint editor's limits. */
+	private static final int MAX_NAME = 32;
+	private static final int MAX_INITIALS = 2;
 	private static final Pattern DIMENSION_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
+
+	/** The line this client shared last, and when, so its own share doesn't get an offer. */
+	private static @Nullable String lastSent;
+	private static long lastSentAt;
 
 	/** A waypoint someone shared. {@code y} is null when the sender didn't know the height. */
 	public record Shared(String name, String initials, int x, Integer y, int z, int colorIndex, String dimension) {
@@ -45,22 +52,41 @@ public final class WaypointShare {
 	}
 
 	/**
-	 * The chat text for a waypoint, or empty if it can't be sent: chat allows at most 256
-	 * characters. A colon in the name becomes a semicolon, since colons separate the fields, and
-	 * anything chat refuses (formatting codes, control characters) is dropped.
+	 * The chat text for a waypoint, or empty if it can't fit in chat's 256 characters. Names are
+	 * escaped the way Xaero's Minimap does, since colons separate the fields, and anything chat
+	 * refuses (formatting codes, control characters) is dropped.
 	 */
 	public static Optional<String> format(Waypoint waypoint) {
-		String tail = ":" + chatSafe(waypoint.label()).replace(":", "") + ":" + waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":"
+		String initials = encode(chatSafe(waypoint.label()));
+		String tail = ":" + initials + ":" + waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":"
 			+ colorIndex(waypoint.color) + ":false:0:Internal-" + xaeroDimension(waypoint.dimension) + "-waypoints";
-		String name = chatSafe(waypoint.name).replace(':', ';').trim();
-		int room = MAX_CHAT - "xaero-waypoint:".length() - tail.length();
-		if (room < 1) {
-			return Optional.empty();
-		}
+		String name = chatSafe(waypoint.name).trim();
 		if (name.isEmpty()) {
 			name = "Waypoint";
 		}
-		return Optional.of("xaero-waypoint:" + name.substring(0, Math.min(name.length(), Math.min(room, 64))) + tail);
+		// Cut the name, not an escape, until the line fits.
+		String encoded = encode(name);
+		while ("xaero-waypoint:".length() + encoded.length() + tail.length() > MAX_CHAT && name.length() > 1) {
+			name = name.substring(0, name.length() - 1);
+			encoded = encode(name);
+		}
+		String line = "xaero-waypoint:" + encoded + tail;
+		return line.length() > MAX_CHAT ? Optional.empty() : Optional.of(line);
+	}
+
+	/** Remembers a line this client is about to send, so its own share gets no offer. */
+	public static void sending(String line) {
+		lastSent = line;
+		lastSentAt = System.currentTimeMillis();
+	}
+
+	/** Xaero's escapes for characters that mean something in the share line. */
+	static String encode(String text) {
+		return text.replace("-", "^min^").replace("_", "-").replace(":", "^col^").replace("*", "^ast^");
+	}
+
+	static String decode(String text) {
+		return text.replace("^ast^", "*").replace("^col^", ":").replace("-", "_").replace("^min^", "-");
 	}
 
 	private static String chatSafe(String text) {
@@ -75,7 +101,12 @@ public final class WaypointShare {
 		if (!m.find()) {
 			return Optional.empty();
 		}
-		String name = m.group(1).trim();
+		String name = chatSafe(decode(m.group(1))).trim();
+		if (name.length() > MAX_NAME) {
+			name = name.substring(0, MAX_NAME).trim();
+		}
+		StringBuilder initials = new StringBuilder();
+		decode(m.group(2)).codePoints().filter(Character::isLetterOrDigit).limit(MAX_INITIALS).forEach(initials::appendCodePoint);
 		int x = Integer.parseInt(m.group(3));
 		int z = Integer.parseInt(m.group(5));
 		Integer y = "~".equals(m.group(4)) ? null : Integer.parseInt(m.group(4));
@@ -86,29 +117,33 @@ public final class WaypointShare {
 			|| color > 15 || dimension == null) {
 			return Optional.empty();
 		}
-		return Optional.of(new Shared(name, m.group(2), x, y, z, color, dimension));
+		return Optional.of(new Shared(name, initials.toString().toUpperCase(Locale.ROOT), x, y, z, color, dimension));
 	}
 
 	/**
-	 * Called for every chat and server message. If it carries a waypoint someone else shared,
-	 * adds a line after it offering to add it. The message itself stays as it is.
+	 * Called for each message chat shows. If it carries a waypoint someone else shared, adds a
+	 * line under it offering to add it.
 	 */
-	public static void received(Component message, @Nullable GameProfile sender) {
-		Minecraft mc = Minecraft.getInstance();
-		if (sender != null && mc.player != null && sender.id().equals(mc.player.getUUID())) {
+	public static void shown(Component message) {
+		String text = message.getString();
+		Optional<Shared> shared = parse(text);
+		if (shared.isEmpty()) {
 			return;
 		}
-		// Queued for later, so it lands after the message itself; execute() would run it now.
-		parse(message.getString()).ifPresent(shared -> mc.schedule(() -> offer(shared, sender == null ? null : sender.name())));
+		if (lastSent != null && text.contains(lastSent) && System.currentTimeMillis() - lastSentAt < 30_000) {
+			lastSent = null;
+			return;
+		}
+		offer(shared.get());
 	}
 
 	/** The command the "Add" link runs for a shared waypoint. */
 	public static String addCommand(Shared shared, int y) {
 		return "/orthomap waypoint add " + shared.x() + " " + y + " " + shared.z() + " " + shared.colorIndex()
-			+ " \"" + shared.dimension() + "\" " + shared.name();
+			+ " \"" + shared.dimension() + "\" \"" + shared.initials() + "\" " + shared.name();
 	}
 
-	private static void offer(Shared shared, @Nullable String from) {
+	private static void offer(Shared shared) {
 		Minecraft mc = Minecraft.getInstance();
 		int y = shared.y() != null ? shared.y() : mc.player != null ? mc.player.getBlockY() : 64;
 		String command = addCommand(shared, y);
@@ -116,13 +151,11 @@ public final class WaypointShare {
 			.withColor(ChatFormatting.GREEN)
 			.withClickEvent(new ClickEvent.RunCommand(command))
 			.withHoverEvent(new HoverEvent.ShowText(Component.translatable("orthomap.share.add_hover"))));
-		Component line = from == null
-			? Component.translatable("orthomap.share.received", shared.name(), shared.x(), y, shared.z())
-			: Component.translatable("orthomap.share.received_from", from, shared.name(), shared.x(), y, shared.z());
+		Component line = Component.translatable("orthomap.share.received", shared.name(), shared.x(), y, shared.z());
 		mc.gui.hud.getChat().addClientSystemMessage(line.copy().append(" ").append(add));
 	}
 
-	/** {@code /orthomap waypoint add <x> <y> <z> <colour> "<dimension>" <name>}, which the "Add" link runs. */
+	/** {@code /orthomap waypoint add <x> <y> <z> <colour> "<dimension>" "<initials>" <name>}, which the "Add" link runs. */
 	public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
 		dispatcher.register(ClientCommands.literal("orthomap")
 			.then(ClientCommands.literal("waypoint")
@@ -132,25 +165,30 @@ public final class WaypointShare {
 							.then(ClientCommands.argument("z", IntegerArgumentType.integer())
 								.then(ClientCommands.argument("colour", IntegerArgumentType.integer(0, 15))
 									.then(ClientCommands.argument("dimension", StringArgumentType.string())
-										.then(ClientCommands.argument("name", StringArgumentType.greedyString())
-											.executes(WaypointShare::add))))))))));
+										.then(ClientCommands.argument("initials", StringArgumentType.string())
+											.then(ClientCommands.argument("name", StringArgumentType.greedyString())
+												.executes(WaypointShare::add)))))))))));
 	}
 
 	private static int add(CommandContext<FabricClientCommandSource> context) {
+		String name = StringArgumentType.getString(context, "name");
 		Waypoint waypoint = new Waypoint(
-			StringArgumentType.getString(context, "name"),
+			name.length() > MAX_NAME ? name.substring(0, MAX_NAME) : name,
 			IntegerArgumentType.getInteger(context, "x"),
 			IntegerArgumentType.getInteger(context, "y"),
 			IntegerArgumentType.getInteger(context, "z"),
 			StringArgumentType.getString(context, "dimension"),
 			paletteColor(IntegerArgumentType.getInteger(context, "colour"))
 		);
+		String initials = StringArgumentType.getString(context, "initials");
+		if (!initials.isEmpty()) {
+			waypoint.initials = initials.length() > MAX_INITIALS ? initials.substring(0, MAX_INITIALS) : initials;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		// Queued for later: a chat click puts the chat screen back right after running this.
 		mc.schedule(() -> mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true)));
 		return 1;
 	}
-
 	/** Xaero's colours are the 16 chat colours, the first 16 {@link ChatFormatting} values; the nearest one to a waypoint colour. */
 	static int colorIndex(int argb) {
 		int best = 15;

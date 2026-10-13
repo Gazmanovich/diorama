@@ -599,16 +599,19 @@ public class OrthomapClientTest implements FabricClientGameTest {
 
 	/** Sharing a waypoint through chat, picking one up from chat, and teleporting to one. */
 	private static void shareAndTeleport(ClientGameTestContext context, TestSingleplayerContext world) {
-		// The chat line is one a client may send: a colon in the name becomes a semicolon, and
-		// the rest survives a round trip.
+		// The chat line is one a client may send, with names escaped the way Xaero's Minimap does,
+		// and it survives a round trip.
 		context.runOnClient(mc -> {
-			Waypoint sent = new Waypoint("Mine: east", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
+			Waypoint sent = new Waypoint("Mine: east-2_b", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
 			String text = WaypointShare.format(sent).orElseThrow(() -> new AssertionError("Couldn't format a short waypoint"));
 			if (text.length() > 256 || !text.codePoints().allMatch(net.minecraft.util.StringUtil::isAllowedChatCharacter)) {
 				throw new AssertionError("Chat would refuse " + text);
 			}
 			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
-			if (!back.name().equals("Mine; east") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
+			if (!text.startsWith("xaero-waypoint:Mine^col^ east^min^2-b:")) {
+				throw new AssertionError("Not escaped like Xaero's Minimap: " + text);
+			}
+			if (!back.name().equals("Mine: east-2_b") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
 				throw new AssertionError("Round trip of " + text + " gave " + back);
 			}
 			for (String bad : new String[] {
@@ -632,16 +635,26 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-07-shared-in-chat");
-		// Run the [Add] link's command the way a chat click does.
+		// Run the [Add] link's command the way a chat click does: from the open chat screen,
+		// which Minecraft puts back after running the command.
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		context.waitTicks(2);
 		context.runOnClient(mc -> {
 			WaypointShare.Shared shared = WaypointShare.parse("xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints").orElseThrow();
-			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(WaypointShare.addCommand(shared, 40)), null);
+			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(WaypointShare.addCommand(shared, 40)), mc.gui.screen());
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
+		context.waitTicks(2);
 		context.runOnClient(mc -> {
-			Waypoint added = ((WaypointEditScreen) mc.gui.screen()).waypoint();
-			if (!added.name.equals("Old Mine") || added.x != 120 || added.y != 40 || added.z != -80) {
-				throw new AssertionError("The editor opened with " + added.name + " at " + added.x + ", " + added.y + ", " + added.z);
+			// What the editor shows: name, initials, x, y, z.
+			java.util.List<String> shown = new java.util.ArrayList<>();
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+					shown.add(box.getValue());
+				}
+			}
+			if (!shown.equals(java.util.List.of("Old Mine", "O", "120", "40", "-80"))) {
+				throw new AssertionError("The editor shows " + shown);
 			}
 		});
 		context.takeScreenshot("waypoints-08-add-shared");

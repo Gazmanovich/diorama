@@ -140,6 +140,7 @@ public final class WaypointEditScreen extends Screen {
 			return;
 		}
 		if (this.minecraft.player != null) {
+			WaypointShare.sending(text.get());
 			this.minecraft.player.connection.sendChat(text.get());
 		}
 		this.onClose();

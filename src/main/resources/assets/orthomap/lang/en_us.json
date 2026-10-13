@@ -31,7 +31,6 @@
 	"orthomap.waypoint.share": "Share in chat",
 	"orthomap.waypoint.teleport": "Teleport",
 	"orthomap.share.received": "Waypoint %s at %s, %s, %s",
-	"orthomap.share.received_from": "%s shared %s at %s, %s, %s",
 	"orthomap.share.too_long": "This waypoint's dimension name is too long to share in chat",
 	"orthomap.share.add": "[Add]",
 	"orthomap.share.add_hover": "Add this waypoint to your map",

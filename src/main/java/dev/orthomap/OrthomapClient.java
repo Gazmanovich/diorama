@@ -53,15 +53,6 @@ public class OrthomapClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Orthomap.id("minimap"), new MinimapHud());
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
-		// A shared waypoint gets a line of its own after the message, offering to add it. The
-		// message itself is left alone: hiding a signed player message would drop it from chat
-		// reports and lose its trust warnings.
-		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-			if (!overlay) {
-				WaypointShare.received(message, null);
-			}
-		});
-		ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, time) -> WaypointShare.received(message, sender));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> ServerRules.onDisconnect());
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
