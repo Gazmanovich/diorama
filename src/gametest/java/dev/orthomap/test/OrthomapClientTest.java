@@ -16,6 +16,7 @@ import dev.orthomap.waypoint.Waypoint;
 import dev.orthomap.waypoint.WaypointEditScreen;
 import dev.orthomap.waypoint.WaypointListScreen;
 import dev.orthomap.waypoint.WaypointOverlay;
+import dev.orthomap.waypoint.WaypointShare;
 import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -593,6 +594,66 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		if (!saved.contains("\"Home\"") || !saved.contains("\"Iron Mine\"") || !saved.contains("\"DEATH\"")) {
 			throw new AssertionError("waypoints.json doesn't have every waypoint:\n" + saved);
 		}
+		shareAndTeleport(context, world);
+	}
+
+	/** Sharing a waypoint through chat, picking one up from chat, and teleporting to one. */
+	private static void shareAndTeleport(ClientGameTestContext context, TestSingleplayerContext world) {
+		// The chat format survives a round trip, a colon in the name included.
+		context.runOnClient(mc -> {
+			Waypoint sent = new Waypoint("Mine: east", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
+			String text = WaypointShare.format(sent);
+			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
+			if (!back.name().equals("Mine: east") || back.x() != 120 || back.y() != 40 || back.z() != -80 || !back.dimension().equals("minecraft:the_nether")) {
+				throw new AssertionError("Round trip of " + text + " gave " + back);
+			}
+		});
+
+		// Someone else's share arrives: the chat line offers to add it.
+		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
+		context.waitTicks(10);
+		context.takeScreenshot("waypoints-07-shared-in-chat");
+		// The [Add] link runs this, the same way a chat click does.
+		context.runOnClient(mc -> mc.player.connection.sendUnattendedCommand("orthomap waypoint add 120 40 -80 6 \"minecraft:overworld\" Old Mine", null));
+		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
+		context.runOnClient(mc -> {
+			Waypoint added = ((WaypointEditScreen) mc.gui.screen()).waypoint();
+			if (!added.name.equals("Old Mine") || added.x != 120 || added.y != 40 || added.z != -80) {
+				throw new AssertionError("The editor opened with " + added.name + " at " + added.x + ", " + added.y + ", " + added.z);
+			}
+		});
+		context.takeScreenshot("waypoints-08-add-shared");
+		context.setScreen(() -> null);
+
+		// Teleport to an existing waypoint 40 blocks away, from its editor.
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		Waypoint target = new Waypoint("Lookout", at.getX() + 40, at.getY() + 30, at.getZ(), "minecraft:overworld", Waypoint.PALETTE[5]);
+		context.setScreen(() -> new WaypointEditScreen(null, target, false));
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			net.minecraft.client.gui.components.Button teleport = buttonLabelled(mc.gui.screen(), "Teleport");
+			if (!teleport.active) {
+				throw new AssertionError("Teleport is off in a world where the player may use /tp");
+			}
+			teleport.onPress(null);
+		});
+		context.waitFor(mc -> mc.player.distanceToSqr(target.x + 0.5, target.y, target.z + 0.5) < 4, 100);
+
+		// Share it: the line goes to chat for everyone.
+		context.setScreen(() -> new WaypointEditScreen(null, target, false));
+		context.waitTicks(2);
+		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress(null));
+		context.waitTicks(10);
+		context.takeScreenshot("waypoints-09-shared-own");
+	}
+
+	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
+				return button;
+			}
+		}
+		throw new AssertionError("No " + label + " button on " + screen.getClass().getSimpleName());
 	}
 
 	/**

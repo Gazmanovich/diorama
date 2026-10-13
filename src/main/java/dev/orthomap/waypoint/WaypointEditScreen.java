@@ -60,6 +60,10 @@ public final class WaypointEditScreen extends Screen {
 			this.addRenderableWidget(Button.builder(Component.translatable("orthomap.waypoint.save"), b -> this.save()).bounds(cx - 100, buttons, 64, 20).build());
 			this.addRenderableWidget(Button.builder(Component.translatable("orthomap.waypoint.delete"), b -> this.delete()).bounds(cx - 32, buttons, 64, 20).build());
 			this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> this.onClose()).bounds(cx + 36, buttons, 64, 20).build());
+			this.addRenderableWidget(Button.builder(Component.translatable("orthomap.waypoint.share"), b -> this.share()).bounds(cx - 100, buttons + 24, 98, 20).build());
+			Button teleport = Button.builder(Component.translatable("orthomap.waypoint.teleport"), b -> this.teleport()).bounds(cx + 2, buttons + 24, 98, 20).build();
+			teleport.active = canTeleport();
+			this.addRenderableWidget(teleport);
 		}
 		this.setInitialFocus(this.name);
 	}
@@ -110,6 +114,32 @@ public final class WaypointEditScreen extends Screen {
 			}
 		}
 		return super.mouseClicked(event, doubleClick);
+	}
+
+	/** The waypoint being edited. For tests. */
+	public Waypoint waypoint() {
+		return this.waypoint;
+	}
+
+	/** Sends the waypoint to chat for others to add. */
+	private void share() {
+		if (this.minecraft.player != null) {
+			this.minecraft.player.connection.sendChat(WaypointShare.format(this.waypoint));
+		}
+		this.onClose();
+	}
+
+	private void teleport() {
+		if (this.minecraft.player != null) {
+			this.minecraft.player.connection.sendCommand("tp @s " + this.waypoint.x + " " + this.waypoint.y + " " + this.waypoint.z);
+		}
+		this.onClose();
+	}
+
+	/** The server only sends the commands a player may use, so {@code tp} being there means it's allowed. */
+	static boolean canTeleport() {
+		var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
+		return connection != null && connection.getCommands().getRoot().getChild("tp") != null;
 	}
 
 	private void save() {
