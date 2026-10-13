@@ -193,15 +193,20 @@ public final class TileStore {
 		return pixels;
 	}
 
-	/** Records a fresh bake, full or partial, and schedules the write. Any thread. */
+	/**
+	 * Records a fresh bake, full or partial, and schedules the write, unless the pixels are the
+	 * same as what's saved already: most re-bakes after a light change or a block that looks the
+	 * same change nothing. Any thread.
+	 */
 	public synchronized void baked(TileImage image) {
 		TileKey key = image.key();
 		int size = Projection.TILE_PIXELS;
+		// The bake read this to merge, so it's cached and cheap.
+		int[] saved = this.read(key);
 		int[] pixels;
 		if (image.isFull()) {
 			pixels = image.mips()[0].clone();
 		} else {
-			int[] saved = this.read(key);
 			pixels = saved == null ? new int[size * size] : saved.clone();
 			for (TileImage.Patch patch : image.patches()) {
 				int[] block = patch.mips()[0];
@@ -211,6 +216,11 @@ public final class TileStore {
 				}
 			}
 		}
+		if (saved != null ? java.util.Arrays.equals(saved, pixels) : nothingKnown(pixels)) {
+			count(true);
+			return;
+		}
+		count(false);
 		this.cache.put(key, pixels);
 		boolean scheduled = this.unwritten.containsKey(key);
 		this.unwritten.put(key, pixels);
@@ -281,6 +291,29 @@ public final class TileStore {
 			}
 			this.trimCache();
 		}
+	}
+
+	private static final java.util.concurrent.atomic.AtomicInteger CHANGED = new java.util.concurrent.atomic.AtomicInteger();
+	private static final java.util.concurrent.atomic.AtomicInteger UNCHANGED = new java.util.concurrent.atomic.AtomicInteger();
+
+	private static void count(boolean unchanged) {
+		if (!Orthomap.DEBUG) {
+			return;
+		}
+		int changed = unchanged ? CHANGED.get() : CHANGED.incrementAndGet();
+		int same = unchanged ? UNCHANGED.incrementAndGet() : UNCHANGED.get();
+		if ((changed + same) % 100 == 0) {
+			Orthomap.LOGGER.info("Bakes saved: {} changed, {} unchanged and skipped", changed, same);
+		}
+	}
+
+	private static boolean nothingKnown(int[] pixels) {
+		for (int pixel : pixels) {
+			if ((pixel >>> 24) != 0) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** Drops the least recently used written tiles until the cache is back under its limit. */
