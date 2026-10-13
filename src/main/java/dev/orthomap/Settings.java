@@ -64,6 +64,16 @@ public final class Settings {
 	public boolean outlines = true;
 	public boolean roundedFog = true;
 	public boolean alwaysFogOfWar = false;
+	public boolean chunkGrid = false;
+	public boolean slimeChunks = false;
+	public SpawnSpots spawnSpots = SpawnSpots.OFF;
+
+	/** Which spawn spots the map marks: none, those dark even by day, or also those dark only at night. */
+	public enum SpawnSpots {
+		OFF,
+		ALWAYS_DARK,
+		AT_NIGHT_TOO
+	}
 
 	public static Settings get() {
 		if (current == null) {
@@ -129,6 +139,9 @@ public final class Settings {
 		}
 		if (settings.minimapSize == null) {
 			settings.minimapSize = Size.MEDIUM;
+		}
+		if (settings.spawnSpots == null) {
+			settings.spawnSpots = SpawnSpots.OFF;
 		}
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;

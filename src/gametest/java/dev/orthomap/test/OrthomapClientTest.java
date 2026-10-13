@@ -7,6 +7,7 @@ import dev.orthomap.Projection;
 import dev.orthomap.Settings;
 import dev.orthomap.SettingsScreen;
 import dev.orthomap.WorldKey;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapTile;
 import dev.orthomap.render.MapViewport;
@@ -81,6 +82,9 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("settings")) {
 				settings(context, world);
+			}
+			if (tests.contains("overlays")) {
+				overlays(context, world);
 			}
 			if (spawnCell != null) {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
@@ -561,6 +565,109 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	 * Settings: the default minimap with its compass and info lines, the settings screen, the
 	 * minimap moved to another corner at another size, and the effect icons pushing it down.
 	 */
+	/**
+	 * Chunk grid, slime chunks and spawn spots on a built scene: a stone platform high in open sky
+	 * across a chunk border, lit by one torch, with a closed stone box on one corner.
+	 */
+	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("time set noon");
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		// The platform's west part starts 4 blocks before a chunk border.
+		int x0 = Math.floorDiv(at.getX() + 40, 16) * 16 - 4;
+		int z0 = at.getZ() - 8;
+		int y = 150;
+		world.getServer().runCommand("fill " + x0 + " " + y + " " + z0 + " " + (x0 + 23) + " " + y + " " + (z0 + 15) + " stone");
+		world.getServer().runCommand("setblock " + (x0 + 12) + " " + (y + 1) + " " + (z0 + 8) + " torch");
+		// Leaves on the dark west edge: monsters can't spawn on them or under them.
+		world.getServer().runCommand("fill " + (x0 + 1) + " " + (y + 1) + " " + (z0 + 11) + " " + (x0 + 3) + " " + (y + 1) + " " + (z0 + 13) + " oak_leaves[persistent=true]");
+		// A sealed room (5x2x5 inside) on the platform's south-east corner: its floor gets no sky light.
+		int bx = x0 + 17;
+		int bz = z0 + 9;
+		world.getServer().runCommand("fill " + bx + " " + (y + 1) + " " + bz + " " + (bx + 6) + " " + (y + 4) + " " + (bz + 6) + " stone hollow");
+		Settings saved = context.computeOnClient(mc -> {
+			Settings s = Settings.get();
+			Settings before = new Settings();
+			before.chunkGrid = s.chunkGrid;
+			before.slimeChunks = s.slimeChunks;
+			before.spawnSpots = s.spawnSpots;
+			s.chunkGrid = true;
+			s.slimeChunks = true;
+			s.spawnSpots = Settings.SpawnSpots.AT_NIGHT_TOO;
+			return before;
+		});
+		try {
+			context.setScreen(MapScreen::new);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x0 + 12, Projection.v(y + 1, z0 + 8), 4.0, TileKey.SURFACE));
+			settle(context, 60);
+			context.takeScreenshot("overlays-01-platform");
+
+			int farX = x0 + 1;
+			int farZ = z0 + 1;
+			assertOverlay(context, TileKey.SURFACE, farX + 0.5, y + 1, farZ + 0.6, Overlays.SPAWN_AT_NIGHT, true, "spawn spot far from the torch");
+			assertOverlay(context, TileKey.SURFACE, x0 + 13.5, y + 1, z0 + 8.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot next to the torch");
+			assertOverlay(context, TileKey.SURFACE, x0 + 2.5, y + 2, z0 + 12.6, Overlays.SPAWN_AT_NIGHT | Overlays.SPAWN_ANY_TIME, false, "spawn spot on leaves");
+			// The chunk border is at x0 + 4: a line at its west edge, none mid-block.
+			assertOverlay(context, TileKey.SURFACE, x0 + 4.1, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, true, "chunk line on the border");
+			assertOverlay(context, TileKey.SURFACE, x0 + 4.6, y + 1, z0 + 2.5, Overlays.CHUNK_WEST, false, "chunk line mid-block");
+			long seed = context.computeOnClient(mc -> MapSession.get().slimeSeed());
+			for (int x : new int[] {x0 + 1, x0 + 8}) {
+				boolean slime = Overlays.slimeChunk(seed, x >> 4, (z0 + 2) >> 4);
+				assertOverlay(context, TileKey.SURFACE, x + 0.5, y + 1, z0 + 2.5, Overlays.SLIME, slime, "slime chunk at x=" + x);
+			}
+
+			// A cave slice just under the room's roof shows its floor (the box's bottom layer, so
+			// its top face is at y + 2): dark any time.
+			int layer = y + 4;
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(bx + 3, Projection.v(y + 1, bz + 3), 4.0, layer));
+			settle(context, 60);
+			context.takeScreenshot("overlays-02-closed-room");
+			assertOverlay(context, layer, bx + 3.5, y + 2, bz + 3.6, Overlays.SPAWN_ANY_TIME, true, "spawn spot in the closed room");
+
+			// Spawn spots off: the tiles keep their bits, and only the grid and slime chunks show.
+			context.runOnClient(mc -> Settings.get().spawnSpots = Settings.SpawnSpots.OFF);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x0 + 12, Projection.v(y + 1, z0 + 8), 4.0, TileKey.SURFACE));
+			settle(context, 20);
+			context.takeScreenshot("overlays-03-grid-and-slime-only");
+
+			// What spawn spots are for: a natural cave, with only the spots that are dark by day.
+			context.runOnClient(mc -> Settings.get().spawnSpots = Settings.SpawnSpots.ALWAYS_DARK);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(at.getX(), Projection.v(30, at.getZ()), 2.5, 32));
+			settle(context, 80);
+			context.takeScreenshot("overlays-04-cave-always-dark");
+			context.setScreen(() -> null);
+		} finally {
+			context.runOnClient(mc -> {
+				Settings s = Settings.get();
+				s.chunkGrid = saved.chunkGrid;
+				s.slimeChunks = saved.slimeChunks;
+				s.spawnSpots = saved.spawnSpots;
+			});
+		}
+	}
+
+	/** Checks the overlay bits at a world point on the map (its top face, for a block). */
+	private static void assertOverlay(ClientGameTestContext context, int layer, double x, double y, double z, int bits, boolean expected, String what) {
+		int found = context.computeOnClient(mc -> {
+			double u = x;
+			double v = Projection.v(y, z);
+			int tu = (int) Math.floor(u / Projection.TILE_UNITS);
+			int tv = (int) Math.floor(v / Projection.TILE_UNITS);
+			MapTile tile = MapSession.get().map().peek(new TileKey(layer, tu, tv));
+			if (tile == null) {
+				return -2;
+			}
+			int px = (int) ((u - tu * Projection.TILE_UNITS) * Projection.PIXELS_PER_UNIT);
+			int py = (int) ((v - tv * Projection.TILE_UNITS) * Projection.PIXELS_PER_UNIT);
+			return tile.overlayBits(px, py);
+		});
+		if (found < 0) {
+			throw new AssertionError(what + ": " + (found == -2 ? "no tile there" : "the tile has no overlay bits"));
+		}
+		if (((found & bits) != 0) != expected) {
+			throw new AssertionError(what + ": expected " + (expected ? "" : "no ") + "bits " + bits + ", found " + found);
+		}
+	}
+
 	private static void settings(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		context.waitTicks(20);
@@ -677,7 +784,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "saved-map");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "saved-map");
 		}
 		return Set.of(env.split(","));
 	}

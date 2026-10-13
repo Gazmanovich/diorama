@@ -7,6 +7,7 @@ import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.orthomap.Projection;
 import dev.orthomap.bake.Mipmaps;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileImage;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -18,12 +19,20 @@ public final class MapTile {
 	private @Nullable GpuTexture texture;
 	private @Nullable GpuTextureView view;
 	private byte @Nullable [] coverage;
+	/** {@link Overlays} bits per pixel from the bakes that recorded them, or null. */
+	private byte @Nullable [] info;
+	private @Nullable GpuTexture overlay;
+	private @Nullable GpuTextureView overlayView;
+	/** The overlay bits the overlay texture shows, or -1 when it has to be drawn again. */
+	private int overlayShown = -1;
 	private boolean empty = true;
 	long lastDrawn;
 
 	void upload(TileImage image) {
 		if (image.isFull()) {
 			this.coverage = image.coverage();
+			this.info = image.info();
+			this.overlayShown = -1;
 			this.empty = isEmpty(this.coverage);
 			if (this.empty) {
 				this.close();
@@ -32,7 +41,7 @@ public final class MapTile {
 			this.ensureTexture(image);
 			int size = Projection.TILE_PIXELS;
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
-				this.write(image.mips()[level], level, 0, 0, size >> level);
+				this.write(this.texture, image.mips()[level], level, 0, 0, size >> level);
 			}
 			return;
 		}
@@ -58,15 +67,87 @@ public final class MapTile {
 			// A new texture over a previously empty tile starts blank everywhere outside the patches.
 			int size = Projection.TILE_PIXELS;
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
-				this.write(new int[(size >> level) * (size >> level)], level, 0, 0, size >> level);
+				this.write(this.texture, new int[(size >> level) * (size >> level)], level, 0, 0, size >> level);
 			}
 		}
 		for (TileImage.Patch patch : image.patches()) {
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
 				int edge = TileImage.BLOCK >> level;
-				this.write(patch.mips()[level], level, patch.blockX() * edge, patch.blockY() * edge, edge);
+				this.write(this.texture, patch.mips()[level], level, patch.blockX() * edge, patch.blockY() * edge, edge);
+			}
+			if (patch.info() != null) {
+				this.patchInfo(patch);
 			}
 		}
+	}
+
+	private void patchInfo(TileImage.Patch patch) {
+		int size = Projection.TILE_PIXELS;
+		int edge = TileImage.BLOCK;
+		if (this.info == null) {
+			this.info = new byte[size * size];
+		}
+		int x0 = patch.blockX() * edge;
+		int y0 = patch.blockY() * edge;
+		for (int y = 0; y < edge; y++) {
+			System.arraycopy(patch.info(), y * edge, this.info, (y0 + y) * size + x0, edge);
+		}
+		if (this.overlay != null && this.overlayShown >= 0) {
+			this.drawOverlay(x0, y0, edge);
+		}
+	}
+
+	/**
+	 * The overlay texture showing these {@link Overlays} bits, drawn over the tile, or null when
+	 * this tile wasn't baked with overlay bits.
+	 */
+	public @Nullable GpuTextureView overlay(int shown) {
+		if (this.info == null || shown == 0 || this.texture == null) {
+			return null;
+		}
+		if (this.overlay == null) {
+			GpuDevice device = RenderSystem.getDevice();
+			int size = Projection.TILE_PIXELS;
+			this.overlay = device.createTexture(
+				"orthomap overlay", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
+			);
+			this.overlayView = device.createTextureView(this.overlay);
+			this.overlayShown = -1;
+		}
+		if (this.overlayShown != shown) {
+			this.overlayShown = shown;
+			this.drawOverlay(0, 0, Projection.TILE_PIXELS);
+		}
+		return this.overlayView;
+	}
+
+	private void drawOverlay(int x0, int y0, int edge) {
+		int size = Projection.TILE_PIXELS;
+		int[] pixels = new int[edge * edge];
+		for (int y = 0; y < edge; y++) {
+			for (int x = 0; x < edge; x++) {
+				pixels[y * edge + x] = overlayColor(this.info[(y0 + y) * size + x0 + x], this.overlayShown);
+			}
+		}
+		this.write(this.overlay, pixels, 0, x0, y0, edge);
+	}
+
+	/** ABGR colour of one overlay pixel: slime chunks tinted green, spawn spots red or yellow, chunk lines white. */
+	static int overlayColor(int bits, int shown) {
+		bits &= shown;
+		if ((bits & (Overlays.CHUNK_WEST | Overlays.CHUNK_NORTH)) != 0) {
+			return 0xA0FFFFFF;
+		}
+		if ((bits & Overlays.SPAWN_ANY_TIME) != 0) {
+			return 0xE02828FF;
+		}
+		if ((bits & Overlays.SPAWN_AT_NIGHT) != 0) {
+			return 0xB020D0FF;
+		}
+		if ((bits & Overlays.SLIME) != 0) {
+			return 0x7040F050;
+		}
+		return 0;
 	}
 
 	/** Creates the GPU texture if needed; true if it was just created. */
@@ -89,11 +170,11 @@ public final class MapTile {
 		return true;
 	}
 
-	private void write(int[] pixels, int level, int x, int y, int edge) {
+	private void write(GpuTexture target, int[] pixels, int level, int x, int y, int edge) {
 		ByteBuffer buffer = MemoryUtil.memAlloc(edge * edge * 4).order(ByteOrder.LITTLE_ENDIAN);
 		try {
 			buffer.asIntBuffer().put(pixels, 0, edge * edge);
-			RenderSystem.getDevice().createCommandEncoder().writeToTexture(this.texture, buffer, level, 0, x, y, edge, edge);
+			RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, level, 0, x, y, edge, edge);
 		} finally {
 			MemoryUtil.memFree(buffer);
 		}
@@ -116,11 +197,24 @@ public final class MapTile {
 		return (c[cellY * Projection.COVERAGE_CELLS + cellX] & 0xFF) / 255.0F;
 	}
 
+	/** The overlay bits recorded for one pixel, or -1 if this tile has none. For tests. */
+	public int overlayBits(int px, int py) {
+		return this.info == null ? -1 : this.info[py * Projection.TILE_PIXELS + px] & 0xFF;
+	}
+
 	public boolean hasCoverage() {
 		return this.coverage != null;
 	}
 
 	void close() {
+		if (this.overlayView != null) {
+			this.overlayView.close();
+			this.overlayView = null;
+		}
+		if (this.overlay != null) {
+			this.overlay.close();
+			this.overlay = null;
+		}
 		if (this.view != null) {
 			this.view.close();
 			this.view = null;

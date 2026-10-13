@@ -1,6 +1,7 @@
 package dev.orthomap;
 
 import dev.orthomap.bake.BlockLooks;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.data.ChunkSnapshot;
 import dev.orthomap.render.MapLevel;
@@ -10,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.client.player.LocalPlayer;
 import dev.orthomap.data.SeenBlocks;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
@@ -63,6 +65,18 @@ public final class MapSession {
 
 	public static @Nullable MapSession get() {
 		return current;
+	}
+
+	/**
+	 * The world seed, which places slime chunks. Only known in singleplayer, and slime chunks
+	 * only exist in the overworld.
+	 */
+	public @Nullable Long slimeSeed() {
+		IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
+		if (server == null || this.level.dimension() != Level.OVERWORLD) {
+			return null;
+		}
+		return server.overworld().getSeed();
 	}
 
 	/** Saves and ends the session. For closing the game; leaving a world is noticed by {@link #tick}. */
@@ -292,6 +306,10 @@ public final class MapSession {
 			Orthomap.LOGGER.info("Fog of war {}; underground={}", fog, this.underground);
 		}
 		this.map.setFogOfWar(fog);
+		Settings settings = Settings.get();
+		boolean spawnSpots = settings.spawnSpots != Settings.SpawnSpots.OFF;
+		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
+		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed()) : null, spawnSpots);
 		this.map.update();
 		if (player != null) {
 			this.updateUnderground(player);

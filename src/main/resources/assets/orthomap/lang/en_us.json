@@ -58,5 +58,12 @@
 	"orthomap.settings.look": "Look",
 	"orthomap.settings.outlines": "Outlines",
 	"orthomap.settings.rounded_fog": "Rounded fog",
-	"orthomap.settings.fog_of_war": "Fog of war always"
+	"orthomap.settings.fog_of_war": "Fog of war always",
+	"orthomap.settings.overlays": "Overlays",
+	"orthomap.settings.chunk_grid": "Chunk grid",
+	"orthomap.settings.slime_chunks": "Slime chunks",
+	"orthomap.settings.spawn_spots": "Spawn spots",
+	"orthomap.settings.spawn_spots.off": "Off",
+	"orthomap.settings.spawn_spots.always_dark": "Always dark",
+	"orthomap.settings.spawn_spots.at_night_too": "Also at night"
 }

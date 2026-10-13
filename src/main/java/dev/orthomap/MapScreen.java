@@ -2,6 +2,7 @@ package dev.orthomap;
 
 import dev.orthomap.bake.BlockLooks;
 import dev.orthomap.bake.MapPick;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileKey;
 import dev.orthomap.render.MapViewport;
 import dev.orthomap.render.Markers;
@@ -88,7 +89,7 @@ public final class MapScreen extends Screen {
 		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
 		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
-		this.viewport.draw(graphics, session.map(), view);
+		this.viewport.draw(graphics, session.map(), view, overlayBits(session));
 		Radar.Blip hovered = null;
 		this.blips = List.of();
 		if (ServerRules.radarAllowed()) {
@@ -282,6 +283,25 @@ public final class MapScreen extends Screen {
 	/** For tests: the radar markers drawn last frame, in GUI coordinates. */
 	public List<Radar.Blip> blips() {
 		return this.blips;
+	}
+
+	/** The {@link Overlays} bits to draw, from the settings. */
+	private static int overlayBits(MapSession session) {
+		Settings s = Settings.get();
+		int bits = 0;
+		if (s.chunkGrid) {
+			bits |= Overlays.CHUNK_WEST | Overlays.CHUNK_NORTH;
+		}
+		if (s.slimeChunks && session.slimeSeed() != null) {
+			bits |= Overlays.SLIME;
+		}
+		if (s.spawnSpots != Settings.SpawnSpots.OFF) {
+			bits |= Overlays.SPAWN_ANY_TIME;
+		}
+		if (s.spawnSpots == Settings.SpawnSpots.AT_NIGHT_TOO) {
+			bits |= Overlays.SPAWN_AT_NIGHT;
+		}
+		return bits;
 	}
 
 	/** Cave slices and unsaved maps have no overview tiles, so they stop at the detailed zoom. */

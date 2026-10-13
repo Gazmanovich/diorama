@@ -4,6 +4,7 @@ import dev.orthomap.Orthomap;
 import dev.orthomap.Projection;
 import dev.orthomap.bake.BlockLooks;
 import dev.orthomap.bake.ChunkSource;
+import dev.orthomap.bake.Overlays;
 import dev.orthomap.bake.TileBaker;
 import dev.orthomap.bake.TileImage;
 import dev.orthomap.bake.TileKey;
@@ -61,6 +62,10 @@ public final class MapLevel implements ChunkSource {
 	private final @Nullable Path folder;
 	private final @Nullable TileStore store;
 	private volatile boolean fogOfWar;
+	/** What bakes record for the map overlays, or null when no overlay is on. */
+	private volatile @Nullable Overlays overlays;
+	/** Light changes refresh the surface too while the light overlay is on. */
+	private volatile boolean lightOverlay;
 	/**
 	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
 	 * switching to or from fog of war. Bakes that started under an older value are dropped.
@@ -145,6 +150,27 @@ public final class MapLevel implements ChunkSource {
 		this.dropTiles(true);
 	}
 
+	/**
+	 * Which overlays are on. Turning them on, or a new slime seed, bakes the tiles in view again
+	 * so they record the overlay bits; switching between overlays needs no bake.
+	 */
+	public void setOverlays(@Nullable Overlays overlays, boolean lightOverlay) {
+		this.lightOverlay = lightOverlay;
+		if (java.util.Objects.equals(overlays, this.overlays)) {
+			return;
+		}
+		this.overlays = overlays;
+		if (overlays == null) {
+			return;
+		}
+		int blocks = (Projection.TILE_PIXELS / TileImage.BLOCK) * (Projection.TILE_PIXELS / TileImage.BLOCK);
+		for (TileKey key : this.tiles.keySet()) {
+			if (key.lod() == 0) {
+				this.dirty.computeIfAbsent(key, k -> new Dirty(0)).blocks.set(0, blocks);
+			}
+		}
+	}
+
 	/** Block colours changed (a resource reload): every tile has to be baked again. */
 	public void colorsChanged() {
 		this.surfaceGeneration++;
@@ -179,7 +205,7 @@ public final class MapLevel implements ChunkSource {
 	public void lightChanged(int chunkX, int chunkZ, int y0, int y1) {
 		int x0 = chunkX << 4;
 		int z0 = chunkZ << 4;
-		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false);
+		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, this.lightOverlay);
 	}
 
 	public int chunkCount() {
@@ -457,12 +483,13 @@ public final class MapLevel implements ChunkSource {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
 		boolean fog = this.fogOfWar;
+		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
 				int[] saved = store == null ? null : store.read(key);
-				this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved).withGeneration(generation));
+				this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved, overlays).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, blocks == null);
 			} catch (Throwable t) {
 				Orthomap.LOGGER.error("Failed to bake tile {}", key, t);

@@ -36,9 +36,9 @@ public final class SettingsScreen extends Screen {
 		Settings s = Settings.get();
 		int gap = 6;
 		this.buttonWidth = Math.min(MAX_BUTTON_WIDTH, (this.width - 2 * gap - 16) / 3);
-		// The tallest column is the minimap's: a header and eight rows, which must clear Done.
-		boolean compact = 30 + 18 + 8 * 22 > this.height - 34;
-		this.row = compact ? 20 : 22;
+		// The tallest columns have two headers and eight rows, which must clear Done.
+		boolean compact = 30 + 2 * 16 + 4 + 8 * 22 > this.height - 30;
+		this.row = compact ? 19 : 22;
 		this.buttonHeight = compact ? 18 : 20;
 		int left = this.width / 2 - this.buttonWidth * 3 / 2 - gap;
 		int middle = left + this.buttonWidth + gap;
@@ -66,6 +66,13 @@ public final class SettingsScreen extends Screen {
 		int[] ranges = Settings.RANGES;
 		y = this.cycle(middle, y, "orthomap.settings.range", () -> indexOf(ranges, s.radarRange), ranges.length,
 			i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
+
+		y = this.header("orthomap.settings.overlays", middle, y + 4);
+		y = this.toggle(middle, y, "orthomap.settings.chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
+		y = this.toggle(middle, y, "orthomap.settings.slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
+		this.cycle(middle, y, "orthomap.settings.spawn_spots", () -> s.spawnSpots.ordinal(), Settings.SpawnSpots.values().length,
+			i -> s.spawnSpots = Settings.SpawnSpots.values()[i],
+			i -> Component.translatable("orthomap.settings.spawn_spots." + Settings.SpawnSpots.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
 
 		y = this.header("orthomap.settings.waypoints", right, top);
 		y = this.toggle(right, y, "orthomap.settings.waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
