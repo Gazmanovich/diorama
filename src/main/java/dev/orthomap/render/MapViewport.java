@@ -6,6 +6,7 @@ import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
 import dev.orthomap.bake.TileKey;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -169,7 +170,55 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}
 		}
+		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
+		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE) {
+			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
+		}
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
+	}
+
+	private final float[] blurA = new float[MASK * MASK];
+	private final float[] blurB = new float[MASK * MASK];
+
+	/**
+	 * Rounds the known area off so the fog edge follows a smooth line instead of chunk steps.
+	 * Blurs the mask, keeps only what stays solidly known, and takes the smaller of that and the
+	 * original, so the fog only ever grows over the edge and never uncovers ground with no data.
+	 */
+	private void roundOff(int radius) {
+		for (int i = 0; i < this.maskPixels.length; i++) {
+			this.blurA[i] = (this.maskPixels[i] & 0xFF) / 255.0F;
+		}
+		boxBlur(this.blurA, this.blurB, radius, true);
+		boxBlur(this.blurB, this.blurA, radius, false);
+		boxBlur(this.blurA, this.blurB, radius, true);
+		boxBlur(this.blurB, this.blurA, radius, false);
+		for (int i = 0; i < this.maskPixels.length; i++) {
+			float t = Math.max(0, Math.min(1, (this.blurA[i] - 0.5F) / 0.35F));
+			float rounded = t * t * (3 - 2 * t);
+			int known = Math.min(this.maskPixels[i] & 0xFF, Math.round(rounded * 255));
+			this.maskPixels[i] = 0xFF000000 | known;
+		}
+	}
+
+	private static void boxBlur(float[] from, float[] to, int radius, boolean horizontal) {
+		float scale = 1.0F / (2 * radius + 1);
+		for (int line = 0; line < MASK; line++) {
+			float sum = 0;
+			for (int k = -radius; k <= radius; k++) {
+				sum += from[index(line, Math.max(0, Math.min(MASK - 1, k)), horizontal)];
+			}
+			for (int k = 0; k < MASK; k++) {
+				to[index(line, k, horizontal)] = sum * scale;
+				int add = Math.min(MASK - 1, k + radius + 1);
+				int drop = Math.max(0, k - radius);
+				sum += from[index(line, add, horizontal)] - from[index(line, drop, horizontal)];
+			}
+		}
+	}
+
+	private static int index(int line, int k, boolean horizontal) {
+		return horizontal ? line * MASK + k : k * MASK + line;
 	}
 
 	public void close() {

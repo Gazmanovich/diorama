@@ -1,5 +1,6 @@
 package dev.orthomap.bake;
 
+import dev.orthomap.MapStyle;
 import dev.orthomap.Projection;
 import dev.orthomap.data.ChunkSnapshot;
 import java.util.ArrayList;
@@ -40,8 +41,8 @@ public final class TileBaker {
 	private static final float AMBIENT = 0.50F;
 	private static final float SUN = 0.62F;
 	private static final float[] AO_LEVELS = {0.6F, 0.74F, 0.87F, 1.0F};
-	private static final float SATURATION = 1.18F;
-	private static final float EXPOSURE = 1.06F;
+	/** How much nearer a neighbouring pixel has to be, in blocks, before an outline is drawn. */
+	private static final float OUTLINE_DEPTH = 1.5F;
 	/** How far below the cut a cave slice looks. */
 	public static final int CAVE_DEPTH = 48;
 	private static final int SHADOW_STEPS = 96;
@@ -77,11 +78,22 @@ public final class TileBaker {
 	/** Cave slice that may only show blocks the player has seen. */
 	private final boolean fogOfWar;
 	private final ChunkSource source;
+	private final MapStyle style;
+	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
+	private final double sin;
+	private final double cos;
 
 	// Result of the last trace, in linear light.
 	private float outR;
 	private float outG;
 	private float outB;
+	/** Camera depth of the last hit relative to {@link #depthOrigin}; larger is farther. */
+	private float outDepth;
+	/**
+	 * Camera depth of this tile's top-left ray start. Depths are kept relative to it so they stay
+	 * small enough for float precision anywhere in the world.
+	 */
+	private final double depthOrigin;
 
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
 		this.key = key;
@@ -90,8 +102,13 @@ public final class TileBaker {
 		this.cave = key.isCave();
 		this.source = source;
 		this.fogOfWar = this.cave && fogOfWar;
+		this.style = MapStyle.get();
+		this.sin = Projection.sin();
+		this.cos = Projection.cos();
 		this.topY = localTop(key, source);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.topY;
+		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
+		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
 	}
 
@@ -156,40 +173,78 @@ public final class TileBaker {
 		if (this.startY <= this.limitY) {
 			return;
 		}
+		// Outlines compare each pixel with its neighbours, so bake a one-pixel border around the area.
+		int border = this.style.outline() > 0 ? 1 : 0;
+		int w = width + 2 * border;
+		int h = height + 2 * border;
+		int[] pixels = border == 0 ? out : new int[w * h];
+		float[] depth = border == 0 ? null : new float[w * h];
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
-		for (int y = 0; y < height; y++) {
-			for (int x = 0; x < width; x++) {
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
 				float r = 0;
 				float g = 0;
 				float b = 0;
+				float d = 0;
 				int known = 0;
 				for (int s = 0; s < SAMPLES.length; s++) {
-					double u = minU + (px0 + x + SAMPLES[s][0]) * unitsPerPixel;
-					double v = minV + (py0 + y + SAMPLES[s][1]) * unitsPerPixel;
+					double u = minU + (px0 + x - border + SAMPLES[s][0]) * unitsPerPixel;
+					double v = minV + (py0 + y - border + SAMPLES[s][1]) * unitsPerPixel;
 					if (this.trace(u, v, s)) {
 						r += this.outR;
 						g += this.outG;
 						b += this.outB;
+						d += this.outDepth;
 						known++;
 					}
 				}
 				if (known > 0) {
-					out[y * width + x] = abgr(r / known, g / known, b / known, known * 255 / SAMPLES.length);
+					pixels[y * w + x] = this.abgr(r / known, g / known, b / known, known * 255 / SAMPLES.length);
 				}
+				if (depth != null) {
+					depth[y * w + x] = known > 0 ? d / known : Float.NaN;
+				}
+			}
+		}
+		if (border == 0) {
+			return;
+		}
+		float keep = 1 - this.style.outline();
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				int i = (y + 1) * w + x + 1;
+				int pixel = pixels[i];
+				float here = depth[i];
+				if (pixel != 0 && (nearer(depth[i - 1], here) || nearer(depth[i + 1], here) || nearer(depth[i - w], here) || nearer(depth[i + w], here))) {
+					pixel = darken(pixel, keep);
+				}
+				out[y * width + x] = pixel;
 			}
 		}
 	}
 
+	/** True if the neighbour is a much nearer surface, so this pixel sits just behind an edge. */
+	private static boolean nearer(float neighbour, float here) {
+		return here - neighbour > OUTLINE_DEPTH;
+	}
+
+	private static int darken(int abgr, float keep) {
+		int r = Math.round((abgr & 0xFF) * keep);
+		int g = Math.round(((abgr >> 8) & 0xFF) * keep);
+		int b = Math.round(((abgr >> 16) & 0xFF) * keep);
+		return (abgr & 0xFF000000) | (b << 16) | (g << 8) | r;
+	}
+
 	/** Traces one ray. Returns false when it ran into a chunk the map has no data for. */
 	private boolean trace(double u, double v, int sample) {
-		final double sin = Projection.SIN;
-		final double cos = Projection.COS;
+		final double sin = this.sin;
+		final double cos = this.cos;
 		final int x = (int) Math.floor(u);
 		final double fx = u - x;
 		final double y0 = this.startY;
-		final double z0 = Projection.zAt(v, y0);
+		final double z0 = (v + y0 * cos) / sin;
 
 		int by = this.startY - 1;
 		int bz = (int) Math.floor(z0);
@@ -245,6 +300,7 @@ public final class TileBaker {
 					}
 					double hitY = y0 - t * sin;
 					double hitZ = z0 - t * cos;
+					this.outDepth = (float) (-(sin * hitY + cos * hitZ) - this.depthOrigin);
 					this.shade(id, x, by, bz, fx, hitY, hitZ, enteredTop, sample);
 					if (through < 1) {
 						// The overlay tints the albedo; approximate by mixing it in after lighting.
@@ -294,6 +350,7 @@ public final class TileBaker {
 		if (this.fogOfWar && (skippingRock || waterId < 0 || !this.source.isSeen(x, waterBy, waterBz))) {
 			return false;
 		}
+		this.outDepth = (float) (-(sin * (y0 - t * sin) + cos * (z0 - t * cos)) - this.depthOrigin);
 		if (skippingRock) {
 			// Solid rock all the way down the slice: draw the cut face.
 			this.outR = 0.0065F;
@@ -351,6 +408,14 @@ public final class TileBaker {
 
 	private void shade(int id, int x, int by, int bz, double fx, double hitY, double hitZ, boolean top, int sample) {
 		this.albedo(id, x, bz, top);
+		float variation = this.style.blockVariation();
+		if (variation > 0) {
+			// A fixed per-block nudge in brightness, so a field of one block isn't a flat sheet.
+			float nudge = 1 + variation * blockNoise(x, by, bz);
+			this.albedoR *= nudge;
+			this.albedoG *= nudge;
+			this.albedoB *= nudge;
+		}
 		// The open cell in front of the face the ray hit.
 		int frontY = top ? by + 1 : by;
 		int frontZ = top ? bz : bz + 1;
@@ -394,9 +459,11 @@ public final class TileBaker {
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
 			// blocks alone and light updates never make it stale.
 			float ambient = AMBIENT * ao;
-			lr = ambient * 0.90F + direct * 1.06F;
-			lg = ambient * 0.95F + direct * 1.00F;
-			lb = ambient * 1.08F + direct * 0.90F;
+			float[] sky = this.style.shadowTint();
+			float[] sun = this.style.sunTint();
+			lr = ambient * sky[0] + direct * sun[0];
+			lg = ambient * sky[1] + direct * sun[1];
+			lb = ambient * sky[2] + direct * sun[2];
 		}
 		if (emission > 0) {
 			float e = 0.35F + emission * 0.85F;
@@ -428,12 +495,29 @@ public final class TileBaker {
 		} else {
 			double sy = SUN_Y + SUN_JITTER[sample][1];
 			double ox = u;
-			double oy = this.startY - tEntry * Projection.SIN + 1e-4;
-			double oz = z0 - tEntry * Projection.COS;
+			double oy = this.startY - tEntry * this.sin + 1e-4;
+			double oz = z0 - tEntry * this.cos;
 			boolean shadow = this.inShadow(ox, oy, oz, SUN_X, sy, SUN_Z);
 			light = AMBIENT + (shadow ? 0 : (float) (SUN * sy));
 		}
 		double depth = Math.max(0, tHit - tEntry);
+		if (this.style.clearWater()) {
+			// Light through water loses the colours the water doesn't have: red goes first, so
+			// shallows over sand turn turquoise and deep water ends up the water's own blue.
+			float peak = Math.max(wr, Math.max(wg, wb));
+			float tr = (float) Math.exp(-depth * 0.45 * (1 - wr / peak) - depth * 0.04);
+			float tg = (float) Math.exp(-depth * 0.45 * (1 - wg / peak) - depth * 0.04);
+			float tb = (float) Math.exp(-depth * 0.45 * (1 - wb / peak) - depth * 0.04);
+			float deepR = wr * 0.55F * light;
+			float deepG = wg * 0.55F * light;
+			float deepB = wb * 0.55F * light;
+			// A little sky reflected off the surface.
+			float sheen = 0.05F * light;
+			this.outR = this.outR * tr + deepR * (1 - tr) + sheen;
+			this.outG = this.outG * tg + deepG * (1 - tg) + sheen;
+			this.outB = this.outB * tb + deepB * (1 - tb) + sheen * 1.2F;
+			return;
+		}
 		float a = (float) Math.max(0.5, Math.min(0.94, 1 - Math.exp(-0.2 * depth)));
 		this.outR = this.outR * (1 - a) + wr * light * a;
 		this.outG = this.outG * (1 - a) + wg * light * a;
@@ -531,11 +615,22 @@ public final class TileBaker {
 		return 0.2126F * r + 0.7152F * g + 0.0722F * b;
 	}
 
-	private static int abgr(float r, float g, float b, int alpha) {
+	/** -1..1, fixed per block position. */
+	private static float blockNoise(int x, int y, int z) {
+		int h = x * 73_856_093 ^ y * 19_349_663 ^ z * 83_492_791;
+		h ^= h >>> 13;
+		h *= 0x5bd1e995;
+		h ^= h >>> 15;
+		return ((h & 0xFFFF) / 32767.5F) - 1;
+	}
+
+	private int abgr(float r, float g, float b, int alpha) {
+		float saturation = this.style.saturation();
+		float exposure = this.style.exposure();
 		float l = luminance(r, g, b);
-		r = (l + (r - l) * SATURATION) * EXPOSURE;
-		g = (l + (g - l) * SATURATION) * EXPOSURE;
-		b = (l + (b - l) * SATURATION) * EXPOSURE;
+		r = (l + (r - l) * saturation) * exposure;
+		g = (l + (g - l) * saturation) * exposure;
+		b = (l + (b - l) * saturation) * exposure;
 		int ri = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (r * 4095)))];
 		int gi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (g * 4095)))];
 		int bi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (b * 4095)))];
