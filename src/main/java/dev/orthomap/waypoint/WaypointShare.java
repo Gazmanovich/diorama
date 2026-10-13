@@ -61,7 +61,7 @@ public final class WaypointShare {
 		// Cut the name, not an escape, until the line fits.
 		String encoded = encode(name);
 		while ("xaero-waypoint:".length() + encoded.length() + tail.length() > MAX_CHAT && name.length() > 1) {
-			name = name.substring(0, name.length() - 1);
+			name = cut(name, name.length() - 1);
 			encoded = encode(name);
 		}
 		String line = "xaero-waypoint:" + encoded + tail;

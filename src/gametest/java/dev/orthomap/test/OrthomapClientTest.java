@@ -637,28 +637,31 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.waitTicks(10);
 		assertConnected(context, "a share with an out-of-range number");
 
-		// Someone else's share arrives: a line after it offers to add it.
+		// Someone else's share arrives: its line gets an [Add] link.
 		world.getServer().runCommand("tellraw @a \"xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints\"");
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-07-shared-in-chat");
-		// Run the command the line's [Add] link carries, the way a chat click does: from the open
-		// chat screen, which Minecraft puts back after running the command.
+		// Take the command from the [Add] link on the line chat actually received, and run it the
+		// way a chat click does: from the open chat screen, which Minecraft puts back after
+		// running the command. The malformed share's line has no link.
 		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
-			net.minecraft.network.chat.Component line = WaypointShare.withAddLink(net.minecraft.network.chat.Component.literal(
-				"<Alex> xaero-waypoint:Old Mine:O:120:40:-80:6:false:0:Internal-overworld-waypoints"));
-			String[] command = new String[1];
-			line.visit((style, text) -> {
-				if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
-					command[0] = run.command();
+			String command = null;
+			for (net.minecraft.client.multiplayer.chat.GuiMessage message : chatMessages(mc)) {
+				String text = message.content().getString();
+				String link = linkIn(message.content());
+				if (text.contains("2147483648") && link != null) {
+					throw new AssertionError("The malformed share got a link: " + text);
 				}
-				return java.util.Optional.empty();
-			}, net.minecraft.network.chat.Style.EMPTY);
-			if (command[0] == null) {
-				throw new AssertionError("The shared line got no [Add] link: " + line.getString());
+				if (text.contains("xaero-waypoint:Old Mine:")) {
+					command = link;
+				}
 			}
-			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command[0]), mc.gui.screen());
+			if (command == null) {
+				throw new AssertionError("The shared line in chat has no [Add] link");
+			}
+			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command), mc.gui.screen());
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
@@ -708,6 +711,30 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		context.waitTicks(20);
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
+	}
+
+	/** Every line in chat, newest first. Read through reflection: chat keeps them private. */
+	@SuppressWarnings("unchecked")
+	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
+		try {
+			java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
+			field.setAccessible(true);
+			return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** The command a line's click-to-run link carries, or null. */
+	private static @org.jspecify.annotations.Nullable String linkIn(net.minecraft.network.chat.Component line) {
+		String[] command = new String[1];
+		line.visit((style, text) -> {
+			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
+				command[0] = run.command();
+			}
+			return java.util.Optional.empty();
+		}, net.minecraft.network.chat.Style.EMPTY);
+		return command[0];
 	}
 
 	private static void assertConnected(ClientGameTestContext context, String after) {
