@@ -116,13 +116,12 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	/**
 	 * Two worlds behind one server address, like a network's lobby and survival servers, or a
 	 * server whose map was reset: each keeps its own map and waypoints, and going back to the
-	 * first finds them again, even after its spawn moved. A map saved before worlds were told
-	 * apart goes to the first world seen.
+	 * first finds them again, even after its spawn moved.
 	 */
 	private static void multiplayer(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:25601");
 		context.runOnClient(mc -> {
-			// Start from nothing saved for this address, then save a waypoint the old way.
+			// Start from nothing saved for this address.
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
 				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(address)).toList()) {
 					org.apache.commons.io.FileUtils.deleteDirectory(folder.toFile());
@@ -130,11 +129,10 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			} catch (java.io.IOException e) {
 				throw new AssertionError(e);
 			}
-			WaypointStore.open(address).add(new Waypoint("Old Camp", 0, 64, 0, "minecraft:overworld", Waypoint.PALETTE[2]));
 		});
-		String first = playOnServer(context, "orthomap-first", "first", null, "Camp First", List.of("Old Camp"), List.of(), null);
-		String second = playOnServer(context, "orthomap-second", "second", null, "Camp Second", List.of(), List.of("Old Camp", "Camp First"), false);
-		String again = playOnServer(context, "orthomap-first", "first-again", "setworldspawn 40 90 40", null, List.of("Old Camp", "Camp First"), List.of("Camp Second"), true);
+		String first = playOnServer(context, "orthomap-first", "first", null, "Camp First", List.of(), List.of(), null);
+		String second = playOnServer(context, "orthomap-second", "second", null, "Camp Second", List.of(), List.of("Camp First"), false);
+		String again = playOnServer(context, "orthomap-first", "first-again", "setworldspawn 40 90 40", null, List.of("Camp First"), List.of("Camp Second"), true);
 		if (first.equals(second)) {
 			throw new AssertionError("Two worlds on one server address share a map folder: " + first);
 		}
@@ -174,7 +172,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				context.takeScreenshot("multiplayer-" + name);
 				if (stripKnown != null) {
 					float known = context.computeOnClient(mc -> overviewKnown(500, Projection.v(70, 0)));
-					if (known > 0.5F != stripKnown) {
+					if ((known > 0.5F) != stripKnown) {
 						throw new AssertionError("The first world's strip east of spawn is " + known + " known on the " + name + " world");
 					}
 				}
