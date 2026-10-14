@@ -7,6 +7,9 @@
 	"authors": [
 		"Dara Adedeji"
 	],
+	"contact": {
+		"homepage": "https://modrinth.com/mod/orthomap"
+	},
 	"license": "MIT",
 	"icon": "assets/orthomap/icon.png",
 	"environment": "client",
