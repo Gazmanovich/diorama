@@ -108,12 +108,12 @@ public final class WaypointListScreen extends Screen {
 			graphics.centeredText(this.font, label, 0, 0, WaypointOverlay.textColour(waypoint.color));
 			graphics.pose().popMatrix();
 			int nameColor = waypoint.visible ? 0xFFFFFFFF : 0xFF808080;
-			graphics.text(this.font, waypoint.name, left + 22, y + 4, nameColor, false);
+			graphics.text(this.font, waypoint.name, left + 22, y + 4, nameColor, true);
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (player != null) {
 				detail = Math.round(waypoint.distanceTo(player.getX(), player.getY(), player.getZ())) + " m · " + detail;
 			}
-			graphics.text(this.font, detail, left + 22, y + 14, 0xFF909090, false);
+			graphics.text(this.font, detail, left + 22, y + 14, 0xFF909090, true);
 		}
 	}
 
