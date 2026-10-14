@@ -86,10 +86,10 @@ public final class WaypointEditScreen extends Screen {
 		int cx = this.width / 2;
 		int top = this.height / 2 - 92;
 		graphics.centeredText(this.font, this.title, cx, top - 12, 0xFFFFFFFF);
-		graphics.text(this.font, Component.translatable("orthomap.waypoint.name"), cx - 100, top + 5, 0xFFA0A0A0, false);
-		graphics.text(this.font, Component.translatable("orthomap.waypoint.initials"), cx + 60, top + 5, 0xFFA0A0A0, false);
-		graphics.text(this.font, Component.translatable("orthomap.waypoint.position"), cx - 100, top + 45, 0xFFA0A0A0, false);
-		graphics.text(this.font, Component.translatable("orthomap.waypoint.colour"), cx - 100, top + 81, 0xFFA0A0A0, false);
+		graphics.text(this.font, Component.translatable("orthomap.waypoint.name"), cx - 100, top + 5, 0xFFA0A0A0, true);
+		graphics.text(this.font, Component.translatable("orthomap.waypoint.initials"), cx + 60, top + 5, 0xFFA0A0A0, true);
+		graphics.text(this.font, Component.translatable("orthomap.waypoint.position"), cx - 100, top + 45, 0xFFA0A0A0, true);
+		graphics.text(this.font, Component.translatable("orthomap.waypoint.colour"), cx - 100, top + 81, 0xFFA0A0A0, true);
 		for (int i = 0; i < Waypoint.PALETTE.length; i++) {
 			float sx = this.swatchX + (i % 8) * (SWATCH + SWATCH_GAP) + SWATCH / 2.0F;
 			float sy = this.swatchY + (i / 8) * (SWATCH + SWATCH_GAP) + SWATCH / 2.0F;

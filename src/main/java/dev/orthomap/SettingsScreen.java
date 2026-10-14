@@ -129,7 +129,7 @@ public final class SettingsScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		graphics.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
 		for (Header header : this.headers) {
-			graphics.text(this.font, header.text(), header.x(), header.y(), 0xFFFFD870, false);
+			graphics.text(this.font, header.text(), header.x(), header.y(), 0xFFFFD870, true);
 		}
 	}
 
