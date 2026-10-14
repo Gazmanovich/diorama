@@ -19,7 +19,7 @@ Places the map has no data for sit under animated fog. Underground, the map swit
 - **Overlays** on the fullscreen map: chunk grid, slime chunks (singleplayer) and the spots where monsters can spawn.
 - **Settings** for all of the above, from a button on the fullscreen map.
 
-Saved maps and waypoints live in `.minecraft/orthomap/`, one folder per world.
+Saved maps and waypoints live in `.minecraft/orthomap/`, one folder per world. On a server, each world behind its address gets its own folder, told apart by the world seed the server sends, so a network's lobby and survival worlds, or a map reset, don't mix.
 
 ## Keys
 
@@ -38,4 +38,4 @@ Needs JDK 25. Gradle downloads everything else.
 
 The mod jar lands in `build/libs/`.
 
-`./gradlew runClientGameTest` launches the game, creates a world and runs every test scenario: the map views, radar, waypoints, fog of war, settings, overlays, the Nether and the End, and saving the map across a restart. Each scenario asserts what it can measure and saves screenshots to `build/run/clientGameTest/screenshots/` for the rest. Set `ORTHOMAP_TESTS` to a comma-separated list (`tour`, `radar`, `waypoints`, `fog-of-war`, `settings`, `overlays`, `dimensions`, `saved-map`) to run only some, `ORTHOMAP_GIF=1` to also save frames for GIFs, and `ORTHOMAP_DEBUG=1` for extra logging.
+`./gradlew runClientGameTest` launches the game, creates a world and runs every test scenario: the map views, radar, waypoints, fog of war, settings, overlays, the Nether and the End, saving the map across a restart, and two worlds on one dedicated server. Each scenario asserts what it can measure and saves screenshots to `build/run/clientGameTest/screenshots/` for the rest. Set `ORTHOMAP_TESTS` to a comma-separated list (`tour`, `radar`, `waypoints`, `fog-of-war`, `settings`, `overlays`, `dimensions`, `saved-map`, `multiplayer`) to run only some, `ORTHOMAP_GIF=1` to also save frames for GIFs, and `ORTHOMAP_DEBUG=1` for extra logging.
