@@ -60,7 +60,7 @@ public final class MapSession {
 
 	/** {@code .minecraft/orthomap/<world>/<dimension>}, or null outside a world. */
 	private static @Nullable Path mapFolder(ClientLevel level) {
-		String key = WorldKey.current();
+		String key = WorldKey.current(level);
 		if (key == null) {
 			return null;
 		}

@@ -20,10 +20,13 @@ import dev.orthomap.waypoint.WaypointShare;
 import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
 import com.mojang.authlib.GameProfile;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -34,6 +37,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Drives the real game through the map's views and saves screenshots, so a person can look at
@@ -102,6 +106,101 @@ public class OrthomapClientTest implements FabricClientGameTest {
 		if (spawnCell != null && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+			}
+		}
+		if (tests.contains("multiplayer")) {
+			multiplayer(context);
+		}
+	}
+
+	/**
+	 * Two worlds behind one server address, like a network's lobby and survival servers, or a
+	 * server whose map was reset: each keeps its own map and waypoints, and going back to the
+	 * first finds them again, even after its spawn moved.
+	 */
+	private static void multiplayer(ClientGameTestContext context) {
+		String address = WorldKey.key("server", "localhost:25601");
+		context.runOnClient(mc -> {
+			// Start from nothing saved for this address.
+			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
+				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(address)).toList()) {
+					org.apache.commons.io.FileUtils.deleteDirectory(folder.toFile());
+				}
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		String first = playOnServer(context, "orthomap-first", "first", null, "Camp First", List.of(), List.of(), null);
+		String second = playOnServer(context, "orthomap-second", "second", null, "Camp Second", List.of(), List.of("Camp First"), false);
+		String again = playOnServer(context, "orthomap-first", "first-again", "setworldspawn 40 90 40", null, List.of("Camp First"), List.of("Camp Second"), true);
+		if (first.equals(second)) {
+			throw new AssertionError("Two worlds on one server address share a map folder: " + first);
+		}
+		if (!first.equals(again)) {
+			throw new AssertionError("Coming back to a world opened another folder: " + first + " then " + again);
+		}
+	}
+
+	/**
+	 * Joins a fresh dedicated server for this seed, always on the same address, and checks its
+	 * waypoints. The first visit to a world adds a waypoint and maps a strip east of spawn that
+	 * the other world won't load. {@code stripKnown}, if not null, is whether that strip should
+	 * show on the zoomed-out map from what's saved. Returns the world's folder key.
+	 */
+	private static String playOnServer(ClientGameTestContext context, String seed, String name, @Nullable String beforeJoin,
+		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown) {
+		java.util.Properties properties = new java.util.Properties();
+		properties.setProperty("server-port", "25601");
+		properties.setProperty("gamemode", "creative");
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed(seed))
+			.createServer(properties)) {
+			if (beforeJoin != null) {
+				server.runCommand(beforeJoin);
+			}
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				server.runCommand("time set noon");
+				server.runCommand("weather clear");
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
+				settle(context, 60);
+				// The fullscreen map zoomed out, before this visit has spread far: anything
+				// beyond the loaded chunks would be another world's saved map.
+				context.setScreen(MapScreen::new);
+				lookAtPlayer(context, 0.25, TileKey.SURFACE);
+				settle(context, 40);
+				context.takeScreenshot("multiplayer-" + name);
+				if (stripKnown != null) {
+					float known = context.computeOnClient(mc -> overviewKnown(500, Projection.v(70, 0)));
+					if ((known > 0.5F) != stripKnown) {
+						throw new AssertionError("The first world's strip east of spawn is " + known + " known on the " + name + " world");
+					}
+				}
+				context.setScreen(() -> null);
+				List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
+				dev.orthomap.Orthomap.LOGGER.info("Server world {}: waypoints {}", name, names);
+				for (String want : expected) {
+					if (!names.contains(want)) {
+						throw new AssertionError("The " + name + " world is missing waypoint " + want + ": " + names);
+					}
+				}
+				for (String other : unexpected) {
+					if (names.contains(other)) {
+						throw new AssertionError("Another world's waypoint shows on the " + name + " world: " + names);
+					}
+				}
+				if (addWaypoint != null) {
+					context.runOnClient(mc -> {
+						BlockPos at = mc.player.blockPosition();
+						WaypointStore.get().add(new Waypoint(addWaypoint, at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+					});
+					for (int x = 200; x <= 600; x += 200) {
+						server.runCommand("tp @a " + x + " 200 0");
+						context.waitTicks(20);
+						settle(context, 60);
+					}
+				}
+				return context.computeOnClient(mc -> WorldKey.current());
 			}
 		}
 	}
@@ -824,7 +923,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	}
 
 	/** The command a line's click-to-run link carries, or null. */
-	private static @org.jspecify.annotations.Nullable String linkIn(net.minecraft.network.chat.Component line) {
+	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
 			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
@@ -1132,7 +1231,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
 		}
 		return Set.of(env.split(","));
 	}

@@ -1,5 +1,6 @@
 package dev.orthomap;
 
+import dev.orthomap.mixin.BiomeManagerAccessor;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -7,6 +8,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.world.level.storage.LevelResource;
@@ -14,23 +16,33 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Names the world the client is in, so per-world data (waypoints, the saved map) lands in its
- * own folder: the save folder for singleplayer, the server address for multiplayer.
+ * own folder: the save folder for singleplayer; for multiplayer, the server address and the
+ * hashed world seed the server sends with every level, since one address can lead to several
+ * worlds (a network's lobby and survival servers, or a map reset). The seed is the same in each
+ * dimension and stays put when the spawn moves.
  */
 public final class WorldKey {
 	private WorldKey() {
 	}
 
+	/** The world the client is in, or null outside one. */
 	public static @Nullable String current() {
+		return current(Minecraft.getInstance().level);
+	}
+
+	/** The world a level belongs to, or null outside one. */
+	public static @Nullable String current(@Nullable ClientLevel level) {
 		Minecraft mc = Minecraft.getInstance();
 		IntegratedServer server = mc.getSingleplayerServer();
 		if (server != null) {
 			return key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
 		}
 		ServerData data = mc.getCurrentServer();
-		if (data != null) {
-			return key(data.isRealm() ? "realms" : "server", data.ip);
+		if (data == null || level == null) {
+			return null;
 		}
-		return null;
+		String address = key(data.isRealm() ? "realms" : "server", data.ip);
+		return address + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).orthomap$biomeZoomSeed());
 	}
 
 	/** {@code .minecraft/orthomap/<world>}. */
