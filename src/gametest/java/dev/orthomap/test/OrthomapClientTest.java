@@ -1132,7 +1132,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "saved-map");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
 		}
 		return Set.of(env.split(","));
 	}
