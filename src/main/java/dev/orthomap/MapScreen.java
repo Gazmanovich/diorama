@@ -94,16 +94,20 @@ public final class MapScreen extends Screen {
 		this.blips = List.of();
 		if (ServerRules.radarAllowed()) {
 			this.blips = Radar.collect(view, a, true);
-			Radar.draw(graphics, view, this.blips, true);
+			Radar.draw(graphics, view, this.blips, true, false);
 			hovered = Radar.under(this.blips, mouseX, mouseY);
 		}
 		WaypointStore store = WaypointStore.get();
 		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : WaypointOverlay.layout(view, store.in(this.minecraft.level.dimension().identifier().toString()), true);
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
+		Radar.draw(graphics, view, this.blips, true, true);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
 		this.lastView = view;
-		if (hoveredPin != null) {
+		// The tooltip is for whatever is drawn on top: a player, then a waypoint, then a mob.
+		if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
+			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+		} else if (hoveredPin != null) {
 			graphics.setTooltipForNextFrame(this.font, WaypointOverlay.describe(hoveredPin.waypoint(), player), mouseX, mouseY);
 		} else if (hovered != null) {
 			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
