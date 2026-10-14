@@ -1,23 +1,23 @@
 {
 	"schemaVersion": 1,
-	"id": "orthomap",
+	"id": "diorama",
 	"version": "${version}",
-	"name": "Orthomap",
+	"name": "Diorama",
 	"description": "A ray-traced, angled voxel map and minimap.",
 	"authors": [
 		"Dara Adedeji"
 	],
 	"contact": {
-		"homepage": "https://modrinth.com/mod/orthomap",
+		"homepage": "https://modrinth.com/mod/diorama",
 		"sources": "https://github.com/SunkenInTime/minecraft-orthogonal-map",
 		"issues": "https://github.com/SunkenInTime/minecraft-orthogonal-map/issues"
 	},
 	"license": "MIT",
-	"icon": "assets/orthomap/icon.png",
+	"icon": "assets/diorama/icon.png",
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"dev.orthomap.OrthomapClient"
+			"dev.diorama.DioramaClient"
 		]
 	},
 	"depends": {
@@ -27,6 +27,6 @@
 		"fabric-api": "*"
 	},
 	"mixins": [
-		"orthomap.mixins.json"
+		"diorama.mixins.json"
 	]
 }
