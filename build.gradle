@@ -4,7 +4,7 @@ plugins {
 
 loom {
 	mods {
-		"orthomap" {
+		"diorama" {
 			sourceSet sourceSets.main
 		}
 	}
@@ -13,7 +13,7 @@ loom {
 fabricApi {
 	configureTests {
 		createSourceSet = true
-		modId = "orthomap-test"
+		modId = "diorama-test"
 		enableGameTests = false
 		enableClientGameTests = true
 		eula = true

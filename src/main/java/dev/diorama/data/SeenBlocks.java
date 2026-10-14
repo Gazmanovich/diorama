@@ -1,0 +1,105 @@
+package dev.diorama.data;
+
+import dev.diorama.Diorama;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
+import net.minecraft.core.SectionPos;
+
+/**
+ * Which blocks the player has had line of sight to, one bit per block. The client thread is the
+ * only writer and bits are only ever set, so bake threads can read without locking; at worst
+ * they see a block as unseen for one more bake. Saved to disk so fog-of-war progress survives
+ * leaving the world.
+ */
+public final class SeenBlocks {
+	private static final int MAGIC = 0x4F4D5331;
+
+	private final ConcurrentHashMap<Long, long[]> sections = new ConcurrentHashMap<>();
+	private volatile boolean changed;
+
+	public boolean isSeen(int x, int y, int z) {
+		long[] bits = this.sections.get(SectionPos.asLong(x >> 4, y >> 4, z >> 4));
+		if (bits == null) {
+			return false;
+		}
+		int i = index(x, y, z);
+		return (bits[i >>> 6] & (1L << i)) != 0;
+	}
+
+	/** Marks a block seen; true if it wasn't before. */
+	public boolean markSeen(int x, int y, int z) {
+		long[] bits = this.sections.computeIfAbsent(SectionPos.asLong(x >> 4, y >> 4, z >> 4), k -> new long[64]);
+		int i = index(x, y, z);
+		long mask = 1L << i;
+		if ((bits[i >>> 6] & mask) != 0) {
+			return false;
+		}
+		bits[i >>> 6] |= mask;
+		this.changed = true;
+		return true;
+	}
+
+	private static int index(int x, int y, int z) {
+		return ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+	}
+
+	public static SeenBlocks load(Path file) {
+		SeenBlocks seen = new SeenBlocks();
+		if (!Files.isRegularFile(file)) {
+			return seen;
+		}
+		try (InputStream in = Files.newInputStream(file); DataInputStream data = new DataInputStream(new InflaterInputStream(in))) {
+			if (data.readInt() != MAGIC) {
+				return seen;
+			}
+			int count = data.readInt();
+			for (int s = 0; s < count; s++) {
+				long key = data.readLong();
+				long[] bits = new long[64];
+				for (int i = 0; i < 64; i++) {
+					bits[i] = data.readLong();
+				}
+				seen.sections.put(key, bits);
+			}
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't read fog-of-war progress from {}", file, e);
+		}
+		return seen;
+	}
+
+	/** Writes the bits if any changed since the last save. Client thread. */
+	public void save(Path file) {
+		if (!this.changed) {
+			return;
+		}
+		this.changed = false;
+		try {
+			Files.createDirectories(file.getParent());
+			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+			try (OutputStream out = Files.newOutputStream(temp); DataOutputStream data = new DataOutputStream(new DeflaterOutputStream(out))) {
+				data.writeInt(MAGIC);
+				data.writeInt(this.sections.size());
+				for (Map.Entry<Long, long[]> entry : this.sections.entrySet()) {
+					data.writeLong(entry.getKey());
+					for (long word : entry.getValue()) {
+						data.writeLong(word);
+					}
+				}
+			}
+			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		} catch (IOException | RuntimeException e) {
+			this.changed = true;
+			Diorama.LOGGER.error("Couldn't save fog-of-war progress to {}", file, e);
+		}
+	}
+}
