@@ -67,7 +67,7 @@ public final class Radar {
 		return null;
 	}
 
-	/** Everything the radar can show inside the view, players last so they draw on top. */
+	/** Everything the radar can show inside the view, players last. */
 	public static List<Blip> collect(MapViewport.View view, float partialTick, boolean fullscreen) {
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel level = mc.level;
@@ -121,10 +121,18 @@ public final class Radar {
 		return fullscreen ? (float) Math.max(4, Math.min(9, zoom * 2.2)) : 4;
 	}
 
-	public static void draw(GuiGraphicsExtractor graphics, MapViewport.View view, List<Blip> blips, boolean fullscreen) {
+	/**
+	 * Draws either the players or everything else. Maps draw mobs, then waypoints, then players,
+	 * so a player standing at a waypoint shows on top of its marker and a crowd of mobs doesn't
+	 * hide one.
+	 */
+	public static void draw(GuiGraphicsExtractor graphics, MapViewport.View view, List<Blip> blips, boolean fullscreen, boolean players) {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		Font font = Minecraft.getInstance().font;
 		for (Blip blip : blips) {
+			if ((blip.kind() == Kind.PLAYER) != players) {
+				continue;
+			}
 			int alpha = alphaFor(blip.dy());
 			float s = blip.size();
 			if (blip.kind() == Kind.PLAYER && blip.entity() instanceof AbstractClientPlayer player) {

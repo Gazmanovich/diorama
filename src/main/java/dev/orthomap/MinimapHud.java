@@ -59,13 +59,13 @@ public final class MinimapHud implements HudElement {
 		graphics.fill(x - 1, y - 1, x + size + 1, y + size + 1, 0x60FFFFFF);
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer);
 		this.viewport.draw(graphics, session.map(), view);
-		if (ServerRules.radarAllowed()) {
-			Radar.draw(graphics, view, Radar.collect(view, partialTick, false), false);
-		}
+		List<Radar.Blip> blips = ServerRules.radarAllowed() ? Radar.collect(view, partialTick, false) : List.of();
+		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
 			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, store.in(mc.level.dimension().identifier().toString()), false), false, null);
 		}
+		Radar.draw(graphics, view, blips, false, true);
 		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, player.getViewYRot(partialTick), 5);
 		if (settings.compass) {
 			this.compass(graphics, font, x, y, size);
