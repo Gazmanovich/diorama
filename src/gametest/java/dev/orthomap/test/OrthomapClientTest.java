@@ -20,6 +20,8 @@ import dev.orthomap.waypoint.WaypointShare;
 import dev.orthomap.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
 import com.mojang.authlib.GameProfile;
@@ -35,6 +37,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Drives the real game through the map's views and saves screenshots, so a person can look at
@@ -117,11 +120,21 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	 * apart goes to the first world seen.
 	 */
 	private static void multiplayer(ClientGameTestContext context) {
-		context.runOnClient(mc -> WaypointStore.open(WorldKey.key("server", "localhost:25601"))
-			.add(new Waypoint("Old Camp", 0, 64, 0, "minecraft:overworld", Waypoint.PALETTE[2])));
-		String first = playOnServer(context, "orthomap-first", "first", null, "Camp First", List.of("Old Camp"), List.of());
-		String second = playOnServer(context, "orthomap-second", "second", null, "Camp Second", List.of(), List.of("Old Camp", "Camp First"));
-		String again = playOnServer(context, "orthomap-first", "first-again", "setworldspawn 40 90 40", null, List.of("Old Camp", "Camp First"), List.of("Camp Second"));
+		String address = WorldKey.key("server", "localhost:25601");
+		context.runOnClient(mc -> {
+			// Start from nothing saved for this address, then save a waypoint the old way.
+			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
+				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(address)).toList()) {
+					org.apache.commons.io.FileUtils.deleteDirectory(folder.toFile());
+				}
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+			WaypointStore.open(address).add(new Waypoint("Old Camp", 0, 64, 0, "minecraft:overworld", Waypoint.PALETTE[2]));
+		});
+		String first = playOnServer(context, "orthomap-first", "first", null, "Camp First", List.of("Old Camp"), List.of(), null);
+		String second = playOnServer(context, "orthomap-second", "second", null, "Camp Second", List.of(), List.of("Old Camp", "Camp First"), false);
+		String again = playOnServer(context, "orthomap-first", "first-again", "setworldspawn 40 90 40", null, List.of("Old Camp", "Camp First"), List.of("Camp Second"), true);
 		if (first.equals(second)) {
 			throw new AssertionError("Two worlds on one server address share a map folder: " + first);
 		}
@@ -133,21 +146,22 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	/**
 	 * Joins a fresh dedicated server for this seed, always on the same address, and checks its
 	 * waypoints. The first visit to a world adds a waypoint and maps a strip east of spawn that
-	 * the other world won't load. Returns the world's folder key.
+	 * the other world won't load. {@code stripKnown}, if not null, is whether that strip should
+	 * show on the zoomed-out map from what's saved. Returns the world's folder key.
 	 */
-	private static String playOnServer(ClientGameTestContext context, String seed, String name, @org.jspecify.annotations.Nullable String beforeJoin,
-		@org.jspecify.annotations.Nullable String addWaypoint, List<String> expected, List<String> unexpected) {
+	private static String playOnServer(ClientGameTestContext context, String seed, String name, @Nullable String beforeJoin,
+		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown) {
 		java.util.Properties properties = new java.util.Properties();
 		properties.setProperty("server-port", "25601");
 		properties.setProperty("gamemode", "creative");
-		try (net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server = context.worldBuilder()
+		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> s.setSeed(seed))
 			.createServer(properties)) {
 			if (beforeJoin != null) {
 				server.runCommand(beforeJoin);
 			}
-			try (net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection connection = server.connect()) {
+			try (TestDedicatedServerConnection connection = server.connect()) {
 				server.runCommand("time set noon");
 				server.runCommand("weather clear");
 				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
@@ -158,6 +172,12 @@ public class OrthomapClientTest implements FabricClientGameTest {
 				lookAtPlayer(context, 0.25, TileKey.SURFACE);
 				settle(context, 40);
 				context.takeScreenshot("multiplayer-" + name);
+				if (stripKnown != null) {
+					float known = context.computeOnClient(mc -> overviewKnown(500, Projection.v(70, 0)));
+					if (known > 0.5F != stripKnown) {
+						throw new AssertionError("The first world's strip east of spawn is " + known + " known on the " + name + " world");
+					}
+				}
 				context.setScreen(() -> null);
 				List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
 				dev.orthomap.Orthomap.LOGGER.info("Server world {}: waypoints {}", name, names);
@@ -905,7 +925,7 @@ public class OrthomapClientTest implements FabricClientGameTest {
 	}
 
 	/** The command a line's click-to-run link carries, or null. */
-	private static @org.jspecify.annotations.Nullable String linkIn(net.minecraft.network.chat.Component line) {
+	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
 			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
