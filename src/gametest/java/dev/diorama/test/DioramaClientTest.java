@@ -34,6 +34,11 @@ import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderSet;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -72,6 +77,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
 				styleTour(context, world);
+			}
+			if (tests.contains("showcase")) {
+				showcase(context, world);
 			}
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
@@ -399,6 +407,127 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		best.forEach((mode, nanos) -> dev.diorama.Diorama.LOGGER.info("BENCH {}: {} ms per tile", mode, nanos / 9 / 1_000_000));
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
+	}
+
+	/**
+	 * Builds {@link ShowcaseScene}'s castle beside the nearest village and photographs it for the
+	 * store page: in game with the minimap, the fullscreen map from close up to far out, the caves
+	 * under the castle, waypoints on the map and in the world, and the Nether over a fortress.
+	 * Opt-in with {@code DIORAMA_TESTS=showcase}; {@code DIORAMA_GIF=1} adds a zoom-out.
+	 */
+	private static void showcase(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.getInput().resizeWindow(1920, 1080);
+		world.getServer().runCommand("difficulty peaceful");
+		BlockPos village = world.getServer().computeOnServer(server ->
+			server.overworld().findNearestMapStructure(StructureTags.VILLAGE, BlockPos.ZERO, 100, false));
+		if (village == null) {
+			throw new AssertionError("No village near spawn");
+		}
+		int cx = village.getX() + Integer.getInteger("diorama.castleDx", 0);
+		int cz = village.getZ() + Integer.getInteger("diorama.castleDz", -110);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + (cz + 40));
+		context.waitTicks(100);
+		ShowcaseScene scene = world.getServer().computeOnServer(server -> ShowcaseScene.site(server.overworld(), cx, cz));
+		int base = scene.base();
+		world.getServer().runCommand("time set noon");
+		dev.diorama.Diorama.LOGGER.info("Showcase castle at {} {} {}, village at {}", cx, base, cz, village);
+		context.runOnClient(mc -> {
+			Settings.get().radarNeutral = false;
+			Settings.get().radarPassive = false;
+		});
+		context.getInput().setCursorPos(0, 0);
+
+		// Copper roofs by default; DIORAMA_ROOFS=1 photographs the other roofs that were tried.
+		String[][] roofs = "1".equals(System.getenv("DIORAMA_ROOFS"))
+			? new String[][] {
+				{"deepslate_tiles", "deepslate_tile_stairs"},
+				{"dark_prismarine", "dark_prismarine_stairs"},
+				{"red_nether_bricks", "red_nether_brick_stairs"},
+				{"bricks", "brick_stairs"},
+				{"waxed_oxidized_cut_copper", "waxed_oxidized_cut_copper_stairs"}}
+			: new String[][] {{"waxed_oxidized_cut_copper", "waxed_oxidized_cut_copper_stairs"}};
+		double v = Projection.v(base + 12, cz);
+		for (String[] roof : roofs) {
+			world.getServer().runOnServer(server -> scene.castle(roof[0], roof[1]));
+			if (roofs.length > 1) {
+				context.setScreen(MapScreen::new);
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, 3.2, TileKey.SURFACE));
+				settle(context, 100);
+				context.takeScreenshot("showcase-roof-" + roof[0]);
+				context.setScreen(() -> null);
+			}
+		}
+
+		// In game: past the wheat fields, looking up the road to the gate.
+		world.getServer().runCommand("gamemode spectator @a");
+		world.getServer().runCommand("tp @a " + (cx + 0.5) + " " + (base + 4) + " " + (cz + 92.5) + " 180 -4");
+		context.waitTicks(60);
+		settle(context, 60);
+		context.takeScreenshot("showcase-01-in-game");
+
+		context.setScreen(MapScreen::new);
+		for (double zoom : new double[] {6, 3.2, 2.2, 1.2, 0.8}) {
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, zoom, TileKey.SURFACE));
+			settle(context, 60);
+			context.takeScreenshot("showcase-map-zoom-" + zoom);
+		}
+		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
+			for (int frame = 0; frame < 90; frame++) {
+				double zoom = 6 * Math.pow(0.8 / 6, frame / 89.0);
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, zoom, TileKey.SURFACE));
+				context.waitTicks(2);
+				context.takeScreenshot(String.format("showcase-gif-%03d", frame));
+			}
+		}
+
+		// The cave view under the castle.
+		int caveY = Integer.getInteger("diorama.showcaseCaveY", 30);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, Projection.v(caveY, cz), 2.4, caveY));
+		settle(context, 100);
+		context.takeScreenshot("showcase-cave");
+		context.setScreen(() -> null);
+
+		// Waypoints: on the map, then as labels in the world, seen from the village.
+		int villageY = world.getServer().computeOnServer(server ->
+			server.overworld().getChunk(village).getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, village.getX() & 15, village.getZ() & 15));
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			String overworld = "minecraft:overworld";
+			store.add(new Waypoint("Castle", cx, base + 1, cz - 10, overworld, Waypoint.PALETTE[3]));
+			store.add(new Waypoint("Village", village.getX(), villageY, village.getZ(), overworld, Waypoint.PALETTE[1]));
+			store.add(new Waypoint("Wheat", cx + 12, base - 4, cz + 66, overworld, Waypoint.PALETTE[2]));
+			store.add(new Waypoint("Iron mine", cx + 150, base - 30, cz - 40, overworld, Waypoint.PALETTE[6]));
+		});
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, Projection.v(base, cz + 50), 1.3, TileKey.SURFACE));
+		settle(context, 60);
+		context.takeScreenshot("showcase-waypoints-map");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("tp @a " + (cx + 14.5) + " " + (base + 3) + " " + (cz + 120.5) + " 172 -6");
+		context.waitTicks(60);
+		settle(context, 40);
+		context.runOnClient(mc -> mc.gui.hud.getChat().clearMessages(false));
+		context.takeScreenshot("showcase-waypoints-in-world");
+
+		// The Nether from above, over the nearest fortress.
+		BlockPos fortress = world.getServer().computeOnServer(server -> {
+			ServerLevel nether = server.getLevel(net.minecraft.world.level.Level.NETHER);
+			HolderSet<Structure> wanted = HolderSet.direct(server.registryAccess().lookupOrThrow(Registries.STRUCTURE).getOrThrow(BuiltinStructures.FORTRESS));
+			var found = nether.getChunkSource().getGenerator().findNearestMapStructure(nether, wanted, BlockPos.ZERO, 100, false);
+			return found == null ? new BlockPos(48, 70, 48) : found.getFirst();
+		});
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + fortress.getX() + " 75 " + fortress.getZ());
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
+			&& MapSession.get().map().chunkCount() > 200, 2400);
+		context.runOnClient(mc -> Settings.get().radarHostile = false);
+		settle(context, 100);
+		context.setScreen(MapScreen::new);
+		for (double zoom : new double[] {2.6, 1.0}) {
+			lookAtPlayer(context, zoom, TileKey.SURFACE);
+			settle(context, 80);
+			context.takeScreenshot("showcase-nether-" + zoom);
+		}
+		context.setScreen(() -> null);
 	}
 
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */
