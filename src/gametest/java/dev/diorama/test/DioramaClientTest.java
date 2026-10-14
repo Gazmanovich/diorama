@@ -55,6 +55,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> mc.options.renderDistance().set(12));
 		String seed = System.getProperty("diorama.seed", "diorama");
 		Set<String> tests = selectedTests();
+		if (tests.contains("showcase") && tests.size() > 1) {
+			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
+			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
+		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
 		try (TestSingleplayerContext world = context.worldBuilder()

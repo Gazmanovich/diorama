@@ -486,7 +486,7 @@ final class ShowcaseScene {
 
 	/** The top solid block of a column, ignoring leaves. */
 	private int surface(int x, int z) {
-		return level.getChunk(x >> 4, z >> 4).getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15) - 1;
+		return level.getChunk(x >> 4, z >> 4).getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15);
 	}
 
 	/** A ring of oaks and birches around the moat, clear of the road, and two in the courtyard. */
