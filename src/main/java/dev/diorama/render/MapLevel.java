@@ -2,6 +2,7 @@ package dev.diorama.render;
 
 import dev.diorama.Diorama;
 import dev.diorama.Projection;
+import dev.diorama.bake.BiomeTints;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.Overlays;
@@ -298,6 +299,19 @@ public final class MapLevel implements ChunkSource {
 			// Rays from any height could have stopped at this chunk while it was unknown. The sky
 			// view only reaches down to the surface; cave slices can be anywhere below it.
 			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+			// Neighbours whose tints were blended before this chunk arrived blended its edge against
+			// the fallback biome. Their next bake blends again; make sure there is one.
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dz = -1; dz <= 1; dz++) {
+					ChunkSnapshot neighbour = this.chunks.get(ChunkSnapshot.key(snapshot.chunkX + dx, snapshot.chunkZ + dz));
+					ChunkSnapshot.Tints tints = neighbour == null ? null : neighbour.tints();
+					if (tints != null && (tints.missing() & BiomeTints.neighbourBit(-dx, -dz)) != 0) {
+						int nx = neighbour.chunkX << 4;
+						int nz = neighbour.chunkZ << 4;
+						this.invalidate(nx, Math.min(neighbour.floorY, this.topY), this.minY, nz, nx + 15, this.topY, nz + 15, true, true);
+					}
+				}
+			}
 		} else {
 			// Under a roof the sky view is lit by block light, so light is part of what's saved.
 			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;

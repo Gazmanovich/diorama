@@ -1,6 +1,7 @@
 package dev.diorama.bake;
 
 import dev.diorama.data.ChunkSnapshot;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.ARGB;
@@ -22,23 +23,58 @@ public final class BiomeTints {
 		BiomeColors.WATER_COLOR_RESOLVER,
 	};
 
+	private static final AtomicInteger REBLENDS = new AtomicInteger();
+
 	private BiomeTints() {
 	}
 
-	/** The snapshot's tints, blended now if no bake has needed them yet. Any thread. */
+	/** How many times tints were blended again because a missing neighbour arrived. For tests. */
+	public static int reblends() {
+		return REBLENDS.get();
+	}
+
+	/**
+	 * The snapshot's tints, blended now if no bake has needed them yet, or blended again if a
+	 * neighbouring chunk the last blend had to do without has arrived since. Any thread.
+	 */
 	public static ChunkSnapshot.Tints of(ChunkSnapshot snapshot, ChunkSource source) {
 		ChunkSnapshot.Tints tints = snapshot.tints();
-		if (tints == null) {
+		// Only arrivals count: a neighbour trimmed from the map since took nothing from the blend.
+		if (tints == null || tints.missing() != 0 && (tints.missing() & ~missing(snapshot, source)) != 0) {
+			if (tints != null) {
+				REBLENDS.incrementAndGet();
+			}
 			tints = blend(snapshot, source);
 			snapshot.setTints(tints);
 		}
 		return tints;
 	}
 
+	/** Bit for the neighbouring chunk at this offset, in {@link ChunkSnapshot.Tints#missing()}. */
+	public static int neighbourBit(int dx, int dz) {
+		return 1 << ((dx + 1) * 3 + dz + 1);
+	}
+
+	/** The neighbouring chunks the source has no snapshot of, as {@link #neighbourBit} bits. */
+	private static int missing(ChunkSnapshot snapshot, ChunkSource source) {
+		int missing = 0;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if ((dx != 0 || dz != 0) && source.chunk(snapshot.chunkX + dx, snapshot.chunkZ + dz) == null) {
+					missing |= neighbourBit(dx, dz);
+				}
+			}
+		}
+		return missing;
+	}
+
 	/** Blends the snapshot's tints from the snapshots the source has now. Any thread. */
 	public static ChunkSnapshot.Tints blend(ChunkSnapshot snapshot, ChunkSource source) {
-		// Biomes in neighbouring chunks come from their snapshots; where there is none, the game
-		// would find no chunk either and use its fallback biome.
+		// Checked before blending, so a neighbour arriving partway through counts as missing and
+		// gets blended in next time.
+		int missing = missing(snapshot, source);
+		// Biomes in neighbouring chunks come from their snapshots. Where the map has none yet, the
+		// game's fallback biome stands in until it arrives; see of().
 		BiomeManager biomes = new BiomeManager((quartX, quartY, quartZ) -> {
 			int chunkX = quartX >> 2;
 			int chunkZ = quartZ >> 2;
@@ -78,6 +114,6 @@ public final class BiomeTints {
 				}
 			}
 		}
-		return new ChunkSnapshot.Tints(colors[0], colors[1], colors[2], colors[3]);
+		return new ChunkSnapshot.Tints(colors[0], colors[1], colors[2], colors[3], missing);
 	}
 }

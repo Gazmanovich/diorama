@@ -171,8 +171,11 @@ public final class ChunkSnapshot {
 		this.tints = tints;
 	}
 
-	/** Blended biome tints per column, as 0xRRGGBB, indexed {@code (z << 4) | x}. */
-	public record Tints(int[] grass, int[] foliage, int[] dryFoliage, int[] water) {
+	/**
+	 * Blended biome tints per column, as 0xRRGGBB, indexed {@code (z << 4) | x}. {@code missing}
+	 * holds the neighbouring chunks the blend had no snapshot of, as {@code BiomeTints.neighbourBit}s.
+	 */
+	public record Tints(int[] grass, int[] foliage, int[] dryFoliage, int[] water, int missing) {
 	}
 
 	public long key() {

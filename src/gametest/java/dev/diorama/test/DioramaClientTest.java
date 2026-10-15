@@ -563,7 +563,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 						continue;
 					}
 					ChunkSnapshot snapshot = map.chunk(cx, cz);
-					ChunkSnapshot.Tints tints = BiomeTints.blend(snapshot, map);
+					// What the last bake used, as it stands: a chunk blended before a neighbour arrived must have been blended again.
+					ChunkSnapshot.Tints tints = snapshot.tints() != null ? snapshot.tints() : BiomeTints.blend(snapshot, map);
 					for (int z = 0; z < 16; z++) {
 						for (int x = 0; x < 16; x++) {
 							pos.set((cx << 4) + x, snapshot.surface(x, z), (cz << 4) + z);
@@ -586,15 +587,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 					}
 				}
 			}
-			return columns + " " + wrong + " " + example;
+			return columns + " " + wrong + " " + BiomeTints.reblends() + " " + example;
 		});
-		String[] parts = result.split(" ", 3);
-		dev.diorama.Diorama.LOGGER.info("Biome tints checked against the game's for {} columns: {} differ", parts[0], parts[1]);
+		String[] parts = result.split(" ", 4);
+		dev.diorama.Diorama.LOGGER.info("Biome tints checked against the game's for {} columns: {} differ; {} blended again after a neighbour arrived", parts[0], parts[1], parts[2]);
 		if (Integer.parseInt(parts[0]) < 1000) {
 			throw new AssertionError("Too few columns to check biome tints: " + parts[0]);
 		}
 		if (!parts[1].equals("0")) {
-			throw new AssertionError(parts[1] + " biome tints differ from the game's, for example " + parts[2]);
+			throw new AssertionError(parts[1] + " biome tints differ from the game's, for example " + parts[3]);
 		}
 	}
 
