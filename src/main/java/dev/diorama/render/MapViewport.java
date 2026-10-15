@@ -30,6 +30,11 @@ public final class MapViewport {
 	private @Nullable GpuTexture maskTexture;
 	private @Nullable GpuTextureView maskView;
 	private final int[] maskPixels = new int[MASK * MASK];
+	/** What the mask texture was last built from; it only needs building again when this changes. */
+	private @Nullable MaskInputs maskInputs;
+
+	private record MaskInputs(MapLevel level, long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded) {
+	}
 
 	/** Where and how big a map is drawn, and what part of the map it shows. */
 	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
@@ -197,6 +202,15 @@ public final class MapViewport {
 			this.maskView = RenderSystem.getDevice().createTextureView(this.maskTexture);
 		}
 		int lod = lodFor(level, view);
+		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
+		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
+		// only eat small explored areas that are a few texels across.
+		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
+		MaskInputs inputs = new MaskInputs(level, level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded);
+		if (inputs.equals(this.maskInputs)) {
+			return;
+		}
+		this.maskInputs = inputs;
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double cellUnits = units / Projection.COVERAGE_CELLS;
 		int lastTu = Integer.MIN_VALUE;
@@ -222,10 +236,7 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}
 		}
-		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
-		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
-		// only eat small explored areas that are a few texels across.
-		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16) {
+		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
@@ -284,5 +295,6 @@ public final class MapViewport {
 			this.maskTexture.close();
 			this.maskTexture = null;
 		}
+		this.maskInputs = null;
 	}
 }
