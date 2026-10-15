@@ -9,6 +9,7 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
+import java.lang.ref.WeakReference;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
@@ -32,8 +33,10 @@ public final class MapViewport {
 	private final int[] maskPixels = new int[MASK * MASK];
 	/** What the mask texture was last built from; it only needs building again when this changes. */
 	private @Nullable MaskInputs maskInputs;
+	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
+	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(MapLevel level, long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded) {
+	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded) {
 	}
 
 	/** Where and how big a map is drawn, and what part of the map it shows. */
@@ -206,11 +209,12 @@ public final class MapViewport {
 		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
 		// only eat small explored areas that are a few texels across.
 		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
-		MaskInputs inputs = new MaskInputs(level, level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded);
-		if (inputs.equals(this.maskInputs)) {
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded);
+		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
 		this.maskInputs = inputs;
+		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double cellUnits = units / Projection.COVERAGE_CELLS;
 		int lastTu = Integer.MIN_VALUE;
