@@ -136,7 +136,11 @@ public final class WaypointEditScreen extends Screen {
 	private void share() {
 		java.util.Optional<String> text = WaypointShare.format(this.shown());
 		if (text.isEmpty()) {
+			//? if >=26.1 {
 			this.minecraft.gui.hud.getChat().addClientSystemMessage(Component.translatable("diorama.share.too_long"));
+			//?} else {
+			/*this.minecraft.gui.getChat().addMessage(Component.translatable("diorama.share.too_long"));
+			*///?}
 			return;
 		}
 		if (this.minecraft.player != null) {

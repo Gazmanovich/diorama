@@ -8,7 +8,11 @@ import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+//? if >=26.1 {
 import net.minecraft.client.gui.components.PlayerFaceExtractor;
+//?} else {
+/*import net.minecraft.client.gui.components.PlayerFaceRenderer;
+*///?}
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
@@ -142,7 +146,11 @@ public final class Radar {
 				graphics.pose().pushMatrix();
 				graphics.pose().translate(x0, y0);
 				graphics.pose().scale(s / 8);
+				//? if >=26.1 {
 				PlayerFaceExtractor.extractRenderState(graphics, player.getSkin(), 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
+				//?} else {
+				/*PlayerFaceRenderer.draw(graphics, player.getSkin(), 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
+				*///?}
 				graphics.pose().popMatrix();
 				if (fullscreen) {
 					String name = player.getName().getString();

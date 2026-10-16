@@ -16,7 +16,12 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
  */
 @Mixin(ChatComponent.class)
 public abstract class ChatComponentMixin {
+	//? if >=26.1 {
 	@ModifyVariable(method = "addMessage", at = @At("HEAD"), argsOnly = true)
+	//?} else {
+	/*// The one-argument overload passes its line on to this one, so only this one is hooked.
+	@ModifyVariable(method = "addMessage(Lnet/minecraft/network/chat/Component;Lnet/minecraft/network/chat/MessageSignature;Lnet/minecraft/client/GuiMessageTag;)V", at = @At("HEAD"), argsOnly = true)
+	*///?}
 	private Component diorama$linkSharedWaypoint(Component contents) {
 		return WaypointShare.withAddLink(contents);
 	}
