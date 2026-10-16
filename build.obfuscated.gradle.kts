@@ -33,3 +33,28 @@ dependencies {
 }
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))
+
+// The tests, run against the remapped release jar in a production environment. In development the
+// game uses Mojang's names; a real install uses intermediary ones, so anything that reflects on the
+// game by name only fails there.
+val gametest = sourceSets.named("gametest")
+val gametestJar = tasks.register<Jar>("gametestJar") {
+	from(gametest.map { it.output })
+	archiveClassifier = "gametest-dev"
+	destinationDirectory = layout.buildDirectory.dir("devlibs")
+}
+val remapGametestJar = tasks.register<net.fabricmc.loom.task.RemapJarTask>("remapGametestJar") {
+	inputFile = gametestJar.flatMap { it.archiveFile }
+	archiveClassifier = "gametest"
+}
+// Fabric API as published, in intermediary names, plus the client game test module it doesn't bundle.
+val productionMods = configurations.create("productionMods") { isTransitive = false }
+dependencies {
+	productionMods("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
+	productionMods("net.fabricmc.fabric-api:fabric-client-gametest-api-v1:${property("client_gametest_api_version")}")
+}
+tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProductionClientGameTest") {
+	mods.from(tasks.named("remapJar"), remapGametestJar, productionMods)
+	jvmArgs.add("-Dfabric.client.gametest")
+	runDir = layout.buildDirectory.dir("run-production")
+}
