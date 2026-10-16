@@ -76,6 +76,8 @@ public final class MapLevel implements ChunkSource {
 
 	// Render thread only below here.
 	private final Map<TileKey, MapTile> tiles = new HashMap<>();
+	/** Goes up whenever a tile's coverage changes or a tile comes or goes; see {@link #coverageVersion()}. */
+	private long coverageVersion;
 	private final Map<TileKey, Dirty> dirty = new HashMap<>();
 	private final Map<TileKey, Double> wanted = new HashMap<>();
 	private final Set<TileKey> inFlight = new HashSet<>();
@@ -254,8 +256,17 @@ public final class MapLevel implements ChunkSource {
 				e.getValue().close();
 				it.remove();
 				this.dirty.remove(e.getKey());
+				this.coverageVersion++;
 			}
 		}
+	}
+
+	/**
+	 * A number that changes whenever what {@link #peek} returns could show different coverage,
+	 * so a view can keep its fog mask until it does.
+	 */
+	public long coverageVersion() {
+		return this.coverageVersion;
 	}
 
 	private int generation(TileKey key) {
@@ -494,6 +505,7 @@ public final class MapLevel implements ChunkSource {
 				MapTile stale = this.tiles.remove(image.key());
 				if (stale != null) {
 					stale.close();
+					this.coverageVersion++;
 				}
 				if (background) {
 					this.unsaved.put(image.key(), 0L);
@@ -522,6 +534,7 @@ public final class MapLevel implements ChunkSource {
 				this.tiles.put(image.key(), tile);
 			}
 			tile.upload(image);
+			this.coverageVersion++;
 			if (this.store != null && !image.key().isCave() && image.key().lod() == 0) {
 				this.store.baked(image);
 			}
@@ -666,6 +679,7 @@ public final class MapLevel implements ChunkSource {
 			}
 			e.getValue().close();
 			this.tiles.remove(e.getKey());
+			this.coverageVersion++;
 			if (this.dirty.remove(e.getKey()) != null && this.store != null && !e.getKey().isCave() && e.getKey().lod() == 0) {
 				// Changed since it was last baked: bake it once more in the background so the change is saved.
 				this.unsaved.put(e.getKey(), 0L);
@@ -696,6 +710,7 @@ public final class MapLevel implements ChunkSource {
 			tile.close();
 		}
 		this.tiles.clear();
+		this.coverageVersion++;
 		this.chunks.clear();
 	}
 
