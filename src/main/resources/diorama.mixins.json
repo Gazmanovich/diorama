@@ -1,7 +1,7 @@
 {
 	"required": true,
 	"package": "dev.diorama.mixin",
-	"compatibilityLevel": "JAVA_25",
+	"compatibilityLevel": "JAVA_${java}",
 	"client": [
 		"BiomeManagerAccessor",
 		"ChatComponentMixin",
