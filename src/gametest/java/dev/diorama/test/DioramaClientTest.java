@@ -563,15 +563,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 						continue;
 					}
 					ChunkSnapshot snapshot = map.chunk(cx, cz);
-					// Edges blended before a neighbour loaded aren't the subject here, only the blend itself.
-					for (int dx = -1; dx <= 1; dx++) {
-						for (int dz = -1; dz <= 1; dz++) {
-							surrounded &= snapshot.hasBiomesAround(dx, dz);
-						}
-					}
-					if (!surrounded) {
-						continue;
-					}
 					// What the last bake used, as it stands.
 					ChunkSnapshot.Tints tints = snapshot.tints() != null ? snapshot.tints() : BiomeTints.blend(snapshot);
 					for (int z = 0; z < 16; z++) {
