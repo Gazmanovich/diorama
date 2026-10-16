@@ -536,6 +536,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */
 	private static void tour(ClientGameTestContext context, TestSingleplayerContext world) {
+		// Fancy for the shots the Fast ones further down are compared with.
+		setQuality(context, Settings.Quality.FANCY);
 		context.takeScreenshot("diorama-01-minimap");
 
 		context.setScreen(MapScreen::new);
