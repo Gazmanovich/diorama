@@ -1,10 +1,18 @@
 package dev.diorama.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+//? if >=26.1 {
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+//?} else {
+/*import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.TextureFormat;
+*///?}
 import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
@@ -108,9 +116,15 @@ public final class MapTile {
 		if (this.overlay == null) {
 			GpuDevice device = RenderSystem.getDevice();
 			int size = Projection.TILE_PIXELS;
+			//? if >=26.1 {
 			this.overlay = device.createTexture(
 				"diorama overlay", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
 			);
+			//?} else {
+			/*this.overlay = device.createTexture(
+				"diorama overlay", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, TextureFormat.RGBA8, size, size, 1, 1
+			);
+			*///?}
 			this.overlayView = device.createTextureView(this.overlay);
 			this.overlayShown = -1;
 		}
@@ -160,7 +174,11 @@ public final class MapTile {
 		this.texture = device.createTexture(
 			"diorama tile " + image.key(),
 			GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST,
+			//? if >=26.1 {
 			GpuFormat.RGBA8_UNORM,
+			//?} else {
+			/*TextureFormat.RGBA8,
+			*///?}
 			size,
 			size,
 			1,
@@ -174,7 +192,11 @@ public final class MapTile {
 		ByteBuffer buffer = MemoryUtil.memAlloc(edge * edge * 4).order(ByteOrder.LITTLE_ENDIAN);
 		try {
 			buffer.asIntBuffer().put(pixels, 0, edge * edge);
+			//? if >=26.1 {
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, level, 0, x, y, edge, edge);
+			//?} else {
+			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, NativeImage.Format.RGBA, level, 0, x, y, edge, edge);
+			*///?}
 		} finally {
 			MemoryUtil.memFree(buffer);
 		}
