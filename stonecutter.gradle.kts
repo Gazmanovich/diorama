@@ -26,6 +26,8 @@ stonecutter parameters {
 		"\\.gui\\.setScreen\\(" to ".setScreen(",
 		"\\.gui\\.screen\\(\\)" to ".screen",
 		"\\.gui\\.hud\\." to ".gui.",
+		// The camera had a getter.
+		"\\.mainCamera\\(\\)" to ".getMainCamera()",
 		// ChunkPos was a class with fields.
 		"getPos\\(\\)\\.([xz])\\(\\)" to "getPos().$1",
 		// Entity type constants lived on EntityType.

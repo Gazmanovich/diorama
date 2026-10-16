@@ -20,6 +20,9 @@ import org.jspecify.annotations.Nullable;
 public final class TileBaker {
 	/** Rotated-grid sample offsets inside a pixel. */
 	private static final double[][] SAMPLES = {{0.375, 0.125}, {0.875, 0.375}, {0.125, 0.625}, {0.625, 0.875}};
+	/** One sample in the middle of the pixel: a quarter of the work, with jaggier block edges. */
+	private static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
+	private static volatile boolean fast;
 
 	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
 	private static final double SUN_AZIMUTH_X = -0.878;
@@ -190,6 +193,15 @@ public final class TileBaker {
 	 * Bakes the whole tile, or only the {@link TileImage#BLOCK}-pixel blocks set in {@code blocks}.
 	 * {@code fogOfWar} is the cave mode when the bake was scheduled, so it matches its generation.
 	 */
+	/** Whether bakes take one sample per pixel instead of four. Set from the Quality setting. */
+	public static boolean fast() {
+		return fast;
+	}
+
+	public static void setFast(boolean value) {
+		fast = value;
+	}
+
 	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar) {
 		return bake(key, source, looks, blocks, fogOfWar, null);
 	}
@@ -275,6 +287,7 @@ public final class TileBaker {
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
+		double[][] samples = fast ? FAST_SAMPLES : SAMPLES;
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				float r = 0;
@@ -282,9 +295,9 @@ public final class TileBaker {
 				float b = 0;
 				float d = 0;
 				int known = 0;
-				for (int s = 0; s < SAMPLES.length; s++) {
-					double u = minU + (px0 + x - border + SAMPLES[s][0]) * unitsPerPixel;
-					double v = minV + (py0 + y - border + SAMPLES[s][1]) * unitsPerPixel;
+				for (int s = 0; s < samples.length; s++) {
+					double u = minU + (px0 + x - border + samples[s][0]) * unitsPerPixel;
+					double v = minV + (py0 + y - border + samples[s][1]) * unitsPerPixel;
 					if (this.trace(u, v, s)) {
 						if (s == 0 && info != null && this.hitSolid) {
 							int ix = x - border;
@@ -301,7 +314,7 @@ public final class TileBaker {
 					}
 				}
 				if (known > 0) {
-					pixels[y * w + x] = this.abgr(r / known, g / known, b / known, known * 255 / SAMPLES.length);
+					pixels[y * w + x] = this.abgr(r / known, g / known, b / known, known * 255 / samples.length);
 				}
 				if (depth != null) {
 					depth[y * w + x] = known > 0 ? d / known : Float.NaN;
@@ -541,11 +554,12 @@ public final class TileBaker {
 			return 0xFFFFFF;
 		}
 		int i = ((z & 15) << 4) | (x & 15);
+		ChunkSnapshot.Tints tints = BiomeTints.of(snapshot);
 		return switch (kind) {
-			case BlockLooks.TINT_GRASS -> snapshot.grass[i];
-			case BlockLooks.TINT_FOLIAGE -> snapshot.foliage[i];
-			case BlockLooks.TINT_DRY_FOLIAGE -> snapshot.dryFoliage[i];
-			case BlockLooks.TINT_WATER -> snapshot.water[i];
+			case BlockLooks.TINT_GRASS -> tints.grass()[i];
+			case BlockLooks.TINT_FOLIAGE -> tints.foliage()[i];
+			case BlockLooks.TINT_DRY_FOLIAGE -> tints.dryFoliage()[i];
+			case BlockLooks.TINT_WATER -> tints.water()[i];
 			default -> 0xFFFFFF;
 		};
 	}

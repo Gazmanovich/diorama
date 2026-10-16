@@ -83,7 +83,10 @@ public final class SettingsScreen extends Screen {
 		y = this.toggle(right, y, "diorama.settings.depth_shading", () -> s.depthShading, v -> s.depthShading = v);
 		y = this.toggle(right, y, "diorama.settings.outlines", () -> s.outlines, v -> s.outlines = v);
 		y = this.toggle(right, y, "diorama.settings.rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
-		this.toggle(right, y, "diorama.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
+		y = this.toggle(right, y, "diorama.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
+		this.cycle(right, y, "diorama.settings.quality", () -> s.quality.ordinal(), Settings.Quality.values().length,
+			i -> s.quality = Settings.Quality.values()[i],
+			i -> Component.translatable("diorama.settings.quality." + Settings.Quality.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
 
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
 			.bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());

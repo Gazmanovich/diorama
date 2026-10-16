@@ -7,8 +7,11 @@ import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.WorldKey;
+import dev.diorama.bake.BiomeTints;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.data.ChunkSnapshot;
+import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Radar;
@@ -29,10 +32,12 @@ import com.mojang.blaze3d.platform.InputConstants;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.Registries;
@@ -40,6 +45,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.tags.StructureTags;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
@@ -417,7 +424,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * Builds {@link ShowcaseScene}'s castle beside the nearest village and photographs it for the
 	 * store page: in game with the minimap, the fullscreen map from close up to far out, the caves
 	 * under the castle, waypoints on the map and in the world, and the Nether over a fortress.
-	 * Opt-in with {@code DIORAMA_TESTS=showcase}; {@code DIORAMA_GIF=1} adds a zoom-out.
+	 * Opt-in with {@code DIORAMA_TESTS=showcase}; {@code DIORAMA_GIF=1} adds the demo video's frames.
 	 */
 	private static void showcase(ClientGameTestContext context, TestSingleplayerContext world) {
 		context.getInput().resizeWindow(1920, 1080);
@@ -476,12 +483,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.takeScreenshot("showcase-map-zoom-" + zoom);
 		}
 		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
-			for (int frame = 0; frame < 90; frame++) {
-				double zoom = 6 * Math.pow(0.8 / 6, frame / 89.0);
-				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, zoom, TileKey.SURFACE));
-				context.waitTicks(2);
-				context.takeScreenshot(String.format("showcase-gif-%03d", frame));
-			}
+			context.setScreen(() -> null);
+			demo(context, world, cx, base, cz);
 		}
 
 		// The cave view under the castle.
@@ -534,13 +537,190 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> null);
 	}
 
+	/**
+	 * Frames for the store page's demo video, one screenshot per frame. It looks around the village
+	 * and settles on the castle, then cranes up and back to the map's camera angle while the field
+	 * of view narrows to near-flat, then opens the fullscreen map at the same framing and zooms out.
+	 * The last in-game frame and the first map frame line up, so the video can cross-fade between
+	 * them. Leaves the map open.
+	 */
+	private static void demo(ClientGameTestContext context, TestSingleplayerContext world, int cx, int base, int cz) {
+		double[] keep = {cx + 0.5, base + 20, cz + 0.5};
+		double[] centre = {cx + 0.5, base + 12, cz + 0.5};
+		// A narrow field of view seen from far away looks nearly like the map's flat projection.
+		double narrowFov = 17;
+		double frameBlocks = 64;
+		double distance = frameBlocks / (2 * Math.tan(Math.toRadians(narrowFov) / 2));
+		double[] above = {centre[0], centre[1] + distance * Projection.sin(), centre[2] + distance * Projection.cos()};
+		double[] start = {cx + 14.5, base + 4.6, cz + 120.5};
+		double[] end = {cx + 12.5, base + 7.6, cz + 110.5};
+
+		// The game's field of view stops at 30 degrees. Its speed effect narrows it further: with no
+		// movement speed a flying player sees 0.55 of it, and the effect scale blends that in smoothly.
+		world.getServer().runCommand("attribute @p minecraft:movement_speed base set 0");
+		CloudStatus clouds = context.computeOnClient(mc -> mc.options.cloudStatus().get());
+		context.runOnClient(mc -> {
+			mc.options.cloudStatus().set(CloudStatus.OFF);
+			mc.options.renderDistance().set(16);
+			mc.gui.hud.getChat().clearMessages(false);
+		});
+		// Load and build everything both ends of the shot can see before recording.
+		for (double[] at : new double[][] {above, start}) {
+			camera(context, at, 180, 45, 70, 1);
+			context.waitTicks(400);
+		}
+
+		int frame = 0;
+		// From the village houses, turn to the castle while drifting towards it.
+		for (int i = 0; i < 110; i++) {
+			double s = ease(i / 109.0);
+			double[] at = lerp(start, end, s);
+			float[] facing = facing(at, keep);
+			camera(context, at, (float) Mth.lerp(s, 115, facing[0]), (float) Mth.lerp(s, 10, facing[1]), 70, 1);
+			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
+		}
+		// Crane up and back to where the map's own camera would be, looking at the castle throughout.
+		for (int i = 0; i < 140; i++) {
+			double s = ease(i / 139.0);
+			double[] at = lerp(end, above, s);
+			float[] facing = facing(at, lerp(keep, centre, s));
+			camera(context, at, facing[0], facing[1], 70 * Math.pow(narrowFov / 70, s), 3);
+			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
+		}
+		double fov = context.computeOnClient(mc -> (double) mc.gameRenderer.mainCamera().getFov());
+		dev.diorama.Diorama.LOGGER.info("Demo ends {} blocks from the castle at a {} degree field of view", Math.round(distance), fov);
+
+		// The map, framed like the last frame: the same blocks per screen height at the castle.
+		context.setScreen(MapScreen::new);
+		double screenBlocks = 2 * distance * Math.tan(Math.toRadians(fov) / 2);
+		double matched = context.computeOnClient(mc -> mc.getWindow().getHeight() / (mc.getWindow().getGuiScale() * screenBlocks));
+		double v = Projection.v(centre[1], centre[2]);
+		for (int i = 0; i < 150; i++) {
+			double zoom = matched * Math.pow(0.8 / matched, ease(Math.clamp((i - 12) / 117.0, 0, 1)));
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(centre[0], v, zoom, TileKey.SURFACE));
+			if (i == 0) {
+				settle(context, 80);
+			} else {
+				context.waitTicks(2);
+			}
+			context.takeScreenshot(String.format("showcase-demo-map-%03d", i));
+		}
+
+		world.getServer().runCommand("attribute @p minecraft:movement_speed base reset");
+		context.runOnClient(mc -> {
+			mc.options.fov().set(70);
+			mc.options.fovEffectScale().set(1.0);
+			mc.options.cloudStatus().set(clouds);
+			mc.options.renderDistance().set(12);
+		});
+	}
+
+	/**
+	 * Puts the camera (the player's eyes) at a point, facing a way, with a field of view in
+	 * degrees, then waits for the field of view to ease in.
+	 */
+	private static void camera(ClientGameTestContext context, double[] eye, float yaw, float pitch, double fov, int ticks) {
+		context.runOnClient(mc -> {
+			int option = Math.clamp((int) Math.ceil(fov), 30, 110);
+			double narrowest = mc.player.getFieldOfViewModifier(true, 1.0F);
+			mc.options.fov().set(option);
+			mc.options.fovEffectScale().set(Math.clamp((1 - fov / option) / (1 - narrowest), 0.0, 1.0));
+			mc.player.setDeltaMovement(Vec3.ZERO);
+			mc.player.snapTo(eye[0], eye[1] - mc.player.getEyeHeight(), eye[2], yaw, pitch);
+		});
+		context.waitTicks(ticks);
+	}
+
+	/** The yaw and pitch that look from one point at another. */
+	private static float[] facing(double[] from, double[] to) {
+		double dx = to[0] - from[0];
+		double dy = to[1] - from[1];
+		double dz = to[2] - from[2];
+		float yaw = Mth.wrapDegrees((float) Math.toDegrees(Math.atan2(dz, dx)) - 90);
+		float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
+		return new float[] {yaw, pitch};
+	}
+
+	private static double[] lerp(double[] a, double[] b, double s) {
+		return new double[] {Mth.lerp(s, a[0], b[0]), Mth.lerp(s, a[1], b[1]), Mth.lerp(s, a[2], b[2])};
+	}
+
+	/** Smoothstep: starts and stops gently. */
+	private static double ease(double s) {
+		return s * s * (3 - 2 * s);
+	}
+
+	/**
+	 * The map blends biome tints on bake threads from its own copies of the chunks. They must come
+	 * out the same as the game's blend, for every column whose neighbours the map also has.
+	 */
+	private static void assertTintsMatchGame(ClientGameTestContext context) {
+		String result = context.computeOnClient(mc -> {
+			MapLevel map = MapSession.get().map();
+			int pcx = mc.player.blockPosition().getX() >> 4;
+			int pcz = mc.player.blockPosition().getZ() >> 4;
+			int columns = 0;
+			int wrong = 0;
+			String example = null;
+			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+			for (int cx = pcx - 8; cx <= pcx + 8; cx++) {
+				for (int cz = pcz - 8; cz <= pcz + 8; cz++) {
+					boolean surrounded = true;
+					for (int dx = -1; dx <= 1; dx++) {
+						for (int dz = -1; dz <= 1; dz++) {
+							surrounded &= map.chunk(cx + dx, cz + dz) != null;
+						}
+					}
+					if (!surrounded) {
+						continue;
+					}
+					ChunkSnapshot snapshot = map.chunk(cx, cz);
+					// What the last bake used, as it stands.
+					ChunkSnapshot.Tints tints = snapshot.tints() != null ? snapshot.tints() : BiomeTints.blend(snapshot);
+					for (int z = 0; z < 16; z++) {
+						for (int x = 0; x < 16; x++) {
+							pos.set((cx << 4) + x, snapshot.surface(x, z), (cz << 4) + z);
+							int i = (z << 4) | x;
+							int[] ours = {tints.grass()[i], tints.foliage()[i], tints.dryFoliage()[i], tints.water()[i]};
+							int[] game = {
+								BiomeColors.getAverageGrassColor(mc.level, pos), BiomeColors.getAverageFoliageColor(mc.level, pos),
+								BiomeColors.getAverageDryFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+							};
+							columns++;
+							for (int k = 0; k < 4; k++) {
+								if ((ours[k] & 0xFFFFFF) != (game[k] & 0xFFFFFF)) {
+									wrong++;
+									if (example == null) {
+										example = String.format("%s tint %d: ours %06X, game %06X", pos.toShortString(), k, ours[k] & 0xFFFFFF, game[k] & 0xFFFFFF);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			return columns + " " + wrong + " " + example;
+		});
+		String[] parts = result.split(" ", 3);
+		dev.diorama.Diorama.LOGGER.info("Biome tints checked against the game's for {} columns: {} differ", parts[0], parts[1]);
+		if (Integer.parseInt(parts[0]) < 1000) {
+			throw new AssertionError("Too few columns to check biome tints: " + parts[0]);
+		}
+		if (!parts[1].equals("0")) {
+			throw new AssertionError(parts[1] + " biome tints differ from the game's, for example " + parts[2]);
+		}
+	}
+
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */
 	private static void tour(ClientGameTestContext context, TestSingleplayerContext world) {
+		// Fancy for the shots the Fast ones further down are compared with.
+		setQuality(context, Settings.Quality.FANCY);
 		context.takeScreenshot("diorama-01-minimap");
 
 		context.setScreen(MapScreen::new);
 		settle(context, 60);
 		context.takeScreenshot("diorama-02-map");
+		assertTintsMatchGame(context);
 
 		lookAtPlayer(context, 5.0, TileKey.SURFACE);
 		settle(context, 40);
@@ -549,6 +729,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 		lookAtPlayer(context, 0.75, TileKey.SURFACE);
 		settle(context, 80);
 		context.takeScreenshot("diorama-04-map-far");
+
+		// Quality Fast: one sample per pixel and the cheap fog. Switching re-bakes what's on screen.
+		setQuality(context, Settings.Quality.FAST);
+		settle(context, 80);
+		context.takeScreenshot("diorama-04c-map-far-fast");
+		lookAtPlayer(context, 5.0, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("diorama-04d-map-close-fast");
+		setQuality(context, Settings.Quality.FANCY);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 80);
 
 		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
 			// Frames for a GIF: a slow pan east across the edge of the loaded area, so the fog's
@@ -1428,6 +1619,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.setScreen(() -> null);
 		}
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
+	}
+
+	private static void setQuality(ClientGameTestContext context, Settings.Quality quality) {
+		context.runOnClient(mc -> {
+			Settings.get().quality = quality;
+			Settings.get().apply();
+		});
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
