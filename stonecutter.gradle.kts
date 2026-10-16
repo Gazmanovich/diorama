@@ -37,6 +37,8 @@ stonecutter parameters {
 		"\\bClientCommands\\b" to "ClientCommandManager",
 		// The client game test API: a dedicated server's connection had no type of its own.
 		"\\bTestDedicatedServerConnection\\b" to "TestServerConnection",
+		// Chat lines moved into the multiplayer chat package.
+		"net\\.minecraft\\.client\\.multiplayer\\.chat\\.GuiMessage\\b" to "net.minecraft.client.GuiMessage",
 	)
 	for ((pattern, older) in before26) {
 		replacements.regex(current.parsed < "26.1") {
