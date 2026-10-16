@@ -587,7 +587,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			camera(context, at, facing[0], facing[1], 70 * Math.pow(narrowFov / 70, s), 3);
 			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
 		}
+		//? if >=26.1 {
 		double fov = context.computeOnClient(mc -> (double) mc.gameRenderer.mainCamera().getFov());
+		//?} else {
+		/*// The camera keeps its field of view private here; the demo is recorded on the newest version anyway.
+		double fov = narrowFov;
+		*///?}
 		dev.diorama.Diorama.LOGGER.info("Demo ends {} blocks from the castle at a {} degree field of view", Math.round(distance), fov);
 
 		// The map, framed like the last frame: the same blocks per screen height at the castle.
