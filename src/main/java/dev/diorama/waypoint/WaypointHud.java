@@ -28,7 +28,11 @@ public final class WaypointHud implements HudElement {
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
 		WaypointStore store = WaypointStore.get();
+		//? if >=26.1 {
 		if (player == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
+		//?} else {
+		/*if (player == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.options.hideGui || !ServerRules.minimapAllowed()) {
+		*///?}
 			return;
 		}
 		Vec3 eye = WorldProjection.camera();

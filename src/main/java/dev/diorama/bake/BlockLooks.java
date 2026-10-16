@@ -12,13 +12,24 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColors;
+//? if >=26.1 {
 import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+//?} else {
+/*import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.renderer.block.BlockModelShaper;
+import net.minecraft.client.renderer.block.model.BlockModelPart;
+import net.minecraft.client.renderer.block.model.BlockStateModel;
+*///?}
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+//? if >=26.1 {
 import net.minecraft.client.resources.model.geometry.BakedQuad;
+//?} else {
+/*import net.minecraft.client.renderer.block.model.BakedQuad;
+*///?}
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
@@ -133,20 +144,32 @@ public final class BlockLooks {
 
 	/** True when resource packs were reloaded since the table was built. */
 	public static boolean isStale() {
+		//? if >=26.1 {
 		return current != null && builtFrom != Minecraft.getInstance().getModelManager().getBlockStateModelSet();
+		//?} else {
+		/*return current != null && builtFrom != Minecraft.getInstance().getModelManager().getMissingBlockStateModel();
+		*///?}
 	}
 
 	/** Builds the table. Must run on the client thread, after models are loaded. */
 	public static BlockLooks build() {
 		long start = System.nanoTime();
 		Minecraft mc = Minecraft.getInstance();
+		//? if >=26.1 {
 		BlockStateModelSet models = mc.getModelManager().getBlockStateModelSet();
+		//?} else {
+		/*BlockModelShaper models = mc.getModelManager().getBlockModelShaper();
+		*///?}
 		BlockColors colors = mc.getBlockColors();
 		int size = Block.BLOCK_STATE_REGISTRY.size();
 		BlockLooks looks = new BlockLooks(size);
 		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
 		RandomSource random = RandomSource.create(42L);
+		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
+		//?} else {
+		/*List<BlockModelPart> parts = new ArrayList<>();
+		*///?}
 
 		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
 			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
@@ -172,11 +195,19 @@ public final class BlockLooks {
 
 			parts.clear();
 			random.setSeed(42L);
+			//? if >=26.1 {
 			BlockStateModel model = models.get(state);
+			//?} else {
+			/*BlockStateModel model = models.getBlockModel(state);
+			*///?}
 			model.collectParts(random, parts);
 			FaceColor topFace = new FaceColor();
 			FaceColor sideFace = new FaceColor();
+			//? if >=26.1 {
 			for (BlockStateModelPart part : parts) {
+			//?} else {
+			/*for (BlockModelPart part : parts) {
+			*///?}
 				accumulate(topFace, part.getQuads(Direction.UP), spriteCache);
 				accumulate(sideFace, part.getQuads(Direction.SOUTH), spriteCache);
 				if (sideFace.isEmpty()) {
@@ -190,7 +221,11 @@ public final class BlockLooks {
 			}
 			if (topFace.isEmpty() && sideFace.isEmpty()) {
 				// Block entities (chests, signs, beds) have no block model; use the particle texture.
+				//? if >=26.1 {
 				float[] avg = spriteAverage(model.particleMaterial().sprite(), spriteCache);
+				//?} else {
+				/*float[] avg = spriteAverage(model.particleIcon(), spriteCache);
+				*///?}
 				topFace.add(avg, false);
 				sideFace.add(avg, false);
 			}
@@ -223,6 +258,7 @@ public final class BlockLooks {
 			} else if (block == Blocks.LILY_PAD) {
 				looks.constantTint[id] = BlockColors.LILY_PAD_IN_WORLD & 0xFFFFFF;
 			} else {
+				//? if >=26.1 {
 				BlockTintSource source = colors.getTintSource(state, 0);
 				if (source == null) {
 					source = colors.getTintSource(state, 1);
@@ -230,6 +266,20 @@ public final class BlockLooks {
 				if (source != null) {
 					looks.constantTint[id] = source.color(state) & 0xFFFFFF;
 				}
+				//?} else {
+				/*// One colour function per block covers all its tint layers. Without a world or
+				// position it gives the block's colour out of the world, as BlockTintSource.color
+				// does from 26.1; -1 means no function is registered. A mod's function may not
+				// expect the missing world, so a failure counts as no tint.
+				try {
+					int color = colors.getColor(state, null, null, 0);
+					if (color != -1) {
+						looks.constantTint[id] = color & 0xFFFFFF;
+					}
+				} catch (RuntimeException e) {
+					looks.constantTint[id] = -1;
+				}
+				*///?}
 			}
 		}
 		// Fluids have no block model, so their particle texture is the untinted grey water. Every
@@ -252,7 +302,12 @@ public final class BlockLooks {
 			}
 		}
 		current = looks;
+		//? if >=26.1 {
 		builtFrom = models;
+		//?} else {
+		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
+		builtFrom = mc.getModelManager().getMissingBlockStateModel();
+		*///?}
 		Diorama.LOGGER.info("Built block colors for {} states in {} ms", size, (System.nanoTime() - start) / 1_000_000);
 		return looks;
 	}
@@ -274,14 +329,23 @@ public final class BlockLooks {
 
 	private static void accumulate(FaceColor face, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
 		for (BakedQuad quad : quads) {
+			//? if >=26.1 {
 			face.add(spriteAverage(quad.materialInfo().sprite(), cache), quad.materialInfo().tintIndex() >= 0);
+			//?} else {
+			/*face.add(spriteAverage(quad.sprite(), cache), quad.tintIndex() >= 0);
+			*///?}
 		}
 	}
 
 	private static void accumulateLoose(FaceColor top, FaceColor side, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
 		for (BakedQuad quad : quads) {
+			//? if >=26.1 {
 			float[] avg = spriteAverage(quad.materialInfo().sprite(), cache);
 			boolean tinted = quad.materialInfo().tintIndex() >= 0;
+			//?} else {
+			/*float[] avg = spriteAverage(quad.sprite(), cache);
+			boolean tinted = quad.tintIndex() >= 0;
+			*///?}
 			if (quad.direction() == Direction.UP || quad.direction() == Direction.DOWN) {
 				top.add(avg, tinted);
 			} else {
@@ -296,7 +360,15 @@ public final class BlockLooks {
 	static {
 		Field field;
 		try {
+			//? if >=26.1 {
 			field = SpriteContents.class.getDeclaredField("originalImage");
+			//?} else {
+			/*// The game runs with intermediary names outside the dev environment, so look the field
+			// up by its intermediary name (SpriteContents.originalImage, a NativeImage) mapped to
+			// whatever names this run uses.
+			field = SpriteContents.class.getDeclaredField(FabricLoader.getInstance().getMappingResolver()
+				.mapFieldName("intermediary", "net.minecraft.class_7764", "field_40539", "Lnet/minecraft/class_1011;"));
+			*///?}
 			field.setAccessible(true);
 		} catch (ReflectiveOperationException e) {
 			field = null;
