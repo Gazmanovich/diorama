@@ -1,5 +1,7 @@
 #version 330
+//? if >=26.1 {
 #extension GL_ARB_separate_shader_objects : require
+//?}
 
 // Volumetric-looking fog over the parts of the map with no data.
 //
@@ -9,6 +11,7 @@
 // sits above the ground point h * cos(pitch) further south, which is what makes the banks look
 // like they rise off the terrain.
 
+//? if >=26.1 {
 layout(std140) uniform Globals {
     ivec3 CameraBlockPos;
     float GlintAlpha;
@@ -25,18 +28,46 @@ layout(std140) uniform DynamicTransforms {
     vec4 ColorModulator;
     vec3 ModelOffset;
 };
+//?} else {
+/*layout(std140) uniform Globals {
+    ivec3 CameraBlockPos;
+    vec3 CameraOffset;
+    vec2 ScreenSize;
+    float GlintAlpha;
+    float GameTime;
+    int MenuBlurRadius;
+    int UseRgss;
+};
+
+layout(std140) uniform DynamicTransforms {
+    mat4 ModelViewMat;
+    vec4 ColorModulator;
+    vec3 ModelOffset;
+    mat4 TextureMat;
+};
+*///?}
 
 // Share of known ground per mask texel, in the red channel.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
 
+//? if >=26.1 {
 layout(location = 0) in vec2 maskUv;
+//?} else {
+/*in vec2 maskUv;
+*///?}
 // rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
 // (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code.
+//? if >=26.1 {
 layout(location = 1) in vec4 params;
 
 layout(location = 0) out vec4 fragColor;
+//?} else {
+/*in vec4 params;
+
+out vec4 fragColor;
+*///?}
 
 const float MASK_TEXELS = 256.0;
 const float NOISE_PERIOD = 512.0;
