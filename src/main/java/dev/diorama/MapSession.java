@@ -128,8 +128,31 @@ public final class MapSession {
 	public static void chunkLoaded(ClientLevel level, LevelChunk chunk) {
 		// Chunks can arrive before the first client tick of a new level, so this may start the session.
 		MapSession session = forLevel(level);
-		if (session != null) {
-			session.schedule(chunk.getPos().x(), chunk.getPos().z(), LOAD_DELAY_MS, null);
+		if (session == null) {
+			return;
+		}
+		int cx = chunk.getPos().x();
+		int cz = chunk.getPos().z();
+		session.schedule(cx, cz, LOAD_DELAY_MS, null);
+		// A neighbour snapshotted before this chunk loaded blended its tints along this edge against
+		// the game's fallback biome. Snapshot it again and re-bake that strip, as the game itself
+		// recolours its blocks there.
+		int reach = ChunkSnapshot.BIOME_REACH;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				ChunkSnapshot around = session.map.chunk(cx + dx, cz + dz);
+				if ((dx == 0 && dz == 0) || around == null || around.hasBiomesAround(-dx, -dz)) {
+					continue;
+				}
+				int x0 = around.chunkX << 4;
+				int z0 = around.chunkZ << 4;
+				int[] strip = {
+					dx < 0 ? x0 + 16 - reach : x0, level.getMinY(), dz < 0 ? z0 + 16 - reach : z0,
+					dx > 0 ? x0 + reach - 1 : x0 + 15, level.getMaxY(), dz > 0 ? z0 + reach - 1 : z0 + 15,
+					MapLevel.CHANGED_SURFACE
+				};
+				session.schedule(around.chunkX, around.chunkZ, CHANGE_DELAY_MS, strip);
+			}
 		}
 	}
 
