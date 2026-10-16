@@ -32,6 +32,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
@@ -44,6 +45,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.tags.StructureTags;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
@@ -421,7 +424,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * Builds {@link ShowcaseScene}'s castle beside the nearest village and photographs it for the
 	 * store page: in game with the minimap, the fullscreen map from close up to far out, the caves
 	 * under the castle, waypoints on the map and in the world, and the Nether over a fortress.
-	 * Opt-in with {@code DIORAMA_TESTS=showcase}; {@code DIORAMA_GIF=1} adds a zoom-out.
+	 * Opt-in with {@code DIORAMA_TESTS=showcase}; {@code DIORAMA_GIF=1} adds the demo video's frames.
 	 */
 	private static void showcase(ClientGameTestContext context, TestSingleplayerContext world) {
 		context.getInput().resizeWindow(1920, 1080);
@@ -480,12 +483,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.takeScreenshot("showcase-map-zoom-" + zoom);
 		}
 		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
-			for (int frame = 0; frame < 90; frame++) {
-				double zoom = 6 * Math.pow(0.8 / 6, frame / 89.0);
-				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, zoom, TileKey.SURFACE));
-				context.waitTicks(2);
-				context.takeScreenshot(String.format("showcase-gif-%03d", frame));
-			}
+			context.setScreen(() -> null);
+			demo(context, world, cx, base, cz);
 		}
 
 		// The cave view under the castle.
@@ -536,6 +535,119 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.takeScreenshot("showcase-nether-" + zoom);
 		}
 		context.setScreen(() -> null);
+	}
+
+	/**
+	 * Frames for the store page's demo video, one screenshot per frame. It looks around the village
+	 * and settles on the castle, then cranes up and back to the map's camera angle while the field
+	 * of view narrows to near-flat, then opens the fullscreen map at the same framing and zooms out.
+	 * The last in-game frame and the first map frame line up, so the video can cross-fade between
+	 * them. Leaves the map open.
+	 */
+	private static void demo(ClientGameTestContext context, TestSingleplayerContext world, int cx, int base, int cz) {
+		double[] keep = {cx + 0.5, base + 20, cz + 0.5};
+		double[] centre = {cx + 0.5, base + 12, cz + 0.5};
+		// A narrow field of view seen from far away looks nearly like the map's flat projection.
+		double narrowFov = 17;
+		double frameBlocks = 64;
+		double distance = frameBlocks / (2 * Math.tan(Math.toRadians(narrowFov) / 2));
+		double[] above = {centre[0], centre[1] + distance * Projection.sin(), centre[2] + distance * Projection.cos()};
+		double[] start = {cx + 14.5, base + 4.6, cz + 120.5};
+		double[] end = {cx + 12.5, base + 7.6, cz + 110.5};
+
+		// The game's field of view stops at 30 degrees. Its speed effect narrows it further: with no
+		// movement speed a flying player sees 0.55 of it, and the effect scale blends that in smoothly.
+		world.getServer().runCommand("attribute @p minecraft:movement_speed base set 0");
+		CloudStatus clouds = context.computeOnClient(mc -> mc.options.cloudStatus().get());
+		context.runOnClient(mc -> {
+			mc.options.cloudStatus().set(CloudStatus.OFF);
+			mc.options.renderDistance().set(16);
+			mc.gui.hud.getChat().clearMessages(false);
+		});
+		// Load and build everything both ends of the shot can see before recording.
+		for (double[] at : new double[][] {above, start}) {
+			camera(context, at, 180, 45, 70, 1);
+			context.waitTicks(400);
+		}
+
+		int frame = 0;
+		// From the village houses, turn to the castle while drifting towards it.
+		for (int i = 0; i < 110; i++) {
+			double s = ease(i / 109.0);
+			double[] at = lerp(start, end, s);
+			float[] facing = facing(at, keep);
+			camera(context, at, (float) Mth.lerp(s, 115, facing[0]), (float) Mth.lerp(s, 10, facing[1]), 70, 1);
+			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
+		}
+		// Crane up and back to where the map's own camera would be, looking at the castle throughout.
+		for (int i = 0; i < 140; i++) {
+			double s = ease(i / 139.0);
+			double[] at = lerp(end, above, s);
+			float[] facing = facing(at, lerp(keep, centre, s));
+			camera(context, at, facing[0], facing[1], 70 * Math.pow(narrowFov / 70, s), 3);
+			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
+		}
+		double fov = context.computeOnClient(mc -> (double) mc.gameRenderer.mainCamera().getFov());
+		dev.diorama.Diorama.LOGGER.info("Demo ends {} blocks from the castle at a {} degree field of view", Math.round(distance), fov);
+
+		// The map, framed like the last frame: the same blocks per screen height at the castle.
+		context.setScreen(MapScreen::new);
+		double screenBlocks = 2 * distance * Math.tan(Math.toRadians(fov) / 2);
+		double matched = context.computeOnClient(mc -> mc.getWindow().getHeight() / (mc.getWindow().getGuiScale() * screenBlocks));
+		double v = Projection.v(centre[1], centre[2]);
+		for (int i = 0; i < 150; i++) {
+			double zoom = matched * Math.pow(0.8 / matched, ease(Math.clamp((i - 12) / 117.0, 0, 1)));
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(centre[0], v, zoom, TileKey.SURFACE));
+			if (i == 0) {
+				settle(context, 80);
+			} else {
+				context.waitTicks(2);
+			}
+			context.takeScreenshot(String.format("showcase-demo-map-%03d", i));
+		}
+
+		world.getServer().runCommand("attribute @p minecraft:movement_speed base reset");
+		context.runOnClient(mc -> {
+			mc.options.fov().set(70);
+			mc.options.fovEffectScale().set(1.0);
+			mc.options.cloudStatus().set(clouds);
+			mc.options.renderDistance().set(12);
+		});
+	}
+
+	/**
+	 * Puts the camera (the player's eyes) at a point, facing a way, with a field of view in
+	 * degrees, then waits for the field of view to ease in.
+	 */
+	private static void camera(ClientGameTestContext context, double[] eye, float yaw, float pitch, double fov, int ticks) {
+		context.runOnClient(mc -> {
+			int option = Math.clamp((int) Math.ceil(fov), 30, 110);
+			double narrowest = mc.player.getFieldOfViewModifier(true, 1.0F);
+			mc.options.fov().set(option);
+			mc.options.fovEffectScale().set(Math.clamp((1 - fov / option) / (1 - narrowest), 0.0, 1.0));
+			mc.player.setDeltaMovement(Vec3.ZERO);
+			mc.player.snapTo(eye[0], eye[1] - mc.player.getEyeHeight(), eye[2], yaw, pitch);
+		});
+		context.waitTicks(ticks);
+	}
+
+	/** The yaw and pitch that look from one point at another. */
+	private static float[] facing(double[] from, double[] to) {
+		double dx = to[0] - from[0];
+		double dy = to[1] - from[1];
+		double dz = to[2] - from[2];
+		float yaw = Mth.wrapDegrees((float) Math.toDegrees(Math.atan2(dz, dx)) - 90);
+		float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
+		return new float[] {yaw, pitch};
+	}
+
+	private static double[] lerp(double[] a, double[] b, double s) {
+		return new double[] {Mth.lerp(s, a[0], b[0]), Mth.lerp(s, a[1], b[1]), Mth.lerp(s, a[2], b[2])};
+	}
+
+	/** Smoothstep: starts and stops gently. */
+	private static double ease(double s) {
+		return s * s * (3 - 2 * s);
 	}
 
 	/**
