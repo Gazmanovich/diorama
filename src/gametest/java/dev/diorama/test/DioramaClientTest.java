@@ -775,7 +775,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			throw new AssertionError("Home is missing");
 		});
+		//? if >=26.1 {
 		context.getInput().lookAt(home);
+		//?} else {
+		/*context.runOnClient(mc -> mc.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, net.minecraft.world.phys.Vec3.atCenterOf(home)));
+		*///?}
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-02-in-world");
 

@@ -35,6 +35,8 @@ stonecutter parameters {
 		"import net\\.fabricmc\\.fabric\\.api\\.client\\.keymapping\\.v1\\.KeyMappingHelper;" to "import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;",
 		"\\bKeyMappingHelper\\.registerKeyMapping\\(" to "KeyBindingHelper.registerKeyBinding(",
 		"\\bClientCommands\\b" to "ClientCommandManager",
+		// The client game test API: a dedicated server's connection had no type of its own.
+		"\\bTestDedicatedServerConnection\\b" to "TestServerConnection",
 	)
 	for ((pattern, older) in before26) {
 		replacements.regex(current.parsed < "26.1") {
