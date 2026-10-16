@@ -1047,13 +1047,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("waypoints-09-shared-own");
 	}
 
-	/** Every line in chat, newest first. Read through reflection: chat keeps them private. */
+	/**
+	 * Every line in chat, newest first. Read through reflection: chat keeps them private. Found by
+	 * type, not name, so it works where the game's names are obfuscated (1.21.11 in production).
+	 */
 	@SuppressWarnings("unchecked")
 	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
 		try {
-			java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
-			field.setAccessible(true);
-			return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+			for (java.lang.reflect.Field field : net.minecraft.client.gui.components.ChatComponent.class.getDeclaredFields()) {
+				if (field.getGenericType() instanceof java.lang.reflect.ParameterizedType type && type.getRawType() == java.util.List.class
+					&& type.getActualTypeArguments()[0] == net.minecraft.client.multiplayer.chat.GuiMessage.class) {
+					field.setAccessible(true);
+					return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+				}
+			}
+			throw new AssertionError("Chat has no List<GuiMessage> field");
 		} catch (ReflectiveOperationException e) {
 			throw new AssertionError(e);
 		}
