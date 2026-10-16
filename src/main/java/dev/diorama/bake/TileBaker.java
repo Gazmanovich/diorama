@@ -530,9 +530,6 @@ public final class TileBaker {
 		this.albedoB = SRGB_TO_LINEAR[base & 0xFF] * bw + SRGB_TO_LINEAR[tinted & 0xFF] * SRGB_TO_LINEAR[tint & 0xFF] * w;
 	}
 
-	private @Nullable ChunkSnapshot tintsFor;
-	private ChunkSnapshot.@Nullable Tints tints;
-
 	private int tint(int id, int x, int z) {
 		byte kind = this.looks.tint[id];
 		if (kind == BlockLooks.TINT_NONE) {
@@ -544,12 +541,7 @@ public final class TileBaker {
 			return 0xFFFFFF;
 		}
 		int i = ((z & 15) << 4) | (x & 15);
-		// Looked up once per chunk per bake: checking for newly arrived neighbours costs map lookups.
-		if (snapshot != this.tintsFor) {
-			this.tintsFor = snapshot;
-			this.tints = BiomeTints.of(snapshot, this.source);
-		}
-		ChunkSnapshot.Tints tints = this.tints;
+		ChunkSnapshot.Tints tints = BiomeTints.of(snapshot);
 		return switch (kind) {
 			case BlockLooks.TINT_GRASS -> tints.grass()[i];
 			case BlockLooks.TINT_FOLIAGE -> tints.foliage()[i];

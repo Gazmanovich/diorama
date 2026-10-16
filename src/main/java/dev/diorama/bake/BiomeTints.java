@@ -1,7 +1,6 @@
 package dev.diorama.bake;
 
 import dev.diorama.data.ChunkSnapshot;
-import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.ARGB;
@@ -13,7 +12,8 @@ import net.minecraft.world.level.biome.BiomeManager;
  * Blends a snapshot's biome tints on a bake thread, the way the game blends them for its own
  * blocks: each column's tint is the average of the biome colors over the blend radius around
  * its top block, with biomes looked up through the same fuzzed zoom. Blending on the client
- * thread took most of its time while exploring, so snapshots only copy the biomes.
+ * thread took most of its time while exploring, so snapshots only hold on to the biomes, their
+ * own and their neighbours', as the game had them when the snapshot was taken.
  */
 public final class BiomeTints {
 	private static final ColorResolver[] RESOLVERS = {
@@ -23,65 +23,23 @@ public final class BiomeTints {
 		BiomeColors.WATER_COLOR_RESOLVER,
 	};
 
-	private static final AtomicInteger REBLENDS = new AtomicInteger();
-
 	private BiomeTints() {
 	}
 
-	/** How many times tints were blended again because a missing neighbour arrived. For tests. */
-	public static int reblends() {
-		return REBLENDS.get();
-	}
-
-	/**
-	 * The snapshot's tints, blended now if no bake has needed them yet, or blended again if a
-	 * neighbouring chunk the last blend had to do without has arrived since. Any thread.
-	 */
-	public static ChunkSnapshot.Tints of(ChunkSnapshot snapshot, ChunkSource source) {
+	/** The snapshot's tints, blended now if no bake has needed them yet. Any thread. */
+	public static ChunkSnapshot.Tints of(ChunkSnapshot snapshot) {
 		ChunkSnapshot.Tints tints = snapshot.tints();
-		// Only arrivals count: a neighbour trimmed from the map since took nothing from the blend.
-		if (tints == null || tints.missing() != 0 && (tints.missing() & ~missing(snapshot, source)) != 0) {
-			if (tints != null) {
-				REBLENDS.incrementAndGet();
-			}
-			tints = blend(snapshot, source);
+		if (tints == null) {
+			// Two bakes may both blend; they read the same biomes, so either result will do.
+			tints = blend(snapshot);
 			snapshot.setTints(tints);
 		}
 		return tints;
 	}
 
-	/** Bit for the neighbouring chunk at this offset, in {@link ChunkSnapshot.Tints#missing()}. */
-	public static int neighbourBit(int dx, int dz) {
-		return 1 << ((dx + 1) * 3 + dz + 1);
-	}
-
-	/** The neighbouring chunks the source has no snapshot of, as {@link #neighbourBit} bits. */
-	private static int missing(ChunkSnapshot snapshot, ChunkSource source) {
-		int missing = 0;
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dz = -1; dz <= 1; dz++) {
-				if ((dx != 0 || dz != 0) && source.chunk(snapshot.chunkX + dx, snapshot.chunkZ + dz) == null) {
-					missing |= neighbourBit(dx, dz);
-				}
-			}
-		}
-		return missing;
-	}
-
-	/** Blends the snapshot's tints from the snapshots the source has now. Any thread. */
-	public static ChunkSnapshot.Tints blend(ChunkSnapshot snapshot, ChunkSource source) {
-		// Checked before blending, so a neighbour arriving partway through counts as missing and
-		// gets blended in next time.
-		int missing = missing(snapshot, source);
-		// Biomes in neighbouring chunks come from their snapshots. Where the map has none yet, the
-		// game's fallback biome stands in until it arrives; see of().
-		BiomeManager biomes = new BiomeManager((quartX, quartY, quartZ) -> {
-			int chunkX = quartX >> 2;
-			int chunkZ = quartZ >> 2;
-			ChunkSnapshot chunk = chunkX == snapshot.chunkX && chunkZ == snapshot.chunkZ ? snapshot : source.chunk(chunkX, chunkZ);
-			return chunk == null ? snapshot.fallbackBiome : chunk.noiseBiome(quartX, quartY, quartZ);
-		}, snapshot.biomeZoomSeed);
-
+	/** Blends the snapshot's tints. Any thread. */
+	public static ChunkSnapshot.Tints blend(ChunkSnapshot snapshot) {
+		BiomeManager biomes = new BiomeManager(snapshot::noiseBiome, snapshot.biomeZoomSeed);
 		int[][] colors = new int[RESOLVERS.length][256];
 		int radius = snapshot.blendRadius;
 		int count = (radius * 2 + 1) * (radius * 2 + 1);
@@ -114,6 +72,6 @@ public final class BiomeTints {
 				}
 			}
 		}
-		return new ChunkSnapshot.Tints(colors[0], colors[1], colors[2], colors[3], missing);
+		return new ChunkSnapshot.Tints(colors[0], colors[1], colors[2], colors[3]);
 	}
 }

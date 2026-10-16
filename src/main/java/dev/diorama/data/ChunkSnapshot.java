@@ -11,11 +11,13 @@ import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.jspecify.annotations.Nullable;
@@ -36,8 +38,16 @@ public final class ChunkSnapshot {
 	private final boolean hasSkyLight;
 	private final @Nullable DataLayer[] blockLight;
 	private final @Nullable DataLayer[] skyLight;
-	/** Biomes per section at quarter resolution, or null for a missing section. */
-	private final @Nullable PalettedContainerRO<Holder<Biome>>[] biomes;
+	/**
+	 * How far from a column its blended tint reads biomes: the game's largest blend radius, 7, plus
+	 * the 5 blocks its biome lookup fuzzes positions by. Never further than a neighbouring chunk.
+	 */
+	public static final int BIOME_REACH = 12;
+	/**
+	 * Biome sections of this chunk and its eight neighbours as the game had them when the snapshot
+	 * was taken, indexed {@code (dx + 1) * 3 + dz + 1}; null where the game had no chunk.
+	 */
+	private final @Nullable PalettedContainerRO<Holder<Biome>>[] @Nullable [] biomes;
 	/** Top block y per column, indexed {@code (z << 4) | x}: where the column's tints are sampled. */
 	private final int[] surface = new int[256];
 	/** The hashed seed the client's biome lookups fuzz positions with. */
@@ -61,7 +71,22 @@ public final class ChunkSnapshot {
 		LevelChunkSection[] sections = chunk.getSections();
 		this.states = new PalettedContainer[sections.length];
 		this.uniform = new BlockState[sections.length];
-		this.biomes = new PalettedContainerRO[sections.length];
+		// The game never writes into a section's biome container: new biomes arrive in a new one,
+		// swapped in. So holding the containers keeps the biomes as they are now, without copying.
+		this.biomes = new PalettedContainerRO[9][];
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				ChunkAccess around = dx == 0 && dz == 0 ? chunk : level.getChunkSource().getChunk(this.chunkX + dx, this.chunkZ + dz, ChunkStatus.BIOMES, false);
+				if (around != null) {
+					LevelChunkSection[] aroundSections = around.getSections();
+					PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[aroundSections.length];
+					for (int i = 0; i < aroundSections.length; i++) {
+						biomes[i] = aroundSections[i] == null ? null : aroundSections[i].getBiomes();
+					}
+					this.biomes[(dx + 1) * 3 + dz + 1] = biomes;
+				}
+			}
+		}
 		this.biomeZoomSeed = ((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed();
 		this.blendRadius = Minecraft.getInstance().options.biomeBlendRadius().get();
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
@@ -71,9 +96,6 @@ public final class ChunkSnapshot {
 		LevelLightEngine light = level.getLightEngine();
 		for (int i = 0; i < sections.length; i++) {
 			LevelChunkSection section = sections[i];
-			if (section != null) {
-				this.biomes[i] = section.getBiomes().copy();
-			}
 			if (section != null && !section.hasOnlyAir()) {
 				PalettedContainer<BlockState> states = section.getStates();
 				// A single-block section's palette copies as itself, and a later chunk packet can
@@ -148,14 +170,26 @@ public final class ChunkSnapshot {
 	}
 
 	/**
-	 * The biome at a quart (4-block) position inside this chunk, with y clamped to the world's
-	 * height, the same as the game's own chunk lookup.
+	 * The biome at a quart (4-block) position in this chunk or a neighbouring one, as the game had
+	 * it when the snapshot was taken: y clamped to the world's height like the game's own chunk
+	 * lookup, and the game's fallback biome where it had no chunk.
 	 */
 	public Holder<Biome> noiseBiome(int quartX, int quartY, int quartZ) {
+		int dx = (quartX >> 2) - this.chunkX;
+		int dz = (quartZ >> 2) - this.chunkZ;
+		PalettedContainerRO<Holder<Biome>>[] sections = dx < -1 || dx > 1 || dz < -1 || dz > 1 ? null : this.biomes[(dx + 1) * 3 + dz + 1];
+		if (sections == null) {
+			return this.fallbackBiome;
+		}
 		int minQuart = this.minSectionY << 2;
-		int y = Mth.clamp(quartY, minQuart, minQuart + (this.biomes.length << 2) - 1);
-		PalettedContainerRO<Holder<Biome>> section = this.biomes[(y >> 2) - this.minSectionY];
+		int y = Mth.clamp(quartY, minQuart, minQuart + (sections.length << 2) - 1);
+		PalettedContainerRO<Holder<Biome>> section = sections[(y >> 2) - this.minSectionY];
 		return section == null ? this.fallbackBiome : section.get(quartX & 3, y & 3, quartZ & 3);
+	}
+
+	/** Whether the game had the neighbouring chunk at this offset when the snapshot was taken. */
+	public boolean hasBiomesAround(int dx, int dz) {
+		return this.biomes[(dx + 1) * 3 + dz + 1] != null;
 	}
 
 	/** The column's top block y, where its tints are sampled. */
@@ -171,11 +205,8 @@ public final class ChunkSnapshot {
 		this.tints = tints;
 	}
 
-	/**
-	 * Blended biome tints per column, as 0xRRGGBB, indexed {@code (z << 4) | x}. {@code missing}
-	 * holds the neighbouring chunks the blend had no snapshot of, as {@code BiomeTints.neighbourBit}s.
-	 */
-	public record Tints(int[] grass, int[] foliage, int[] dryFoliage, int[] water, int missing) {
+	/** Blended biome tints per column, as 0xRRGGBB, indexed {@code (z << 4) | x}. */
+	public record Tints(int[] grass, int[] foliage, int[] dryFoliage, int[] water) {
 	}
 
 	public long key() {
