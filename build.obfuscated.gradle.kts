@@ -34,6 +34,14 @@ dependencies {
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))
 
+// The 1.21.11 client game test API's network synchronizer gives up at random points in our runs
+// ("Detected interfacing with packets at a lower level"), and its own message says to turn it off.
+// The scenarios wait for what they need rather than counting on packets arriving in lockstep.
+val disableNetworkSynchronizer = "-Dfabric.client.gametest.disableNetworkSynchronizer=true"
+loom.runs.matching { it.name == "clientGameTest" }.configureEach {
+	vmArg(disableNetworkSynchronizer)
+}
+
 // The tests, run against the remapped release jar in a production environment. In development the
 // game uses Mojang's names; a real install uses intermediary ones, so anything that reflects on the
 // game by name only fails there.
@@ -56,5 +64,6 @@ dependencies {
 tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProductionClientGameTest") {
 	mods.from(tasks.named("remapJar"), remapGametestJar, productionMods)
 	jvmArgs.add("-Dfabric.client.gametest")
+	jvmArgs.add(disableNetworkSynchronizer)
 	runDir = layout.buildDirectory.dir("run-production")
 }
