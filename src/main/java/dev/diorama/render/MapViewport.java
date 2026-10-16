@@ -8,6 +8,7 @@ import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
+import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -172,7 +173,9 @@ public final class MapViewport {
 		int noiseV = Math.floorMod((long) (originV / snap), 8);
 		boolean cave = view.layer() != TileKey.SURFACE;
 		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
-		int params = (scaleCode * 16) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
+		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast fog.
+		int quality = TileBaker.fast() ? 4 : 0;
+		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		TextureSetup textures = TextureSetup.doubleTexture(
 			this.maskView,

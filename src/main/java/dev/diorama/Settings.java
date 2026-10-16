@@ -2,6 +2,7 @@ package dev.diorama;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import dev.diorama.bake.TileBaker;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -66,9 +67,20 @@ public final class Settings {
 	/** The look with sky occlusion, deep shadows and a lower camera; off is the flatter look from before. */
 	public boolean depthShading = true;
 	public boolean alwaysFogOfWar = false;
+	/**
+	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
+	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
+	 * lighting them from the sun.
+	 */
+	public Quality quality = Quality.FANCY;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
+
+	public enum Quality {
+		FANCY,
+		FAST
+	}
 
 	/** Which spawn spots the map marks: none, those dark even by day, or also those dark only at night. */
 	public enum SpawnSpots {
@@ -124,6 +136,15 @@ public final class Settings {
 		if (!style.looksLike(MapStyle.get())) {
 			MapStyle.set(style);
 		}
+		boolean fast = this.quality == Quality.FAST;
+		if (fast != TileBaker.fast()) {
+			TileBaker.setFast(fast);
+			// Bake what's on screen again at the new quality.
+			MapSession session = MapSession.get();
+			if (session != null) {
+				session.map().colorsChanged();
+			}
+		}
 		ServerRules.setAlwaysFogOfWar(this.alwaysFogOfWar);
 	}
 
@@ -148,6 +169,9 @@ public final class Settings {
 		}
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;
+		}
+		if (settings.quality == null) {
+			settings.quality = Quality.FANCY;
 		}
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));

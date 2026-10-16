@@ -550,6 +550,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 80);
 		context.takeScreenshot("diorama-04-map-far");
 
+		// Quality Fast: one sample per pixel and the cheap fog. Switching re-bakes what's on screen.
+		setQuality(context, Settings.Quality.FAST);
+		settle(context, 80);
+		context.takeScreenshot("diorama-04c-map-far-fast");
+		lookAtPlayer(context, 5.0, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("diorama-04d-map-close-fast");
+		setQuality(context, Settings.Quality.FANCY);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 80);
+
 		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
 			// Frames for a GIF: a slow pan east across the edge of the loaded area, so the fog's
 			// drift and the zoomed-out map show in motion.
@@ -1416,6 +1427,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.setScreen(() -> null);
 		}
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
+	}
+
+	private static void setQuality(ClientGameTestContext context, Settings.Quality quality) {
+		context.runOnClient(mc -> {
+			Settings.get().quality = quality;
+			Settings.get().apply();
+		});
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
