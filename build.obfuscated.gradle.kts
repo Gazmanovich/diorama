@@ -39,7 +39,7 @@ apply(from = rootProject.file("gradle/common.gradle.kts"))
 // The scenarios wait for what they need rather than counting on packets arriving in lockstep.
 val disableNetworkSynchronizer = "-Dfabric.client.gametest.disableNetworkSynchronizer=true"
 loom.runs.matching { it.name == "clientGameTest" }.configureEach {
-	vmArg(disableNetworkSynchronizer)
+	vmArgs(disableNetworkSynchronizer)
 }
 
 // The tests, run against the remapped release jar in a production environment. In development the
@@ -66,4 +66,13 @@ tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProducti
 	jvmArgs.add("-Dfabric.client.gametest")
 	jvmArgs.add(disableNetworkSynchronizer)
 	runDir = layout.buildDirectory.dir("run-production")
+	// The multiplayer scenario starts a dedicated server, which won't run without the EULA accepted;
+	// the development test run gets this from configureTests' eula = true.
+	val eula = runDir.file("eula.txt")
+	doFirst {
+		eula.get().asFile.apply {
+			parentFile.mkdirs()
+			writeText("eula=true\n")
+		}
+	}
 }
