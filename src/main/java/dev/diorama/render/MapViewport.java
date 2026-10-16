@@ -8,7 +8,9 @@ import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
+import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
+import java.lang.ref.WeakReference;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
@@ -30,6 +32,13 @@ public final class MapViewport {
 	private @Nullable GpuTexture maskTexture;
 	private @Nullable GpuTextureView maskView;
 	private final int[] maskPixels = new int[MASK * MASK];
+	/** What the mask texture was last built from; it only needs building again when this changes. */
+	private @Nullable MaskInputs maskInputs;
+	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
+	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
+
+	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded) {
+	}
 
 	/** Where and how big a map is drawn, and what part of the map it shows. */
 	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
@@ -172,7 +181,9 @@ public final class MapViewport {
 		int noiseV = Math.floorMod((long) (originV / snap), 8);
 		boolean cave = view.layer() != TileKey.SURFACE;
 		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
-		int params = (scaleCode * 16) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
+		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast fog.
+		int quality = TileBaker.fast() ? 4 : 0;
+		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		TextureSetup textures = TextureSetup.doubleTexture(
 			this.maskView,
@@ -197,6 +208,16 @@ public final class MapViewport {
 			this.maskView = RenderSystem.getDevice().createTextureView(this.maskTexture);
 		}
 		int lod = lodFor(level, view);
+		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
+		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
+		// only eat small explored areas that are a few texels across.
+		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded);
+		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
+			return;
+		}
+		this.maskInputs = inputs;
+		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double cellUnits = units / Projection.COVERAGE_CELLS;
 		int lastTu = Integer.MIN_VALUE;
@@ -222,10 +243,7 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}
 		}
-		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
-		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
-		// only eat small explored areas that are a few texels across.
-		if (MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16) {
+		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
@@ -284,5 +302,6 @@ public final class MapViewport {
 			this.maskTexture.close();
 			this.maskTexture = null;
 		}
+		this.maskInputs = null;
 	}
 }

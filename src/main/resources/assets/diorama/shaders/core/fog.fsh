@@ -33,7 +33,8 @@ uniform sampler2D Sampler1;
 
 layout(location = 0) in vec2 maskUv;
 // rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
-// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code.
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7) and the fast
+// quality flag (4).
 layout(location = 1) in vec4 params;
 
 layout(location = 0) out vec4 fragColor;
@@ -43,6 +44,8 @@ const float NOISE_PERIOD = 512.0;
 // The default camera angle (50 degrees). At other angles the banks sit slightly too far north or south.
 const float COS_PITCH = 0.643;
 const int LAYERS = 8;
+// Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
+const int FAST_LAYERS = 2;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -57,6 +60,7 @@ float fogScale;
 float scaleSteps;
 float scaleFraction;
 float seconds;
+bool fast;
 
 // Known share blurred over a radius in map units, so chunk-shaped edges melt away.
 float knownBlur(vec2 uv, float units) {
@@ -77,7 +81,7 @@ float knownBlur(vec2 uv, float units) {
 // Surface fog blends a near and a wide blur, so banks reach well over the edge of known land
 // and the noise has room to billow. Cave fog stays tight to the explored tunnels.
 float knownSoft(vec2 uv) {
-    if (blurUnits < 5.0) {
+    if (blurUnits < 5.0 || fast) {
         return knownBlur(uv, blurUnits);
     }
     return 0.5 * knownBlur(uv, blurUnits) + 0.5 * knownBlur(uv, blurUnits * 2.4);
@@ -118,7 +122,9 @@ float hash(vec2 p) {
 void main() {
     seconds = GameTime * 1200.0;
     noiseOrigin = floor(params.rg * 255.0 / 32.0 + 0.5) / 8.0;
-    unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(params.a * 255.0 / 16.0 + 0.5));
+    float alphaCode = floor(params.a * 255.0 + 0.5);
+    unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
+    fast = mod(alphaCode, 16.0) >= 2.0;
     float fogCode = floor(params.b * 255.0 + 0.5);
     bool cave = fogCode >= 128.0;
     fogCode = mod(fogCode, 128.0);
@@ -135,8 +141,9 @@ void main() {
     vec3 color = vec3(0.0);
     float alpha = 0.0;
     float jitter = hash(gl_FragCoord.xy) - 0.5;
-    for (int i = 0; i < LAYERS; i++) {
-        float h = fogHeight * (1.0 - (float(i) + 0.5 + jitter * 0.6) / float(LAYERS));
+    int layers = fast ? FAST_LAYERS : LAYERS;
+    for (int i = 0; i < layers; i++) {
+        float h = fogHeight * (1.0 - (float(i) + 0.5 + jitter * 0.6) / float(layers));
         vec2 ground = maskUv + vec2(0.0, h * COS_PITCH / unitsPerUv);
         float th = thickness(ground);
         float a = smoothstep(h - 1.4, h + 1.4, th);
@@ -144,12 +151,16 @@ void main() {
             continue;
         }
         // More fog between this point and the sun means it sits in shadow.
-        vec2 probe = ground + toSun;
-        float toward = thicknessFrom(texture(Sampler0, probe).r, noiseAt(probe));
-        float occlusion = clamp((toward - th) / fogHeight * 2.2, 0.0, 1.0);
+        float occlusion = 0.0;
+        if (!fast) {
+            vec2 probe = ground + toSun;
+            float toward = thicknessFrom(texture(Sampler0, probe).r, noiseAt(probe));
+            occlusion = clamp((toward - th) / fogHeight * 2.2, 0.0, 1.0);
+        }
         float light = clamp(0.2 + 0.7 * (h / fogHeight) + 0.3 - occlusion * 0.7, 0.0, 1.0);
         vec3 layerColor = mix(shade, lit, light);
-        float layerAlpha = a * 0.45;
+        // Fewer layers each carry more, so the bank stays as thick.
+        float layerAlpha = a * (fast ? 0.85 : 0.45);
         color += (1.0 - alpha) * layerAlpha * layerColor;
         alpha += (1.0 - alpha) * layerAlpha;
         if (alpha > 0.985) {

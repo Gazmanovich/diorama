@@ -7,8 +7,11 @@ import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.WorldKey;
+import dev.diorama.bake.BiomeTints;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.data.ChunkSnapshot;
+import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Radar;
@@ -34,6 +37,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.Registries;
@@ -646,13 +650,77 @@ public class DioramaClientTest implements FabricClientGameTest {
 		return s * s * (3 - 2 * s);
 	}
 
+	/**
+	 * The map blends biome tints on bake threads from its own copies of the chunks. They must come
+	 * out the same as the game's blend, for every column whose neighbours the map also has.
+	 */
+	private static void assertTintsMatchGame(ClientGameTestContext context) {
+		String result = context.computeOnClient(mc -> {
+			MapLevel map = MapSession.get().map();
+			int pcx = mc.player.blockPosition().getX() >> 4;
+			int pcz = mc.player.blockPosition().getZ() >> 4;
+			int columns = 0;
+			int wrong = 0;
+			String example = null;
+			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+			for (int cx = pcx - 8; cx <= pcx + 8; cx++) {
+				for (int cz = pcz - 8; cz <= pcz + 8; cz++) {
+					boolean surrounded = true;
+					for (int dx = -1; dx <= 1; dx++) {
+						for (int dz = -1; dz <= 1; dz++) {
+							surrounded &= map.chunk(cx + dx, cz + dz) != null;
+						}
+					}
+					if (!surrounded) {
+						continue;
+					}
+					ChunkSnapshot snapshot = map.chunk(cx, cz);
+					// What the last bake used, as it stands.
+					ChunkSnapshot.Tints tints = snapshot.tints() != null ? snapshot.tints() : BiomeTints.blend(snapshot);
+					for (int z = 0; z < 16; z++) {
+						for (int x = 0; x < 16; x++) {
+							pos.set((cx << 4) + x, snapshot.surface(x, z), (cz << 4) + z);
+							int i = (z << 4) | x;
+							int[] ours = {tints.grass()[i], tints.foliage()[i], tints.dryFoliage()[i], tints.water()[i]};
+							int[] game = {
+								BiomeColors.getAverageGrassColor(mc.level, pos), BiomeColors.getAverageFoliageColor(mc.level, pos),
+								BiomeColors.getAverageDryFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+							};
+							columns++;
+							for (int k = 0; k < 4; k++) {
+								if ((ours[k] & 0xFFFFFF) != (game[k] & 0xFFFFFF)) {
+									wrong++;
+									if (example == null) {
+										example = String.format("%s tint %d: ours %06X, game %06X", pos.toShortString(), k, ours[k] & 0xFFFFFF, game[k] & 0xFFFFFF);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			return columns + " " + wrong + " " + example;
+		});
+		String[] parts = result.split(" ", 3);
+		dev.diorama.Diorama.LOGGER.info("Biome tints checked against the game's for {} columns: {} differ", parts[0], parts[1]);
+		if (Integer.parseInt(parts[0]) < 1000) {
+			throw new AssertionError("Too few columns to check biome tints: " + parts[0]);
+		}
+		if (!parts[1].equals("0")) {
+			throw new AssertionError(parts[1] + " biome tints differ from the game's, for example " + parts[2]);
+		}
+	}
+
 	/** The minimap, the fullscreen map at three zooms, a resource reload and a cave slice. */
 	private static void tour(ClientGameTestContext context, TestSingleplayerContext world) {
+		// Fancy for the shots the Fast ones further down are compared with.
+		setQuality(context, Settings.Quality.FANCY);
 		context.takeScreenshot("diorama-01-minimap");
 
 		context.setScreen(MapScreen::new);
 		settle(context, 60);
 		context.takeScreenshot("diorama-02-map");
+		assertTintsMatchGame(context);
 
 		lookAtPlayer(context, 5.0, TileKey.SURFACE);
 		settle(context, 40);
@@ -661,6 +729,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 		lookAtPlayer(context, 0.75, TileKey.SURFACE);
 		settle(context, 80);
 		context.takeScreenshot("diorama-04-map-far");
+
+		// Quality Fast: one sample per pixel and the cheap fog. Switching re-bakes what's on screen.
+		setQuality(context, Settings.Quality.FAST);
+		settle(context, 80);
+		context.takeScreenshot("diorama-04c-map-far-fast");
+		lookAtPlayer(context, 5.0, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("diorama-04d-map-close-fast");
+		setQuality(context, Settings.Quality.FANCY);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 80);
 
 		if ("1".equals(System.getenv("DIORAMA_GIF"))) {
 			// Frames for a GIF: a slow pan east across the edge of the loaded area, so the fog's
@@ -1528,6 +1607,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.setScreen(() -> null);
 		}
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
+	}
+
+	private static void setQuality(ClientGameTestContext context, Settings.Quality quality) {
+		context.runOnClient(mc -> {
+			Settings.get().quality = quality;
+			Settings.get().apply();
+		});
 	}
 
 	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
