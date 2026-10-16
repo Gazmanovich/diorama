@@ -111,7 +111,12 @@ public final class MobFaces {
 		FACES.put(EntityTypes.WOLF, new Faces(new Face(64, 32, 4, 4, 6, 6), new Face(32, 32, 5, 17, 6, 5)));
 		FACES.put(EntityTypes.CAT, new Faces(new Face(64, 32, 5, 5, 5, 4), new Face(32, 32, 4, 4, 5, 4)));
 		FACES.put(EntityTypes.FOX, new Faces(new Face(48, 32, 7, 11, 8, 6, null, new Piece(9, 21, 4, 2, 2, 4)), new Face(32, 32, 5, 5, 6, 5)));
+		//? if >=26.1 {
 		FACES.put(EntityTypes.RABBIT, new Faces(new Face(64, 64, 5, 21, 5, 5), new Face(32, 32, 4, 4, 5, 4)));
+		//?} else {
+		/*// The rabbit model before 26.1: head box at texOffs(32, 0), 5 x 4 x 5, in a 64 x 32 texture.
+		FACES.put(EntityType.RABBIT, new Faces(new Face(64, 32, 37, 5, 5, 4), null));
+		*///?}
 		FACES.put(EntityTypes.POLAR_BEAR, new Faces(new Face(128, 64, 7, 7, 7, 7), new Face(64, 64, 4, 4, 6, 5)));
 		FACES.put(EntityTypes.PANDA, new Faces(new Face(64, 64, 9, 15, 13, 10, null, new Piece(47, 18, 7, 5, 3, 5)), new Face(64, 64, 5, 5, 7, 6)));
 		FACES.put(EntityTypes.ALLAY, new Faces(new Face(32, 32, 5, 5, 5, 5), null));
@@ -141,7 +146,13 @@ public final class MobFaces {
 		if (faces == null) {
 			return null;
 		}
+		//? if >=26.1 {
 		return entity instanceof LivingEntity living && living.isBaby() ? faces.baby() : faces.adult();
+		//?} else {
+		/*// Before 26.1 a baby is its adult model scaled down, drawn with the adult texture, so it
+		// has the adult's face.
+		return faces.adult();
+		*///?}
 	}
 
 	/**

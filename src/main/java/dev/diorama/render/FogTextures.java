@@ -1,10 +1,18 @@
 package dev.diorama.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+//? if >=26.1 {
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+//?} else {
+/*import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.TextureFormat;
+*///?}
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Random;
@@ -28,16 +36,26 @@ final class FogTextures {
 	}
 
 	static GpuTexture createTexture(String label, int size) {
+		//? if >=26.1 {
 		return RenderSystem.getDevice().createTexture(
 			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
 		);
+		//?} else {
+		/*return RenderSystem.getDevice().createTexture(
+			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, TextureFormat.RGBA8, size, size, 1, 1
+		);
+		*///?}
 	}
 
 	static void write(GpuTexture texture, int[] abgr, int size) {
 		ByteBuffer buffer = MemoryUtil.memAlloc(size * size * 4).order(ByteOrder.LITTLE_ENDIAN);
 		try {
 			buffer.asIntBuffer().put(abgr);
+			//? if >=26.1 {
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, 0, 0, 0, 0, size, size);
+			//?} else {
+			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, NativeImage.Format.RGBA, 0, 0, 0, 0, size, size);
+			*///?}
 		} finally {
 			MemoryUtil.memFree(buffer);
 		}

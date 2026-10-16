@@ -587,7 +587,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			camera(context, at, facing[0], facing[1], 70 * Math.pow(narrowFov / 70, s), 3);
 			context.takeScreenshot(String.format("showcase-demo-world-%03d", frame++));
 		}
+		//? if >=26.1 {
 		double fov = context.computeOnClient(mc -> (double) mc.gameRenderer.mainCamera().getFov());
+		//?} else {
+		/*// The camera keeps its field of view private here; the demo is recorded on the newest version anyway.
+		double fov = narrowFov;
+		*///?}
 		dev.diorama.Diorama.LOGGER.info("Demo ends {} blocks from the castle at a {} degree field of view", Math.round(distance), fov);
 
 		// The map, framed like the last frame: the same blocks per screen height at the castle.
@@ -966,7 +971,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			throw new AssertionError("Home is missing");
 		});
+		//? if >=26.1 {
 		context.getInput().lookAt(home);
+		//?} else {
+		/*context.runOnClient(mc -> mc.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, net.minecraft.world.phys.Vec3.atCenterOf(home)));
+		*///?}
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-02-in-world");
 
@@ -1234,13 +1243,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("waypoints-09-shared-own");
 	}
 
-	/** Every line in chat, newest first. Read through reflection: chat keeps them private. */
+	/**
+	 * Every line in chat, newest first. Read through reflection: chat keeps them private. Found by
+	 * type, not name, so it works where the game's names are obfuscated (1.21.11 in production).
+	 */
 	@SuppressWarnings("unchecked")
 	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
 		try {
-			java.lang.reflect.Field field = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
-			field.setAccessible(true);
-			return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+			for (java.lang.reflect.Field field : net.minecraft.client.gui.components.ChatComponent.class.getDeclaredFields()) {
+				if (field.getGenericType() instanceof java.lang.reflect.ParameterizedType type && type.getRawType() == java.util.List.class
+					&& type.getActualTypeArguments()[0] == net.minecraft.client.multiplayer.chat.GuiMessage.class) {
+					field.setAccessible(true);
+					return (java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage>) field.get(mc.gui.hud.getChat());
+				}
+			}
+			throw new AssertionError("Chat has no List<GuiMessage> field");
 		} catch (ReflectiveOperationException e) {
 			throw new AssertionError(e);
 		}

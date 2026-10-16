@@ -1,11 +1,19 @@
 package dev.diorama.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+//? if >=26.1 {
 import com.mojang.renderpearl.api.textures.AddressMode;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+//?} else {
+/*import com.mojang.blaze3d.textures.AddressMode;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+*///?}
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileBaker;
