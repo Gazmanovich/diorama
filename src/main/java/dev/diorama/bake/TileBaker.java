@@ -541,11 +541,12 @@ public final class TileBaker {
 			return 0xFFFFFF;
 		}
 		int i = ((z & 15) << 4) | (x & 15);
+		ChunkSnapshot.Tints tints = BiomeTints.of(snapshot);
 		return switch (kind) {
-			case BlockLooks.TINT_GRASS -> snapshot.grass[i];
-			case BlockLooks.TINT_FOLIAGE -> snapshot.foliage[i];
-			case BlockLooks.TINT_DRY_FOLIAGE -> snapshot.dryFoliage[i];
-			case BlockLooks.TINT_WATER -> snapshot.water[i];
+			case BlockLooks.TINT_GRASS -> tints.grass()[i];
+			case BlockLooks.TINT_FOLIAGE -> tints.foliage()[i];
+			case BlockLooks.TINT_DRY_FOLIAGE -> tints.dryFoliage()[i];
+			case BlockLooks.TINT_WATER -> tints.water()[i];
 			default -> 0xFFFFFF;
 		};
 	}
