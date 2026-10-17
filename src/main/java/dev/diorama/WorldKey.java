@@ -1,12 +1,14 @@
 package dev.diorama;
 
 import dev.diorama.mixin.BiomeManagerAccessor;
+import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Objects;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
@@ -22,6 +24,8 @@ import org.jspecify.annotations.Nullable;
  * dimension and stays put when the spawn moves.
  */
 public final class WorldKey {
+	private static @Nullable Last last;
+
 	private WorldKey() {
 	}
 
@@ -35,14 +39,44 @@ public final class WorldKey {
 		Minecraft mc = Minecraft.getInstance();
 		IntegratedServer server = mc.getSingleplayerServer();
 		if (server != null) {
-			return key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			// An integrated server runs one save for its whole life.
+			Last seen = last;
+			if (seen != null && seen.matches(server, null, null, false)) {
+				return seen.key;
+			}
+			String key = key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			last = new Last(new WeakReference<>(server), null, null, false, key);
+			return key;
 		}
 		ServerData data = mc.getCurrentServer();
 		if (data == null || level == null) {
 			return null;
 		}
-		String address = key(data.isRealm() ? "realms" : "server", data.ip);
-		return address + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
+		// A server list entry can be edited in place, so its address and kind are checked too. A
+		// level's seed never changes.
+		boolean realm = data.isRealm();
+		Last seen = last;
+		if (seen != null && seen.matches(data, level, data.ip, realm)) {
+			return seen.key;
+		}
+		String address = key(realm ? "realms" : "server", data.ip);
+		String key = address + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
+		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, key);
+		return key;
+	}
+
+	/**
+	 * The last key handed out and what it was worked out from. The HUD and the map ask every
+	 * frame, and working it out means a hash and a regex each time. The objects are held weakly
+	 * so a world that was left can still be freed; one that was freed can't match a live one.
+	 */
+	private record Last(WeakReference<Object> source, @Nullable WeakReference<ClientLevel> level, @Nullable String ip, boolean realm, String key) {
+		boolean matches(Object source, @Nullable ClientLevel level, @Nullable String ip, boolean realm) {
+			return this.source.get() == source
+				&& (this.level == null ? level == null : this.level.get() == level)
+				&& Objects.equals(this.ip, ip)
+				&& this.realm == realm;
+		}
 	}
 
 	/** {@code .minecraft/diorama/<world>}. */
