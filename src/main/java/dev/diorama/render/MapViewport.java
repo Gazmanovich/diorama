@@ -104,6 +104,27 @@ public final class MapViewport {
 		return lod;
 	}
 
+	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */
+	public static boolean ready(MapLevel level, View view) {
+		int lod = lodFor(level, view);
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
+		double u0 = view.minU();
+		double v0 = view.minV();
+		int tu0 = (int) Math.floor(u0 / units);
+		int tv0 = (int) Math.floor(v0 / units);
+		int tu1 = (int) Math.floor((u0 + view.width() / view.zoom()) / units);
+		int tv1 = (int) Math.floor((v0 + view.height() / view.zoom()) / units);
+		boolean ready = true;
+		for (int tu = tu0; tu <= tu1; tu++) {
+			for (int tv = tv0; tv <= tv1; tv++) {
+				double du = (tu + 0.5) * units - view.centerU();
+				double dv = (tv + 0.5) * units - view.centerV();
+				ready &= level.want(new TileKey(view.layer(), tu, tv, lod), Math.sqrt(du * du + dv * dv)) != null;
+			}
+		}
+		return ready;
+	}
+
 	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);

@@ -28,8 +28,13 @@ public final class MinimapHud implements HudElement {
 	/** Half the hotbar's width; hearts and hunger sit in the same columns just above it. */
 	private static final int HOTBAR_HALF_WIDTH = 91;
 	private static final int SMALLEST = 64;
+	/** Longest the minimap keeps showing the old slice while the new one draws. */
+	private static final long LAYER_HOLD_MS = 1000;
 
 	private final MapViewport viewport = new MapViewport();
+	/** The slice on screen. Moving up or down a cave slice keeps this one until the next has drawn. */
+	private int shownLayer = Integer.MIN_VALUE;
+	private long layerWanted;
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
@@ -57,7 +62,8 @@ public final class MinimapHud implements HudElement {
 		size = this.fit(size, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
-		int layer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
+		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
+		int layer = this.layerToShow(session, new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 
 		graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, 0xC0101418);
 		graphics.fill(x - 1, y - 1, x + size + 1, y + size + 1, 0x60FFFFFF);
@@ -81,6 +87,28 @@ public final class MinimapHud implements HudElement {
 			graphics.text(font, line, tx, textY, 0xFFFFFFFF, true);
 			textY += 10;
 		}
+	}
+
+	/**
+	 * The slice to draw for a view of the slice the player is in: that one once its tiles have
+	 * baked, the one already on screen until then, so climbing past a slice edge doesn't flash
+	 * the minimap blank.
+	 */
+	private int layerToShow(MapSession session, MapViewport.View wanted) {
+		long now = System.currentTimeMillis();
+		if (wanted.layer() == this.shownLayer || this.shownLayer == Integer.MIN_VALUE) {
+			this.shownLayer = wanted.layer();
+			this.layerWanted = now;
+			return this.shownLayer;
+		}
+		MapViewport.View shown = new MapViewport.View(wanted.x(), wanted.y(), wanted.width(), wanted.height(),
+			wanted.centerU(), wanted.centerV(), wanted.zoom(), this.shownLayer);
+		// The old slice only helps if it's there to show: after a teleport or a new dimension it isn't.
+		if (MapViewport.ready(session.map(), wanted) || now - this.layerWanted > LAYER_HOLD_MS
+			|| !MapViewport.ready(session.map(), shown)) {
+			this.shownLayer = wanted.layer();
+		}
+		return this.shownLayer;
 	}
 
 	/**
