@@ -1,5 +1,6 @@
 package dev.diorama.waypoint;
 
+import dev.diorama.DioramaClient;
 import dev.diorama.render.MapIcons;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -7,6 +8,7 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -82,12 +84,8 @@ public final class WaypointListScreen extends Screen {
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))).bounds(bx, y, 44, 20).build());
 		}
 		int bottom = this.height - 30;
-		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> {
-			Waypoint fresh = Waypoints.atPlayer();
-			if (fresh != null) {
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, fresh, true));
-			}
-		}).bounds(this.width / 2 - 102, bottom, 100, 20).build());
+		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
+			.bounds(this.width / 2 - 102, bottom, 100, 20).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose()).bounds(this.width / 2 + 2, bottom, 100, 20).build());
 	}
 
@@ -100,7 +98,10 @@ public final class WaypointListScreen extends Screen {
 		// The name and position stop short of the row's first button.
 		int textWidth = LIST_WIDTH - ROW_BUTTONS - (this.canTeleport ? TP_BUTTON : 0) - TEXT_LEFT - 4;
 		if (this.rows.isEmpty()) {
-			graphics.centeredText(this.font, Component.translatable("diorama.waypoints.empty"), this.width / 2, this.listTop + 20, 0xFFA0A0A0);
+			Component hint = DioramaClient.NEW_WAYPOINT.isUnbound()
+				? Component.translatable("diorama.waypoints.empty_unbound")
+				: Component.translatable("diorama.waypoints.empty", DioramaClient.NEW_WAYPOINT.getTranslatedKeyMessage());
+			graphics.centeredText(this.font, hint, this.width / 2, this.listTop + 20, 0xFFA0A0A0);
 		}
 		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
 			Waypoint waypoint = this.rows.get(this.scroll + i);
@@ -149,6 +150,23 @@ public final class WaypointListScreen extends Screen {
 			this.rebuildWidgets();
 		}
 		return true;
+	}
+
+	private void newWaypoint() {
+		Waypoint fresh = Waypoints.atPlayer();
+		if (fresh != null) {
+			this.minecraft.gui.setScreen(new WaypointEditScreen(this, fresh, true));
+		}
+	}
+
+	/** The add-waypoint key works here too, since the empty list tells the player to press it. */
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		if (DioramaClient.NEW_WAYPOINT.matches(event)) {
+			this.newWaypoint();
+			return true;
+		}
+		return super.keyPressed(event);
 	}
 
 	private void teleport(Waypoint waypoint) {
