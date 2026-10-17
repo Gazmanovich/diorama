@@ -16,9 +16,11 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Iterator;
@@ -70,6 +72,17 @@ public final class TileStore {
 	private final Path folder;
 	/** Set by close(), whose flush writes everything; writes still scheduled then do nothing. */
 	private volatile boolean closed;
+	/**
+	 * Held while reading a tile from disk or merging bakes into it, so those happen one at a time
+	 * and in order. The render thread never takes it: it only hands bakes over. Take before
+	 * {@code this}, never the other way round.
+	 */
+	private final Object io = new Object();
+	/**
+	 * Bakes handed over by {@link #baked} and not yet merged into their tile, oldest first. Guarded
+	 * by {@code this}.
+	 */
+	private final Map<TileKey, ArrayDeque<TileImage>> handedOver = new HashMap<>();
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
 	private final LinkedHashMap<TileKey, int[]> cache = new LinkedHashMap<>(16, 0.75F, true) {
 		@Override
@@ -152,10 +165,13 @@ public final class TileStore {
 				if (pixels == null) {
 					continue;
 				}
-				synchronized (this) {
-					this.cache.put(key, pixels);
-					// Pending until written, like a bake.
-					this.unwritten.put(key, pixels);
+				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
+				synchronized (this.io) {
+					synchronized (this) {
+						this.cache.put(key, pixels);
+						// Pending until written, like a bake.
+						this.unwritten.put(key, pixels);
+					}
 				}
 				boolean saved = this.store(key, pixels);
 				synchronized (this) {
@@ -179,53 +195,106 @@ public final class TileStore {
 		}
 	}
 
-	/** The saved pixels of a tile, or null if there are none. Any thread. Don't modify the array. */
-	public synchronized int @Nullable [] read(TileKey key) {
-		int[] pending = this.unwritten.get(key);
-		if (pending != null) {
-			return pending;
+	/**
+	 * The saved pixels of a tile, or null if there are none, including every bake handed over so
+	 * far. Not on the render thread: it can wait for the disk. Don't modify the array.
+	 */
+	public int @Nullable [] read(TileKey key) {
+		synchronized (this.io) {
+			this.merge(key);
+			return this.saved(key);
 		}
-		int[] pixels = this.cache.get(key);
-		if (pixels == null && !this.cache.containsKey(key)) {
-			pixels = this.load(key);
+	}
+
+	/** The tile's pixels in memory, else on disk, leaving out bakes not merged yet. Hold {@link #io}. */
+	private int @Nullable [] saved(TileKey key) {
+		synchronized (this) {
+			int[] pending = this.unwritten.get(key);
+			if (pending != null) {
+				return pending;
+			}
+			if (this.cache.containsKey(key)) {
+				return this.cache.get(key);
+			}
+		}
+		int[] pixels = this.load(key);
+		synchronized (this) {
 			this.cache.put(key, pixels);
 		}
 		return pixels;
 	}
 
 	/**
-	 * Records a fresh bake, full or partial, and schedules the write, unless the pixels are the
-	 * same as what's saved already: most re-bakes after a light change or a block that looks the
-	 * same change nothing. Any thread.
+	 * Records a fresh bake, full or partial. The writer thread merges it into the saved pixels and
+	 * schedules the write. Returns without waiting for the disk or for another thread's read, so
+	 * the render thread can call it.
 	 */
-	public synchronized void baked(TileImage image) {
+	public void baked(TileImage image) {
 		TileKey key = image.key();
-		int size = Projection.TILE_PIXELS;
-		// The bake read this to merge, so it's cached and cheap.
-		int[] saved = this.read(key);
-		int[] pixels;
-		if (image.isFull()) {
-			pixels = image.mips()[0].clone();
-		} else {
-			pixels = saved == null ? new int[size * size] : saved.clone();
-			for (TileImage.Patch patch : image.patches()) {
-				int[] block = patch.mips()[0];
-				int edge = TileImage.BLOCK;
-				for (int y = 0; y < edge; y++) {
-					System.arraycopy(block, y * edge, pixels, (patch.blockY() * edge + y) * size + patch.blockX() * edge, edge);
+		synchronized (this) {
+			this.handedOver.computeIfAbsent(key, k -> new ArrayDeque<>()).add(image);
+		}
+		WRITER.execute(() -> this.merge(key));
+	}
+
+	/**
+	 * Merges the bakes handed over for a tile into its pixels, oldest first, and schedules the
+	 * write, unless the pixels come out the same as what's saved already: most re-bakes after a
+	 * light change or a block that looks the same change nothing.
+	 */
+	private void merge(TileKey key) {
+		synchronized (this.io) {
+			List<TileImage> images;
+			synchronized (this) {
+				ArrayDeque<TileImage> queue = this.handedOver.get(key);
+				if (queue == null) {
+					return;
+				}
+				images = List.copyOf(queue);
+			}
+			int size = Projection.TILE_PIXELS;
+			int[] saved = this.saved(key);
+			boolean changed = false;
+			for (TileImage image : images) {
+				int[] pixels;
+				if (image.isFull()) {
+					pixels = image.mips()[0].clone();
+				} else {
+					pixels = saved == null ? new int[size * size] : saved.clone();
+					for (TileImage.Patch patch : image.patches()) {
+						int[] block = patch.mips()[0];
+						int edge = TileImage.BLOCK;
+						for (int y = 0; y < edge; y++) {
+							System.arraycopy(block, y * edge, pixels, (patch.blockY() * edge + y) * size + patch.blockX() * edge, edge);
+						}
+					}
+				}
+				if (saved != null ? java.util.Arrays.equals(saved, pixels) : nothingKnown(pixels)) {
+					count(true);
+					continue;
+				}
+				count(false);
+				saved = pixels;
+				changed = true;
+			}
+			synchronized (this) {
+				// Bakes handed over meanwhile stay queued; their own merge comes next.
+				ArrayDeque<TileImage> queue = this.handedOver.get(key);
+				for (int i = 0; i < images.size(); i++) {
+					queue.poll();
+				}
+				if (queue.isEmpty()) {
+					this.handedOver.remove(key);
+				}
+				if (changed) {
+					this.cache.put(key, saved);
+					boolean scheduled = this.unwritten.containsKey(key);
+					this.unwritten.put(key, saved);
+					if (!scheduled) {
+						WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
+					}
 				}
 			}
-		}
-		if (saved != null ? java.util.Arrays.equals(saved, pixels) : nothingKnown(pixels)) {
-			count(true);
-			return;
-		}
-		count(false);
-		this.cache.put(key, pixels);
-		boolean scheduled = this.unwritten.containsKey(key);
-		this.unwritten.put(key, pixels);
-		if (!scheduled) {
-			WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
 		}
 	}
 
@@ -236,6 +305,13 @@ public final class TileStore {
 		}
 		this.closed = true;
 		Future<?> flush = WRITER.submit(() -> {
+			Set<TileKey> handed;
+			synchronized (this) {
+				handed = new HashSet<>(this.handedOver.keySet());
+			}
+			for (TileKey key : handed) {
+				this.merge(key);
+			}
 			Map<TileKey, int[]> pending;
 			synchronized (this) {
 				pending = new HashMap<>(this.unwritten);
