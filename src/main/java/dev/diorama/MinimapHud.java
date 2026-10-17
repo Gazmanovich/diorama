@@ -34,8 +34,6 @@ public final class MinimapHud implements HudElement {
 	 * half a second to bake and a new slice can need four at once, so this leaves room for that.
 	 */
 	private static final long LAYER_HOLD_MS = 3000;
-	/** A gap between frames longer than this (the HUD hidden, a screen open) starts the hold afresh. */
-	private static final long FRAME_GAP_MS = 250;
 
 	private final MapViewport viewport = new MapViewport();
 	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
@@ -43,7 +41,6 @@ public final class MinimapHud implements HudElement {
 	private boolean showing;
 	/** When the minimap started holding the old slice, or -1 when it isn't. */
 	private long holdStart = -1;
-	private long lastFrame;
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
@@ -57,6 +54,8 @@ public final class MinimapHud implements HudElement {
 		/*if (session == null || player == null || mc.level == null || !settings.minimap || mc.options.hideGui
 		*///?}
 			|| mc.gui.screen() instanceof MapScreen || !ServerRules.minimapAllowed()) {
+			// Not drawn: a hold picks up afresh when it is again, rather than having run out meanwhile.
+			this.holdStart = -1;
 			return;
 		}
 		float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
@@ -105,15 +104,13 @@ public final class MinimapHud implements HudElement {
 	 */
 	private int layerToShow(MapLevel level, MapViewport.View wanted) {
 		long now = System.currentTimeMillis();
-		boolean gap = now - this.lastFrame > FRAME_GAP_MS;
-		this.lastFrame = now;
 		if (!this.showing || wanted.layer() == this.shownLayer) {
 			this.showing = true;
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;
 			return this.shownLayer;
 		}
-		if (this.holdStart < 0 || gap) {
+		if (this.holdStart < 0) {
 			this.holdStart = now;
 		}
 		MapViewport.View shown = new MapViewport.View(wanted.x(), wanted.y(), wanted.width(), wanted.height(),
