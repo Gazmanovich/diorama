@@ -1213,7 +1213,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Waypoint sent = new Waypoint("Mine: east-2_b", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
 			String text = WaypointShare.format(sent).orElseThrow(() -> new AssertionError("Couldn't format a short waypoint"));
+			//? if >=1.21.9 {
 			if (text.length() > 256 || !text.codePoints().allMatch(net.minecraft.util.StringUtil::isAllowedChatCharacter)) {
+			//?} else {
+			/*if (text.length() > 256 || !text.chars().allMatch(c -> net.minecraft.util.StringUtil.isAllowedChatCharacter((char) c))) {
+			*///?}
 				throw new AssertionError("Chat would refuse " + text);
 			}
 			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
@@ -1253,7 +1257,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Take the command from the [Add] link on the line chat actually received, and run it the
 		// way a chat click does: from the open chat screen, which Minecraft puts back after
 		// running the command. The malformed share's line has no link.
+		//? if >=1.21.9 {
 		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
 			String command = null;
@@ -1309,14 +1317,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!teleport.active) {
 				throw new AssertionError("Teleport is off in a world where the player may use /tp");
 			}
+			//? if >=1.21.9 {
 			teleport.onPress(null);
+			//?} else {
+			/*teleport.onPress();
+			*///?}
 		});
 		context.waitFor(mc -> mc.player.distanceToSqr(editedX + 0.5, target.y, target.z + 0.5) < 4, 100);
 
 		// Share it: a name with a colon goes out without upsetting the server.
 		context.setScreen(() -> new WaypointEditScreen(null, target, false));
 		context.waitTicks(2);
+		//? if >=1.21.9 {
 		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress(null));
+		//?} else {
+		/*context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress());
+		*///?}
 		context.waitTicks(20);
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");

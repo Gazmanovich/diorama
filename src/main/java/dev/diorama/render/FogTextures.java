@@ -6,9 +6,17 @@ import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
-//?} else {
+//?} else if >=1.21.11 {
 /*import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.TextureFormat;
+*///?} else {
+/*import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.textures.AddressMode;
+import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
@@ -53,13 +61,24 @@ final class FogTextures {
 			buffer.asIntBuffer().put(abgr);
 			//? if >=26.2 {
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, 0, 0, 0, 0, size, size);
-			//?} else {
+			//?} else if >=1.21.9 {
 			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, NativeImage.Format.RGBA, 0, 0, 0, 0, size, size);
+			*///?} else {
+			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer.asIntBuffer(), NativeImage.Format.RGBA, 0, 0, 0, 0, size, size);
 			*///?}
 		} finally {
 			MemoryUtil.memFree(buffer);
 		}
 	}
+
+	//? if <1.21.11 {
+	/*// Before 1.21.11 a texture carried its own sampling state instead of each draw choosing a
+	// sampler. Minifies linearly, like every sampler the map uses.
+	static void sampleWith(GpuTextureView view, AddressMode address, FilterMode magnify, boolean mipmaps) {
+		view.texture().setAddressMode(address);
+		view.texture().setTextureFilter(FilterMode.LINEAR, magnify, mipmaps);
+	}
+	*///?}
 
 	/** Tileable value noise, a coarser scale in each channel from red to alpha. */
 	private static GpuTextureView createNoise() {

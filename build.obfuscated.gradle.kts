@@ -3,7 +3,9 @@ plugins {
 	id("net.fabricmc.fabric-loom-remap")
 }
 
-version = "${property("mod_version")}+${sc.current.version}"
+// A jar that covers several Minecraft versions names them all (minecraft_label), so a player on
+// 1.21.8 can tell the 1.21.6 jar is theirs.
+version = "${property("mod_version")}+${findProperty("minecraft_label") ?: sc.current.version}"
 group = property("mod_group") as String
 base.archivesName = "diorama"
 
@@ -30,6 +32,13 @@ dependencies {
 	mappings(loom.officialMojangMappings())
 	modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")
 	modImplementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
+	// The source marks nullable types with JSpecify's @Nullable, which Minecraft only ships from
+	// 1.21.11. Older versions get it at compile time only: the JVM skips annotations whose class is
+	// missing, so the jar runs without it.
+	if (sc.current.parsed < "1.21.11") {
+		compileOnly("org.jspecify:jspecify:1.0.0")
+		"gametestCompileOnly"("org.jspecify:jspecify:1.0.0")
+	}
 }
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))

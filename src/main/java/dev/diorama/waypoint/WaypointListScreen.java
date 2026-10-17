@@ -13,7 +13,9 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+//? if >=1.21.11 {
 import net.minecraft.server.permissions.Permissions;
+//?}
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -56,7 +58,12 @@ public final class WaypointListScreen extends Screen {
 		this.visibleRows = Math.max(1, (this.height - this.listTop - 40) / ROW);
 		this.scroll = Math.max(0, Math.min(this.scroll, this.rows.size() - this.visibleRows));
 		int left = (this.width - LIST_WIDTH) / 2;
+		//? if >=1.21.11 {
 		this.canTeleport = player != null && player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
+		//?} else {
+		/*// Permission level 2 is the game master level /tp needs.
+		this.canTeleport = player != null && player.hasPermissions(2);
+		*///?}
 		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
 			Waypoint waypoint = this.rows.get(this.scroll + i);
 			int y = this.listTop + i * ROW + 2;

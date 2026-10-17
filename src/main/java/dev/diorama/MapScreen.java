@@ -18,8 +18,10 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+//?}
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
@@ -136,36 +138,81 @@ public final class MapScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 	}
 
+	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
+	// method below that both versions share.
+	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		if (super.mouseClicked(event, doubleClick)) {
-			// A widget took the click.
-			this.dragged = true;
-			return true;
-		}
-		this.pressX = event.x();
-		this.pressY = event.y();
-		this.dragged = false;
-		return true;
+		return this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y());
 	}
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		if (this.dragged || Math.hypot(event.x() - this.pressX, event.y() - this.pressY) > 3) {
+		return this.released(event.x(), event.y(), event.button()) || super.mouseReleased(event);
+	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		return this.dragged(event.x(), event.y(), event.button(), dx, dy) || super.mouseDragged(event, dx, dy);
+	}
+
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		return this.keyDown(event.key(), DioramaClient.WAYPOINT_LIST.matches(event), DioramaClient.OPEN_MAP.matches(event))
+			|| super.keyPressed(event);
+	}
+	//?} else {
+	/*@Override
+	public boolean mouseClicked(double x, double y, int button) {
+		return this.clicked(super.mouseClicked(x, y, button), x, y);
+	}
+
+	@Override
+	public boolean mouseReleased(double x, double y, int button) {
+		return this.released(x, y, button) || super.mouseReleased(x, y, button);
+	}
+
+	@Override
+	public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
+		return this.dragged(x, y, button, dx, dy) || super.mouseDragged(x, y, button, dx, dy);
+	}
+
+	@Override
+	public boolean keyPressed(int key, int scancode, int modifiers) {
+		return this.keyDown(key, DioramaClient.WAYPOINT_LIST.matches(key, scancode), DioramaClient.OPEN_MAP.matches(key, scancode))
+			|| super.keyPressed(key, scancode, modifiers);
+	}
+	*///?}
+
+	/** A press; {@code widgetTook} if a widget (the settings button) took it. */
+	private boolean clicked(boolean widgetTook, double x, double y) {
+		if (widgetTook) {
+			this.dragged = true;
 			return true;
 		}
-		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
-			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, event.x(), event.y());
+		this.pressX = x;
+		this.pressY = y;
+		this.dragged = false;
+		return true;
+	}
+
+	/** A release; false leaves it to the screen's widgets. */
+	private boolean released(double x, double y, int button) {
+		if (this.dragged || Math.hypot(x - this.pressX, y - this.pressY) > 3) {
+			return true;
+		}
+		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
+			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
 			if (pin != null) {
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint(), false));
 			}
 			return true;
 		}
-		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
-			this.addWaypointAt(event.x(), event.y());
+		if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
+			this.addWaypointAt(x, y);
 			return true;
 		}
-		return super.mouseReleased(event);
+		return false;
 	}
 
 	/** Opens a new waypoint on the block shown under a screen point. */
@@ -188,18 +235,18 @@ public final class MapScreen extends Screen {
 		}
 	}
 
-	@Override
-	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
-		if (Math.hypot(event.x() - this.pressX, event.y() - this.pressY) > 3) {
+	/** A drag; false leaves it to the screen's widgets. */
+	private boolean dragged(double x, double y, int button, double dx, double dy) {
+		if (Math.hypot(x - this.pressX, y - this.pressY) > 3) {
 			this.dragged = true;
 		}
-		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.dragged) {
+		if (button == InputConstants.MOUSE_BUTTON_LEFT && this.dragged) {
 			this.centerU -= dx / this.zoom;
 			this.centerV -= dy / this.zoom;
 			this.following = false;
 			return true;
 		}
-		return super.mouseDragged(event, dx, dy);
+		return false;
 	}
 
 	@Override
@@ -220,19 +267,19 @@ public final class MapScreen extends Screen {
 		return true;
 	}
 
-	@Override
-	public boolean keyPressed(KeyEvent event) {
+	/** A key press, and whether it is bound to the waypoint list or the map; false leaves it to the screen. */
+	private boolean keyDown(int key, boolean waypointListKey, boolean mapKey) {
 		// The player's own bindings come before the map's fixed keys, so Open map rebound to C still closes it.
-		if (DioramaClient.WAYPOINT_LIST.matches(event)) {
+		if (waypointListKey) {
 			this.minecraft.gui.setScreen(new WaypointListScreen(this));
 			return true;
 		}
-		if (DioramaClient.OPEN_MAP.matches(event)) {
+		if (mapKey) {
 			this.onClose();
 			return true;
 		}
 		LocalPlayer player = this.minecraft.player;
-		switch (event.key()) {
+		switch (key) {
 			case InputConstants.KEY_C -> {
 				this.layer = this.layer == TileKey.SURFACE && player != null ? MapSession.caveLayerFor(player.getY()) : TileKey.SURFACE;
 				return true;
@@ -252,7 +299,7 @@ public final class MapScreen extends Screen {
 			default -> {
 			}
 		}
-		return super.keyPressed(event);
+		return false;
 	}
 
 	private void shiftSlice(int delta, LocalPlayer player) {

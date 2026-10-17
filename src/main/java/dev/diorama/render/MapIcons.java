@@ -4,6 +4,9 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+//? if <1.21.11 {
+/*import com.mojang.blaze3d.textures.AddressMode;
+*///?}
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -56,7 +59,11 @@ public final class MapIcons {
 		}
 		graphics.guiRenderState.addGuiElement(QuadElement.of(
 			RenderPipelines.GUI_TEXTURED,
+			//? if >=1.21.11 {
 			TextureSetup.singleTexture(caret, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+			//?} else {
+			/*TextureSetup.singleTexture(caret),
+			*///?}
 			new Matrix3x2f(graphics.pose()),
 			corners,
 			new float[] {0, 0, 0, 1, 1, 1, 1, 0},
@@ -68,7 +75,11 @@ public final class MapIcons {
 	private static void draw(GuiGraphicsExtractor graphics, GpuTextureView texture, float x, float y, float size, int argb, boolean flip) {
 		graphics.guiRenderState.addGuiElement(QuadElement.rect(
 			RenderPipelines.GUI_TEXTURED,
+			//? if >=1.21.11 {
 			TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+			//?} else {
+			/*TextureSetup.singleTexture(texture),
+			*///?}
 			new Matrix3x2f(graphics.pose()),
 			x, y, x + size, y + size,
 			0, flip ? 1 : 0, 1, flip ? 0 : 1,
@@ -109,6 +120,10 @@ public final class MapIcons {
 		}
 		GpuTexture texture = FogTextures.createTexture(label, SIZE);
 		FogTextures.write(texture, pixels, SIZE);
-		return RenderSystem.getDevice().createTextureView(texture);
+		GpuTextureView view = RenderSystem.getDevice().createTextureView(texture);
+		//? if <1.21.11 {
+		/*FogTextures.sampleWith(view, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, false);
+		*///?}
+		return view;
 	}
 }
