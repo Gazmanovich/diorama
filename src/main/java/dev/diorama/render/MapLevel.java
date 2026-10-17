@@ -96,6 +96,18 @@ public final class MapLevel implements ChunkSource {
 	private final Set<TileKey> backgroundBakes = new HashSet<>();
 	/** A changed tile waits this long for more changes before a background bake. */
 	private static final long BACKGROUND_QUIET_MS = 2000;
+	/**
+	 * Set when a trim couldn't get the snapshots down because their tiles still wait to be saved.
+	 * Only a finished surface bake can free them, so the next try waits for one, and for
+	 * {@link #TRIM_RETRY_MS} after the last: a trim looks at every snapshot.
+	 */
+	private boolean trimStuck;
+	private boolean surfaceBakedSinceTrim;
+	private long lastTrimMs;
+	private static final long TRIM_RETRY_MS = 1000;
+	/** Where the player was at the last {@link #put}; trims keep the snapshots nearest it. */
+	private int playerChunkX;
+	private int playerChunkZ;
 	private long frame;
 	private volatile boolean closed;
 
@@ -315,8 +327,10 @@ public final class MapLevel implements ChunkSource {
 			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], surface, terrain);
 		}
-		if (this.chunks.size() > MAX_CHUNKS) {
-			this.trimChunks(playerChunkX, playerChunkZ);
+		this.playerChunkX = playerChunkX;
+		this.playerChunkZ = playerChunkZ;
+		if (this.chunks.size() > MAX_CHUNKS && !this.trimStuck) {
+			this.trimChunks();
 		}
 	}
 
@@ -420,7 +434,9 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
-	private void trimChunks(int playerChunkX, int playerChunkZ) {
+	private void trimChunks() {
+		int playerChunkX = this.playerChunkX;
+		int playerChunkZ = this.playerChunkZ;
 		List<ChunkSnapshot> all = new ArrayList<>(this.chunks.values());
 		all.sort(Comparator.comparingLong(s -> -(sq(s.chunkX - playerChunkX) + sq(s.chunkZ - playerChunkZ))));
 		int excess = all.size() - MAX_CHUNKS * 3 / 4;
@@ -431,11 +447,17 @@ public final class MapLevel implements ChunkSource {
 				excess--;
 			}
 		}
+		this.trimStuck = excess > 0;
+		this.surfaceBakedSinceTrim = false;
+		this.lastTrimMs = System.currentTimeMillis();
 	}
 
-	/** Whether a surface tile this chunk shows in is still waiting for its background bake. */
+	/**
+	 * Whether a surface tile this chunk shows in still has to be baked and saved: it changed since
+	 * its last bake, or its bake is running and may still read this chunk.
+	 */
 	private boolean waitingToSave(ChunkSnapshot snapshot) {
-		if (this.unsaved.isEmpty() || snapshot.maxY == Integer.MIN_VALUE) {
+		if (this.unsaved.isEmpty() && this.inFlight.isEmpty() || snapshot.maxY == Integer.MIN_VALUE) {
 			return false;
 		}
 		double units = Projection.TILE_UNITS;
@@ -447,7 +469,8 @@ public final class MapLevel implements ChunkSource {
 		int tv1 = (int) Math.floor(Projection.v(snapshot.floorY, z0 + 16) / units);
 		for (int tu = tu0; tu <= tu1; tu++) {
 			for (int tv = tv0; tv <= tv1; tv++) {
-				if (this.unsaved.containsKey(new TileKey(TileKey.SURFACE, tu, tv))) {
+				TileKey key = new TileKey(TileKey.SURFACE, tu, tv);
+				if (this.unsaved.containsKey(key) || this.inFlight.contains(key)) {
 					return true;
 				}
 			}
@@ -500,6 +523,9 @@ public final class MapLevel implements ChunkSource {
 			if (this.closed) {
 				continue;
 			}
+			if (image.key().layer() == TileKey.SURFACE && image.key().lod() == 0) {
+				this.surfaceBakedSinceTrim = true;
+			}
 			if (image.generation() != this.generation(image.key())) {
 				// Baked under old colours or the other cave mode; bake it again.
 				MapTile stale = this.tiles.remove(image.key());
@@ -538,6 +564,9 @@ public final class MapLevel implements ChunkSource {
 			if (this.store != null && !image.key().isCave() && image.key().lod() == 0) {
 				this.store.baked(image);
 			}
+		}
+		if (this.trimStuck && this.surfaceBakedSinceTrim && System.currentTimeMillis() - this.lastTrimMs >= TRIM_RETRY_MS) {
+			this.trimChunks();
 		}
 
 		BlockLooks looks = BlockLooks.get();
