@@ -1,5 +1,5 @@
 #version 330
-//? if >=26.1 {
+//? if >=26.3 {
 #extension GL_ARB_separate_shader_objects : require
 //?}
 
@@ -11,7 +11,7 @@
 // sits above the ground point h * cos(pitch) further south, which is what makes the banks look
 // like they rise off the terrain.
 
-//? if >=26.1 {
+//? if >=26.3 {
 layout(std140) uniform Globals {
     ivec3 CameraBlockPos;
     float GlintAlpha;
@@ -53,7 +53,7 @@ uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
 
-//? if >=26.1 {
+//? if >=26.3 {
 layout(location = 0) in vec2 maskUv;
 //?} else {
 /*in vec2 maskUv;
@@ -61,7 +61,7 @@ layout(location = 0) in vec2 maskUv;
 // rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
 // (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7) and the fast
 // quality flag (4).
-//? if >=26.1 {
+//? if >=26.3 {
 layout(location = 1) in vec4 params;
 
 layout(location = 0) out vec4 fragColor;

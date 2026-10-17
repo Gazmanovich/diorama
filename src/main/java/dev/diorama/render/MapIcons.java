@@ -1,15 +1,9 @@
 package dev.diorama.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-//? if >=26.1 {
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
-//?} else {
-/*import com.mojang.blaze3d.textures.FilterMode;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
-*///?}
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.renderer.RenderPipelines;
