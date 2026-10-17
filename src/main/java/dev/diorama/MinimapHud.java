@@ -28,8 +28,11 @@ public final class MinimapHud implements HudElement {
 	/** Half the hotbar's width; hearts and hunger sit in the same columns just above it. */
 	private static final int HOTBAR_HALF_WIDTH = 91;
 	private static final int SMALLEST = 64;
-	/** Longest the minimap keeps showing the old slice while the new one draws. */
-	private static final long LAYER_HOLD_MS = 1000;
+	/**
+	 * Longest the minimap keeps showing the old slice while the new one draws. A tile takes about
+	 * half a second to bake and a new slice can need four at once, so this leaves room for that.
+	 */
+	private static final long LAYER_HOLD_MS = 3000;
 
 	private final MapViewport viewport = new MapViewport();
 	/** The slice on screen. Moving up or down a cave slice keeps this one until the next has drawn. */
