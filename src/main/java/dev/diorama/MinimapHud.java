@@ -1,6 +1,7 @@
 package dev.diorama;
 
 import dev.diorama.bake.TileKey;
+import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
@@ -29,15 +30,20 @@ public final class MinimapHud implements HudElement {
 	private static final int HOTBAR_HALF_WIDTH = 91;
 	private static final int SMALLEST = 64;
 	/**
-	 * Longest the minimap keeps showing the old slice while the new one draws. A tile takes about
+	 * Longest the minimap keeps showing the old slice while the new one bakes. A tile takes about
 	 * half a second to bake and a new slice can need four at once, so this leaves room for that.
 	 */
 	private static final long LAYER_HOLD_MS = 3000;
+	/** A gap between frames longer than this (the HUD hidden, a screen open) starts the hold afresh. */
+	private static final long FRAME_GAP_MS = 250;
 
 	private final MapViewport viewport = new MapViewport();
-	/** The slice on screen. Moving up or down a cave slice keeps this one until the next has drawn. */
-	private int shownLayer = Integer.MIN_VALUE;
-	private long layerWanted;
+	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
+	private int shownLayer;
+	private boolean showing;
+	/** When the minimap started holding the old slice, or -1 when it isn't. */
+	private long holdStart = -1;
+	private long lastFrame;
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
@@ -66,7 +72,7 @@ public final class MinimapHud implements HudElement {
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
-		int layer = this.layerToShow(session, new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
+		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 
 		graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, 0xC0101418);
 		graphics.fill(x - 1, y - 1, x + size + 1, y + size + 1, 0x60FFFFFF);
@@ -97,19 +103,25 @@ public final class MinimapHud implements HudElement {
 	 * baked, the one already on screen until then, so climbing past a slice edge doesn't flash
 	 * the minimap blank.
 	 */
-	private int layerToShow(MapSession session, MapViewport.View wanted) {
+	private int layerToShow(MapLevel level, MapViewport.View wanted) {
 		long now = System.currentTimeMillis();
-		if (wanted.layer() == this.shownLayer || this.shownLayer == Integer.MIN_VALUE) {
+		boolean gap = now - this.lastFrame > FRAME_GAP_MS;
+		this.lastFrame = now;
+		if (!this.showing || wanted.layer() == this.shownLayer) {
+			this.showing = true;
 			this.shownLayer = wanted.layer();
-			this.layerWanted = now;
+			this.holdStart = -1;
 			return this.shownLayer;
+		}
+		if (this.holdStart < 0 || gap) {
+			this.holdStart = now;
 		}
 		MapViewport.View shown = new MapViewport.View(wanted.x(), wanted.y(), wanted.width(), wanted.height(),
 			wanted.centerU(), wanted.centerV(), wanted.zoom(), this.shownLayer);
-		// The old slice only helps if it's there to show: after a teleport or a new dimension it isn't.
-		if (MapViewport.ready(session.map(), wanted) || now - this.layerWanted > LAYER_HOLD_MS
-			|| !MapViewport.ready(session.map(), shown)) {
+		// The old slice only helps if it has something to show: after a teleport or a new dimension it doesn't.
+		if (MapViewport.ready(level, wanted) || now - this.holdStart > LAYER_HOLD_MS || !MapViewport.showsAnything(level, shown)) {
 			this.shownLayer = wanted.layer();
+			this.holdStart = -1;
 		}
 		return this.shownLayer;
 	}
