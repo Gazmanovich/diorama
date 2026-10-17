@@ -19,6 +19,8 @@ import dev.diorama.Projection;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
@@ -102,6 +104,49 @@ public final class MapViewport {
 			lod++;
 		}
 		return lod;
+	}
+
+	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */
+	public static boolean ready(MapLevel level, View view) {
+		boolean ready = true;
+		for (TileKey key : tilesIn(level, view)) {
+			ready &= level.want(key, distance(key, view)) != null;
+		}
+		return ready;
+	}
+
+	/** Whether any tile this view shows is baked and has something on it. Asks for nothing. */
+	public static boolean showsAnything(MapLevel level, View view) {
+		for (TileKey key : tilesIn(level, view)) {
+			MapTile tile = level.peek(key);
+			if (tile != null && !tile.isEmpty()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static List<TileKey> tilesIn(MapLevel level, View view) {
+		int lod = lodFor(level, view);
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
+		double u0 = view.minU();
+		double v0 = view.minV();
+		int tu1 = (int) Math.floor((u0 + view.width() / view.zoom()) / units);
+		int tv1 = (int) Math.floor((v0 + view.height() / view.zoom()) / units);
+		List<TileKey> keys = new ArrayList<>();
+		for (int tu = (int) Math.floor(u0 / units); tu <= tu1; tu++) {
+			for (int tv = (int) Math.floor(v0 / units); tv <= tv1; tv++) {
+				keys.add(new TileKey(view.layer(), tu, tv, lod));
+			}
+		}
+		return keys;
+	}
+
+	private static double distance(TileKey key, View view) {
+		double units = (double) Projection.TILE_UNITS * (1 << key.lod());
+		double du = (key.tileU() + 0.5) * units - view.centerU();
+		double dv = (key.tileV() + 0.5) * units - view.centerV();
+		return Math.sqrt(du * du + dv * dv);
 	}
 
 	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
