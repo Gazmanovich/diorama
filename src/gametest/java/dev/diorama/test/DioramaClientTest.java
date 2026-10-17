@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.DioramaClient;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -949,6 +950,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void waypoints(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		context.waitFor(mc -> mc.player.onGround(), 600);
+		// The empty list says to press the add-waypoint key, so pressing it there opens the editor.
+		context.getInput().pressKey(DioramaClient.WAYPOINT_LIST);
+		context.waitTicks(3);
+		context.takeScreenshot("waypoints-00-empty-list");
+		context.getInput().pressKey(DioramaClient.NEW_WAYPOINT);
+		context.waitTicks(3);
+		boolean keyOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		context.setScreen(() -> null);
+		if (!keyOpenedEditor) {
+			throw new AssertionError("The add-waypoint key did nothing on the waypoint list");
+		}
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
 			BlockPos at = mc.player.blockPosition();
@@ -1046,6 +1058,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.setScreen(() -> null);
 
+		// A name as long as the editor allows, and coordinates near the world border, stop before
+		// the row's buttons.
+		context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Long waypoint name 1234567890123",
+			-29999000, -64, 29999000, mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3])));
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-05-list");
