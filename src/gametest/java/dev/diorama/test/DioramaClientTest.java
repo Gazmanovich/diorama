@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.DioramaClient;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -776,6 +777,27 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 40);
 		context.takeScreenshot("diorama-06-cave-close");
 		context.setScreen(() -> null);
+
+		// Open map rebound to C, which the map also uses for caves: the player's binding wins, so
+		// pressing it again closes the map.
+		context.runOnClient(mc -> {
+			DioramaClient.OPEN_MAP.setKey(InputConstants.getKey("key.keyboard.c"));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		context.getInput().pressKey(DioramaClient.OPEN_MAP);
+		context.waitTicks(5);
+		boolean opened = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen);
+		context.getInput().pressKey(DioramaClient.OPEN_MAP);
+		context.waitTicks(5);
+		boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			DioramaClient.OPEN_MAP.setKey(DioramaClient.OPEN_MAP.getDefaultKey());
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		if (!opened || !closed) {
+			throw new AssertionError("With Open map on C, the key " + (opened ? "didn't close the map" : "didn't open the map"));
+		}
 	}
 
 	/** Fog of war after the server's fair-play code, in a scene built for it. */
