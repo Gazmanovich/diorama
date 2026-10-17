@@ -8,6 +8,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.permissions.Permissions;
 import org.jspecify.annotations.Nullable;
@@ -19,12 +20,18 @@ import org.jspecify.annotations.Nullable;
 public final class WaypointListScreen extends Screen {
 	private static final int ROW = 24;
 	private static final int LIST_WIDTH = 340;
+	/** Where a row's name and position start, right of its dot. */
+	private static final int TEXT_LEFT = 22;
+	/** Edit, Hide and Delete, each 44 wide with a 2 pixel gap. */
+	private static final int ROW_BUTTONS = 3 * 46;
+	private static final int TP_BUTTON = 30;
 
 	private final @Nullable Screen parent;
 	private final List<Waypoint> rows = new ArrayList<>();
 	private int scroll;
 	private int listTop;
 	private int visibleRows;
+	private boolean canTeleport;
 
 	public WaypointListScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.waypoints.title"));
@@ -44,13 +51,13 @@ public final class WaypointListScreen extends Screen {
 		this.visibleRows = Math.max(1, (this.height - this.listTop - 40) / ROW);
 		this.scroll = Math.max(0, Math.min(this.scroll, this.rows.size() - this.visibleRows));
 		int left = (this.width - LIST_WIDTH) / 2;
-		boolean canTeleport = player != null && player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
+		this.canTeleport = player != null && player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
 		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
 			Waypoint waypoint = this.rows.get(this.scroll + i);
 			int y = this.listTop + i * ROW + 2;
 			int bx = left + LIST_WIDTH;
-			if (canTeleport) {
-				bx -= 30;
+			if (this.canTeleport) {
+				bx -= TP_BUTTON;
 				this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoints.tp"), b -> this.teleport(waypoint)).bounds(bx, y, 28, 20).build());
 			}
 			bx -= 46;
@@ -90,6 +97,8 @@ public final class WaypointListScreen extends Screen {
 		graphics.centeredText(this.font, this.title, this.width / 2, 16, 0xFFFFFFFF);
 		LocalPlayer player = this.minecraft.player;
 		int left = (this.width - LIST_WIDTH) / 2;
+		// The name and position stop short of the row's first button.
+		int textWidth = LIST_WIDTH - ROW_BUTTONS - (this.canTeleport ? TP_BUTTON : 0) - TEXT_LEFT - 4;
 		if (this.rows.isEmpty()) {
 			graphics.centeredText(this.font, Component.translatable("diorama.waypoints.empty"), this.width / 2, this.listTop + 20, 0xFFA0A0A0);
 		}
@@ -108,13 +117,28 @@ public final class WaypointListScreen extends Screen {
 			graphics.centeredText(this.font, label, 0, 0, WaypointOverlay.textColour(waypoint.color));
 			graphics.pose().popMatrix();
 			int nameColor = waypoint.visible ? 0xFFFFFFFF : 0xFF808080;
-			graphics.text(this.font, waypoint.name, left + 22, y + 4, nameColor, true);
+			String name = this.fit(waypoint.name, textWidth);
+			graphics.text(this.font, name, left + TEXT_LEFT, y + 4, nameColor, true);
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (player != null) {
 				detail = Math.round(waypoint.distanceTo(player.getX(), player.getY(), player.getZ())) + " m · " + detail;
 			}
-			graphics.text(this.font, detail, left + 22, y + 14, 0xFF909090, true);
+			String shownDetail = this.fit(detail, textWidth);
+			graphics.text(this.font, shownDetail, left + TEXT_LEFT, y + 14, 0xFF909090, true);
+			boolean overText = mouseX >= left + TEXT_LEFT && mouseX < left + TEXT_LEFT + textWidth && mouseY >= y && mouseY < y + ROW - 1;
+			if (overText && (!name.equals(waypoint.name) || !shownDetail.equals(detail))) {
+				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(waypoint.name), Component.literal(detail)), mouseX, mouseY);
+			}
 		}
+	}
+
+	/** The text, cut to the width with an ellipsis the way vanilla clips a label, if it's wider. */
+	private String fit(String text, int width) {
+		if (this.font.width(text) <= width) {
+			return text;
+		}
+		String ellipsis = CommonComponents.ELLIPSIS.getString();
+		return this.font.plainSubstrByWidth(text, width - this.font.width(ellipsis)) + ellipsis;
 	}
 
 	@Override
