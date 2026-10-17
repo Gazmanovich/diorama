@@ -1028,7 +1028,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-04-editor");
-		context.clickScreenButton("diorama.waypoint.save");
+
+		// A coordinate that isn't a number turns red and Save stays off, instead of saving the old
+		// coordinate. What's typed survives a GUI scale change, which rebuilds the screen.
+		String pickedX = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(2).getValue());
+		typeInto(context, 2, "abc");
+		clickButton(context, "diorama.waypoint.save");
+		boolean savedBadX = context.computeOnClient(mc -> !(mc.gui.screen() instanceof WaypointEditScreen) || WaypointStore.get().all().size() != 2);
+		if (savedBadX) {
+			throw new AssertionError("Save went through with X = abc");
+		}
+		int guiScale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		setGuiScale(context, 4);
+		context.takeScreenshot("waypoints-04b-editor-bad-x");
+		String keptX = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(2).getValue());
+		setGuiScale(context, guiScale);
+		if (!keptX.equals("abc")) {
+			throw new AssertionError("Changing GUI scale replaced the typed X with " + keptX);
+		}
+		typeInto(context, 2, pickedX);
+		clickButton(context, "diorama.waypoint.save");
 		context.waitTicks(5);
 		int count = context.computeOnClient(mc -> WaypointStore.get().all().size());
 		if (count != 3) {
@@ -1280,6 +1299,56 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!connected) {
 			throw new AssertionError("Disconnected after " + after);
 		}
+	}
+
+	/** The screen's text fields, top to bottom and left to right. */
+	private static List<net.minecraft.client.gui.components.EditBox> editBoxes(net.minecraft.client.gui.screens.Screen screen) {
+		java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+				boxes.add(box);
+			}
+		}
+		return boxes;
+	}
+
+	/** Clicks the middle of a widget with the mouse, the way a player does. */
+	private static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+		double[] at = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
+	/** Clicks a button with the mouse, which does nothing while it's off (unlike clickScreenButton). */
+	private static void clickButton(ClientGameTestContext context, String translationKey) {
+		String label = net.minecraft.network.chat.Component.translatable(translationKey).getString();
+		clickAt(context, context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(), label)));
+	}
+
+	/** Clicks a text field, selects what's in it and types over it. */
+	private static void typeInto(ClientGameTestContext context, int field, String text) {
+		clickAt(context, context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(field)));
+		context.getInput().holdControl();
+		context.getInput().pressKey(InputConstants.KEY_A);
+		context.getInput().releaseControl();
+		context.getInput().typeChars(text);
+		context.waitTicks(2);
+	}
+
+	private static void setGuiScale(ClientGameTestContext context, int scale) {
+		context.runOnClient(mc -> {
+			mc.options.guiScale().set(scale);
+			//? if >=26.1 {
+			mc.resizeGui();
+			//?} else {
+			/*mc.resizeDisplay();
+			*///?}
+		});
+		context.waitTicks(3);
 	}
 
 	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
