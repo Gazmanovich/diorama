@@ -98,11 +98,10 @@ public final class MapLevel implements ChunkSource {
 	private static final long BACKGROUND_QUIET_MS = 2000;
 	/**
 	 * Set when a trim couldn't get the snapshots down because their tiles still wait to be saved.
-	 * Only a finished surface bake can free them, so the next try waits for one, and for
-	 * {@link #TRIM_RETRY_MS} after the last: a trim looks at every snapshot.
+	 * New snapshots then don't start another try each; the next one comes {@link #TRIM_RETRY_MS}
+	 * later, since a trim looks at every snapshot.
 	 */
 	private boolean trimStuck;
-	private boolean surfaceBakedSinceTrim;
 	private long lastTrimMs;
 	private static final long TRIM_RETRY_MS = 1000;
 	/** Where the player was at the last {@link #put}; trims keep the snapshots nearest it. */
@@ -448,7 +447,6 @@ public final class MapLevel implements ChunkSource {
 			}
 		}
 		this.trimStuck = excess > 0;
-		this.surfaceBakedSinceTrim = false;
 		this.lastTrimMs = System.currentTimeMillis();
 	}
 
@@ -523,9 +521,6 @@ public final class MapLevel implements ChunkSource {
 			if (this.closed) {
 				continue;
 			}
-			if (image.key().layer() == TileKey.SURFACE && image.key().lod() == 0) {
-				this.surfaceBakedSinceTrim = true;
-			}
 			if (image.generation() != this.generation(image.key())) {
 				// Baked under old colours or the other cave mode; bake it again.
 				MapTile stale = this.tiles.remove(image.key());
@@ -565,7 +560,7 @@ public final class MapLevel implements ChunkSource {
 				this.store.baked(image);
 			}
 		}
-		if (this.trimStuck && this.surfaceBakedSinceTrim && System.currentTimeMillis() - this.lastTrimMs >= TRIM_RETRY_MS) {
+		if (this.trimStuck && System.currentTimeMillis() - this.lastTrimMs >= TRIM_RETRY_MS) {
 			this.trimChunks();
 		}
 
