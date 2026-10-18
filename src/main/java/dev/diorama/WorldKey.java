@@ -89,10 +89,10 @@ public final class WorldKey {
 		return id != null ? idKey(data, id) : seedKey(data, level);
 	}
 
-	/** Whether the map should wait for this level's ID. */
+	/** Whether {@link #current} last said to wait for this level's ID, without asking again. */
 	public static boolean waiting(@Nullable ClientLevel level) {
-		return level != null && Minecraft.getInstance().getSingleplayerServer() == null && Minecraft.getInstance().getCurrentServer() != null
-			&& current(level) == null;
+		Naming naming = level == null ? null : LEVELS.get(level);
+		return naming != null && !naming.decided;
 	}
 
 	private static boolean expectingId(Naming naming) {
