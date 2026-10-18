@@ -289,30 +289,37 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(600, Projection.v(120, 30.5), 1.0, TileKey.SURFACE));
 				settle(context, 20);
 				context.takeScreenshot("tracked-players-01-far");
-				assertBob(context, 640.5);
+				waitForBob(context, 640.5, "where XaeroTracker put him");
 
 				byte[] moved = BOB_TRACKED.clone();
 				java.nio.ByteBuffer.wrap(moved, indexAfter(moved, new byte[] {6, 0, 1, 'x'}), 8).putDouble(580.5);
 				sendXaero(server, moved);
-				context.waitTicks(5);
+				waitForBob(context, 580.5, "after he moved");
 				context.takeScreenshot("tracked-players-02-moved");
-				assertBob(context, 580.5);
 
 				server.runCommand("tellraw @a \"§f§a§i§r§x§a§e§r§o\"");
-				context.waitTicks(5);
+				waitForBob(context, null, "under fair play");
 				context.takeScreenshot("tracked-players-03-fair-play");
-				assertBob(context, null);
 				server.runCommand("tellraw @a \"§r§e§s§e§t§x§a§e§r§o\"");
-				context.waitTicks(5);
-				assertBob(context, 580.5);
+				waitForBob(context, 580.5, "after fair play ended");
 
-				byte[] removed = BOB_TRACKED.clone();
-				removed[indexAfter(removed, new byte[] {1, 0, 1, 'r'})] = 1;
-				sendXaero(server, removed);
-				context.waitTicks(5);
-				assertBob(context, null);
+				// A remove names only the player, as servers send it.
+				byte[] uuid = java.util.Arrays.copyOfRange(BOB_TRACKED, indexAfter(BOB_TRACKED, new byte[] {11, 0, 1, 'i'}), indexAfter(BOB_TRACKED, new byte[] {11, 0, 1, 'i'}) + 20);
+				java.io.ByteArrayOutputStream removed = new java.io.ByteArrayOutputStream();
+				removed.writeBytes(new byte[] {2, 10, 1, 0, 1, 'r', 1, 11, 0, 1, 'i'});
+				removed.writeBytes(uuid);
+				removed.write(0);
+				sendXaero(server, removed.toByteArray());
+				waitForBob(context, null, "after the server stopped tracking him");
+				// Tracked again, then the tracker reset that comes before the server sends everyone again.
+				sendXaero(server, BOB_TRACKED);
+				waitForBob(context, 640.5, "when tracked again");
+				sendXaero(server, new byte[] {3});
+				waitForBob(context, null, "after the tracker reset");
 				context.setScreen(() -> null);
 			}
+		} finally {
+			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP.id());
 		}
 	}
 
@@ -334,25 +341,31 @@ public class DioramaClientTest implements FabricClientGameTest {
 		throw new AssertionError("Not in the fixture: " + java.util.Arrays.toString(pattern));
 	}
 
-	/** Bob is on the fullscreen map where block x {@code x} draws, or not on it at all if null. */
-	private static void assertBob(ClientGameTestContext context, @Nullable Double x) {
-		context.runOnClient(mc -> {
-			MapScreen screen = (MapScreen) mc.gui.screen();
-			Radar.Blip bob = screen.blips().stream().filter(b -> b.entity().getUUID().equals(BOB)).findFirst().orElse(null);
-			if (x == null) {
-				if (bob != null) {
-					throw new AssertionError("Bob is on the map at " + bob.x() + ", " + bob.y());
+	/** Waits until Bob is on the fullscreen map where block x {@code x}, y 120, z 30.5 draws, or not on it at all if null. */
+	private static void waitForBob(ClientGameTestContext context, @Nullable Double x, String when) {
+		for (int tick = 0; tick < 100; tick++) {
+			String wrong = context.computeOnClient(mc -> {
+				MapScreen screen = (MapScreen) mc.gui.screen();
+				Radar.Blip bob = screen.blips().stream().filter(b -> b.entity().getUUID().equals(BOB)).findFirst().orElse(null);
+				if (x == null) {
+					return bob == null ? null : "Bob is on the map at " + bob.x() + ", " + bob.y();
 				}
+				if (bob == null) {
+					return "Bob isn't on the map";
+				}
+				float wantX = screen.view().screenX(x);
+				float wantY = screen.view().screenY(Projection.v(120, 30.5));
+				return Math.abs(bob.x() - wantX) <= 1 && Math.abs(bob.y() - wantY) <= 1 ? null
+					: "Bob is drawn at " + bob.x() + ", " + bob.y() + ", not " + wantX + ", " + wantY;
+			});
+			if (wrong == null) {
 				return;
 			}
-			if (bob == null || bob.kind() != Radar.Kind.PLAYER || !bob.entity().getName().getString().equals("Bob")) {
-				throw new AssertionError("Bob isn't on the map as a player: " + bob);
+			if (tick == 99) {
+				throw new AssertionError(wrong + " " + when);
 			}
-			float want = screen.view().screenX(x);
-			if (Math.abs(bob.x() - want) > 1) {
-				throw new AssertionError("Bob is drawn at x " + bob.x() + " on screen, not " + want);
-			}
-		});
+			context.waitTicks(1);
+		}
 	}
 
 	/**

@@ -57,11 +57,13 @@ public class DioramaClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
 			ServerRules.onDisconnect();
 			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
 			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 		});
 		XaeroChannels.register();

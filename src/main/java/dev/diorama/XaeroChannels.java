@@ -26,6 +26,11 @@ import org.jspecify.annotations.Nullable;
  *       tracker reset (kind 3, empty), sent before the server sends everyone again.</li>
  * </ul>
  *
+ * <p>Servers track players on one channel per client, the minimap's when the client answered
+ * there. Diorama takes them from that channel only, so a server moving a player from one channel
+ * to the other can't remove them. It doesn't answer at all while Xaero's World Map is installed:
+ * an answer moves the server's tracking from the World Map's channel to Diorama.
+ *
  * <p>Fabric allows one handler per channel, and registering a channel twice throws at startup.
  * So a channel is only Diorama's when the Xaero mod that owns it isn't installed. With both of
  * Xaero's mods installed, they keep their channels and Diorama names worlds by their seed.
@@ -47,6 +52,8 @@ public final class XaeroChannels {
 
 	/** Whether Diorama listens on at least one of the channels. */
 	private static boolean listening;
+	/** The channel tracked players come on: the first Diorama answered on, the minimap's over the World Map's. */
+	private static CustomPacketPayload.@Nullable Type<Message> trackerChannel;
 
 	private XaeroChannels() {
 	}
@@ -102,17 +109,48 @@ public final class XaeroChannels {
 					WorldKey.serverLevelId(id);
 				}
 			}
-			case HANDSHAKE -> ClientPlayNetworking.send(new Message(message.type(), HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array()));
+			case HANDSHAKE -> answer(message.type());
 			case TRACKED_PLAYER -> {
-				CompoundTag tag = new FriendlyByteBuf(Unpooled.wrappedBuffer(message.body())).readNbt();
-				if (tag != null) {
-					TrackedPlayers.update(tag);
+				if (message.type() == trackerChannel) {
+					CompoundTag tag = readNbt(message.body());
+					if (tag != null) {
+						TrackedPlayers.update(tag);
+					}
 				}
 			}
-			case TRACKER_RESET -> TrackedPlayers.clear();
+			case TRACKER_RESET -> {
+				if (message.type() == trackerChannel) {
+					TrackedPlayers.clear();
+				}
+			}
 			default -> {
 			}
 		}
+	}
+
+	private static void answer(CustomPacketPayload.Type<Message> channel) {
+		if (FabricLoader.getInstance().isModLoaded("xaeroworldmap")) {
+			return;
+		}
+		if (trackerChannel == null || channel == MINIMAP && trackerChannel != MINIMAP) {
+			trackerChannel = channel;
+			TrackedPlayers.clear();
+		}
+		ClientPlayNetworking.send(new Message(channel, HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array()));
+	}
+
+	private static @Nullable CompoundTag readNbt(byte[] body) {
+		try {
+			return new FriendlyByteBuf(Unpooled.wrappedBuffer(body)).readNbt();
+		} catch (RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't read a tracked player from the server", e);
+			return null;
+		}
+	}
+
+	/** Left the server, or a network moved the player to another of its servers. */
+	public static void onJoinOrLeave() {
+		trackerChannel = null;
 	}
 
 	static boolean listening() {

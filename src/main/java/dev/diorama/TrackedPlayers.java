@@ -13,6 +13,7 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.GameType;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -48,6 +49,7 @@ public final class TrackedPlayers {
 		}
 		if (tag.getBooleanOr("r", false)) {
 			PLAYERS.remove(id);
+			STAND_INS.remove(id);
 		} else {
 			PLAYERS.put(id, new Tracked(tag.getDoubleOr("x", 0), tag.getDoubleOr("y", 0), tag.getDoubleOr("z", 0), tag.getStringOr("d", "")));
 		}
@@ -75,6 +77,7 @@ public final class TrackedPlayers {
 	/**
 	 * The tracked players to draw in this level: in its dimension, not loaded by the client
 	 * (those are drawn as they are), and on the tab list, which has their name and skin.
+	 * Spectators are left off unless the player is one too, as the game hides them.
 	 */
 	public static List<RemotePlayer> unloaded(ClientLevel level) {
 		Minecraft mc = Minecraft.getInstance();
@@ -95,7 +98,7 @@ public final class TrackedPlayers {
 				continue;
 			}
 			PlayerInfo info = connection.getPlayerInfo(id);
-			if (info == null) {
+			if (info == null || info.getGameMode() == GameType.SPECTATOR && !mc.player.isSpectator()) {
 				continue;
 			}
 			RemotePlayer standIn = STAND_INS.computeIfAbsent(id, uuid -> new RemotePlayer(level, info.getProfile()));
