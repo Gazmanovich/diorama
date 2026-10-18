@@ -45,6 +45,10 @@ layout(std140) uniform DynamicTransforms {
     vec3 ModelOffset;
     mat4 TextureMat;
 };
+*///?} else if <1.21.6 {
+/*// Before 1.21.6 uniforms were set one by one, and only the ones the shader names.
+uniform float GameTime;
+uniform vec4 ColorModulator;
 *///?} else {
 /*// Before 1.21.11 the globals started at the screen size, and the transforms ended with a line width.
 layout(std140) uniform Globals {

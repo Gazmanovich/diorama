@@ -1,3 +1,4 @@
+//? if >=1.21.6 {
 package dev.diorama.render;
 
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -82,7 +83,8 @@ public final class DioramaPipelines {
 	private DioramaPipelines() {
 	}
 
-	/** Forces class loading so the pipeline is registered before shaders compile. */
+	// Forces class loading so the pipeline is registered before shaders compile.
 	public static void init() {
 	}
 }
+//?}

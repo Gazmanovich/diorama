@@ -694,7 +694,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 							int[] ours = {tints.grass()[i], tints.foliage()[i], tints.dryFoliage()[i], tints.water()[i]};
 							int[] game = {
 								BiomeColors.getAverageGrassColor(mc.level, pos), BiomeColors.getAverageFoliageColor(mc.level, pos),
+								//? if >=1.21.5 {
 								BiomeColors.getAverageDryFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								//?} else {
+								/*// No dry foliage before 1.21.5; the mod fills that slot with foliage.
+								BiomeColors.getAverageFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								*///?}
 							};
 							columns++;
 							for (int k = 0; k < 4; k++) {
@@ -1282,7 +1287,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (command == null) {
 				throw new AssertionError("The shared line in chat has no [Add] link");
 			}
+			//? if >=1.21.6 {
 			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command), mc.gui.screen());
+			//?} else {
+			/*// What a chat click ran before 1.21.6.
+			mc.player.connection.sendUnsignedCommand(command.startsWith("/") ? command.substring(1) : command);
+			*///?}
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
@@ -1366,9 +1376,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
+			//? if >=1.21.5 {
 			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
 				command[0] = run.command();
 			}
+			//?} else {
+			/*net.minecraft.network.chat.ClickEvent click = style.getClickEvent();
+			if (click != null && click.getAction() == net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND) {
+				command[0] = click.getValue();
+			}
+			*///?}
 			return java.util.Optional.empty();
 		}, net.minecraft.network.chat.Style.EMPTY);
 		return command[0];

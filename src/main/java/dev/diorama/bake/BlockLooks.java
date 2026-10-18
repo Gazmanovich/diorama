@@ -17,11 +17,16 @@ import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
-//?} else {
+//?} else if >=1.21.5 {
 /*import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.renderer.block.model.BlockModelPart;
 import net.minecraft.client.renderer.block.model.BlockStateModel;
+*///?} else {
+/*import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.renderer.block.BlockModelShaper;
+import net.minecraft.client.resources.model.BakedModel;
+import org.jspecify.annotations.Nullable;
 *///?}
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -64,10 +69,18 @@ public final class BlockLooks {
 	public static final byte TINT_DRY_FOLIAGE = 3;
 	public static final byte TINT_WATER = 4;
 
+	//? if >=1.21.5 {
 	private static final Set<Block> GRASS_TINTED = Set.of(
 		Blocks.GRASS_BLOCK, Blocks.SHORT_GRASS, Blocks.TALL_GRASS, Blocks.FERN, Blocks.LARGE_FERN,
 		Blocks.BUSH, Blocks.POTTED_FERN, Blocks.SUGAR_CANE, Blocks.PINK_PETALS, Blocks.WILDFLOWERS
 	);
+	//?} else {
+	/*// Bushes and wildflowers came in 1.21.5.
+	private static final Set<Block> GRASS_TINTED = Set.of(
+		Blocks.GRASS_BLOCK, Blocks.SHORT_GRASS, Blocks.TALL_GRASS, Blocks.FERN, Blocks.LARGE_FERN,
+		Blocks.POTTED_FERN, Blocks.SUGAR_CANE, Blocks.PINK_PETALS
+	);
+	*///?}
 	private static final Set<Block> FOLIAGE_TINTED = Set.of(
 		Blocks.OAK_LEAVES, Blocks.JUNGLE_LEAVES, Blocks.ACACIA_LEAVES, Blocks.DARK_OAK_LEAVES,
 		Blocks.VINE, Blocks.MANGROVE_LEAVES
@@ -167,7 +180,7 @@ public final class BlockLooks {
 		RandomSource random = RandomSource.create(42L);
 		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
-		//?} else {
+		//?} else if >=1.21.5 {
 		/*List<BlockModelPart> parts = new ArrayList<>();
 		*///?}
 
@@ -193,20 +206,28 @@ public final class BlockLooks {
 				continue;
 			}
 
+			//? if >=26.1 {
 			parts.clear();
 			random.setSeed(42L);
-			//? if >=26.1 {
 			BlockStateModel model = models.get(state);
-			//?} else {
-			/*BlockStateModel model = models.getBlockModel(state);
-			*///?}
 			model.collectParts(random, parts);
+			//?} else if >=1.21.5 {
+			/*parts.clear();
+			random.setSeed(42L);
+			BlockStateModel model = models.getBlockModel(state);
+			model.collectParts(random, parts);
+			*///?} else {
+			/*BakedModel model = models.getBlockModel(state);
+			List<LegacyPart> parts = List.of(new LegacyPart(model, state, random));
+			*///?}
 			FaceColor topFace = new FaceColor();
 			FaceColor sideFace = new FaceColor();
 			//? if >=26.1 {
 			for (BlockStateModelPart part : parts) {
-			//?} else {
+			//?} else if >=1.21.5 {
 			/*for (BlockModelPart part : parts) {
+			*///?} else {
+			/*for (LegacyPart part : parts) {
 			*///?}
 				accumulate(topFace, part.getQuads(Direction.UP), spriteCache);
 				accumulate(sideFace, part.getQuads(Direction.SOUTH), spriteCache);
@@ -251,12 +272,19 @@ public final class BlockLooks {
 				looks.tint[id] = TINT_GRASS;
 			} else if (FOLIAGE_TINTED.contains(block)) {
 				looks.tint[id] = TINT_FOLIAGE;
+			//? if >=1.21.5 {
 			} else if (block == Blocks.LEAF_LITTER) {
 				looks.tint[id] = TINT_DRY_FOLIAGE;
+			//?}
 			} else if (WATER_TINTED.contains(block) || kind == WATER) {
 				looks.tint[id] = TINT_WATER;
 			} else if (block == Blocks.LILY_PAD) {
+				//? if >=1.21.4 {
 				looks.constantTint[id] = BlockColors.LILY_PAD_IN_WORLD & 0xFFFFFF;
+				//?} else {
+				/*// The constant came in 1.21.4, with this value.
+				looks.constantTint[id] = -14647248 & 0xFFFFFF;
+				*///?}
 			} else {
 				//? if >=26.1 {
 				BlockTintSource source = colors.getTintSource(state, 0);
@@ -312,6 +340,17 @@ public final class BlockLooks {
 		return looks;
 	}
 
+	//? if <1.21.5 {
+	/*// Before 1.21.5 a block's model gave its quads itself, for one random seed, rather than
+	// through parts. This stands in for the one part, asked the same way collectParts would.
+	private record LegacyPart(BakedModel model, BlockState state, RandomSource random) {
+		List<BakedQuad> getQuads(@Nullable Direction direction) {
+			this.random.setSeed(42L);
+			return this.model.getQuads(this.state, direction, this.random);
+		}
+	}
+
+	*///?}
 	private static byte classify(BlockState state) {
 		if (state.isAir() || state.getRenderShape() == RenderShape.INVISIBLE && state.getFluidState().isEmpty()) {
 			return AIR;

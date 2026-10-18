@@ -43,6 +43,17 @@ dependencies {
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))
 
+// The fog shader's program file, which only the versions that load shaders from json read: from
+// the mod's namespace on 1.21.2-1.21.4, from the minecraft namespace (by name) before.
+tasks.named<ProcessResources>("processResources") {
+	if (sc.current.parsed >= "1.21.2") {
+		exclude("assets/minecraft/shaders/core/diorama_fog.json")
+	}
+	if (sc.current.parsed < "1.21.2" || sc.current.parsed >= "1.21.5") {
+		exclude("assets/diorama/shaders/core/fog.json")
+	}
+}
+
 // The 1.21.11 client game test API's network synchronizer gives up at random points in our runs
 // ("Detected interfacing with packets at a lower level"), and its own message says to turn it off.
 // The scenarios wait for what they need rather than counting on packets arriving in lockstep.

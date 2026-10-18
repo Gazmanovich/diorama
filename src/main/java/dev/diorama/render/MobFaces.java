@@ -59,7 +59,12 @@ public final class MobFaces {
 	private static final Piece VILLAGER_HAT = new Piece(40, 8, 8, 10, 0, 0);
 	/** Villager-style noses stick out from the lower middle of a 10-pixel-tall face. */
 	private static final Piece VILLAGER_NOSE = new Piece(26, 2, 2, 3, 3, 7);
+	//? if >=1.21.5 {
 	private static final Face COW = new Face(64, 64, 6, 6, 8, 8, null, new Piece(2, 34, 6, 3, 1, 5));
+	//?} else {
+	/*// The cow model before 1.21.5: head box at texOffs(0, 0), 8 x 8 x 6, no muzzle, in a 64 x 32 texture.
+	private static final Face COW = new Face(64, 32, 6, 6, 8, 8);
+	*///?}
 	/** Cold cows keep their muzzle elsewhere in the texture: their model moves its texture origin. */
 	private static final Piece COLD_COW_MUZZLE = new Piece(10, 34, 6, 3, 1, 5);
 
@@ -104,7 +109,12 @@ public final class MobFaces {
 		FACES.put(EntityTypes.COW, cow);
 		FACES.put(EntityTypes.MOOSHROOM, cow);
 		// The pig's snout covers the middle of its face, rows 4 to 7 of 8.
+		//? if >=1.21.5 {
 		FACES.put(EntityTypes.PIG, new Faces(new Face(64, 64, 8, 8, 8, 8, null, new Piece(17, 17, 4, 3, 2, 4)), new Face(32, 32, 6, 21, 7, 6)));
+		//?} else {
+		/*// The pig model before 1.21.5: the same head and snout boxes in a 64 x 32 texture.
+		FACES.put(EntityTypes.PIG, new Faces(new Face(64, 32, 8, 8, 8, 8, null, new Piece(17, 17, 4, 3, 2, 4)), null));
+		*///?}
 		FACES.put(EntityTypes.SHEEP, new Faces(new Face(64, 32, 8, 8, 6, 6), new Face(64, 32, 5, 5, 5, 5)));
 		// The chicken's beak is across rows 2 to 4 of its 6-pixel-tall face.
 		FACES.put(EntityTypes.CHICKEN, new Faces(new Face(64, 32, 3, 3, 4, 6, null, new Piece(16, 2, 4, 2, 0, 2)), new Face(16, 16, 4, 4, 4, 4)));
@@ -188,8 +198,13 @@ public final class MobFaces {
 
 	/** Cold cows use a different model, with the muzzle elsewhere in the texture. */
 	private static boolean coldCow(Entity entity) {
+		//? if >=1.21.5 {
 		return entity instanceof net.minecraft.world.entity.animal.cow.Cow cow
 			&& cow.getVariant().value().modelAndTexture().model() == net.minecraft.world.entity.animal.cow.CowVariant.ModelType.COLD;
+		//?} else {
+		/*// Cow variants came in 1.21.5.
+		return false;
+		*///?}
 	}
 
 	/** The texture the game draws this entity with, from its renderer. */

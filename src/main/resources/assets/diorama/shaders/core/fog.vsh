@@ -16,7 +16,7 @@ layout(std140) uniform DynamicTransforms {
     vec3 ModelOffset;
     mat4 TextureMat;
 };
-*///?} else {
+*///?} else if >=1.21.6 {
 /*// Must match fog.fsh's block, which before 1.21.11 ends with a line width.
 layout(std140) uniform DynamicTransforms {
     mat4 ModelViewMat;
@@ -26,9 +26,15 @@ layout(std140) uniform DynamicTransforms {
     float LineWidth;
 };
 *///?}
+//? if >=1.21.6 {
 layout(std140) uniform Projection {
     mat4 ProjMat;
 };
+//?} else {
+/*// Before 1.21.6 uniforms were set one by one.
+uniform mat4 ModelViewMat;
+uniform mat4 ProjMat;
+*///?}
 
 //? if >=26.3 {
 layout(location = 0) in vec3 Position;
