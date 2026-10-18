@@ -17,13 +17,19 @@ loom {
 	}
 }
 
-fabricApi {
-	configureTests {
-		createSourceSet = true
-		modId = "diorama-test"
-		enableGameTests = false
-		enableClientGameTests = true
-		eula = true
+// Fabric API's client game test API exists from 1.21.4. Older versions run the same tests on a
+// test-only stand-in for it (src/gameshim), set up at the end of this file.
+val hasGameTestApi = sc.current.parsed >= "1.21.4"
+
+if (hasGameTestApi) {
+	fabricApi {
+		configureTests {
+			createSourceSet = true
+			modId = "diorama-test"
+			enableGameTests = false
+			enableClientGameTests = true
+			eula = true
+		}
 	}
 }
 
@@ -37,7 +43,9 @@ dependencies {
 	// missing, so the jar runs without it.
 	if (sc.current.parsed < "1.21.11") {
 		compileOnly("org.jspecify:jspecify:1.0.0")
-		"gametestCompileOnly"("org.jspecify:jspecify:1.0.0")
+		if (hasGameTestApi) {
+			"gametestCompileOnly"("org.jspecify:jspecify:1.0.0")
+		}
 	}
 }
 
@@ -62,37 +70,39 @@ loom.runs.matching { it.name == "clientGameTest" }.configureEach {
 	vmArgs(disableNetworkSynchronizer)
 }
 
-// The tests, run against the remapped release jar in a production environment. In development the
-// game uses Mojang's names; a real install uses intermediary ones, so anything that reflects on the
-// game by name only fails there.
-val gametest = sourceSets.named("gametest")
-val gametestJar = tasks.register<Jar>("gametestJar") {
-	from(gametest.map { it.output })
-	archiveClassifier = "gametest-dev"
-	destinationDirectory = layout.buildDirectory.dir("devlibs")
-}
-val remapGametestJar = tasks.register<net.fabricmc.loom.task.RemapJarTask>("remapGametestJar") {
-	inputFile = gametestJar.flatMap { it.archiveFile }
-	archiveClassifier = "gametest"
-}
-// Fabric API as published, in intermediary names, plus the client game test module it doesn't bundle.
-val productionMods = configurations.create("productionMods") { isTransitive = false }
-dependencies {
-	productionMods("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
-	productionMods("net.fabricmc.fabric-api:fabric-client-gametest-api-v1:${property("client_gametest_api_version")}")
-}
-tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProductionClientGameTest") {
-	mods.from(tasks.named("remapJar"), remapGametestJar, productionMods)
-	jvmArgs.add("-Dfabric.client.gametest")
-	jvmArgs.add(disableNetworkSynchronizer)
-	runDir = layout.buildDirectory.dir("run-production")
-	// The multiplayer scenario starts a dedicated server, which won't run without the EULA accepted;
-	// the development test run gets this from configureTests' eula = true.
-	val eula = runDir.file("eula.txt")
-	doFirst {
-		eula.get().asFile.apply {
-			parentFile.mkdirs()
-			writeText("eula=true\n")
+if (hasGameTestApi) {
+	// The tests, run against the remapped release jar in a production environment. In development the
+	// game uses Mojang's names; a real install uses intermediary ones, so anything that reflects on the
+	// game by name only fails there.
+	val gametest = sourceSets.named("gametest")
+	val gametestJar = tasks.register<Jar>("gametestJar") {
+		from(gametest.map { it.output })
+		archiveClassifier = "gametest-dev"
+		destinationDirectory = layout.buildDirectory.dir("devlibs")
+	}
+	val remapGametestJar = tasks.register<net.fabricmc.loom.task.RemapJarTask>("remapGametestJar") {
+		inputFile = gametestJar.flatMap { it.archiveFile }
+		archiveClassifier = "gametest"
+	}
+	// Fabric API as published, in intermediary names, plus the client game test module it doesn't bundle.
+	val productionMods = configurations.create("productionMods") { isTransitive = false }
+	dependencies {
+		productionMods("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
+		productionMods("net.fabricmc.fabric-api:fabric-client-gametest-api-v1:${property("client_gametest_api_version")}")
+	}
+	tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProductionClientGameTest") {
+		mods.from(tasks.named("remapJar"), remapGametestJar, productionMods)
+		jvmArgs.add("-Dfabric.client.gametest")
+		jvmArgs.add(disableNetworkSynchronizer)
+		runDir = layout.buildDirectory.dir("run-production")
+		// The multiplayer scenario starts a dedicated server, which won't run without the EULA accepted;
+		// the development test run gets this from configureTests' eula = true.
+		val eula = runDir.file("eula.txt")
+		doFirst {
+			eula.get().asFile.apply {
+				parentFile.mkdirs()
+				writeText("eula=true\n")
+			}
 		}
 	}
 }

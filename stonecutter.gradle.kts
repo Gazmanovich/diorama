@@ -124,4 +124,22 @@ stonecutter parameters {
 			replace(pattern, older, "(?!)", "never")
 		}
 	}
+
+	// From the 1.21.2 spelling to the 1.21.1 one.
+	val before1_21_2 = listOf(
+		// Colour helpers lived in FastColor.
+		"import net\\.minecraft\\.util\\.ARGB;" to "import net.minecraft.util.FastColor;",
+		"\\bARGB\\.(red|green|blue|color)\\(" to "FastColor.ARGB32.$1(",
+		// World heights: the bottom had another name, and the top was exclusive.
+		"\\.getMinY\\(\\)" to ".getMinBuildHeight()",
+		"\\.getMinSectionY\\(\\)" to ".getMinSection()",
+		"([\\w.]+)\\.getMaxY\\(\\)" to "($1.getMaxBuildHeight() - 1)",
+		// Running a task on the client thread later was telling the client.
+		"\\bmc\\.schedule\\(" to "mc.tell(",
+	)
+	for ((pattern, older) in before1_21_2) {
+		replacements.regex(current.parsed < "1.21.2") {
+			replace(pattern, older, "(?!)", "never")
+		}
+	}
 }

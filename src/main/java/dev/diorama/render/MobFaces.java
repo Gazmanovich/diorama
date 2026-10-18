@@ -7,7 +7,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
+//? if >=1.21.2 {
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
+//?}
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -131,7 +133,9 @@ public final class MobFaces {
 		FACES.put(EntityTypes.PANDA, new Faces(new Face(64, 64, 9, 15, 13, 10, null, new Piece(47, 18, 7, 5, 3, 5)), new Face(64, 64, 5, 5, 7, 6)));
 		FACES.put(EntityTypes.ALLAY, new Faces(new Face(32, 32, 5, 5, 5, 5), null));
 		FACES.put(EntityTypes.BREEZE, new Faces(new Face(32, 32, 8, 8, 8, 8), null));
+		//? if >=1.21.2 {
 		FACES.put(EntityTypes.CREAKING, new Faces(new Face(64, 64, 6, 6, 6, 10), null));
+		//?}
 		FACES.put(EntityTypes.DOLPHIN, new Faces(new Face(64, 64, 6, 6, 8, 7), new Face(64, 64, 4, 4, 6, 5)));
 		FACES.put(EntityTypes.BEE, new Faces(new Face(64, 64, 10, 10, 7, 7), new Face(32, 32, 5, 5, 4, 4)));
 		FACES.put(EntityTypes.AXOLOTL, new Faces(new Face(64, 64, 5, 6, 8, 5), new Face(32, 32, 4, 12, 6, 3)));
@@ -221,13 +225,22 @@ public final class MobFaces {
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	private static @Nullable Identifier lookUp(Entity entity) {
+		//? if >=1.21.2 {
 		EntityRenderer<?, ?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
+		//?} else {
+		/*EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
+		*///?}
 		if (!(renderer instanceof LivingEntityRenderer living)) {
 			return null;
 		}
 		try {
+			//? if >=1.21.2 {
 			LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
 			return ((LivingEntityRenderer) living).getTextureLocation(state);
+			//?} else {
+			/*// Renderers had no render state yet and asked the entity directly.
+			return ((LivingEntityRenderer) living).getTextureLocation((LivingEntity) entity);
+			*///?}
 		} catch (RuntimeException e) {
 			return null;
 		}

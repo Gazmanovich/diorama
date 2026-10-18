@@ -436,7 +436,13 @@ public final class BlockLooks {
 			int visible = 0;
 			for (int y = 0; y < h; y++) {
 				for (int x = 0; x < w; x++) {
+					//? if >=1.21.2 {
 					int argb = image.getPixel(x, y);
+					//?} else {
+					/*// Only the ABGR getter existed; swap red and blue.
+					int abgr = image.getPixelRGBA(x, y);
+					int argb = (abgr & 0xFF00FF00) | (abgr >> 16 & 0xFF) | (abgr & 0xFF) << 16;
+					*///?}
 					int a = argb >>> 24;
 					if (a < 26) {
 						continue;
