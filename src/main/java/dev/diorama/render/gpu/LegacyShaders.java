@@ -1,7 +1,9 @@
 //? if <1.21.6 {
 /*package dev.diorama.render.gpu;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import dev.diorama.Diorama;
 import net.minecraft.client.renderer.RenderType;
@@ -12,19 +14,23 @@ import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.shaders.UniformType;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.RenderPipelines;
 //?} else if >=1.21.2 {
+import com.mojang.blaze3d.vertex.BufferUploader;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.CompiledShaderProgram;
 import net.minecraft.client.renderer.CoreShaders;
 import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.ShaderDefines;
+import net.minecraft.client.renderer.ShaderManager;
 import net.minecraft.client.renderer.ShaderProgram;
+import org.lwjgl.opengl.GL11;
 //?} else {
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.ShaderInstance;
+import org.lwjgl.opengl.GL11;
 //?}
 
 // How ImmediateCanvas draws before 1.21.6: three render types without depth testing, so the map
@@ -33,10 +39,10 @@ import net.minecraft.client.renderer.ShaderInstance;
 //
 // A mod shader that fails to compile through the game's normal path takes the player's resource
 // packs (1.21.2-1.21.4) or the whole resource reload (1.21.1, 1.21.5) down with it, so the fog's
-// program is compiled through a side door first; fogReady() says whether it may be drawn.
+// program only ever comes through a side door; fogReady() says whether it may be drawn. A resource
+// reload can change the shader's sources, so the fog is checked again after each one.
 final class LegacyShaders {
 	private static final Logger LOGGER = LoggerFactory.getLogger("diorama");
-	private static boolean fogFailed;
 
 	//? if >=1.21.5 {
 	private static final RenderPipeline TEXTURED_PIPELINE = RenderPipeline.builder(RenderPipelines.MATRICES_COLOR_SNIPPET)
@@ -79,22 +85,42 @@ final class LegacyShaders {
 	static final RenderType SOLID = RenderType.create("diorama_solid", 1536, SOLID_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
 	static final RenderType FOG = RenderType.create("diorama_fog", 1536, FOG_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
 
+	private static boolean fogFailed;
+
 	static boolean fogReady() {
 		// Compiled at most once per resource reload (the device clears its pipeline cache then).
 		boolean ready = RenderSystem.getDevice().precompilePipeline(FOG_PIPELINE).isValid();
-		return checked(ready);
+		if (!ready && !fogFailed) {
+			fogFailed = true;
+			LOGGER.error("Diorama's fog shader didn't compile; the map draws without fog");
+		}
+		return ready;
+	}
+
+	static void draw(RenderType type, MeshData mesh) {
+		type.draw(mesh);
+	}
+
+	static void drawFog(MeshData mesh) {
+		FOG.draw(mesh);
 	}
 	//?} else {
 	//? if >=1.21.2 {
 	private static final ShaderProgram FOG_PROGRAM = new ShaderProgram(Diorama.id("core/fog"), DefaultVertexFormat.POSITION_TEX_COLOR, ShaderDefines.EMPTY);
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(CoreShaders.POSITION_TEX_COLOR);
-	private static final RenderStateShard.ShaderStateShard FOG_SHADER = new RenderStateShard.ShaderStateShard(FOG_PROGRAM);
-	private static boolean fogChecked;
+	// No shader shard: drawFog sets the program fogReady() got through the side door. A shard would
+	// fetch it through the normal path, which on a compile failure clears the player's resource packs.
+	private static final RenderStateShard.ShaderStateShard FOG_SHADER = RenderStateShard.NO_SHADER;
+	private static CompiledShaderProgram fogProgram;
 	//?} else {
 	private static ShaderInstance fogShader;
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(GameRenderer::getPositionTexColorShader);
 	private static final RenderStateShard.ShaderStateShard FOG_SHADER = new RenderStateShard.ShaderStateShard(() -> fogShader);
 	//?}
+	// Each resource reload makes new instances of vanilla's own programs; this is the one seen at the
+	// last check, so a different one means the fog has to be checked again.
+	private static Object fogReload;
+	private static boolean fogFailed;
 
 	static final RenderType TEXTURED = create("diorama_textured", DefaultVertexFormat.POSITION_TEX_COLOR, TEXTURED_SHADER);
 	static final RenderType SOLID = create("diorama_solid", DefaultVertexFormat.POSITION_COLOR, RenderStateShard.POSITION_COLOR_SHADER);
@@ -112,42 +138,81 @@ final class LegacyShaders {
 
 	static boolean fogReady() {
 		//? if >=1.21.2 {
-		// getProgramForLoading throws instead of triggering the resource pack recovery that the
-		// shader state's getProgram would, and caches the program when it compiles.
-		if (!fogChecked) {
-			fogChecked = true;
-			try {
-				Minecraft.getInstance().getShaderManager().getProgramForLoading(FOG_PROGRAM);
-			} catch (Exception e) {
-				LOGGER.error("Diorama's fog shader didn't compile; the map draws without fog", e);
-				return checked(false);
+		ShaderManager shaders = Minecraft.getInstance().getShaderManager();
+		Object reload = shaders.getProgram(CoreShaders.POSITION_TEX_COLOR);
+		if (reload != fogReload) {
+			fogReload = reload;
+			fogFailed = false;
+		}
+		fogProgram = null;
+		if (fogFailed) {
+			return false;
+		}
+		// Asked every frame: once compiled it comes from the shader manager's cache, which a reload
+		// replaces, so a program from before a reload is never drawn. getProgramForLoading throws
+		// where getProgram would start the resource pack recovery.
+		try {
+			fogProgram = shaders.getProgramForLoading(FOG_PROGRAM);
+			return true;
+		} catch (Exception e) {
+			fogFailed = true;
+			LOGGER.error("Diorama's fog shader didn't compile; the map draws without fog", e);
+			return false;
+		}
+		//?} else {
+		ShaderInstance reload = GameRenderer.getPositionTexColorShader();
+		if (reload != fogReload) {
+			fogReload = reload;
+			fogFailed = false;
+			if (fogShader != null) {
+				fogShader.close();
+				fogShader = null;
 			}
 		}
-		return checked(true);
-		//?} else {
 		// Built by hand rather than through Fabric's core shader callback, whose failure would fail
 		// the whole resource reload. The json lives in the minecraft namespace, where the vanilla
-		// constructor looks; its stages name diorama:fog, which Fabric API resolves.
+		// constructor looks; its stages name diorama:fog, which Fabric API resolves. The game doesn't
+		// know about it, so it's closed and built again here after a reload.
 		if (fogShader == null && !fogFailed) {
 			try {
 				fogShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "diorama_fog", DefaultVertexFormat.POSITION_TEX_COLOR);
 			} catch (Exception e) {
+				fogFailed = true;
 				LOGGER.error("Diorama's fog shader didn't compile; the map draws without fog", e);
-				return checked(false);
 			}
 		}
-		return checked(fogShader != null);
+		return fogShader != null;
+		//?}
+	}
+
+	// The depth test shard for "always" leaves depth testing as it found it, and before 1.21.2 the
+	// GUI's flush turns it on, so earlier GUI shapes could hide parts of the map. Off for the draw,
+	// then back as it was.
+	static void draw(RenderType type, MeshData mesh) {
+		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+		RenderSystem.disableDepthTest();
+		type.draw(mesh);
+		if (depth) {
+			RenderSystem.enableDepthTest();
+		}
+	}
+
+	static void drawFog(MeshData mesh) {
+		//? if >=1.21.2 {
+		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+		FOG.setupRenderState();
+		RenderSystem.disableDepthTest();
+		RenderSystem.setShader(fogProgram);
+		BufferUploader.drawWithShader(mesh);
+		FOG.clearRenderState();
+		if (depth) {
+			RenderSystem.enableDepthTest();
+		}
+		//?} else {
+		draw(FOG, mesh);
 		//?}
 	}
 	//?}
-
-	private static boolean checked(boolean ready) {
-		if (!ready && !fogFailed) {
-			fogFailed = true;
-			LOGGER.error("Diorama's fog shader isn't available; the map draws without fog");
-		}
-		return ready;
-	}
 
 	private LegacyShaders() {
 	}

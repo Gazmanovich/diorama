@@ -33,7 +33,7 @@ final class ImmediateCanvas implements MapCanvas {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(argb);
 		}
 		((LegacyTexture) texture).bind(0, sampling);
-		LegacyShaders.TEXTURED.draw(mesh.buildOrThrow());
+		LegacyShaders.draw(LegacyShaders.TEXTURED, mesh.buildOrThrow());
 		unbind(0);
 	}
 
@@ -44,7 +44,7 @@ final class ImmediateCanvas implements MapCanvas {
 		for (int i = 0; i < 4; i++) {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setColor(argb);
 		}
-		LegacyShaders.SOLID.draw(mesh.buildOrThrow());
+		LegacyShaders.draw(LegacyShaders.SOLID, mesh.buildOrThrow());
 	}
 
 	@Override
@@ -69,7 +69,7 @@ final class ImmediateCanvas implements MapCanvas {
 		this.rect(mesh, x, y, x + width, y + height, u0, v0, u1, v1, params);
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
 		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
-		LegacyShaders.FOG.draw(mesh.buildOrThrow());
+		LegacyShaders.drawFog(mesh.buildOrThrow());
 		unbind(0);
 		unbind(1);
 	}
@@ -83,7 +83,7 @@ final class ImmediateCanvas implements MapCanvas {
 		//?} else {
 		RenderSystem.setShaderTexture(0, texture);
 		//?}
-		LegacyShaders.TEXTURED.draw(mesh.buildOrThrow());
+		LegacyShaders.draw(LegacyShaders.TEXTURED, mesh.buildOrThrow());
 		unbind(0);
 	}
 
