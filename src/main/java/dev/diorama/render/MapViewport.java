@@ -47,7 +47,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded) {
+	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast) {
 	}
 
 	/** Where and how big a map is drawn, and what part of the map it shows. */
@@ -223,7 +223,8 @@ public final class MapViewport {
 		}
 		double originU = Math.floor((view.minU() - MASK_MARGIN) / snap) * snap;
 		double originV = Math.floor((view.minV() - MASK_MARGIN) / snap) * snap;
-		this.buildMask(level, view, originU, originV, texel);
+		boolean fast = TileBaker.fast();
+		this.buildMask(level, view, originU, originV, texel, steps, fast);
 
 		double span = MASK * texel;
 		float mu0 = (float) ((view.minU() - originU) / span);
@@ -235,7 +236,7 @@ public final class MapViewport {
 		boolean cave = view.layer() != TileKey.SURFACE;
 		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
 		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast fog.
-		int quality = TileBaker.fast() ? 4 : 0;
+		int quality = fast ? 4 : 0;
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		TextureSetup textures = TextureSetup.doubleTexture(
@@ -255,7 +256,7 @@ public final class MapViewport {
 		));
 	}
 
-	private void buildMask(MapLevel level, View view, double originU, double originV, double texel) {
+	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, boolean fast) {
 		if (this.maskTexture == null) {
 			this.maskTexture = FogTextures.createTexture("diorama fog mask", MASK);
 			this.maskView = RenderSystem.getDevice().createTextureView(this.maskTexture);
@@ -265,7 +266,7 @@ public final class MapViewport {
 		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
 		// only eat small explored areas that are a few texels across.
 		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
@@ -299,7 +300,66 @@ public final class MapViewport {
 		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
+		this.markClear(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
+	}
+
+	/**
+	 * How far, in mask texels, the fog shader can read from a pixel: {west, east, north, south}.
+	 * Mirrors fog.fsh: the blur taps (the wide surface blur, 1.9x on the diagonals, never under a
+	 * texel), the height layers sitting up to fogHeight * COS_PITCH further south, and the sun probe
+	 * 9 west and 3.6 north times the noise scale. On top of that one texel for linear filtering,
+	 * and half a texel for where in its own texel the pixel sits.
+	 */
+	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps) {
+		double fogHeight = cave ? 4 : 10;
+		double blurUnits = cave ? 2.5 : 7;
+		if (blurUnits >= 5 && !fast) {
+			blurUnits *= 2.4;
+		}
+		double blur = 1.9 * Math.max(blurUnits / texel, 1);
+		double layerShift = fogHeight * 0.643 / texel;
+		// The noise scale is below 2^(steps + 1).
+		double sun = fast ? 0 : 9.0 * (1 << (scaleSteps + 1)) / texel;
+		double slack = 1.5;
+		return new int[] {
+			(int) Math.ceil(Math.max(blur, sun) + slack),
+			(int) Math.ceil(blur + slack),
+			(int) Math.ceil(Math.max(blur, sun * 0.4) + slack),
+			(int) Math.ceil(blur + layerShift + slack)
+		};
+	}
+
+	private final int[] unknownCounts = new int[(MASK + 1) * (MASK + 1)];
+
+	/**
+	 * Sets the green channel where every texel within reach is fully known. The shader can skip
+	 * all its texture reads there: there is no fog thickness anywhere such a pixel looks. Texels
+	 * past the mask's edge read as the edge texel, so the reach just stops at the edge.
+	 */
+	private void markClear(int[] reach) {
+		int row = MASK + 1;
+		int[] counts = this.unknownCounts;
+		// counts[(j + 1) * row + i + 1]: texels short of fully known in the rectangle from (0, 0) to (i, j).
+		for (int j = 0; j < MASK; j++) {
+			int line = 0;
+			for (int i = 0; i < MASK; i++) {
+				line += (this.maskPixels[j * MASK + i] & 0xFF) == 0xFF ? 0 : 1;
+				counts[(j + 1) * row + i + 1] = counts[j * row + i + 1] + line;
+			}
+		}
+		for (int j = 0; j < MASK; j++) {
+			int top = Math.max(0, j - reach[2]);
+			int bottom = Math.min(MASK - 1, j + reach[3]) + 1;
+			for (int i = 0; i < MASK; i++) {
+				int left = Math.max(0, i - reach[0]);
+				int right = Math.min(MASK - 1, i + reach[1]) + 1;
+				int unknown = counts[bottom * row + right] - counts[top * row + right] - counts[bottom * row + left] + counts[top * row + left];
+				if (unknown == 0) {
+					this.maskPixels[j * MASK + i] |= 0xFF00;
+				}
+			}
+		}
 	}
 
 	private final float[] blurA = new float[MASK * MASK];
