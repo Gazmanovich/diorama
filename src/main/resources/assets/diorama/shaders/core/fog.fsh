@@ -28,7 +28,7 @@ layout(std140) uniform DynamicTransforms {
     vec4 ColorModulator;
     vec3 ModelOffset;
 };
-//?} else {
+//?} else if >=1.21.11 {
 /*layout(std140) uniform Globals {
     ivec3 CameraBlockPos;
     vec3 CameraOffset;
@@ -44,6 +44,22 @@ layout(std140) uniform DynamicTransforms {
     vec4 ColorModulator;
     vec3 ModelOffset;
     mat4 TextureMat;
+};
+*///?} else {
+/*// Before 1.21.11 the globals started at the screen size, and the transforms ended with a line width.
+layout(std140) uniform Globals {
+    vec2 ScreenSize;
+    float GlintAlpha;
+    float GameTime;
+    int MenuBlurRadius;
+};
+
+layout(std140) uniform DynamicTransforms {
+    mat4 ModelViewMat;
+    vec4 ColorModulator;
+    vec3 ModelOffset;
+    mat4 TextureMat;
+    float LineWidth;
 };
 *///?}
 

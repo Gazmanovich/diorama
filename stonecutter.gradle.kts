@@ -70,6 +70,10 @@ stonecutter parameters {
 		"\\.identifier\\(\\)" to ".location()",
 		// Cows had no package of their own.
 		"net\\.minecraft\\.world\\.entity\\.animal\\.cow\\." to "net.minecraft.world.entity.animal.",
+		// Game rules had camel-case names (the tests set them by command).
+		"\\bgamerule show_death_messages\\b" to "gamerule showDeathMessages",
+		"\\bgamerule immediate_respawn\\b" to "gamerule doImmediateRespawn",
+		"\\bgamerule random_tick_speed\\b" to "gamerule randomTickSpeed",
 	)
 	for ((pattern, older) in before1_21_11) {
 		replacements.regex(current.parsed < "1.21.11") {

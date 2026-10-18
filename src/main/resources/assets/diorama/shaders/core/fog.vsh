@@ -8,13 +8,22 @@ layout(std140) uniform DynamicTransforms {
     vec4 ColorModulator;
     vec3 ModelOffset;
 };
-//?} else {
+//?} else if >=1.21.11 {
 /*
 layout(std140) uniform DynamicTransforms {
     mat4 ModelViewMat;
     vec4 ColorModulator;
     vec3 ModelOffset;
     mat4 TextureMat;
+};
+*///?} else {
+/*// Must match fog.fsh's block, which before 1.21.11 ends with a line width.
+layout(std140) uniform DynamicTransforms {
+    mat4 ModelViewMat;
+    vec4 ColorModulator;
+    vec3 ModelOffset;
+    mat4 TextureMat;
+    float LineWidth;
 };
 *///?}
 layout(std140) uniform Projection {
