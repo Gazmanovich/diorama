@@ -386,7 +386,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("dimensions-06-end-far");
 		context.setScreen(() -> null);
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
-		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD, 1200);
+		// Back home the level switches before the loading screen closes; the next scenario starts
+		// with a minimap screenshot, so wait for the screen to go and the map to fill in again.
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		settle(context, 100);
 	}
 
 	/**
