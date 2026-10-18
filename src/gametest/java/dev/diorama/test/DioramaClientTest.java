@@ -166,14 +166,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/** Level ID messages as MapModCompanion sent them through Velocity, for two same-seed servers. */
 	private static final byte[] LOBBY_ID = {0, 124, 86, -44, -107};
 	private static final byte[] SURVIVAL_ID = {0, 4, -83, -79, -28};
-	/** What the dedicated server sends a player who joins: a level ID message, or nothing. */
+	/** What the dedicated server sends a player a second after they join: a level ID message, or nothing. */
 	private static byte @Nullable [] levelIdOnJoin;
 	private static boolean joinHooked;
+	private static final net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<dev.diorama.XaeroChannels.Message> WORLD_INFO =
+		new net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<>(net.minecraft.resources.Identifier.fromNamespaceAndPath("worldinfo", "world_id"));
 
 	/**
-	 * A network's two servers whose worlds share a seed, each naming its world with a level ID:
-	 * they keep separate maps and waypoints. The map saved under the seed before Diorama read
-	 * level IDs moves to the first of them, and only that one.
+	 * A network's two servers whose worlds share a seed, each naming its world with a level ID a
+	 * second after the player joins, as MapModCompanion does: they keep separate maps and
+	 * waypoints. The map saved under the seed before Diorama read level IDs moves to the first of
+	 * them, and only that one. A server that names its world without declaring a channel first
+	 * gets the map opened under the seed for a moment, and nothing of it is saved there.
 	 */
 	private static void serverLevelIds(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:25601");
@@ -188,31 +192,39 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		if (!joinHooked) {
 			joinHooked = true;
-			// Listen where MapModCompanion does, so the server declares a channel that comes with
-			// level IDs, as servers that send them do.
-			net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<dev.diorama.XaeroChannels.Message> worldInfo =
-				new net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<>(net.minecraft.resources.Identifier.fromNamespaceAndPath("worldinfo", "world_id"));
-			net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay().register(worldInfo, dev.diorama.XaeroChannels.codec(worldInfo));
-			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(worldInfo, (message, ctx) -> {
-			});
+			net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay().register(WORLD_INFO, dev.diorama.XaeroChannels.codec(WORLD_INFO));
 			net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
 				byte[] message = levelIdOnJoin;
 				if (message != null) {
-					sender.sendPacket(new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, message[0], java.util.Arrays.copyOfRange(message, 1, message.length)));
+					Thread later = new Thread(() -> {
+						try {
+							Thread.sleep(1000);
+						} catch (InterruptedException e) {
+							return;
+						}
+						server.execute(() -> sender.sendPacket(new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, message[0], java.util.Arrays.copyOfRange(message, 1, message.length))));
+					});
+					later.setDaemon(true);
+					later.start();
 				}
 			});
 		}
 		String seeded = playOnServer(context, "diorama-shared", "id-none", null, "Old Camp", List.of(), List.of(), null, null);
-		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of("Old Camp"), List.of(), true, LOBBY_ID);
-		if (context.computeOnClient(mc -> java.nio.file.Files.exists(WorldKey.folder(seeded)))) {
-			throw new AssertionError("The seed's folder is still there after the lobby took it over");
-		}
-		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
-		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Old Camp", "Lobby Camp"), List.of("Survival Camp"), true, LOBBY_ID);
-		levelIdOnJoin = null;
 		if (!seeded.startsWith(address + "-world-")) {
 			throw new AssertionError("A server that sends no level ID didn't get the seed's folder: " + seeded);
 		}
+		// Listen where MapModCompanion does, so the server declares a channel that comes with
+		// level IDs, as servers that send them do.
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(WORLD_INFO, (message, ctx) -> {
+		});
+		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of("Old Camp"), List.of(), true, LOBBY_ID);
+		assertGone(context, seeded, "after the lobby took it over");
+		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
+		assertGone(context, seeded, "after visiting survival");
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
+		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Old Camp", "Lobby Camp"), List.of("Survival Camp"), true, LOBBY_ID);
+		assertGone(context, seeded, "after the map opened there before the lobby named its world");
+		levelIdOnJoin = null;
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
 		}
@@ -221,12 +233,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	private static void assertGone(ClientGameTestContext context, String key, String when) {
+		if (context.computeOnClient(mc -> java.nio.file.Files.exists(WorldKey.folder(key)))) {
+			throw new AssertionError("The seed's folder is there " + when);
+		}
+	}
+
 	/**
 	 * Joins a fresh dedicated server for this seed, always on the same address, and checks its
 	 * waypoints. The first visit to a world adds a waypoint and maps a strip east of spawn that
 	 * the other world won't load. {@code stripKnown}, if not null, is whether that strip should
 	 * show on the zoomed-out map from what's saved. {@code levelId}, if not null, is a level ID
-	 * message the server sends as the player joins. Returns the world's folder key.
+	 * message the server sends a second after the player joins. Returns the world's folder key.
 	 */
 	private static String playOnServer(ClientGameTestContext context, String seed, String name, @Nullable String beforeJoin,
 		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown, byte @Nullable [] levelId) {
@@ -244,7 +262,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			try (TestDedicatedServerConnection connection = server.connect()) {
 				server.runCommand("time set noon");
 				server.runCommand("weather clear");
-				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150
+					&& (levelId == null || String.valueOf(WorldKey.current()).contains("-id-")), 2400);
 				settle(context, 60);
 				// The fullscreen map zoomed out, before this visit has spread far: anything
 				// beyond the loaded chunks would be another world's saved map.

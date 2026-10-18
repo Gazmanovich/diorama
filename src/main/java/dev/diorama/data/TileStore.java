@@ -263,6 +263,15 @@ public final class TileStore {
 		}
 	}
 
+	/** Closes without writing what's still waiting to be written. */
+	public void discard() {
+		this.closed = true;
+		synchronized (this) {
+			this.unwritten.clear();
+			this.cache.clear();
+		}
+	}
+
 	/** Writes the newest pixels of a tile. Writer thread. */
 	private void write(TileKey key) {
 		if (this.closed) {
