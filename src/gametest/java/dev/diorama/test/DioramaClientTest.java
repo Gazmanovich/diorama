@@ -1567,6 +1567,42 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		context.getInput().resizeWindow(1600, 900);
 		context.waitTicks(10);
+
+		// Rounded fog only reshapes the fog edge, so switching it keeps the baked map instead of
+		// blanking it and baking every tile again.
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 60);
+		MapTile before = context.computeOnClient(mc -> playerTile());
+		if (before == null) {
+			throw new AssertionError("No baked tile under the player to check against");
+		}
+		context.runOnClient(mc -> {
+			Settings.get().roundedFog = false;
+			Settings.get().save();
+		});
+		context.waitTicks(5);
+		context.takeScreenshot("settings-07-sharp-fog");
+		boolean kept = context.computeOnClient(mc -> playerTile() == before);
+		boolean applied = context.computeOnClient(mc -> !MapStyle.get().roundedFog());
+		context.runOnClient(mc -> {
+			Settings.get().roundedFog = true;
+			Settings.get().save();
+		});
+		context.setScreen(() -> null);
+		if (!kept) {
+			throw new AssertionError("Switching rounded fog threw away the baked map");
+		}
+		if (!applied) {
+			throw new AssertionError("Switching rounded fog didn't reach the map's fog");
+		}
+	}
+
+	private static @Nullable MapTile playerTile() {
+		LocalPlayer player = Minecraft.getInstance().player;
+		int tu = (int) Math.floor(player.getX() / Projection.TILE_UNITS);
+		int tv = (int) Math.floor(Projection.v(player.getY(), player.getZ()) / Projection.TILE_UNITS);
+		return MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv));
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
