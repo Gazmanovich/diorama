@@ -83,6 +83,8 @@ public final class TileStore {
 	 * by {@code this}.
 	 */
 	private final Map<TileKey, ArrayDeque<TileImage>> handedOver = new HashMap<>();
+	/** Tiles with a merge waiting on the writer thread, so a run of bakes queues one. Guarded by {@code this}. */
+	private final Set<TileKey> mergeQueued = new HashSet<>();
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
 	private final LinkedHashMap<TileKey, int[]> cache = new LinkedHashMap<>(16, 0.75F, true) {
 		@Override
@@ -233,8 +235,17 @@ public final class TileStore {
 		TileKey key = image.key();
 		synchronized (this) {
 			this.handedOver.computeIfAbsent(key, k -> new ArrayDeque<>()).add(image);
+			if (!this.mergeQueued.add(key)) {
+				return;
+			}
 		}
-		WRITER.execute(() -> this.merge(key));
+		WRITER.execute(() -> {
+			// Cleared first, so a bake handed over during this merge queues another.
+			synchronized (this) {
+				this.mergeQueued.remove(key);
+			}
+			this.merge(key);
+		});
 	}
 
 	/**
