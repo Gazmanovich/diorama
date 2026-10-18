@@ -1580,6 +1580,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(5);
 		context.takeScreenshot("settings-07-sharp-fog");
 		boolean kept = context.computeOnClient(mc -> playerTile() == before);
+		boolean applied = context.computeOnClient(mc -> !MapStyle.get().roundedFog());
 		context.runOnClient(mc -> {
 			Settings.get().roundedFog = true;
 			Settings.get().save();
@@ -1587,6 +1588,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> null);
 		if (!kept) {
 			throw new AssertionError("Switching rounded fog threw away the baked map");
+		}
+		if (!applied) {
+			throw new AssertionError("Switching rounded fog didn't reach the map's fog");
 		}
 	}
 
