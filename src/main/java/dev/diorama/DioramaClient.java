@@ -54,7 +54,13 @@ public class DioramaClient implements ClientModInitializer {
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
-		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> ServerRules.onDisconnect());
+		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
+			ServerRules.onDisconnect();
+			WorldKey.onJoinOrLeave();
+		});
+		// A network moving the player to another of its servers joins again without leaving.
+		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> WorldKey.onJoinOrLeave());
+		XaeroChannels.register();
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
 		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MapSession.close());
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {

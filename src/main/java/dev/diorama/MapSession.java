@@ -112,13 +112,16 @@ public final class MapSession {
 		session.tickSession(mc);
 	}
 
-	/** The session for this level, starting a new one if the client moved to it. */
+	/**
+	 * The session for this level, starting a new one if the client moved to it. None while the
+	 * server may still name the world: its chunks are mapped once the folder is known.
+	 */
 	private static @Nullable MapSession forLevel(@Nullable ClientLevel level) {
 		if (current != null && current.level != level) {
 			current.map.close();
 			current = null;
 		}
-		if (level != null && current == null) {
+		if (level != null && current == null && !WorldKey.waiting(level)) {
 			current = new MapSession(level);
 			BlockLooks.invalidate();
 		}
