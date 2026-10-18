@@ -21,6 +21,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.XaeroImport;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection;
@@ -106,6 +107,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("waypoints")) {
 				waypoints(context, world);
+			}
+			if (tests.contains("xaero-import")) {
+				xaeroImport(context, world);
 			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
@@ -1282,6 +1286,101 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/**
+	 * Importing from Xaero's Minimap, with files Xaero's Minimap 26.6.0 wrote in a real game
+	 * (src/gametest/resources/xaero/): put where Xaero's keeps them for this world, the waypoint
+	 * list offers them, and importing brings their names (a colon, a death point Xaero's names
+	 * with a translation key), colours, hidden state, death marker and the Nether one across.
+	 * A second look offers nothing, even after the player moved, so the one Xaero's stored
+	 * without a height isn't taken for a new one.
+	 */
+	private static void xaeroImport(ClientGameTestContext context, TestSingleplayerContext world) {
+		java.nio.file.Path root = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("xaero").resolve("minimap").resolve(XaeroImport.singleplayerFolders(
+			mc.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString()).get(0)));
+		xaeroFixture("singleplayer/overworld.txt", root.resolve("dim%0").resolve("waypoints.txt"));
+		xaeroFixture("singleplayer/nether.txt", root.resolve("dim%-1").resolve("waypoints.txt"));
+		Set<UUID> before = context.computeOnClient(mc -> new java.util.HashSet<>(WaypointStore.get().all().stream().map(w -> w.id).toList()));
+
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-01-offered");
+		String offer = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (!"Import from Xaero's Minimap (8)".equals(offer)) {
+			throw new AssertionError("The waypoint list offers " + offer);
+		}
+		context.clickScreenButton("diorama.xaero.import");
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-02-imported");
+
+		List<Waypoint> imported = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> !before.contains(w.id)).toList());
+		java.util.Map<String, Waypoint> byName = new java.util.HashMap<>();
+		imported.forEach(w -> byName.put(w.name, w));
+		if (imported.size() != 8 || !byName.keySet().equals(Set.of("Latest Death", "No Height", "Pink Tree", "Hidden Cave", "Base_2 - East", "Iron: Farm", "Home", "Nether Hub"))) {
+			throw new AssertionError("Imported " + byName.keySet());
+		}
+		Waypoint home = byName.get("Home");
+		if (home.x != -232 || home.y != 78 || home.z != -118 || !home.dimension.equals("minecraft:overworld") || home.color != Waypoint.PALETTE[0]) {
+			throw new AssertionError("Home came in at " + home.x + "," + home.y + "," + home.z + " in " + home.dimension + ", colour " + Integer.toHexString(home.color));
+		}
+		if (byName.get("Latest Death").kind != Waypoint.Kind.DEATH || byName.get("Home").kind != Waypoint.Kind.MANUAL) {
+			throw new AssertionError("Xaero's death point didn't come in as a death marker, or another waypoint did");
+		}
+		if (byName.get("Hidden Cave").visible || !byName.get("Home").visible) {
+			throw new AssertionError("The waypoint hidden in Xaero's isn't hidden, or a shown one is");
+		}
+		if (!byName.get("Nether Hub").dimension.equals("minecraft:the_nether") || byName.get("Nether Hub").y != 128) {
+			throw new AssertionError("Nether Hub came in as " + byName.get("Nether Hub").dimension + " at y " + byName.get("Nether Hub").y);
+		}
+		// Xaero's colour 16 is its magenta; dark blue is index 1.
+		if (byName.get("Pink Tree").color != Waypoint.PALETTE[8] || byName.get("No Height").color != Waypoint.PALETTE[6]) {
+			throw new AssertionError("Pink Tree is " + Integer.toHexString(byName.get("Pink Tree").color) + ", No Height " + Integer.toHexString(byName.get("No Height").color));
+		}
+
+		// Higher up, and with the list opened afresh, there's nothing left to import.
+		context.setScreen(() -> null);
+		world.getServer().runCommand("tp @a ~ ~20 ~");
+		context.waitTicks(10);
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		String again = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (again != null) {
+			throw new AssertionError("After importing, the list still offers " + again);
+		}
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			imported.forEach(store::remove);
+			try {
+				org.apache.commons.io.FileUtils.deleteDirectory(root.toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+	}
+
+	private static void xaeroFixture(String name, java.nio.file.Path to) {
+		try (java.io.InputStream in = DioramaClientTest.class.getResourceAsStream("/xaero/" + name)) {
+			if (in == null) {
+				throw new AssertionError("Missing fixture " + name);
+			}
+			java.nio.file.Files.createDirectories(to.getParent());
+			java.nio.file.Files.copy(in, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** The label of the waypoint list's import button, or null if it has none. */
+	private static @Nullable String importButtonLabel(net.minecraft.client.gui.screens.Screen screen) {
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().startsWith("Import from Xaero's")) {
+				return button.getMessage().getString();
+			}
+		}
+		return null;
+	}
+
 	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
@@ -1572,7 +1671,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
 		}
 		return Set.of(env.split(","));
 	}

@@ -6,9 +6,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
@@ -42,6 +44,10 @@ public final class XaeroImport {
 	private static final int MAX_INITIALS = 2;
 	private static final int MAX_HORIZONTAL = 30_000_000;
 	private static final int MAX_VERTICAL = 4096;
+	/** About 50,000 waypoints; anything bigger isn't a waypoint file. */
+	private static final long MAX_FILE = 4 << 20;
+	/** The folder Xaero's uses for every server when told not to tell them apart by address. */
+	private static final String SHARED_FOLDER = "Multiplayer_Any Address";
 
 	/**
 	 * A waypoint read from Xaero's. {@code heightKnown} is false when Xaero's didn't store a
@@ -106,9 +112,10 @@ public final class XaeroImport {
 
 	/**
 	 * Xaero's worlds in the first of {@code roots} that exists under {@code base}, and which one
-	 * Xaero's would open. {@code height} stands in for heights Xaero's didn't store.
+	 * Xaero's would open. {@code height} stands in for heights Xaero's didn't store. Separate
+	 * from {@link #find()} for tests and tools.
 	 */
-	static @Nullable Found find(Path base, List<String> roots, boolean singleplayer, String spawnId, int height) throws IOException {
+	public static @Nullable Found find(Path base, List<String> roots, boolean singleplayer, String spawnId, int height) throws IOException {
 		Path root = existing(base, roots);
 		if (root == null) {
 			return null;
@@ -138,6 +145,10 @@ public final class XaeroImport {
 							id = parts[0];
 							name = parts[1].replace("%us%", "_").replace("§§", ":");
 						}
+						if (Files.size(file) > MAX_FILE) {
+							Diorama.LOGGER.warn("Skipping {}: too big for a Xaero's Minimap waypoint file", file);
+							continue;
+						}
 						List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
 						World parsed = parse(lines, dimension, height);
 						World previous = worlds.get(id);
@@ -155,7 +166,8 @@ public final class XaeroImport {
 		}
 		// Decided before dropping empty worlds: if Xaero's own world for here is empty, another
 		// world's waypoints aren't this one's.
-		World chosen = chosen(worlds, singleplayer, root.resolve("config.txt"), spawnId);
+		boolean shared = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER);
+		World chosen = shared ? null : chosen(worlds, singleplayer, root.resolve("config.txt"), spawnId);
 		if (chosen != null) {
 			return chosen.entries().isEmpty() ? null : new Found(List.of(chosen), chosen);
 		}
@@ -164,20 +176,23 @@ public final class XaeroImport {
 	}
 
 	/**
-	 * The world Xaero's would open, following its own rules: {@code waypoints} in singleplayer;
-	 * on a server, the only one there is, else the one its config pins (multiworld detection off,
-	 * the default) or the one for the current spawn (detection on). Worlds named by the server or
-	 * Xaero's World Map ({@code mw$...}) take precedence over both, and which of those applies
-	 * isn't known from here, so with any of them in the mix the player picks.
+	 * The world Xaero's would open, following its own rules, or null when that can't be told from
+	 * here. Singleplayer: {@code waypoints}. On a server, the world comes from the server's level
+	 * id when the server runs Xaero's (an {@code mw$<id>} name this can't see), else from Xaero's
+	 * World Map when installed ({@code mw$default} unless the player set it up otherwise), else
+	 * from Xaero's config: the world it pinned on the first visit (multiworld detection off, the
+	 * default) or the one for the current spawn (detection on).
 	 */
 	private static @Nullable World chosen(Map<String, World> worlds, boolean singleplayer, Path config, String spawnId) throws IOException {
 		if (singleplayer) {
 			return worlds.get("waypoints");
 		}
-		if (worlds.size() == 1) {
-			return worlds.values().iterator().next();
+		boolean named = worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"));
+		if (named) {
+			// World Map's default is the one name that doesn't depend on the server.
+			return worlds.size() == 1 ? worlds.get("mw$default") : null;
 		}
-		if (worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$")) || !Files.isRegularFile(config)) {
+		if (!Files.isRegularFile(config)) {
 			return null;
 		}
 		boolean detection = false;
@@ -190,7 +205,8 @@ public final class XaeroImport {
 				pinned = parts[1];
 			}
 		}
-		return worlds.get(detection ? spawnId : pinned);
+		String id = detection ? spawnId : pinned;
+		return id == null ? null : worlds.get(id);
 	}
 
 	/** The first folder in {@code names} under {@code base}, matching case the way Xaero's does. */
@@ -213,7 +229,7 @@ public final class XaeroImport {
 	}
 
 	/** Xaero's folder name for a save folder, newest naming first. */
-	static List<String> singleplayerFolders(String saveFolder) {
+	public static List<String> singleplayerFolders(String saveFolder) {
 		String older = saveFolder.replace("_", "%us%").replace("/", "%fs%").replace("\\", "%bs%");
 		String newer = older.replace("[", "%lb%").replace("]", "%rb%");
 		return newer.equals(older) ? List.of(newer) : List.of(newer, older);
@@ -224,7 +240,7 @@ public final class XaeroImport {
 	 * when it starts, but a player who stopped updating it has those), then the shared folder
 	 * Xaero's uses when told not to tell servers apart by address.
 	 */
-	static List<String> serverFolders(String address) {
+	public static List<String> serverFolders(String address) {
 		List<String> names = new ArrayList<>();
 		for (int version = 4; version >= 0; version--) {
 			String name = serverFolder(address, version);
@@ -232,7 +248,7 @@ public final class XaeroImport {
 				names.add(name);
 			}
 		}
-		names.add("Multiplayer_Any Address");
+		names.add(SHARED_FOLDER);
 		return names;
 	}
 
@@ -276,7 +292,8 @@ public final class XaeroImport {
 	 * The waypoints in one of Xaero's files. Lines that aren't waypoints (sets, comments, the
 	 * slime chunk seed) and ones that can't be read are skipped, as Xaero's does. One-off
 	 * destinations are skipped too: Xaero's removes them once reached. (Its temporary waypoints
-	 * never reach the file.)
+	 * never reach the file.) The last field marks destinations, but Xaero's sets it on death
+	 * points as well; only an ordinary waypoint carrying it is a one-off destination.
 	 */
 	static World parse(List<String> lines, String dimension, int height) {
 		List<Entry> entries = new ArrayList<>();
@@ -293,7 +310,7 @@ public final class XaeroImport {
 				int z = Integer.parseInt(args[5]);
 				int color = Integer.parseInt(args[6]);
 				int type = Integer.parseInt(args[8]);
-				if (type == 3 || (args.length > 13 && args[13].equals("true"))) {
+				if (type == 3 || (type == 0 && args.length > 13 && args[13].equals("true"))) {
 					destinations++;
 					continue;
 				}
@@ -336,18 +353,27 @@ public final class XaeroImport {
 	 * height counts, since it took the player's height when it was imported.
 	 */
 	public static List<Waypoint> missing(World world, WaypointStore store) {
+		Set<String> exact = new HashSet<>();
+		Set<String> anyHeight = new HashSet<>();
+		for (Waypoint w : store.all()) {
+			exact.add(key(w, true));
+			anyHeight.add(key(w, false));
+		}
 		List<Waypoint> out = new ArrayList<>();
-		List<Waypoint> known = new ArrayList<>(store.all());
 		for (Entry entry : world.entries()) {
 			Waypoint in = entry.waypoint();
-			boolean present = known.stream().anyMatch(w -> w.name.equals(in.name) && w.dimension.equals(in.dimension)
-				&& w.x == in.x && w.z == in.z && (!entry.heightKnown() || w.y == in.y));
+			boolean present = entry.heightKnown() ? exact.contains(key(in, true)) : anyHeight.contains(key(in, false));
 			if (!present) {
 				out.add(in);
-				known.add(in);
+				exact.add(key(in, true));
+				anyHeight.add(key(in, false));
 			}
 		}
 		return out;
+	}
+
+	private static String key(Waypoint w, boolean height) {
+		return w.dimension + "|" + w.x + "|" + (height ? w.y : "") + "|" + w.z + "|" + w.name;
 	}
 
 	/** Adds the waypoints of {@code world} that aren't in the store yet and returns them. */

@@ -152,7 +152,8 @@ public final class WaypointListScreen extends Screen {
 				this.rebuildWidgets();
 			}).build();
 		}
-		if (found.worlds().stream().allMatch(world -> XaeroImport.missing(world, store).isEmpty())) {
+		// A world with nothing left to import is the one the player picked before.
+		if (found.worlds().stream().anyMatch(world -> XaeroImport.missing(world, store).isEmpty())) {
 			return null;
 		}
 		return Button.builder(Component.translatable("diorama.xaero.import_pick"), b ->
