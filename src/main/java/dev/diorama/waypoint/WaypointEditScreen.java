@@ -14,6 +14,8 @@ import org.jspecify.annotations.Nullable;
 public final class WaypointEditScreen extends Screen {
 	private static final int SWATCH = 16;
 	private static final int SWATCH_GAP = 4;
+	/** Vanilla's colour for a number field it can't read, from the game rules screen. */
+	private static final int INVALID_TEXT = 0xFFFF0000;
 
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
@@ -23,6 +25,9 @@ public final class WaypointEditScreen extends Screen {
 	private EditBox x;
 	private EditBox y;
 	private EditBox z;
+	private @Nullable Button save;
+	private @Nullable Button share;
+	private @Nullable Button teleport;
 	private int color;
 	private boolean visible;
 	private int swatchX;
@@ -41,11 +46,15 @@ public final class WaypointEditScreen extends Screen {
 	protected void init() {
 		int cx = this.width / 2;
 		int top = this.height / 2 - 92;
-		this.name = this.field(cx - 100, top + 16, 156, this.waypoint.name, "diorama.waypoint.name", 32);
-		this.initials = this.field(cx + 60, top + 16, 40, this.waypoint.initials, "diorama.waypoint.initials", 2);
-		this.x = this.field(cx - 100, top + 56, 64, Integer.toString(this.waypoint.x), "diorama.waypoint.x", 9);
-		this.y = this.field(cx - 32, top + 56, 64, Integer.toString(this.waypoint.y), "diorama.waypoint.y", 9);
-		this.z = this.field(cx + 36, top + 56, 64, Integer.toString(this.waypoint.z), "diorama.waypoint.z", 9);
+		// Resizing the window or changing GUI scale runs init() again: keep what's typed, not the saved waypoint.
+		this.name = this.field(cx - 100, top + 16, 156, draft(this.name, this.waypoint.name), "diorama.waypoint.name", 32);
+		this.initials = this.field(cx + 60, top + 16, 40, draft(this.initials, this.waypoint.initials), "diorama.waypoint.initials", 2);
+		this.x = this.field(cx - 100, top + 56, 64, draft(this.x, Integer.toString(this.waypoint.x)), "diorama.waypoint.x", 9);
+		this.y = this.field(cx - 32, top + 56, 64, draft(this.y, Integer.toString(this.waypoint.y)), "diorama.waypoint.y", 9);
+		this.z = this.field(cx + 36, top + 56, 64, draft(this.z, Integer.toString(this.waypoint.z)), "diorama.waypoint.z", 9);
+		this.x.setResponder(text -> this.validate());
+		this.y.setResponder(text -> this.validate());
+		this.z.setResponder(text -> this.validate());
 		this.swatchX = cx - (Waypoint.PALETTE.length / 2 * (SWATCH + SWATCH_GAP) - SWATCH_GAP) / 2;
 		this.swatchY = top + 92;
 		this.addRenderableWidget(Button.builder(this.visibilityLabel(), b -> {
@@ -54,18 +63,43 @@ public final class WaypointEditScreen extends Screen {
 		}).bounds(cx - 100, top + 140, 200, 20).build());
 		int buttons = top + 168;
 		if (this.isNew) {
-			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.save"), b -> this.save()).bounds(cx - 100, buttons, 98, 20).build());
+			this.save = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.save"), b -> this.save()).bounds(cx - 100, buttons, 98, 20).build());
 			this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> this.onClose()).bounds(cx + 2, buttons, 98, 20).build());
 		} else {
-			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.save"), b -> this.save()).bounds(cx - 100, buttons, 64, 20).build());
+			this.save = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.save"), b -> this.save()).bounds(cx - 100, buttons, 64, 20).build());
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.delete"), b -> this.delete()).bounds(cx - 32, buttons, 64, 20).build());
 			this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> this.onClose()).bounds(cx + 36, buttons, 64, 20).build());
-			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.share"), b -> this.share()).bounds(cx - 100, buttons + 24, 98, 20).build());
-			Button teleport = Button.builder(Component.translatable("diorama.waypoint.teleport"), b -> this.teleport()).bounds(cx + 2, buttons + 24, 98, 20).build();
-			teleport.active = canTeleport();
-			this.addRenderableWidget(teleport);
+			this.share = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.share"), b -> this.share()).bounds(cx - 100, buttons + 24, 98, 20).build());
+			this.teleport = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.teleport"), b -> this.teleport()).bounds(cx + 2, buttons + 24, 98, 20).build());
 		}
+		this.validate();
 		this.setInitialFocus(this.name);
+	}
+
+	private static String draft(@Nullable EditBox box, String saved) {
+		return box != null ? box.getValue() : saved;
+	}
+
+	/**
+	 * Colours a coordinate that isn't a whole number red, the way vanilla's game rules screen does,
+	 * and keeps Save, Share and Teleport off until every coordinate reads.
+	 */
+	private void validate() {
+		boolean valid = true;
+		for (EditBox box : new EditBox[] {this.x, this.y, this.z}) {
+			boolean reads = parse(box.getValue()) != null;
+			box.setTextColor(reads ? EditBox.DEFAULT_TEXT_COLOR : INVALID_TEXT);
+			valid &= reads;
+		}
+		if (this.save != null) {
+			this.save.active = valid;
+		}
+		if (this.share != null) {
+			this.share.active = valid;
+		}
+		if (this.teleport != null) {
+			this.teleport.active = valid && canTeleport();
+		}
 	}
 
 	private EditBox field(int x, int y, int width, String value, String hint, int maxLength) {
@@ -121,12 +155,16 @@ public final class WaypointEditScreen extends Screen {
 		return this.waypoint;
 	}
 
-	/** The waypoint as the fields show it now, edits included, without saving. */
-	private Waypoint shown() {
+	/** The waypoint as the fields show it now, edits included, without saving; null while a coordinate isn't a number. */
+	private @Nullable Waypoint shown() {
+		Integer x = parse(this.x.getValue());
+		Integer y = parse(this.y.getValue());
+		Integer z = parse(this.z.getValue());
+		if (x == null || y == null || z == null) {
+			return null;
+		}
 		String name = this.name.getValue().trim();
-		Waypoint shown = new Waypoint(name.isEmpty() ? this.waypoint.name : name,
-			parse(this.x.getValue(), this.waypoint.x), parse(this.y.getValue(), this.waypoint.y), parse(this.z.getValue(), this.waypoint.z),
-			this.waypoint.dimension, this.color);
+		Waypoint shown = new Waypoint(name.isEmpty() ? this.waypoint.name : name, x, y, z, this.waypoint.dimension, this.color);
 		String initials = this.initials.getValue().trim();
 		shown.initials = initials.isEmpty() ? shown.initials : initials.toUpperCase(java.util.Locale.ROOT);
 		return shown;
@@ -134,7 +172,11 @@ public final class WaypointEditScreen extends Screen {
 
 	/** Sends the waypoint to chat for others to add. */
 	private void share() {
-		java.util.Optional<String> text = WaypointShare.format(this.shown());
+		Waypoint shown = this.shown();
+		if (shown == null) {
+			return;
+		}
+		java.util.Optional<String> text = WaypointShare.format(shown);
 		if (text.isEmpty()) {
 			//? if >=26.1 {
 			this.minecraft.gui.hud.getChat().addClientSystemMessage(Component.translatable("diorama.share.too_long"));
@@ -151,6 +193,9 @@ public final class WaypointEditScreen extends Screen {
 
 	private void teleport() {
 		Waypoint shown = this.shown();
+		if (shown == null) {
+			return;
+		}
 		if (this.minecraft.player != null) {
 			this.minecraft.player.connection.sendCommand("tp @s " + shown.x + " " + shown.y + " " + shown.z);
 		}
@@ -164,17 +209,20 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	private void save() {
+		Waypoint shown = this.shown();
+		if (shown == null) {
+			return;
+		}
 		WaypointStore store = WaypointStore.get();
 		if (store == null) {
 			this.onClose();
 			return;
 		}
-		String name = this.name.getValue().trim();
-		this.waypoint.name = name.isEmpty() ? this.waypoint.name : name;
+		this.waypoint.name = shown.name;
 		this.waypoint.initials = this.initials.getValue().trim().toUpperCase(java.util.Locale.ROOT);
-		this.waypoint.x = parse(this.x.getValue(), this.waypoint.x);
-		this.waypoint.y = parse(this.y.getValue(), this.waypoint.y);
-		this.waypoint.z = parse(this.z.getValue(), this.waypoint.z);
+		this.waypoint.x = shown.x;
+		this.waypoint.y = shown.y;
+		this.waypoint.z = shown.z;
 		this.waypoint.color = this.color;
 		this.waypoint.visible = this.visible;
 		if (this.isNew) {
@@ -193,11 +241,11 @@ public final class WaypointEditScreen extends Screen {
 		this.onClose();
 	}
 
-	private static int parse(String text, int fallback) {
+	private static @Nullable Integer parse(String text) {
 		try {
 			return Integer.parseInt(text.trim());
 		} catch (NumberFormatException e) {
-			return fallback;
+			return null;
 		}
 	}
 
