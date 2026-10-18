@@ -1,10 +1,10 @@
 package dev.diorama.render;
 
+import dev.diorama.render.gpu.MapCanvas;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
@@ -171,22 +171,19 @@ public final class MobFaces {
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x - w / 2, y - h / 2);
 		graphics.pose().scale(scale);
-		blit(graphics, texture, face, face.u(), face.v(), face.w(), face.h(), 0, 0, color);
+		MapCanvas canvas = MapCanvas.of(graphics);
+		canvas.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
 		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
 		if (feature != null) {
 			Piece p = feature;
-			blit(graphics, texture, face, p.u(), p.v(), p.w(), p.h(), p.dx(), p.dy(), color);
+			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
 		}
 		if (face.hat() != null) {
 			Piece p = face.hat();
-			blit(graphics, texture, face, p.u(), p.v(), p.w(), p.h(), p.dx(), p.dy(), color);
+			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
 		}
 		graphics.pose().popMatrix();
 		return true;
-	}
-
-	private static void blit(GuiGraphicsExtractor graphics, Identifier texture, Face face, int u, int v, int w, int h, int dx, int dy, int color) {
-		graphics.blit(RenderPipelines.GUI_TEXTURED, texture, dx, dy, u, v, w, h, w, h, face.texW(), face.texH(), color);
 	}
 
 	/** Cold cows use a different model, with the muzzle elsewhere in the texture. */

@@ -1,23 +1,16 @@
 package dev.diorama.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
-//? if <1.21.11 {
-/*import com.mojang.blaze3d.textures.AddressMode;
-*///?}
+import dev.diorama.render.gpu.MapCanvas;
+import dev.diorama.render.gpu.MapTexture;
+import dev.diorama.render.gpu.Sampling;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.render.TextureSetup;
-import net.minecraft.client.renderer.RenderPipelines;
-import org.joml.Matrix3x2f;
 import org.jspecify.annotations.Nullable;
 
 /** Small white shapes drawn tinted on the map: dots for mobs, carets for "above" and "below". */
 public final class MapIcons {
 	private static final int SIZE = 32;
-	private static @Nullable GpuTextureView dot;
-	private static @Nullable GpuTextureView caret;
+	private static @Nullable MapTexture dot;
+	private static @Nullable MapTexture caret;
 
 	private MapIcons() {
 	}
@@ -57,35 +50,11 @@ public final class MapIcons {
 			corners[i * 2] = x + local[i][0] * cos - local[i][1] * sin;
 			corners[i * 2 + 1] = y + local[i][0] * sin + local[i][1] * cos;
 		}
-		graphics.guiRenderState.addGuiElement(QuadElement.of(
-			RenderPipelines.GUI_TEXTURED,
-			//? if >=1.21.11 {
-			TextureSetup.singleTexture(caret, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
-			//?} else {
-			/*TextureSetup.singleTexture(caret),
-			*///?}
-			new Matrix3x2f(graphics.pose()),
-			corners,
-			new float[] {0, 0, 0, 1, 1, 1, 1, 0},
-			argb,
-			graphics.scissorStack.peek()
-		));
+		MapCanvas.of(graphics).quad(caret, Sampling.CLAMP_LINEAR, corners, new float[] {0, 0, 0, 1, 1, 1, 1, 0}, argb);
 	}
 
-	private static void draw(GuiGraphicsExtractor graphics, GpuTextureView texture, float x, float y, float size, int argb, boolean flip) {
-		graphics.guiRenderState.addGuiElement(QuadElement.rect(
-			RenderPipelines.GUI_TEXTURED,
-			//? if >=1.21.11 {
-			TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
-			//?} else {
-			/*TextureSetup.singleTexture(texture),
-			*///?}
-			new Matrix3x2f(graphics.pose()),
-			x, y, x + size, y + size,
-			0, flip ? 1 : 0, 1, flip ? 0 : 1,
-			argb,
-			graphics.scissorStack.peek()
-		));
+	private static void draw(GuiGraphicsExtractor graphics, MapTexture texture, float x, float y, float size, int argb, boolean flip) {
+		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_LINEAR, x, y, x + size, y + size, 0, flip ? 1 : 0, 1, flip ? 0 : 1, argb);
 	}
 
 	private interface Shape {
@@ -108,7 +77,7 @@ public final class MapIcons {
 		return Math.max(0, Math.min(1, (halfWidth - Math.abs(px)) * SIZE / 2));
 	}
 
-	private static GpuTextureView create(String label, Shape shape) {
+	private static MapTexture create(String label, Shape shape) {
 		int[] pixels = new int[SIZE * SIZE];
 		for (int y = 0; y < SIZE; y++) {
 			for (int x = 0; x < SIZE; x++) {
@@ -118,12 +87,8 @@ public final class MapIcons {
 				pixels[y * SIZE + x] = (a << 24) | 0xFFFFFF;
 			}
 		}
-		GpuTexture texture = FogTextures.createTexture(label, SIZE);
-		FogTextures.write(texture, pixels, SIZE);
-		GpuTextureView view = RenderSystem.getDevice().createTextureView(texture);
-		//? if <1.21.11 {
-		/*FogTextures.sampleWith(view, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, false);
-		*///?}
-		return view;
+		MapTexture texture = MapTexture.create(label, SIZE, 1);
+		texture.write(0, 0, 0, SIZE, pixels);
+		return texture;
 	}
 }

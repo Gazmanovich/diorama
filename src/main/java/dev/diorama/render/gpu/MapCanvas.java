@@ -1,0 +1,59 @@
+package dev.diorama.render.gpu;
+
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.resources.Identifier;
+
+/**
+ * Draws the map's own shapes into a GUI frame: quads with float corners and the mod's textures,
+ * the fog, mob and player faces. Vanilla GUI draws only take whole-pixel positions, and the map
+ * pans smoothly. From 1.21.6 this submits GUI render state; before, it draws straight away. Get
+ * one per draw call; it holds no GPU state. Positions are in the GUI's current pose.
+ */
+public interface MapCanvas {
+	static MapCanvas of(GuiGraphicsExtractor graphics) {
+		//? if >=1.21.6 {
+		return new StateCanvas(graphics);
+		//?} else {
+		/*return new ImmediateCanvas(graphics);
+		*///?}
+	}
+
+	/**
+	 * A textured quad multiplied by {@code argb}.
+	 *
+	 * @param corners x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left
+	 * @param uvs u0 v0 u1 v1 u2 v2 u3 v3, matching the corners
+	 */
+	void quad(MapTexture texture, Sampling sampling, float[] corners, float[] uvs, int argb);
+
+	/** An axis-aligned textured rectangle multiplied by {@code argb}. */
+	default void rect(
+		MapTexture texture, Sampling sampling, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int argb
+	) {
+		this.quad(
+			texture, sampling,
+			new float[] {x0, y0, x0, y1, x1, y1, x1, y0},
+			new float[] {u0, v0, u0, v1, u1, v1, u1, v0},
+			argb
+		);
+	}
+
+	/** An untextured quad in one colour, corners counter-clockwise (the other winding is culled). */
+	void solid(float[] corners, int argb);
+
+	/**
+	 * A {@code w} x {@code h} rectangle of a game texture (a mob's skin) at (u, v), drawn at (x, y)
+	 * the same size, in a texture of {@code texW} x {@code texH} pixels.
+	 */
+	void blit(Identifier texture, int x, int y, int u, int v, int w, int h, int texW, int texH, int argb);
+
+	/** A player's face with its hat layer, {@code size} across, at (x, y). */
+	void playerFace(AbstractClientPlayer player, int x, int y, int size, int argb);
+
+	/**
+	 * The fog over a view: the known-area mask in sampler 0 (clamped), the noise in sampler 1
+	 * (repeating), and the shader's parameters packed into the vertex colour. Clipped to the view.
+	 */
+	void fog(MapTexture mask, MapTexture noise, int x, int y, int width, int height, float u0, float v0, float u1, float v1, int params);
+}
