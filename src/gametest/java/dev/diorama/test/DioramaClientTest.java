@@ -1329,12 +1329,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		clickAt(context, context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(), label)));
 	}
 
-	/** Clicks a text field, selects what's in it and types over it. */
+	/** Clicks a text field, empties it and types into it. */
 	private static void typeInto(ClientGameTestContext context, int field, String text) {
 		clickAt(context, context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(field)));
-		context.getInput().holdControl();
-		context.getInput().pressKey(InputConstants.KEY_A);
-		context.getInput().releaseControl();
+		// The test input's Ctrl+A doesn't select, so the field is emptied directly; the typing is real.
+		context.runOnClient(mc -> editBoxes(mc.gui.screen()).get(field).setValue(""));
 		context.getInput().typeChars(text);
 		context.waitTicks(2);
 	}
