@@ -961,6 +961,25 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!keyOpenedEditor) {
 			throw new AssertionError("The add-waypoint key did nothing on the waypoint list");
 		}
+		// Bound to a mouse button, the hint names that button, so it has to work too.
+		InputConstants.Key boundKey = context.computeOnClient(mc -> InputConstants.getKey(DioramaClient.NEW_WAYPOINT.saveString()));
+		context.runOnClient(mc -> {
+			DioramaClient.NEW_WAYPOINT.setKey(InputConstants.Type.MOUSE.getOrCreate(InputConstants.MOUSE_BUTTON_LEFT + 3));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(3);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT + 3);
+		context.waitTicks(3);
+		boolean mouseOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			DioramaClient.NEW_WAYPOINT.setKey(boundKey);
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		if (!mouseOpenedEditor) {
+			throw new AssertionError("A mouse button bound to add-waypoint did nothing on the waypoint list");
+		}
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
 			BlockPos at = mc.player.blockPosition();

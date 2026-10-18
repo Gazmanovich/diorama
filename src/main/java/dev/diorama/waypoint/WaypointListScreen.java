@@ -9,6 +9,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -34,6 +35,8 @@ public final class WaypointListScreen extends Screen {
 	private int listTop;
 	private int visibleRows;
 	private boolean canTeleport;
+	/** Set by the add-waypoint key; tick() opens the editor. */
+	private boolean newWaypointPressed;
 
 	public WaypointListScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.waypoints.title"));
@@ -159,14 +162,38 @@ public final class WaypointListScreen extends Screen {
 		}
 	}
 
-	/** The add-waypoint key works here too, since the empty list tells the player to press it. */
+	/**
+	 * The add-waypoint key (or mouse button) works here too, since the empty list tells the player to
+	 * press it. The editor opens on the next tick: the key's typed letter arrives after the key
+	 * itself, and would otherwise land in the editor's name field.
+	 */
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		if (DioramaClient.NEW_WAYPOINT.matches(event)) {
-			this.newWaypoint();
+			this.newWaypointPressed = true;
 			return true;
 		}
 		return super.keyPressed(event);
+	}
+
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (super.mouseClicked(event, doubleClick)) {
+			return true;
+		}
+		if (DioramaClient.NEW_WAYPOINT.matchesMouse(event)) {
+			this.newWaypointPressed = true;
+			return true;
+		}
+		return false;
+	}
+
+	@Override
+	public void tick() {
+		if (this.newWaypointPressed) {
+			this.newWaypointPressed = false;
+			this.newWaypoint();
+		}
 	}
 
 	private void teleport(Waypoint waypoint) {
