@@ -8,8 +8,10 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+//?}
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -174,6 +176,7 @@ public final class WaypointListScreen extends Screen {
 	 * press it. The editor opens on the next tick: the key's typed letter arrives after the key
 	 * itself, and would otherwise land in the editor's name field.
 	 */
+	//? if >=1.21.9 {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		if (DioramaClient.NEW_WAYPOINT.matches(event)) {
@@ -194,6 +197,28 @@ public final class WaypointListScreen extends Screen {
 		}
 		return false;
 	}
+	//?} else {
+	/*@Override
+	public boolean keyPressed(int key, int scancode, int modifiers) {
+		if (DioramaClient.NEW_WAYPOINT.matches(key, scancode)) {
+			this.newWaypointPressed = true;
+			return true;
+		}
+		return super.keyPressed(key, scancode, modifiers);
+	}
+
+	@Override
+	public boolean mouseClicked(double x, double y, int button) {
+		if (super.mouseClicked(x, y, button)) {
+			return true;
+		}
+		if (DioramaClient.NEW_WAYPOINT.matchesMouse(button)) {
+			this.newWaypointPressed = true;
+			return true;
+		}
+		return false;
+	}
+	*///?}
 
 	@Override
 	public void tick() {
