@@ -144,7 +144,7 @@ public final class TileBaker {
 		this.key = key;
 		this.overlays = overlays;
 		this.looks = looks;
-		this.reader = new VoxelReader(source);
+		this.reader = new VoxelReader(source, looks.kind);
 		this.cave = key.isCave();
 		this.roofless = !this.cave && source.roof() != ChunkSource.NO_ROOF;
 		this.lit = this.cave || this.roofless;
@@ -417,13 +417,12 @@ public final class TileBaker {
 		int waterBz = 0;
 
 		while (by >= this.limitY) {
-			int id = this.reader.state(x, by, bz);
-			if (id == VoxelReader.UNKNOWN) {
-				return false;
-			}
-			byte kind = this.looks.kind[id];
 			if (skippingRock) {
-				if (kind == BlockLooks.SOLID) {
+				int solid = this.reader.solid(x, by, bz);
+				if (solid == VoxelReader.UNKNOWN) {
+					return false;
+				}
+				if (solid == 1) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
@@ -440,6 +439,11 @@ public final class TileBaker {
 				}
 				skippingRock = false;
 			}
+			int id = this.reader.state(x, by, bz);
+			if (id == VoxelReader.UNKNOWN) {
+				return false;
+			}
+			byte kind = this.looks.kind[id];
 
 			switch (kind) {
 				case BlockLooks.SOLID, BlockLooks.LAVA -> {
@@ -765,6 +769,17 @@ public final class TileBaker {
 		if (cy < this.rayTop && this.occludes(cx, cy, cz)) {
 			return true;
 		}
+		int top = this.rayTop;
+		if (dy > 0) {
+			// A ray that only climbs can't be blocked once it is above every solid block in the
+			// chunks it can reach, so it stops there instead of walking on through open sky.
+			double ex = ox + dx * distance;
+			double ez = oz + dz * distance;
+			top = Math.min(top, this.reader.solidTop(
+				((int) Math.floor(Math.min(ox, ex)) - 1) >> 4, ((int) Math.floor(Math.min(oz, ez)) - 1) >> 4,
+				((int) Math.floor(Math.max(ox, ex)) + 1) >> 4, ((int) Math.floor(Math.max(oz, ez)) + 1) >> 4
+			));
+		}
 		int stepX = dx > 0 ? 1 : -1;
 		int stepY = dy > 0 ? 1 : -1;
 		int stepZ = dz > 0 ? 1 : -1;
@@ -788,14 +803,14 @@ public final class TileBaker {
 				cz += stepZ;
 				tMaxZ += tDeltaZ;
 			}
-			if (cy >= this.rayTop) {
+			if (cy >= top) {
 				return false;
 			}
-			int id = this.reader.state(cx, cy, cz);
-			if (id == VoxelReader.UNKNOWN) {
+			int solid = this.reader.solid(cx, cy, cz);
+			if (solid == VoxelReader.UNKNOWN) {
 				return false;
 			}
-			if (this.looks.kind[id] == BlockLooks.SOLID) {
+			if (solid == 1) {
 				return true;
 			}
 		}
@@ -803,8 +818,7 @@ public final class TileBaker {
 	}
 
 	private boolean occludes(int x, int y, int z) {
-		int id = this.reader.state(x, y, z);
-		return id != VoxelReader.UNKNOWN && this.looks.kind[id] == BlockLooks.SOLID;
+		return this.reader.solid(x, y, z) == 1;
 	}
 
 	/** Smooth corner occlusion on a top face, from the eight blocks around the cell above it. */
