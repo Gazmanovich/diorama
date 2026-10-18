@@ -106,3 +106,59 @@ if (hasGameTestApi) {
 		}
 	}
 }
+
+if (!hasGameTestApi) {
+	// Below 1.21.4 the tests run on src/gameshim: a test-only stand-in for the part of Fabric's
+	// client game test API they use. Neither the shim nor the tests go in the release jar.
+	val main = sourceSets.main.get()
+	val gameshim = sourceSets.create("gameshim") {
+		compileClasspath += main.compileClasspath
+		runtimeClasspath += main.runtimeClasspath
+	}
+	val gametest = sourceSets.create("gametest") {
+		compileClasspath += main.compileClasspath + main.output + gameshim.output
+		runtimeClasspath += main.runtimeClasspath + main.output + gameshim.output
+	}
+	dependencies {
+		"gametestCompileOnly"("org.jspecify:jspecify:1.0.0")
+	}
+	loom {
+		mods {
+			register("diorama-gameshim") { sourceSet(gameshim) }
+			register("diorama-test") { sourceSet(gametest) }
+		}
+		runs {
+			register("clientGameTest") {
+				client()
+				source(gametest)
+				property("diorama.gameshim", "true")
+				runDir("build/run/clientGameTest")
+				ideConfigGenerated(false)
+			}
+		}
+	}
+
+	// The same, with the remapped release jar in a production environment (intermediary names).
+	fun remapped(name: String, from: SourceSet): TaskProvider<net.fabricmc.loom.task.RemapJarTask> {
+		val dev = tasks.register<Jar>("${name}Jar") {
+			from(from.output)
+			archiveClassifier = "$name-dev"
+			destinationDirectory = layout.buildDirectory.dir("devlibs")
+		}
+		return tasks.register<net.fabricmc.loom.task.RemapJarTask>("remap${name.replaceFirstChar { it.uppercase() }}Jar") {
+			inputFile = dev.flatMap { it.archiveFile }
+			archiveClassifier = name
+		}
+	}
+	val remapGameshimJar = remapped("gameshim", gameshim)
+	val remapGametestJar = remapped("gametest", gametest)
+	val productionMods = configurations.create("productionMods") { isTransitive = false }
+	dependencies {
+		productionMods("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
+	}
+	tasks.register<net.fabricmc.loom.task.prod.ClientProductionRunTask>("runProductionClientGameTest") {
+		mods.from(tasks.named("remapJar"), remapGameshimJar, remapGametestJar, productionMods)
+		jvmArgs.add("-Ddiorama.gameshim=true")
+		runDir = layout.buildDirectory.dir("run-production")
+	}
+}

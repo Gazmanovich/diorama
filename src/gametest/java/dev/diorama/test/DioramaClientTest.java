@@ -632,7 +632,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void camera(ClientGameTestContext context, double[] eye, float yaw, float pitch, double fov, int ticks) {
 		context.runOnClient(mc -> {
 			int option = Math.clamp((int) Math.ceil(fov), 30, 110);
+			//? if >=1.21.2 {
 			double narrowest = mc.player.getFieldOfViewModifier(true, 1.0F);
+			//?} else {
+			/*// The modifier took the effect scale from the options.
+			mc.options.fovEffectScale().set(1.0);
+			double narrowest = mc.player.getFieldOfViewModifier();
+			*///?}
 			mc.options.fov().set(option);
 			mc.options.fovEffectScale().set(Math.clamp((1 - fov / option) / (1 - narrowest), 0.0, 1.0));
 			mc.player.setDeltaMovement(Vec3.ZERO);
@@ -1773,7 +1779,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
+			//? if >=1.21.4 {
 			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
+			//?} else {
+			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			*///?}
 		}
 		return Set.of(env.split(","));
 	}
