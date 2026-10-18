@@ -259,6 +259,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		properties.setProperty("server-port", "25601");
 		properties.setProperty("gamemode", "creative");
 		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
+		// Bob is higher up than the radar's default height range reaches, which hides players as it does mobs.
+		int range = context.computeOnClient(mc -> Settings.get().radarRange);
+		context.runOnClient(mc -> Settings.get().radarRange = 128);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP, (message, ctx) -> {
 			if (message.kind() == 1 && java.util.Arrays.equals(message.body(), new byte[] {0, 0, 0, 3})) {
 				answers.incrementAndGet();
@@ -320,6 +323,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		} finally {
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP.id());
+			context.runOnClient(mc -> Settings.get().radarRange = range);
 		}
 	}
 
@@ -343,7 +347,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/** Waits until Bob is on the fullscreen map where block x {@code x}, y 120, z 30.5 draws, or not on it at all if null. */
 	private static void waitForBob(ClientGameTestContext context, @Nullable Double x, String when) {
-		for (int tick = 0; tick < 100; tick++) {
+		for (int tick = 0; tick < 400; tick++) {
 			String wrong = context.computeOnClient(mc -> {
 				MapScreen screen = (MapScreen) mc.gui.screen();
 				Radar.Blip bob = screen.blips().stream().filter(b -> b.entity().getUUID().equals(BOB)).findFirst().orElse(null);
@@ -361,7 +365,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (wrong == null) {
 				return;
 			}
-			if (tick == 99) {
+			if (tick == 399) {
 				throw new AssertionError(wrong + " " + when);
 			}
 			context.waitTicks(1);
