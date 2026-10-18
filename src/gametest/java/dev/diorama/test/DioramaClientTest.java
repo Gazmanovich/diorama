@@ -133,6 +133,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("server-id")) {
 			serverLevelIds(context);
 		}
+		if (tests.contains("tracked-players")) {
+			trackedPlayers(context);
+		}
 	}
 
 	/**
@@ -237,6 +240,119 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (context.computeOnClient(mc -> java.nio.file.Files.exists(WorldKey.folder(key)))) {
 			throw new AssertionError("The seed's folder is there " + when);
 		}
+	}
+
+	/** Bob's offline-mode UUID, and his position as XaeroTracker sent it: x 640.5, y 120, z 30.5 in the overworld. */
+	private static final UUID BOB = UUID.fromString("faa5dca3-c3d4-354b-ae1b-dde9e5a14b3b");
+	private static final byte[] BOB_TRACKED = {2, 10, 1, 0, 1, 114, 0, 11, 0, 1, 105, 0, 0, 0, 4, -6, -91, -36, -93, -61, -44, 53, 75, -82, 27, -35, -23, -27, -95, 75, 59,
+		6, 0, 1, 120, 64, -124, 4, 0, 0, 0, 0, 0, 6, 0, 1, 121, 64, 94, 0, 0, 0, 0, 0, 0, 6, 0, 1, 122, 64, 62, -128, 0, 0, 0, 0, 0,
+		8, 0, 1, 100, 0, 19, 109, 105, 110, 101, 99, 114, 97, 102, 116, 58, 111, 118, 101, 114, 119, 111, 114, 108, 100, 0};
+
+	/**
+	 * A player far beyond the loaded chunks whom the server tracks, as Xaero's player tracker
+	 * reports them: once the client has answered the server's handshake, they show on the map
+	 * with their face and name, move when the server says they moved, hide under fair play, and
+	 * go when the server stops tracking them.
+	 */
+	private static void trackedPlayers(ClientGameTestContext context) {
+		java.util.Properties properties = new java.util.Properties();
+		properties.setProperty("server-port", "25601");
+		properties.setProperty("gamemode", "creative");
+		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP, (message, ctx) -> {
+			if (message.kind() == 1 && java.util.Arrays.equals(message.body(), new byte[] {0, 0, 0, 3})) {
+				answers.incrementAndGet();
+			}
+		});
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed("diorama-tracked"))
+			.createServer(properties)) {
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				server.runCommand("time set noon");
+				server.runCommand("weather clear");
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
+				server.runOnServer(s -> {
+					// Bob is on the tab list, as players elsewhere on the server are, but not in the
+					// client's world: he's far away.
+					net.minecraft.server.level.ServerPlayer alice = s.getPlayerList().getPlayers().get(0);
+					net.minecraft.server.level.ServerPlayer bob = new net.minecraft.server.level.ServerPlayer(s, s.overworld(), new GameProfile(BOB, "Bob"),
+						net.minecraft.server.level.ClientInformation.createDefault());
+					// The tab list entry reads the player's latency from their connection.
+					bob.connection = alice.connection;
+					alice.connection.send(net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bob)));
+					sendXaero(alice, new byte[] {1, 0, 0, 0, 3});
+				});
+				context.waitFor(mc -> answers.get() > 0, 200);
+				sendXaero(server, BOB_TRACKED);
+				context.setScreen(MapScreen::new);
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(600, Projection.v(120, 30.5), 1.0, TileKey.SURFACE));
+				settle(context, 20);
+				context.takeScreenshot("tracked-players-01-far");
+				assertBob(context, 640.5);
+
+				byte[] moved = BOB_TRACKED.clone();
+				java.nio.ByteBuffer.wrap(moved, indexAfter(moved, new byte[] {6, 0, 1, 'x'}), 8).putDouble(580.5);
+				sendXaero(server, moved);
+				context.waitTicks(5);
+				context.takeScreenshot("tracked-players-02-moved");
+				assertBob(context, 580.5);
+
+				server.runCommand("tellraw @a \"§f§a§i§r§x§a§e§r§o\"");
+				context.waitTicks(5);
+				context.takeScreenshot("tracked-players-03-fair-play");
+				assertBob(context, null);
+				server.runCommand("tellraw @a \"§r§e§s§e§t§x§a§e§r§o\"");
+				context.waitTicks(5);
+				assertBob(context, 580.5);
+
+				byte[] removed = BOB_TRACKED.clone();
+				removed[indexAfter(removed, new byte[] {1, 0, 1, 'r'})] = 1;
+				sendXaero(server, removed);
+				context.waitTicks(5);
+				assertBob(context, null);
+				context.setScreen(() -> null);
+			}
+		}
+	}
+
+	private static void sendXaero(TestDedicatedServerContext server, byte[] message) {
+		server.runOnServer(s -> sendXaero(s.getPlayerList().getPlayers().get(0), message));
+	}
+
+	private static void sendXaero(net.minecraft.server.level.ServerPlayer player, byte[] message) {
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
+			new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, message[0], java.util.Arrays.copyOfRange(message, 1, message.length)));
+	}
+
+	private static int indexAfter(byte[] bytes, byte[] pattern) {
+		for (int i = 0; i + pattern.length <= bytes.length; i++) {
+			if (java.util.Arrays.equals(bytes, i, i + pattern.length, pattern, 0, pattern.length)) {
+				return i + pattern.length;
+			}
+		}
+		throw new AssertionError("Not in the fixture: " + java.util.Arrays.toString(pattern));
+	}
+
+	/** Bob is on the fullscreen map where block x {@code x} draws, or not on it at all if null. */
+	private static void assertBob(ClientGameTestContext context, @Nullable Double x) {
+		context.runOnClient(mc -> {
+			MapScreen screen = (MapScreen) mc.gui.screen();
+			Radar.Blip bob = screen.blips().stream().filter(b -> b.entity().getUUID().equals(BOB)).findFirst().orElse(null);
+			if (x == null) {
+				if (bob != null) {
+					throw new AssertionError("Bob is on the map at " + bob.x() + ", " + bob.y());
+				}
+				return;
+			}
+			if (bob == null || bob.kind() != Radar.Kind.PLAYER || !bob.entity().getName().getString().equals("Bob")) {
+				throw new AssertionError("Bob isn't on the map as a player: " + bob);
+			}
+			float want = screen.view().screenX(x);
+			if (Math.abs(bob.x() - want) > 1) {
+				throw new AssertionError("Bob is drawn at x " + bob.x() + " on screen, not " + want);
+			}
+		});
 	}
 
 	/**
@@ -1654,7 +1770,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id");
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
 		}
 		return Set.of(env.split(","));
 	}

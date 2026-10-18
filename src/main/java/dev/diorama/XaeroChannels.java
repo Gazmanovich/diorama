@@ -1,9 +1,11 @@
 package dev.diorama;
 
+import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -14,8 +16,15 @@ import org.jspecify.annotations.Nullable;
  * The plugin channels Xaero's Minimap and World Map share with servers. Servers built around
  * Xaero's mods send on them: Xaero's mods installed on the server, and plugins such as
  * MapModCompanion. Both channels carry the same messages, each one byte for its kind and then
- * its body. Diorama reads the level ID (kind 0, a big-endian int): the server's name for the
- * world the player is in, which tells apart worlds behind one address that share a seed.
+ * its body. Diorama reads:
+ * <ul>
+ *   <li>the level ID (kind 0, a big-endian int): the server's name for the world the player is
+ *       in, which tells apart worlds behind one address that share a seed;</li>
+ *   <li>the handshake (kind 1, the server's protocol version as an int), which Diorama answers
+ *       like Xaero's mods do, since servers only track players for clients that answered;</li>
+ *   <li>tracked players (kind 2, one player in network NBT, see {@link TrackedPlayers}) and the
+ *       tracker reset (kind 3, empty), sent before the server sends everyone again.</li>
+ * </ul>
  *
  * <p>Fabric allows one handler per channel, and registering a channel twice throws at startup.
  * So a channel is only Diorama's when the Xaero mod that owns it isn't installed. With both of
@@ -24,6 +33,11 @@ import org.jspecify.annotations.Nullable;
 public final class XaeroChannels {
 	/** Message kinds, the first byte of every message. */
 	static final int LEVEL_ID = 0;
+	static final int HANDSHAKE = 1;
+	static final int TRACKED_PLAYER = 2;
+	static final int TRACKER_RESET = 3;
+	/** The protocol version Xaero's mods answer with, which the player tracker needs. */
+	private static final int PROTOCOL = 3;
 
 	/** The channels, public for tests that send on them. */
 	public static final CustomPacketPayload.Type<Message> MINIMAP = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("xaerominimap", "main"));
@@ -61,6 +75,7 @@ public final class XaeroChannels {
 		}
 		listening = true;
 		PayloadTypeRegistry.clientboundPlay().register(type, codec(type));
+		PayloadTypeRegistry.serverboundPlay().register(type, codec(type));
 		// Registering a handler also tells the server Diorama listens here. Plugins need that:
 		// Paper drops messages on channels the client hasn't registered.
 		ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
@@ -80,9 +95,23 @@ public final class XaeroChannels {
 	}
 
 	private static void receive(Message message) {
-		Integer id = message.levelId();
-		if (id != null) {
-			WorldKey.serverLevelId(id);
+		switch (message.kind()) {
+			case LEVEL_ID -> {
+				Integer id = message.levelId();
+				if (id != null) {
+					WorldKey.serverLevelId(id);
+				}
+			}
+			case HANDSHAKE -> ClientPlayNetworking.send(new Message(message.type(), HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array()));
+			case TRACKED_PLAYER -> {
+				CompoundTag tag = new FriendlyByteBuf(Unpooled.wrappedBuffer(message.body())).readNbt();
+				if (tag != null) {
+					TrackedPlayers.update(tag);
+				}
+			}
+			case TRACKER_RESET -> TrackedPlayers.clear();
+			default -> {
+			}
 		}
 	}
 
