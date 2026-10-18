@@ -80,4 +80,10 @@ stonecutter parameters {
 			replace(pattern, older, "(?!)", "never")
 		}
 	}
+
+	// Up to 1.21.8 the game asks only for OpenGL 3.2, so the fog shaders must be GLSL 1.50. This
+	// can't be a //? block: #version has to be the first thing in the file.
+	replacements.regex(current.parsed < "1.21.9") {
+		replace("^#version 330$", "#version 150", "(?!)", "never")
+	}
 }
