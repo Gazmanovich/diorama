@@ -77,7 +77,7 @@ public final class WaypointShare {
 		return text.replace("^ast^", "*").replace("^col^", ":").replace("-", "_").replace("^min^", "-");
 	}
 
-	private static String chatSafe(String text) {
+	static String chatSafe(String text) {
 		StringBuilder out = new StringBuilder();
 		text.codePoints().filter(c -> c >= ' ' && c != '§' && c != 127).forEach(out::appendCodePoint);
 		return out.toString();
@@ -196,13 +196,22 @@ public final class WaypointShare {
 
 	/** The palette colour nearest a chat colour. */
 	static int paletteColor(int index) {
-		int chat = TextColor.fromLegacyFormat(ChatFormatting.values()[Math.max(0, Math.min(15, index))]).getValue();
+		return nearestPaletteColor(chatColor(index));
+	}
+
+	/** The RGB of one of the 16 chat colours. */
+	static int chatColor(int index) {
+		return TextColor.fromLegacyFormat(ChatFormatting.values()[Math.max(0, Math.min(15, index))]).getValue();
+	}
+
+	/** The palette colour nearest an RGB colour. */
+	static int nearestPaletteColor(int rgb) {
 		int best = Waypoint.PALETTE[0];
 		long bestDistance = Long.MAX_VALUE;
 		for (int color : Waypoint.PALETTE) {
-			long dr = ((color >> 16) & 0xFF) - ((chat >> 16) & 0xFF);
-			long dg = ((color >> 8) & 0xFF) - ((chat >> 8) & 0xFF);
-			long db = (color & 0xFF) - (chat & 0xFF);
+			long dr = ((color >> 16) & 0xFF) - ((rgb >> 16) & 0xFF);
+			long dg = ((color >> 8) & 0xFF) - ((rgb >> 8) & 0xFF);
+			long db = (color & 0xFF) - (rgb & 0xFF);
 			long distance = dr * dr + dg * dg + db * db;
 			if (distance < bestDistance) {
 				bestDistance = distance;
