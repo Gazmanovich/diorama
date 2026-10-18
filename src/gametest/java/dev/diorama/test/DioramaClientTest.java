@@ -1292,7 +1292,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * list offers them, and importing brings their names (a colon, a death point Xaero's names
 	 * with a translation key), colours, hidden state, death marker and the Nether one across.
 	 * A second look offers nothing, even after the player moved, so the one Xaero's stored
-	 * without a height isn't taken for a new one.
+	 * without a height isn't taken for a new one. Then which of a server's worlds is chosen.
 	 */
 	private static void xaeroImport(ClientGameTestContext context, TestSingleplayerContext world) {
 		java.nio.file.Path root = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("xaero").resolve("minimap").resolve(XaeroImport.singleplayerFolders(
@@ -1308,7 +1308,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!"Import from Xaero's Minimap (8)".equals(offer)) {
 			throw new AssertionError("The waypoint list offers " + offer);
 		}
-		context.clickScreenButton("diorama.xaero.import");
+		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap (8)").onPress(null));
 		context.waitTicks(5);
 		context.takeScreenshot("xaero-02-imported");
 
@@ -1353,6 +1353,44 @@ public class DioramaClientTest implements FabricClientGameTest {
 			imported.forEach(store::remove);
 			try {
 				org.apache.commons.io.FileUtils.deleteDirectory(root.toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+
+		// A server's folder as Xaero's wrote it on a vanilla server, plus a copy under another
+		// spawn's name, as a map reset leaves behind. With multiworld detection off, Xaero's
+		// config pins the first; with it on, the current spawn's wins; with Xaero's World Map's
+		// world in the mix too, which one is current can't be told, so the player picks.
+		context.runOnClient(mc -> {
+			java.nio.file.Path base = mc.gameDirectory.toPath().resolve("xaero-import-test");
+			java.nio.file.Path server = base.resolve("Multiplayer_localhost");
+			java.nio.file.Path config = server.resolve("config.txt");
+			xaeroFixture("server/config.txt", config);
+			xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw-1,1,0_1.txt"));
+			xaeroFixture("server/nether.txt", server.resolve("dim%-1").resolve("mw-1,1,0_1.txt"));
+			xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw7,1,3_2.txt"));
+			List<String> folders = XaeroImport.serverFolders("localhost:25580");
+			try {
+				XaeroImport.Found pinned = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				if (pinned == null || pinned.chosen() == null || !pinned.chosen().id().equals("mw-1,1,0")) {
+					throw new AssertionError("With detection off, the server import didn't pick the world Xaero's config pins");
+				}
+				Set<String> names = Set.copyOf(pinned.chosen().entries().stream().map(e -> e.waypoint().name).toList());
+				if (!names.equals(Set.of("Latest Death", "Mine: Deep", "Spawn Shop", "Fortress"))) {
+					throw new AssertionError("The pinned server world brought " + names);
+				}
+				java.nio.file.Files.writeString(config, java.nio.file.Files.readString(config).replace("usingMultiworldDetection:false", "usingMultiworldDetection:true"));
+				XaeroImport.Found bySpawn = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				if (bySpawn.chosen() == null || !bySpawn.chosen().id().equals("mw7,1,3")) {
+					throw new AssertionError("With detection on, the server import didn't pick the current spawn's world");
+				}
+				xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw$default_Default.txt"));
+				XaeroImport.Found unsure = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				if (unsure.chosen() != null || unsure.worlds().size() != 3) {
+					throw new AssertionError("With World Map's world in the mix, the server import chose a world or lost one");
+				}
+				org.apache.commons.io.FileUtils.deleteDirectory(base.toFile());
 			} catch (java.io.IOException e) {
 				throw new AssertionError(e);
 			}
