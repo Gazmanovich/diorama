@@ -7,51 +7,52 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.entrypoint.EntrypointContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.screens.TitleScreen;
 
 /**
- * Runs the {@code fabric-client-gametest} entrypoints on Minecraft versions whose Fabric API has no
- * client game test module. Only active with {@code -Ddiorama.gameshim=true}: once the game has
- * loaded it runs every test on a thread of its own, writes {@code PASS} or {@code FAIL} and the
- * stack trace to {@code gameshim-result.txt} in the game directory, and closes the game with exit
- * code 0 if every test passed, 1 if one failed, and 2 if the game closed before they finished.
+ * Runs the {@code fabric-client-gametest} tests on Minecraft versions whose Fabric API has no client
+ * game test module, and on NeoForge. Only active with {@code -Ddiorama.gameshim=true}: once the
+ * game has loaded it runs every test on a thread of its own, writes {@code PASS} or {@code FAIL}
+ * and the stack trace to {@code gameshim-result.txt} in the game directory, and closes the game
+ * with exit code 0 if every test passed, 1 if one failed, and 2 if the game closed before they
+ * finished. The loader's entrypoint ({@code fabric.FabricShim}, {@code neoforge.NeoForgeShim})
+ * finds the tests and calls {@link #onTickEnd} every tick.
  */
-public final class GameShim implements ClientModInitializer {
+public final class GameShim {
 	public static final Logger LOGGER = LoggerFactory.getLogger("diorama-gameshim");
-	private static final String ENTRYPOINT = "fabric-client-gametest";
+	/** Where tests are listed: Fabric's entrypoint name, and on NeoForge a mod property. */
+	public static final String ENTRYPOINT = "fabric-client-gametest";
 
 	private static volatile boolean finished;
 	private static volatile boolean failed;
 	private static boolean started;
 
+	/** A test to run, named by the mod it comes from and its class. */
+	public record Test(String name, FabricClientGameTest test) {
+	}
+
+	private GameShim() {
+	}
+
 	public static boolean enabled() {
 		return Boolean.getBoolean("diorama.gameshim");
 	}
 
-	@Override
-	public void onInitializeClient() {
-		if (!enabled()) {
-			return;
+	/** Called at the end of every client tick; starts the tests once the game has loaded. */
+	public static void onTickEnd(Minecraft minecraft, Supplier<List<Test>> tests) {
+		ShimThreading.onTickEnd();
+		if (!started && minecraft.getOverlay() == null) {
+			started = true;
+			start(minecraft, tests);
 		}
-		LOGGER.info("Diorama game shim: running the {} entrypoints once the game has loaded", ENTRYPOINT);
-		ClientTickEvents.END_CLIENT_TICK.register(minecraft -> {
-			ShimThreading.onTickEnd();
-			if (!started && minecraft.getOverlay() == null) {
-				started = true;
-				start(minecraft);
-			}
-		});
 	}
 
 	/** Called as the game's options are created, after options.txt is read. */
@@ -67,30 +68,31 @@ public final class GameShim implements ClientModInitializer {
 		return !finished ? 2 : failed ? 1 : 0;
 	}
 
-	private static void start(Minecraft minecraft) {
+	private static void start(Minecraft minecraft, Supplier<List<Test>> tests) {
 		// The window may not have focus; the game should behave as if it had.
 		minecraft.setWindowActive(true);
-		List<EntrypointContainer<FabricClientGameTest>> tests = FabricLoader.getInstance().getEntrypointContainers(ENTRYPOINT, FabricClientGameTest.class);
-		Path result = FabricLoader.getInstance().getGameDir().resolve("gameshim-result.txt");
+		Path result = minecraft.gameDirectory.toPath().resolve("gameshim-result.txt");
 		Thread thread = new Thread(() -> run(tests, result), "Client game test (Diorama shim)");
 		thread.setDaemon(true);
 		ShimThreading.testThread = thread;
 		thread.start();
 	}
 
-	private static void run(List<EntrypointContainer<FabricClientGameTest>> tests, Path result) {
+	private static void run(Supplier<List<Test>> findTests, Path result) {
 		String outcome;
 		try {
 			Files.deleteIfExists(result);
+			// Found here, so a test that can't be created fails the run like any other.
+			List<Test> tests = findTests.get();
 			if (tests.isEmpty()) {
 				throw new AssertionError("No " + ENTRYPOINT + " entrypoints to run");
 			}
-			for (EntrypointContainer<FabricClientGameTest> test : tests) {
-				String name = test.getProvider().getMetadata().getId() + " " + test.getEntrypoint().getClass().getName();
+			for (Test test : tests) {
+				String name = test.name();
 				LOGGER.info("Running client game test {}", name);
 				ShimContext context = new ShimContext();
 				context.prepare();
-				test.getEntrypoint().runTest(context);
+				test.test().runTest(context);
 				finalCheck(context, name);
 				LOGGER.info("Client game test {} passed", name);
 			}

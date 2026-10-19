@@ -1,0 +1,12 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT AND Apache-2.0"
+
+[[mods]]
+modId = "diorama_gameshim"
+version = "1.0.0"
+displayName = "Diorama game test shim"
+description = "Runs Diorama's client game tests on NeoForge, which has no client game test API. Test builds only; active with -Ddiorama.gameshim=true."
+
+[[mixins]]
+config = "diorama-gameshim.mixins.json"

@@ -1,0 +1,76 @@
+// NeoForge. It runs the game with Mojang's names in development and in a real install alike, so
+// nothing is remapped.
+plugins {
+	id("net.neoforged.moddev")
+}
+
+// The loader goes in the version, so the jar's name (diorama-0.1.1+neoforge-1.21.1.jar) tells
+// a player it is the NeoForge one, and for which Minecraft versions.
+version = "${property("mod_version")}+neoforge-${findProperty("minecraft_label") ?: sc.current.version}"
+group = property("mod_group") as String
+base.archivesName = "diorama"
+
+// The client game tests run on src/gameshim, the test-only stand-in for Fabric's client game test
+// API that the Fabric jars before 1.21.4 use too. Neither goes in the release jar.
+val main = sourceSets.main.get()
+val gameshim = sourceSets.create("gameshim")
+val gametest = sourceSets.create("gametest") {
+	compileClasspath += main.output + gameshim.output
+	runtimeClasspath += main.output + gameshim.output
+}
+
+neoForge {
+	version = property("neoforge_version") as String
+	addModdingDependenciesTo(gameshim)
+	addModdingDependenciesTo(gametest)
+
+	mods {
+		register("diorama") { sourceSet(main) }
+		register("diorama_gameshim") { sourceSet(gameshim) }
+		register("diorama_test") { sourceSet(gametest) }
+	}
+
+	runs {
+		register("client") {
+			client()
+			loadedMods = listOf(mods["diorama"])
+		}
+		// ./gradlew :1.21.1-neoforge:runClientGameTest, like the Fabric versions' task.
+		register("clientGameTest") {
+			client()
+			sourceSet = gametest
+			loadedMods = listOf(mods["diorama"], mods["diorama_gameshim"], mods["diorama_test"])
+			gameDirectory = project.file("build/run/clientGameTest")
+			systemProperty("diorama.gameshim", "true")
+		}
+	}
+}
+
+dependencies {
+	// Minecraft only ships JSpecify, which the source marks nullable types with, from 1.21.11. The
+	// JVM skips annotations whose class is missing, so the jar runs without it.
+	compileOnly("org.jspecify:jspecify:1.0.0")
+	"gameshimCompileOnly"("org.jspecify:jspecify:1.0.0")
+	"gametestCompileOnly"("org.jspecify:jspecify:1.0.0")
+}
+
+apply(from = rootProject.file("gradle/common.gradle.kts"))
+
+// Fabric's entrypoints and metadata go in the Fabric jars only.
+sourceSets.configureEach {
+	java.exclude("dev/diorama/**/fabric/**")
+}
+tasks.withType<ProcessResources>().configureEach {
+	exclude("fabric.mod.json")
+}
+
+// The fog shader's program file, which only the versions that load shaders from json read: from
+// the mod's namespace on 1.21.2-1.21.4, from the minecraft namespace (by name) before.
+tasks.named<ProcessResources>("processResources") {
+	if (sc.current.parsed >= "1.21.2") {
+		exclude("assets/minecraft/shaders/core/diorama_fog.json")
+	}
+	if (sc.current.parsed < "1.21.2" || sc.current.parsed >= "1.21.5") {
+		exclude("assets/diorama/shaders/core/fog.json")
+	}
+}

@@ -5,27 +5,20 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.diorama.render.DioramaPipelines;
 //?}
 import dev.diorama.waypoint.Waypoint;
-import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointEditScreen;
-import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.Waypoints;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
-//? if >=1.21.6 {
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-//?} else {
-/*import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-*///?}
+import java.util.List;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 
-public class DioramaClient implements ClientModInitializer {
+/**
+ * What Diorama does on the client, whichever mod loader runs it: its key bindings, and what it does
+ * each tick. The loader's entrypoint registers these and hooks up the rest of the mod to the
+ * loader's events: {@code dev.diorama.fabric.DioramaFabric} on Fabric, {@code
+ * dev.diorama.neoforge.DioramaNeoForge} on NeoForge.
+ */
+public final class DioramaClient {
 	//? if >=1.21.9 {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Diorama.id("map"));
 	//?} else {
@@ -39,6 +32,11 @@ public class DioramaClient implements ClientModInitializer {
 	public static final KeyMapping ZOOM_OUT = new KeyMapping("key.diorama.zoom_out", InputConstants.KEY_MINUS, CATEGORY);
 	public static final KeyMapping SETTINGS = new KeyMapping("key.diorama.settings", InputConstants.UNKNOWN.getValue(), CATEGORY);
 	public static final KeyMapping TOGGLE_MINIMAP = new KeyMapping("key.diorama.toggle_minimap", InputConstants.UNKNOWN.getValue(), CATEGORY);
+	/** Every key binding, for the loader to register. */
+	public static final List<KeyMapping> KEY_MAPPINGS = List.of(OPEN_MAP, NEW_WAYPOINT, WAYPOINT_LIST, ZOOM_IN, ZOOM_OUT, SETTINGS, TOGGLE_MINIMAP);
+
+	private DioramaClient() {
+	}
 
 	private static void changeZoom(int step) {
 		Settings s = Settings.get();
@@ -49,89 +47,48 @@ public class DioramaClient implements ClientModInitializer {
 		}
 	}
 
-	@Override
-	public void onInitializeClient() {
+	/** Called once, from the loader's entrypoint. */
+	public static void init() {
 		//? if >=1.21.6 {
 		DioramaPipelines.init();
 		//?}
-		KeyMappingHelper.registerKeyMapping(OPEN_MAP);
-		KeyMappingHelper.registerKeyMapping(NEW_WAYPOINT);
-		KeyMappingHelper.registerKeyMapping(WAYPOINT_LIST);
-		KeyMappingHelper.registerKeyMapping(ZOOM_IN);
-		KeyMappingHelper.registerKeyMapping(ZOOM_OUT);
-		KeyMappingHelper.registerKeyMapping(SETTINGS);
-		KeyMappingHelper.registerKeyMapping(TOGGLE_MINIMAP);
 		Settings.get();
-		//? if >=1.21.6 {
-		HudElementRegistry.addLast(Diorama.id("waypoints"), new WaypointHud());
-		HudElementRegistry.addLast(Diorama.id("minimap"), new MinimapHud());
-		//?} else {
-		/*// Drawn after the whole vanilla HUD, like addLast. Each vanilla HUD layer sits 200 deeper
-		// than the one before and the GUI depth-tests, so lift the vanilla fills and text these
-		// draw above all of them.
-		WaypointHud waypointHud = new WaypointHud();
-		MinimapHud minimapHud = new MinimapHud();
-		HudRenderCallback.EVENT.register((graphics, deltaTracker) -> {
-			var pose = graphics.pose();
-			pose.pushPose();
-			pose.translate(0, 0, 5000);
-			waypointHud.render(graphics, deltaTracker);
-			minimapHud.render(graphics, deltaTracker);
-			pose.popPose();
-		});
-		*///?}
-		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
-		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
-		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
-		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
-			ServerRules.onDisconnect();
-			WorldKey.onJoinOrLeave();
-			XaeroChannels.onJoinOrLeave();
-			TrackedPlayers.clear();
-		});
-		// A network moving the player to another of its servers joins again without leaving.
-		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
-			WorldKey.onJoinOrLeave();
-			XaeroChannels.onJoinOrLeave();
-			TrackedPlayers.clear();
-		});
-		XaeroChannels.register();
-		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
-		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MapSession.close());
-		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
-			MapSession.tick(mc);
-			while (OPEN_MAP.consumeClick()) {
-				if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
-					mc.gui.setScreen(new MapScreen());
-				}
+	}
+
+	/** Called at the end of every client tick. */
+	public static void tick(Minecraft mc) {
+		MapSession.tick(mc);
+		while (OPEN_MAP.consumeClick()) {
+			if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
+				mc.gui.setScreen(new MapScreen());
 			}
-			while (NEW_WAYPOINT.consumeClick()) {
-				Waypoint waypoint = Waypoints.atPlayer();
-				if (mc.gui.screen() == null && waypoint != null) {
-					mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true));
-				}
+		}
+		while (NEW_WAYPOINT.consumeClick()) {
+			Waypoint waypoint = Waypoints.atPlayer();
+			if (mc.gui.screen() == null && waypoint != null) {
+				mc.gui.setScreen(new WaypointEditScreen(null, waypoint, true));
 			}
-			while (ZOOM_IN.consumeClick()) {
-				changeZoom(1);
+		}
+		while (ZOOM_IN.consumeClick()) {
+			changeZoom(1);
+		}
+		while (ZOOM_OUT.consumeClick()) {
+			changeZoom(-1);
+		}
+		while (SETTINGS.consumeClick()) {
+			if (mc.gui.screen() == null) {
+				mc.gui.setScreen(new SettingsScreen(null));
 			}
-			while (ZOOM_OUT.consumeClick()) {
-				changeZoom(-1);
+		}
+		while (TOGGLE_MINIMAP.consumeClick()) {
+			Settings s = Settings.get();
+			s.minimap = !s.minimap;
+			s.save();
+		}
+		while (WAYPOINT_LIST.consumeClick()) {
+			if (mc.gui.screen() == null && mc.level != null) {
+				mc.gui.setScreen(new WaypointListScreen(null));
 			}
-			while (SETTINGS.consumeClick()) {
-				if (mc.gui.screen() == null) {
-					mc.gui.setScreen(new SettingsScreen(null));
-				}
-			}
-			while (TOGGLE_MINIMAP.consumeClick()) {
-				Settings s = Settings.get();
-				s.minimap = !s.minimap;
-				s.save();
-			}
-			while (WAYPOINT_LIST.consumeClick()) {
-				if (mc.gui.screen() == null && mc.level != null) {
-					mc.gui.setScreen(new WaypointListScreen(null));
-				}
-			}
-		});
+		}
 	}
 }

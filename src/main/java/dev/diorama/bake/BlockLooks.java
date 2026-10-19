@@ -18,15 +18,16 @@ import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 //?} else if >=1.21.5 {
-/*import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.renderer.block.BlockModelShaper;
+/*import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.renderer.block.model.BlockModelPart;
 import net.minecraft.client.renderer.block.model.BlockStateModel;
 *///?} else {
-/*import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.renderer.block.BlockModelShaper;
+/*import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.resources.model.BakedModel;
 import org.jspecify.annotations.Nullable;
+*///?}
+//? if <26.1 && fabric {
+/*import net.fabricmc.loader.api.FabricLoader;
 *///?}
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -399,12 +400,12 @@ public final class BlockLooks {
 	static {
 		Field field;
 		try {
-			//? if >=26.1 {
+			//? if >=26.1 || neoforge {
 			field = SpriteContents.class.getDeclaredField("originalImage");
 			//?} else {
-			/*// The game runs with intermediary names outside the dev environment, so look the field
-			// up by its intermediary name (SpriteContents.originalImage, a NativeImage) mapped to
-			// whatever names this run uses.
+			/*// Fabric runs the game with intermediary names outside the dev environment (NeoForge
+			// doesn't), so look the field up by its intermediary name (SpriteContents.originalImage, a
+			// NativeImage) mapped to whatever names this run uses.
 			field = SpriteContents.class.getDeclaredField(FabricLoader.getInstance().getMappingResolver()
 				.mapFieldName("intermediary", "net.minecraft.class_7764", "field_40539", "Lnet/minecraft/class_1011;"));
 			*///?}

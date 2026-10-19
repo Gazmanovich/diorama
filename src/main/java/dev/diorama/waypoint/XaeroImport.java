@@ -13,7 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+//? if fabric {
 import net.fabricmc.loader.api.FabricLoader;
+//?} else {
+/*import net.neoforged.fml.loading.FMLPaths;
+*///?}
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
@@ -100,7 +104,12 @@ public final class XaeroImport {
 			if (server != null) {
 				roots = singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
 			} else if (data != null && !data.isRealm()) {
-				roots = serverFolders(data.ip, byAddress(FabricLoader.getInstance().getConfigDir().resolve("xaero").resolve("minimap").resolve("client.cfg")));
+				//? if fabric {
+				Path config = FabricLoader.getInstance().getConfigDir();
+				//?} else {
+				/*Path config = FMLPaths.CONFIGDIR.get();
+				*///?}
+				roots = serverFolders(data.ip, byAddress(config.resolve("xaero").resolve("minimap").resolve("client.cfg")));
 			} else {
 				// Xaero's names a Realm by its owner and id, which only the Realms screen knows.
 				return null;

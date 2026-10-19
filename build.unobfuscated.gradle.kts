@@ -33,6 +33,14 @@ dependencies {
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))
 
+// NeoForge's entrypoints and metadata go in the NeoForge jar only (build.neoforge.gradle.kts).
+sourceSets.configureEach {
+	java.exclude("dev/diorama/**/neoforge/**")
+}
+tasks.withType<ProcessResources>().configureEach {
+	exclude("META-INF/neoforge.mods.toml")
+}
+
 // Fog shader program files that only versions before 1.21.5 read.
 tasks.named<ProcessResources>("processResources") {
 	exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/diorama/shaders/core/fog.json")

@@ -17,7 +17,7 @@
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"dev.diorama.DioramaClient"
+			"dev.diorama.fabric.DioramaFabric"
 		]
 	},
 	"depends": {
