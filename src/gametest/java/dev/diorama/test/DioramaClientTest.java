@@ -127,6 +127,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("overlays")) {
 				overlays(context, world);
 			}
+			if (tests.contains("screens")) {
+				screens(context, world);
+			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
 				brokenFog(context);
@@ -1985,6 +1988,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 	*///?}
 
+	/**
+	 * The minimap with a screen open. An inventory hides it, so item lists from other mods (JEI) beside
+	 * the inventory don't run into it. The pause menu keeps it, behind the menu.
+	 */
+	private static void screens(ClientGameTestContext context, TestSingleplayerContext world) {
+		// Survival, so the inventory is the plain one other mods (JEI) draw beside.
+		world.getServer().runCommand("gamemode survival @a");
+		context.setScreen(() -> null);
+		settle(context, 40);
+		context.takeScreenshot("screens-01-none");
+		context.setScreen(() -> new net.minecraft.client.gui.screens.inventory.InventoryScreen(Minecraft.getInstance().player));
+		settle(context, 20);
+		context.takeScreenshot("screens-02-inventory");
+		context.setScreen(() -> new net.minecraft.client.gui.screens.PauseScreen(true));
+		settle(context, 20);
+		context.takeScreenshot("screens-03-pause");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("gamemode creative @a");
+	}
+
 	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		// No leaf decay or growth below the scene: a chunk changing for its own reasons would
@@ -2295,10 +2318,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 {
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
 			//?} else {
 			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
 			*///?}
 		}
 		return Set.of(env.split(","));
