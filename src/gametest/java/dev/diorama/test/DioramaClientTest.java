@@ -1495,6 +1495,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("After importing, the list still offers " + again);
 		}
 		context.setScreen(() -> null);
+		// The death point's name came from the game's language. Under another language, or with
+		// Xaero's (which has its own translation) removed, it reads differently, and it's still
+		// the same death point.
+		context.runOnClient(mc -> byName.get("Latest Death").name = "Derni\u00e8re mort");
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		String otherLanguage = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (otherLanguage != null) {
+			throw new AssertionError("With the death point named in another language, the list offers " + otherLanguage);
+		}
+		context.setScreen(() -> null);
 
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();

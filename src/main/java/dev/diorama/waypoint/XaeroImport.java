@@ -387,7 +387,9 @@ public final class XaeroImport {
 	/**
 	 * The waypoints of {@code world} that aren't in the store yet. A waypoint is already there if
 	 * one has its name, dimension and position; for one Xaero's stored without a height, any
-	 * height counts, since it took the player's height when it was imported.
+	 * height counts, since it took the player's height when it was imported. A death point is
+	 * already there if a death marker has its dimension and position, whatever its name: the name
+	 * comes from the game's language at import time, so it changes with the language.
 	 */
 	public static List<Waypoint> missing(World world, WaypointStore store) {
 		Set<String> exact = new HashSet<>();
@@ -410,7 +412,8 @@ public final class XaeroImport {
 	}
 
 	private static String key(Waypoint w, boolean height) {
-		return w.dimension + "|" + w.x + "|" + (height ? w.y : "") + "|" + w.z + "|" + w.name;
+		String what = w.kind == Waypoint.Kind.DEATH ? "death" : "name|" + w.name;
+		return w.dimension + "|" + w.x + "|" + (height ? w.y : "") + "|" + w.z + "|" + what;
 	}
 
 	/** Adds the waypoints of {@code world} that aren't in the store yet and returns them. */
