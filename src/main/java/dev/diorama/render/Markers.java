@@ -1,9 +1,7 @@
 package dev.diorama.render;
 
+import dev.diorama.render.gpu.MapCanvas;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.render.TextureSetup;
-import net.minecraft.client.renderer.RenderPipelines;
-import org.joml.Matrix3x2f;
 
 /** Shapes drawn on top of the map. */
 public final class Markers {
@@ -40,14 +38,6 @@ public final class Markers {
 		float notchX = (float) (x - dx * size * 0.35);
 		float notchY = (float) (y - dy * size * 0.35);
 		// One quad: tip, right wing, notch, left wing (the GUI culls the other winding).
-		graphics.guiRenderState.addGuiElement(QuadElement.of(
-			RenderPipelines.GUI,
-			TextureSetup.noTexture(),
-			new Matrix3x2f(graphics.pose()),
-			new float[] {tipX, tipY, rightX, rightY, notchX, notchY, leftX, leftY},
-			null,
-			color,
-			graphics.scissorStack.peek()
-		));
+		MapCanvas.of(graphics).solid(new float[] {tipX, tipY, rightX, rightY, notchX, notchY, leftX, leftY}, color);
 	}
 }

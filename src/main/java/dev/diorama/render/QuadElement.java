@@ -1,24 +1,18 @@
+//? if >=1.21.6 {
 package dev.diorama.render;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
-//? if >=26.1 {
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
-//?} else {
-/*import com.mojang.blaze3d.pipeline.RenderPipeline;
-*///?}
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.renderer.state.gui.GuiElementRenderState;
 import org.joml.Matrix3x2f;
 import org.jspecify.annotations.Nullable;
 
-/**
- * A GUI quad with float corners, optional UVs and one colour. Vanilla GUI draws take whole-pixel
- * positions; the map pans smoothly, so it needs this.
- *
- * @param corners x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left
- * @param uvs u0 v0 u1 v1 u2 v2 u3 v3, or null for untextured pipelines
- */
+// A GUI quad with float corners, optional UVs and one colour, as GUI render state (1.21.6 on).
+// Vanilla GUI draws take whole-pixel positions; the map pans smoothly, so it needs this.
+// corners: x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left.
+// uvs: u0 v0 u1 v1 u2 v2 u3 v3, or null for untextured pipelines.
 public record QuadElement(
 	RenderPipeline pipeline,
 	TextureSetup textureSetup,
@@ -64,14 +58,28 @@ public record QuadElement(
 		);
 	}
 
+	//? if >=1.21.9 {
 	@Override
 	public void buildVertices(VertexConsumer consumer) {
 		for (int i = 0; i < 4; i++) {
-			VertexConsumer vertex = consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1]);
-			if (this.uvs != null) {
-				vertex.setUv(this.uvs[i * 2], this.uvs[i * 2 + 1]);
-			}
-			vertex.setColor(this.color);
+			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1]), i);
 		}
 	}
+	//?} else {
+	/*// GUI elements were drawn at a depth the renderer handed in.
+	@Override
+	public void buildVertices(VertexConsumer consumer, float z) {
+		for (int i = 0; i < 4; i++) {
+			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1], z), i);
+		}
+	}
+	*///?}
+
+	private void vertex(VertexConsumer vertex, int i) {
+		if (this.uvs != null) {
+			vertex.setUv(this.uvs[i * 2], this.uvs[i * 2 + 1]);
+		}
+		vertex.setColor(this.color);
+	}
 }
+//?}

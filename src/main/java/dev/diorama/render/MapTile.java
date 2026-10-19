@@ -1,36 +1,19 @@
 package dev.diorama.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-//? if >=26.1 {
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.device.GpuDevice;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
-//?} else {
-/*import com.mojang.blaze3d.platform.NativeImage;
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.textures.TextureFormat;
-*///?}
 import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileImage;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import dev.diorama.render.gpu.MapTexture;
 import org.jspecify.annotations.Nullable;
-import org.lwjgl.system.MemoryUtil;
 
 /** A baked tile on the GPU, plus the coverage the fog reads. Render thread only. */
 public final class MapTile {
-	private @Nullable GpuTexture texture;
-	private @Nullable GpuTextureView view;
+	private @Nullable MapTexture texture;
 	private byte @Nullable [] coverage;
 	/** {@link Overlays} bits per pixel from the bakes that recorded them, or null. */
 	private byte @Nullable [] info;
-	private @Nullable GpuTexture overlay;
-	private @Nullable GpuTextureView overlayView;
+	private @Nullable MapTexture overlay;
 	/** The overlay bits the overlay texture shows, or -1 when it has to be drawn again. */
 	private int overlayShown = -1;
 	private boolean empty = true;
@@ -49,7 +32,7 @@ public final class MapTile {
 			this.ensureTexture(image);
 			int size = Projection.TILE_PIXELS;
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
-				this.write(this.texture, image.mips()[level], level, 0, 0, size >> level);
+				this.texture.write(level, 0, 0, size >> level, image.mips()[level]);
 			}
 			return;
 		}
@@ -75,13 +58,13 @@ public final class MapTile {
 			// A new texture over a previously empty tile starts blank everywhere outside the patches.
 			int size = Projection.TILE_PIXELS;
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
-				this.write(this.texture, new int[(size >> level) * (size >> level)], level, 0, 0, size >> level);
+				this.texture.write(level, 0, 0, size >> level, new int[(size >> level) * (size >> level)]);
 			}
 		}
 		for (TileImage.Patch patch : image.patches()) {
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
 				int edge = TileImage.BLOCK >> level;
-				this.write(this.texture, patch.mips()[level], level, patch.blockX() * edge, patch.blockY() * edge, edge);
+				this.texture.write(level, patch.blockX() * edge, patch.blockY() * edge, edge, patch.mips()[level]);
 			}
 			if (patch.info() != null) {
 				this.patchInfo(patch);
@@ -109,30 +92,19 @@ public final class MapTile {
 	 * The overlay texture showing these {@link Overlays} bits, drawn over the tile, or null when
 	 * this tile wasn't baked with overlay bits.
 	 */
-	public @Nullable GpuTextureView overlay(int shown) {
+	public @Nullable MapTexture overlay(int shown) {
 		if (this.info == null || shown == 0 || this.texture == null) {
 			return null;
 		}
 		if (this.overlay == null) {
-			GpuDevice device = RenderSystem.getDevice();
-			int size = Projection.TILE_PIXELS;
-			//? if >=26.1 {
-			this.overlay = device.createTexture(
-				"diorama overlay", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
-			);
-			//?} else {
-			/*this.overlay = device.createTexture(
-				"diorama overlay", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, TextureFormat.RGBA8, size, size, 1, 1
-			);
-			*///?}
-			this.overlayView = device.createTextureView(this.overlay);
+			this.overlay = MapTexture.create("diorama overlay", Projection.TILE_PIXELS, 1);
 			this.overlayShown = -1;
 		}
 		if (this.overlayShown != shown) {
 			this.overlayShown = shown;
 			this.drawOverlay(0, 0, Projection.TILE_PIXELS);
 		}
-		return this.overlayView;
+		return this.overlay;
 	}
 
 	private void drawOverlay(int x0, int y0, int edge) {
@@ -143,7 +115,7 @@ public final class MapTile {
 				pixels[y * edge + x] = overlayColor(this.info[(y0 + y) * size + x0 + x], this.overlayShown);
 			}
 		}
-		this.write(this.overlay, pixels, 0, x0, y0, edge);
+		this.overlay.write(0, x0, y0, edge, pixels);
 	}
 
 	/** ABGR colour of one overlay pixel: slime chunks tinted green, spawn spots red or yellow, chunk lines white. */
@@ -169,41 +141,12 @@ public final class MapTile {
 		if (this.texture != null) {
 			return false;
 		}
-		GpuDevice device = RenderSystem.getDevice();
-		int size = Projection.TILE_PIXELS;
-		this.texture = device.createTexture(
-			"diorama tile " + image.key(),
-			GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST,
-			//? if >=26.1 {
-			GpuFormat.RGBA8_UNORM,
-			//?} else {
-			/*TextureFormat.RGBA8,
-			*///?}
-			size,
-			size,
-			1,
-			Mipmaps.LEVELS
-		);
-		this.view = device.createTextureView(this.texture);
+		this.texture = MapTexture.create("diorama tile " + image.key(), Projection.TILE_PIXELS, Mipmaps.LEVELS);
 		return true;
 	}
 
-	private void write(GpuTexture target, int[] pixels, int level, int x, int y, int edge) {
-		ByteBuffer buffer = MemoryUtil.memAlloc(edge * edge * 4).order(ByteOrder.LITTLE_ENDIAN);
-		try {
-			buffer.asIntBuffer().put(pixels, 0, edge * edge);
-			//? if >=26.1 {
-			RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, level, 0, x, y, edge, edge);
-			//?} else {
-			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, NativeImage.Format.RGBA, level, 0, x, y, edge, edge);
-			*///?}
-		} finally {
-			MemoryUtil.memFree(buffer);
-		}
-	}
-
-	public @Nullable GpuTextureView view() {
-		return this.view;
+	public @Nullable MapTexture texture() {
+		return this.texture;
 	}
 
 	public boolean isEmpty() {
@@ -229,17 +172,9 @@ public final class MapTile {
 	}
 
 	void close() {
-		if (this.overlayView != null) {
-			this.overlayView.close();
-			this.overlayView = null;
-		}
 		if (this.overlay != null) {
 			this.overlay.close();
 			this.overlay = null;
-		}
-		if (this.view != null) {
-			this.view.close();
-			this.view = null;
 		}
 		if (this.texture != null) {
 			this.texture.close();

@@ -1,0 +1,25 @@
+{
+	"schemaVersion": 1,
+	"id": "diorama-gameshim",
+	"version": "1.0.0",
+	"name": "Diorama game test shim",
+	"description": "Runs Diorama's client game tests on Minecraft versions whose Fabric API has no client game test module. Test builds only; active with -Ddiorama.gameshim=true.",
+	"license": ["MIT", "Apache-2.0"],
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"dev.diorama.gameshim.GameShim"
+		]
+	},
+	"mixins": [
+		"diorama-gameshim.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.16.0",
+		"minecraft": ">=1.21 <1.21.4",
+		"fabric-lifecycle-events-v1": "*"
+	},
+	"breaks": {
+		"fabric-client-gametest-api-v1": "*"
+	}
+}

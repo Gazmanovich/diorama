@@ -2,7 +2,7 @@
 
 # Diorama
 
-Diorama is a client-side Fabric mod for Minecraft 26.3 and 1.21.11 that draws your world as an angled voxel map, like a baked diorama, in a minimap and a fullscreen map you can pan and zoom.
+Diorama is a client-side Fabric mod for Minecraft 26.1 to 26.3 and 1.21.11 that draws your world as an angled voxel map, like a baked diorama, in a minimap and a fullscreen map you can pan and zoom.
 
 The map is ray traced from the chunk data your client already has. The camera looks north and down at 50°, so you see block tops and their south faces. Each pixel's ray walks the real blocks, so overhangs, bridges and tree canopies come out right. A second ray toward a low sun casts long shadows, more rays measure how much sky each spot can see so the ground under trees and overhangs darkens, and higher ground is a little brighter, so hills still read as hills when you zoom far out. Water gets darker with depth. A "Depth shading" setting turns all of this down to a flatter look. Tiles bake on background threads and only re-bake the parts an edit can affect.
 
@@ -36,6 +36,8 @@ One source tree builds a jar for each supported Minecraft version, using [Stonec
 
 ```sh
 ./gradlew :26.3:build
+./gradlew :26.2:build
+./gradlew :26.1:build   # also runs on 26.1.1 and 26.1.2
 ./gradlew :1.21.11:build
 ```
 
