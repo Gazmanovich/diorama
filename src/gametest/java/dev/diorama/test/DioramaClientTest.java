@@ -149,6 +149,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("server-id")) {
 			serverLevelIds(context);
 		}
+		if (tests.contains("tracked-players")) {
+			trackedPlayers(context);
+		}
 	}
 
 	/**
@@ -248,6 +251,136 @@ public class DioramaClientTest implements FabricClientGameTest {
 		List<String> old = context.computeOnClient(mc -> WaypointStore.open(seeded).all().stream().map(w -> w.name).toList());
 		if (!old.equals(List.of("Old Camp"))) {
 			throw new AssertionError("The seed's folder lost its waypoint or took another world's: " + old);
+		}
+	}
+
+	/** Bob's offline-mode UUID, and his position as XaeroTracker sent it: x 640.5, y 120, z 30.5 in the overworld. */
+	private static final UUID BOB = UUID.fromString("faa5dca3-c3d4-354b-ae1b-dde9e5a14b3b");
+	private static final byte[] BOB_TRACKED = {2, 10, 1, 0, 1, 114, 0, 11, 0, 1, 105, 0, 0, 0, 4, -6, -91, -36, -93, -61, -44, 53, 75, -82, 27, -35, -23, -27, -95, 75, 59,
+		6, 0, 1, 120, 64, -124, 4, 0, 0, 0, 0, 0, 6, 0, 1, 121, 64, 94, 0, 0, 0, 0, 0, 0, 6, 0, 1, 122, 64, 62, -128, 0, 0, 0, 0, 0,
+		8, 0, 1, 100, 0, 19, 109, 105, 110, 101, 99, 114, 97, 102, 116, 58, 111, 118, 101, 114, 119, 111, 114, 108, 100, 0};
+
+	/**
+	 * A player far beyond the loaded chunks whom the server tracks, as Xaero's player tracker
+	 * reports them: once the client has answered the server's handshake, they show on the map
+	 * with their face and name, move when the server says they moved, hide under fair play, and
+	 * go when the server stops tracking them.
+	 */
+	private static void trackedPlayers(ClientGameTestContext context) {
+		java.util.Properties properties = new java.util.Properties();
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
+		properties.setProperty("gamemode", "creative");
+		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
+		// Bob is higher up than the radar's default height range reaches, which hides players as it does mobs.
+		int range = context.computeOnClient(mc -> Settings.get().radarRange);
+		context.runOnClient(mc -> Settings.get().radarRange = 128);
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP, (message, ctx) -> {
+			if (message.kind() == 1 && java.util.Arrays.equals(message.body(), new byte[] {0, 0, 0, 3})) {
+				answers.incrementAndGet();
+			}
+		});
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed("diorama-tracked"))
+			.createServer(properties)) {
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				server.runCommand("time set noon");
+				server.runCommand("weather clear");
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
+				server.runOnServer(s -> {
+					// Bob is on the tab list, as players elsewhere on the server are, but not in the
+					// client's world: he's far away.
+					net.minecraft.server.level.ServerPlayer alice = s.getPlayerList().getPlayers().get(0);
+					net.minecraft.server.level.ServerPlayer bob = new net.minecraft.server.level.ServerPlayer(s, s.overworld(), new GameProfile(BOB, "Bob"),
+						net.minecraft.server.level.ClientInformation.createDefault());
+					// The tab list entry reads the player's latency from their connection.
+					bob.connection = alice.connection;
+					alice.connection.send(net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(bob)));
+					sendXaero(alice, new byte[] {1, 0, 0, 0, 3});
+				});
+				context.waitFor(mc -> answers.get() > 0, 200);
+				sendXaero(server, BOB_TRACKED);
+				context.setScreen(MapScreen::new);
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(600, Projection.v(120, 30.5), 1.0, TileKey.SURFACE));
+				settle(context, 20);
+				context.takeScreenshot("tracked-players-01-far");
+				waitForBob(context, 640.5, "where XaeroTracker put him");
+
+				byte[] moved = BOB_TRACKED.clone();
+				java.nio.ByteBuffer.wrap(moved, indexAfter(moved, new byte[] {6, 0, 1, 'x'}), 8).putDouble(580.5);
+				sendXaero(server, moved);
+				waitForBob(context, 580.5, "after he moved");
+				context.takeScreenshot("tracked-players-02-moved");
+
+				server.runCommand("tellraw @a \"§f§a§i§r§x§a§e§r§o\"");
+				waitForBob(context, null, "under fair play");
+				context.takeScreenshot("tracked-players-03-fair-play");
+				server.runCommand("tellraw @a \"§r§e§s§e§t§x§a§e§r§o\"");
+				waitForBob(context, 580.5, "after fair play ended");
+
+				// A remove names only the player, as servers send it.
+				byte[] uuid = java.util.Arrays.copyOfRange(BOB_TRACKED, indexAfter(BOB_TRACKED, new byte[] {11, 0, 1, 'i'}), indexAfter(BOB_TRACKED, new byte[] {11, 0, 1, 'i'}) + 20);
+				java.io.ByteArrayOutputStream removed = new java.io.ByteArrayOutputStream();
+				removed.writeBytes(new byte[] {2, 10, 1, 0, 1, 'r', 1, 11, 0, 1, 'i'});
+				removed.writeBytes(uuid);
+				removed.write(0);
+				sendXaero(server, removed.toByteArray());
+				waitForBob(context, null, "after the server stopped tracking him");
+				// Tracked again, then the tracker reset that comes before the server sends everyone again.
+				sendXaero(server, BOB_TRACKED);
+				waitForBob(context, 640.5, "when tracked again");
+				sendXaero(server, new byte[] {3});
+				waitForBob(context, null, "after the tracker reset");
+				context.setScreen(() -> null);
+			}
+		} finally {
+			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP.id());
+			context.runOnClient(mc -> Settings.get().radarRange = range);
+		}
+	}
+
+	private static void sendXaero(TestDedicatedServerContext server, byte[] message) {
+		server.runOnServer(s -> sendXaero(s.getPlayerList().getPlayers().get(0), message));
+	}
+
+	private static void sendXaero(net.minecraft.server.level.ServerPlayer player, byte[] message) {
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
+			new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, message[0], java.util.Arrays.copyOfRange(message, 1, message.length)));
+	}
+
+	private static int indexAfter(byte[] bytes, byte[] pattern) {
+		for (int i = 0; i + pattern.length <= bytes.length; i++) {
+			if (java.util.Arrays.equals(bytes, i, i + pattern.length, pattern, 0, pattern.length)) {
+				return i + pattern.length;
+			}
+		}
+		throw new AssertionError("Not in the fixture: " + java.util.Arrays.toString(pattern));
+	}
+
+	/** Waits until Bob is on the fullscreen map where block x {@code x}, y 120, z 30.5 draws, or not on it at all if null. */
+	private static void waitForBob(ClientGameTestContext context, @Nullable Double x, String when) {
+		for (int tick = 0; tick < 400; tick++) {
+			String wrong = context.computeOnClient(mc -> {
+				MapScreen screen = (MapScreen) mc.gui.screen();
+				Radar.Blip bob = screen.blips().stream().filter(b -> b.entity().getUUID().equals(BOB)).findFirst().orElse(null);
+				if (x == null) {
+					return bob == null ? null : "Bob is on the map at " + bob.x() + ", " + bob.y();
+				}
+				if (bob == null) {
+					return "Bob isn't on the map";
+				}
+				float wantX = screen.view().screenX(x);
+				float wantY = screen.view().screenY(Projection.v(120, 30.5));
+				return Math.abs(bob.x() - wantX) <= 1 && Math.abs(bob.y() - wantY) <= 1 ? null
+					: "Bob is drawn at " + bob.x() + ", " + bob.y() + ", not " + wantX + ", " + wantY;
+			});
+			if (wrong == null) {
+				return;
+			}
+			if (tick == 399) {
+				throw new AssertionError(wrong + " " + when);
+			}
+			context.waitTicks(1);
 		}
 	}
 
@@ -2154,7 +2287,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 {
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
 			//?} else {
 			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
 			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");

@@ -1,7 +1,9 @@
 package dev.diorama.render;
 
+import com.google.common.collect.Iterables;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
+import dev.diorama.TrackedPlayers;
 import dev.diorama.render.gpu.MapCanvas;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,10 +23,11 @@ import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Other players and mobs on the map. Players show as their skin's face. Mobs show as their own
- * face (see {@link MobFaces}) framed in a colour by how they treat you, or as a dot of that colour
- * when they have no face icon. Anything well above or below you gets a caret and fades a little, since the
- * map is a top view and can't otherwise show height.
+ * Other players and mobs on the map. Players show as their skin's face, including players
+ * beyond the loaded chunks whose position the server reports (see {@link TrackedPlayers}). Mobs
+ * show as their own face (see {@link MobFaces}) framed in a colour by how they treat you, or as a
+ * dot of that colour when they have no face icon. Anything well above or below you gets a caret
+ * and fades a little, since the map is a top view and can't otherwise show height.
  */
 public final class Radar {
 	/** Vertical distance, in blocks, past which a caret shows. */
@@ -82,7 +85,7 @@ public final class Radar {
 		// the surface view.
 		double range = settings.radarRange;
 		float margin = 12;
-		for (Entity entity : level.entitiesForRendering()) {
+		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
 			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
 				continue;
 			}

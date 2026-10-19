@@ -86,9 +86,15 @@ public class DioramaClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
 			ServerRules.onDisconnect();
 			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
+			TrackedPlayers.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
-		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> WorldKey.onJoinOrLeave());
+		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
+			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
+			TrackedPlayers.clear();
+		});
 		XaeroChannels.register();
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
 		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MapSession.close());
