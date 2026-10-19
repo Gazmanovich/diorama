@@ -2,6 +2,7 @@ package dev.diorama;
 
 import dev.diorama.mixin.BiomeManagerAccessor;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +11,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.WeakHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -60,6 +62,7 @@ public final class WorldKey {
 	private static @Nullable Integer lastId;
 	/** This server let a wait run out without naming its world, so it isn't waited on again. */
 	private static boolean silent;
+	private static @Nullable Last last;
 
 	private WorldKey() {
 	}
@@ -74,7 +77,14 @@ public final class WorldKey {
 		Minecraft mc = Minecraft.getInstance();
 		IntegratedServer server = mc.getSingleplayerServer();
 		if (server != null) {
-			return key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			// An integrated server runs one save for its whole life.
+			Last seen = last;
+			if (seen != null && seen.matches(server, null, null, false, null)) {
+				return seen.key;
+			}
+			String key = key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			last = new Last(new WeakReference<>(server), null, null, false, null, key);
+			return key;
 		}
 		ServerData data = mc.getCurrentServer();
 		if (data == null || level == null) {
@@ -86,7 +96,32 @@ public final class WorldKey {
 		}
 		naming.decided = true;
 		Integer id = naming.id != null ? naming.id : lastId;
-		return id != null ? idKey(data, id) : seedKey(data, level);
+		// A server list entry can be edited in place, so its address and kind are checked too. A
+		// level's seed never changes, and its ID only through serverLevelId.
+		boolean realm = data.isRealm();
+		Last seen = last;
+		if (seen != null && seen.matches(data, level, data.ip, realm, id)) {
+			return seen.key;
+		}
+		String key = id != null ? idKey(data, id) : seedKey(data, level);
+		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, id, key);
+		return key;
+	}
+
+	/**
+	 * The last key handed out and what it was worked out from. The HUD and the map ask every
+	 * frame, and working it out means a hash and a regex each time. The objects are held weakly
+	 * so a world that was left can still be freed; one that was freed can't match a live one.
+	 */
+	private record Last(WeakReference<Object> source, @Nullable WeakReference<ClientLevel> level, @Nullable String ip, boolean realm,
+		@Nullable Integer id, String key) {
+		boolean matches(Object source, @Nullable ClientLevel level, @Nullable String ip, boolean realm, @Nullable Integer id) {
+			return this.source.get() == source
+				&& (this.level == null ? level == null : this.level.get() == level)
+				&& Objects.equals(this.ip, ip)
+				&& this.realm == realm
+				&& Objects.equals(this.id, id);
+		}
 	}
 
 	/** Whether {@link #current} last said to wait for this level's ID, without asking again. */

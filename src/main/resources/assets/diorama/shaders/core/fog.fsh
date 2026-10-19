@@ -47,7 +47,8 @@ layout(std140) uniform DynamicTransforms {
 };
 *///?}
 
-// Share of known ground per mask texel, in the red channel.
+// Share of known ground per mask texel, in the red channel. Green is 1 where every texel this
+// shader can read from a pixel in that texel is fully known.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
@@ -92,6 +93,10 @@ float scaleSteps;
 float scaleFraction;
 float seconds;
 bool fast;
+// Every mask texel this pixel can read is fully known. Then every thickness is 0 whatever the
+// noise, so the texture reads are skipped. The rest still runs: the lowest layers leave a faint
+// veil even over known ground.
+bool clear;
 
 // Known share blurred over a radius in map units, so chunk-shaped edges melt away.
 float knownBlur(vec2 uv, float units) {
@@ -112,6 +117,9 @@ float knownBlur(vec2 uv, float units) {
 // Surface fog blends a near and a wide blur, so banks reach well over the edge of known land
 // and the noise has room to billow. Cave fog stays tight to the explored tunnels.
 float knownSoft(vec2 uv) {
+    if (clear) {
+        return 1.0;
+    }
     if (blurUnits < 5.0 || fast) {
         return knownBlur(uv, blurUnits);
     }
@@ -142,8 +150,16 @@ float thicknessFrom(float known, float n) {
     return fogHeight * amount * (0.45 + 0.75 * n);
 }
 
+// From this known share up there is no fog whatever the noise: unknown + 0.75 * edge stays below
+// the 0.12 where the amount starts, so the noise needn't be read.
+const float NO_FOG_KNOWN = 0.95;
+
+float thicknessAt(vec2 uv, float known) {
+    return known >= NO_FOG_KNOWN ? 0.0 : thicknessFrom(known, noiseAt(uv));
+}
+
 float thickness(vec2 uv) {
-    return thicknessFrom(knownSoft(uv), noiseAt(uv));
+    return thicknessAt(uv, knownSoft(uv));
 }
 
 float hash(vec2 p) {
@@ -162,8 +178,12 @@ void main() {
     scaleSteps = floor(fogCode / 16.0);
     scaleFraction = mod(fogCode, 16.0) / 16.0;
     fogScale = exp2(scaleSteps + scaleFraction);
+    // MapViewport.fogReach repeats how far the reads below can reach (these sizes, the blur taps,
+    // the layer shift and the sun probe), to know where the clear flag is safe. Change both together.
     fogHeight = cave ? 4.0 : 10.0;
     blurUnits = cave ? 2.5 : 7.0;
+    ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
+    clear = texelFetch(Sampler0, texel, 0).g > 0.5;
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
@@ -185,7 +205,7 @@ void main() {
         float occlusion = 0.0;
         if (!fast) {
             vec2 probe = ground + toSun;
-            float toward = thicknessFrom(texture(Sampler0, probe).r, noiseAt(probe));
+            float toward = thicknessAt(probe, clear ? 1.0 : texture(Sampler0, probe).r);
             occlusion = clamp((toward - th) / fogHeight * 2.2, 0.0, 1.0);
         }
         float light = clamp(0.2 + 0.7 * (h / fogHeight) + 0.3 - occlusion * 0.7, 0.0, 1.0);
@@ -200,13 +220,14 @@ void main() {
     }
 
     // The ground under a thick bank is never visible.
-    float floorFog = smoothstep(0.5, 2.5, thickness(maskUv));
+    float soft = knownSoft(maskUv);
+    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft));
     color += (1.0 - alpha) * floorFog * shade;
     alpha += (1.0 - alpha) * floorFog;
 
     // Ground that is known right here stays visible; fog only rolls over its edges. Caves use the
     // sharp mask so narrow tunnels stay clear; the surface uses the blurred one so banks stay soft.
-    float here = cave ? texture(Sampler0, maskUv).r : knownSoft(maskUv);
+    float here = cave ? texture(Sampler0, maskUv).r : soft;
     alpha *= 1.0 - 0.85 * smoothstep(0.45, 0.95, here);
 
     // Where there is no map at all, nothing should show through, or the edge of the data would

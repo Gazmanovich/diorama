@@ -222,6 +222,15 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		// The player's own bindings come before the map's fixed keys, so Open map rebound to C still closes it.
+		if (DioramaClient.WAYPOINT_LIST.matches(event)) {
+			this.minecraft.gui.setScreen(new WaypointListScreen(this));
+			return true;
+		}
+		if (DioramaClient.OPEN_MAP.matches(event)) {
+			this.onClose();
+			return true;
+		}
 		LocalPlayer player = this.minecraft.player;
 		switch (event.key()) {
 			case InputConstants.KEY_C -> {
@@ -242,14 +251,6 @@ public final class MapScreen extends Screen {
 			}
 			default -> {
 			}
-		}
-		if (DioramaClient.WAYPOINT_LIST.matches(event)) {
-			this.minecraft.gui.setScreen(new WaypointListScreen(this));
-			return true;
-		}
-		if (DioramaClient.OPEN_MAP.matches(event)) {
-			this.onClose();
-			return true;
 		}
 		return super.keyPressed(event);
 	}

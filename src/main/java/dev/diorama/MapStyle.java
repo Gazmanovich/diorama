@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * How the map looks: camera angle, colour grade, lighting, outlines, per-block variation and the
- * shape of the fog edge. Switching style re-bakes every tile.
+ * shape of the fog edge. Switching to a style whose tiles look different re-bakes every tile.
  *
  * @param sunTint colour of direct sunlight, multiplied per channel
  * @param shadowTint colour of the ambient sky light that fills shadows
@@ -89,7 +89,10 @@ public record MapStyle(
 		Projection.setPitch(style.pitchDegrees);
 	}
 
-	/** True when tiles baked under one style look the same under the other; the name doesn't count. */
+	/**
+	 * True when tiles baked under one style look the same under the other. The name doesn't
+	 * count, and neither does the fog edge, which is drawn over the tiles.
+	 */
 	public boolean looksLike(MapStyle other) {
 		return this.pitchDegrees == other.pitchDegrees
 			&& this.saturation == other.saturation
@@ -98,7 +101,6 @@ public record MapStyle(
 			&& java.util.Arrays.equals(this.shadowTint, other.shadowTint)
 			&& this.outline == other.outline
 			&& this.blockVariation == other.blockVariation
-			&& this.roundedFog == other.roundedFog
 			&& this.clearWater == other.clearWater
 			&& this.skyOcclusion == other.skyOcclusion
 			&& this.sunElevation == other.sunElevation

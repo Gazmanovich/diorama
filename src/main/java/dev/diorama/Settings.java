@@ -131,11 +131,8 @@ public final class Settings {
 
 	/** Pushes the settings that live elsewhere: the map look and fog of war. */
 	public void apply() {
-		// Only a real change of look re-bakes the map; moving the minimap shouldn't.
-		MapStyle style = this.style();
-		if (!style.looksLike(MapStyle.get())) {
-			MapStyle.set(style);
-		}
+		// The map session re-bakes only if the tiles would look different.
+		MapStyle.set(this.style());
 		boolean fast = this.quality == Quality.FAST;
 		if (fast != TileBaker.fast()) {
 			TileBaker.setFast(fast);
