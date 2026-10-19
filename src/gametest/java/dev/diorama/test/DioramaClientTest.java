@@ -146,8 +146,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
-		// Level IDs and tracked players come over Xaero's channels, which Diorama listens on through
-		// Fabric API networking, on Fabric only so far.
+		// The server's side of Xaero's channels goes through Fabric API networking, so these run on
+		// Fabric only. On NeoForge the shim can't start a dedicated server anyway.
 		//? if fabric {
 		if (tests.contains("server-id")) {
 			serverLevelIds(context);
