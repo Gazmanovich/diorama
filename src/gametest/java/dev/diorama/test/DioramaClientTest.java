@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.DioramaClient;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -390,7 +391,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("dimensions-06-end-far");
 		context.setScreen(() -> null);
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
-		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD, 1200);
+		// Back home the level switches before the loading screen closes; the next scenario starts
+		// with a minimap screenshot, so wait for the screen to go and the map to fill in again.
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		settle(context, 100);
 	}
 
 	/**
@@ -780,6 +785,27 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 40);
 		context.takeScreenshot("diorama-06-cave-close");
 		context.setScreen(() -> null);
+
+		// Open map rebound to C, which the map also uses for caves: the player's binding wins, so
+		// pressing it again closes the map.
+		context.runOnClient(mc -> {
+			DioramaClient.OPEN_MAP.setKey(InputConstants.getKey("key.keyboard.c"));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		context.getInput().pressKey(DioramaClient.OPEN_MAP);
+		context.waitTicks(5);
+		boolean opened = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen);
+		context.getInput().pressKey(DioramaClient.OPEN_MAP);
+		context.waitTicks(5);
+		boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			DioramaClient.OPEN_MAP.setKey(DioramaClient.OPEN_MAP.getDefaultKey());
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		if (!opened || !closed) {
+			throw new AssertionError("With Open map on C, the key " + (opened ? "didn't close the map" : "didn't open the map"));
+		}
 	}
 
 	/** Fog of war after the server's fair-play code, in a scene built for it. */
@@ -953,6 +979,36 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void waypoints(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		context.waitFor(mc -> mc.player.onGround(), 600);
+		// The empty list says to press the add-waypoint key, so pressing it there opens the editor.
+		context.getInput().pressKey(DioramaClient.WAYPOINT_LIST);
+		context.waitTicks(3);
+		context.takeScreenshot("waypoints-00-empty-list");
+		context.getInput().pressKey(DioramaClient.NEW_WAYPOINT);
+		context.waitTicks(3);
+		boolean keyOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		context.setScreen(() -> null);
+		if (!keyOpenedEditor) {
+			throw new AssertionError("The add-waypoint key did nothing on the waypoint list");
+		}
+		// Bound to a mouse button, the hint names that button, so it has to work too.
+		InputConstants.Key boundKey = context.computeOnClient(mc -> InputConstants.getKey(DioramaClient.NEW_WAYPOINT.saveString()));
+		context.runOnClient(mc -> {
+			DioramaClient.NEW_WAYPOINT.setKey(InputConstants.Type.MOUSE.getOrCreate(InputConstants.MOUSE_BUTTON_LEFT + 3));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(3);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT + 3);
+		context.waitTicks(3);
+		boolean mouseOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			DioramaClient.NEW_WAYPOINT.setKey(boundKey);
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		if (!mouseOpenedEditor) {
+			throw new AssertionError("A mouse button bound to add-waypoint did nothing on the waypoint list");
+		}
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
 			BlockPos at = mc.player.blockPosition();
@@ -1032,7 +1088,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-04-editor");
-		context.clickScreenButton("diorama.waypoint.save");
+
+		// A coordinate that isn't a number turns red and Save stays off, instead of saving the old
+		// coordinate. What's typed survives a GUI scale change, which rebuilds the screen.
+		String pickedX = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(2).getValue());
+		typeInto(context, 2, "abc");
+		clickButton(context, "diorama.waypoint.save");
+		boolean savedBadX = context.computeOnClient(mc -> !(mc.gui.screen() instanceof WaypointEditScreen) || WaypointStore.get().all().size() != 2);
+		if (savedBadX) {
+			throw new AssertionError("Save went through with X = abc");
+		}
+		int guiScale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		setGuiScale(context, 4);
+		context.takeScreenshot("waypoints-04b-editor-bad-x");
+		String keptX = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(2).getValue());
+		setGuiScale(context, guiScale);
+		if (!keptX.equals("abc")) {
+			throw new AssertionError("Changing GUI scale replaced the typed X with " + keptX);
+		}
+		typeInto(context, 2, pickedX);
+		clickButton(context, "diorama.waypoint.save");
 		context.waitTicks(5);
 		int count = context.computeOnClient(mc -> WaypointStore.get().all().size());
 		if (count != 3) {
@@ -1050,6 +1125,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.setScreen(() -> null);
 
+		// A name as long as the editor allows, and coordinates near the world border, stop before
+		// the row's buttons.
+		context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Long waypoint name 1234567890123",
+			-29999000, -64, 29999000, mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3])));
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-05-list");
@@ -1477,6 +1556,55 @@ public class DioramaClientTest implements FabricClientGameTest {
 		return null;
 	}
 
+	/** The screen's text fields, top to bottom and left to right. */
+	private static List<net.minecraft.client.gui.components.EditBox> editBoxes(net.minecraft.client.gui.screens.Screen screen) {
+		java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.EditBox box) {
+				boxes.add(box);
+			}
+		}
+		return boxes;
+	}
+
+	/** Clicks the middle of a widget with the mouse, the way a player does. */
+	private static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+		double[] at = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
+	/** Clicks a button with the mouse, which does nothing while it's off (unlike clickScreenButton). */
+	private static void clickButton(ClientGameTestContext context, String translationKey) {
+		String label = net.minecraft.network.chat.Component.translatable(translationKey).getString();
+		clickAt(context, context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(), label)));
+	}
+
+	/** Clicks a text field, empties it and types into it. */
+	private static void typeInto(ClientGameTestContext context, int field, String text) {
+		clickAt(context, context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(field)));
+		// The test input's Ctrl+A doesn't select, so the field is emptied directly; the typing is real.
+		context.runOnClient(mc -> editBoxes(mc.gui.screen()).get(field).setValue(""));
+		context.getInput().typeChars(text);
+		context.waitTicks(2);
+	}
+
+	private static void setGuiScale(ClientGameTestContext context, int scale) {
+		context.runOnClient(mc -> {
+			mc.options.guiScale().set(scale);
+			//? if >=26.1 {
+			mc.resizeGui();
+			//?} else {
+			/*mc.resizeDisplay();
+			*///?}
+		});
+		context.waitTicks(3);
+	}
+
 	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
@@ -1758,6 +1886,42 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		context.getInput().resizeWindow(1600, 900);
 		context.waitTicks(10);
+
+		// Rounded fog only reshapes the fog edge, so switching it keeps the baked map instead of
+		// blanking it and baking every tile again.
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 60);
+		MapTile before = context.computeOnClient(mc -> playerTile());
+		if (before == null) {
+			throw new AssertionError("No baked tile under the player to check against");
+		}
+		context.runOnClient(mc -> {
+			Settings.get().roundedFog = false;
+			Settings.get().save();
+		});
+		context.waitTicks(5);
+		context.takeScreenshot("settings-07-sharp-fog");
+		boolean kept = context.computeOnClient(mc -> playerTile() == before);
+		boolean applied = context.computeOnClient(mc -> !MapStyle.get().roundedFog());
+		context.runOnClient(mc -> {
+			Settings.get().roundedFog = true;
+			Settings.get().save();
+		});
+		context.setScreen(() -> null);
+		if (!kept) {
+			throw new AssertionError("Switching rounded fog threw away the baked map");
+		}
+		if (!applied) {
+			throw new AssertionError("Switching rounded fog didn't reach the map's fog");
+		}
+	}
+
+	private static @Nullable MapTile playerTile() {
+		LocalPlayer player = Minecraft.getInstance().player;
+		int tu = (int) Math.floor(player.getX() / Projection.TILE_UNITS);
+		int tv = (int) Math.floor(Projection.v(player.getY(), player.getZ()) / Projection.TILE_UNITS);
+		return MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv));
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
