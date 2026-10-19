@@ -6,6 +6,7 @@
 	"compatibilityLevel": "JAVA_21",
 	"client": [
 		"InputConstantsMixin",
+		"KeyboardHandlerAccessor",
 		"MinecraftMixin",
 		"MouseHandlerAccessor",
 		"OptionsMixin",

@@ -21,6 +21,8 @@
 
 package net.fabricmc.fabric.api.client.gametest.v1;
 
+import net.minecraft.client.KeyMapping;
+
 /**
  * Simulated mouse and window input. The game ignores the real keyboard and mouse while the tests
  * run, so only this input reaches it.
@@ -34,6 +36,12 @@ public interface TestInput {
 
 	/** Presses and releases a mouse button, then waits a tick. */
 	void pressMouse(int button);
+
+	/** Presses and releases the key or mouse button bound to the mapping, then waits a tick. */
+	void pressKey(KeyMapping keyMapping);
+
+	/** Types the characters, as the keyboard would send them to the focused text field. */
+	void typeChars(String chars);
 
 	/** Moves the cursor to a position in window pixels. */
 	void setCursorPos(double x, double y);

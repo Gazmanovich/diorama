@@ -6,7 +6,12 @@ import java.util.Set;
 
 import org.lwjgl.glfw.GLFW;
 
+import com.mojang.blaze3d.platform.InputConstants;
+
+import dev.diorama.gameshim.mixin.KeyboardHandlerAccessor;
 import dev.diorama.gameshim.mixin.MouseHandlerAccessor;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.KeyMapping;
 import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.minecraft.client.Minecraft;
 
@@ -44,6 +49,28 @@ final class ShimInput implements TestInput {
 		holdMouse(button);
 		releaseMouse(button);
 		context.waitTick();
+	}
+
+	@Override
+	public void pressKey(KeyMapping keyMapping) {
+		ShimThreading.checkOnTestThread("pressKey");
+		InputConstants.Key key = KeyBindingHelper.getBoundKeyOf(keyMapping);
+		if (key.getType() == InputConstants.Type.MOUSE) {
+			pressMouse(key.getValue());
+			return;
+		}
+		context.runOnClient(minecraft -> {
+			minecraft.keyboardHandler.keyPress(window(minecraft), key.getValue(), 0, GLFW.GLFW_PRESS, 0);
+			minecraft.keyboardHandler.keyPress(window(minecraft), key.getValue(), 0, GLFW.GLFW_RELEASE, 0);
+		});
+		context.waitTick();
+	}
+
+	@Override
+	public void typeChars(String chars) {
+		ShimThreading.checkOnTestThread("typeChars");
+		context.runOnClient(minecraft -> chars.codePoints().forEach(c ->
+			((KeyboardHandlerAccessor) minecraft.keyboardHandler).diorama$charTyped(window(minecraft), c, 0)));
 	}
 
 	@Override
