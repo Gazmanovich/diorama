@@ -1,3 +1,4 @@
+//? if >=1.21.6 {
 package dev.diorama.render;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -8,13 +9,10 @@ import net.minecraft.client.renderer.state.gui.GuiElementRenderState;
 import org.joml.Matrix3x2f;
 import org.jspecify.annotations.Nullable;
 
-/**
- * A GUI quad with float corners, optional UVs and one colour. Vanilla GUI draws take whole-pixel
- * positions; the map pans smoothly, so it needs this.
- *
- * @param corners x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left
- * @param uvs u0 v0 u1 v1 u2 v2 u3 v3, or null for untextured pipelines
- */
+// A GUI quad with float corners, optional UVs and one colour, as GUI render state (1.21.6 on).
+// Vanilla GUI draws take whole-pixel positions; the map pans smoothly, so it needs this.
+// corners: x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left.
+// uvs: u0 v0 u1 v1 u2 v2 u3 v3, or null for untextured pipelines.
 public record QuadElement(
 	RenderPipeline pipeline,
 	TextureSetup textureSetup,
@@ -84,3 +82,4 @@ public record QuadElement(
 		vertex.setColor(this.color);
 	}
 }
+//?}

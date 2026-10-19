@@ -15,7 +15,7 @@ plugins {
 // and needs remapping to Mojang's names; from 26.1 it ships with those names already.
 stonecutter {
 	create(rootProject) {
-		versions("1.21.6", "1.21.9", "1.21.11").buildscript("build.obfuscated.gradle.kts")
+		versions("1.21.1", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.9", "1.21.11").buildscript("build.obfuscated.gradle.kts")
 		versions("26.1", "26.2", "26.3").buildscript("build.unobfuscated.gradle.kts")
 		vcsVersion = "26.3"
 	}

@@ -117,6 +117,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("overlays")) {
 				overlays(context, world);
 			}
+			//? if <1.21.6 {
+			/*if (tests.contains("broken-fog")) {
+				brokenFog(context);
+			}
+			*///?}
 			if (spawnCell != null) {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
@@ -632,7 +637,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void camera(ClientGameTestContext context, double[] eye, float yaw, float pitch, double fov, int ticks) {
 		context.runOnClient(mc -> {
 			int option = Math.clamp((int) Math.ceil(fov), 30, 110);
+			//? if >=1.21.2 {
 			double narrowest = mc.player.getFieldOfViewModifier(true, 1.0F);
+			//?} else {
+			/*// The modifier took the effect scale from the options.
+			mc.options.fovEffectScale().set(1.0);
+			double narrowest = mc.player.getFieldOfViewModifier();
+			*///?}
 			mc.options.fov().set(option);
 			mc.options.fovEffectScale().set(Math.clamp((1 - fov / option) / (1 - narrowest), 0.0, 1.0));
 			mc.player.setDeltaMovement(Vec3.ZERO);
@@ -694,7 +705,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 							int[] ours = {tints.grass()[i], tints.foliage()[i], tints.dryFoliage()[i], tints.water()[i]};
 							int[] game = {
 								BiomeColors.getAverageGrassColor(mc.level, pos), BiomeColors.getAverageFoliageColor(mc.level, pos),
+								//? if >=1.21.5 {
 								BiomeColors.getAverageDryFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								//?} else {
+								/*// No dry foliage before 1.21.5; the mod fills that slot with foliage.
+								BiomeColors.getAverageFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								*///?}
 							};
 							columns++;
 							for (int k = 0; k < 4; k++) {
@@ -1282,7 +1298,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (command == null) {
 				throw new AssertionError("The shared line in chat has no [Add] link");
 			}
+			//? if >=1.21.6 {
 			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command), mc.gui.screen());
+			//?} else {
+			/*// What a chat click ran before 1.21.6.
+			mc.player.connection.sendUnsignedCommand(command.startsWith("/") ? command.substring(1) : command);
+			*///?}
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
@@ -1366,9 +1387,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
+			//? if >=1.21.5 {
 			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
 				command[0] = run.command();
 			}
+			//?} else {
+			/*net.minecraft.network.chat.ClickEvent click = style.getClickEvent();
+			if (click != null && click.getAction() == net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND) {
+				command[0] = click.getValue();
+			}
+			*///?}
 			return java.util.Optional.empty();
 		}, net.minecraft.network.chat.Style.EMPTY);
 		return command[0];
@@ -1447,6 +1475,60 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * Chunk grid, slime chunks and spawn spots on a built scene: a stone platform high in open sky
 	 * across a chunk border, lit by one torch, with a closed stone box on one corner.
 	 */
+	//? if <1.21.6 {
+	/*// Opt-in with DIORAMA_TESTS=broken-fog. A resource pack whose fog shader doesn't compile, the way a
+	// strict graphics driver might reject ours. Before 1.21.6 the game's own shader path clears the
+	// player's resource packs (or crashes) when a shader fails, so the map has to draw without fog and
+	// leave the packs alone, then bring the fog back once a reload fixes the shader.
+	private static void brokenFog(ClientGameTestContext context) {
+		String id = "file/diorama-broken-fog";
+		java.nio.file.Path pack = context.computeOnClient(mc -> mc.getResourcePackDirectory().resolve("diorama-broken-fog"));
+		context.runOnClient(mc -> {
+			try {
+				java.nio.file.Files.createDirectories(pack.resolve("assets/diorama/shaders/core"));
+				int format = net.minecraft.SharedConstants.getCurrentVersion().getPackVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+				java.nio.file.Files.writeString(pack.resolve("pack.mcmeta"), "{\"pack\": {\"pack_format\": " + format + ", \"description\": \"Diorama test: a fog shader that doesn't compile\"}}");
+				java.nio.file.Files.writeString(pack.resolve("assets/diorama/shaders/core/fog.fsh"), "#version 150\nvoid main() { this is not glsl }\n");
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+			mc.getResourcePackRepository().reload();
+			if (!mc.getResourcePackRepository().addPack(id)) {
+				throw new AssertionError("The broken fog test pack didn't load");
+			}
+			mc.reloadResourcePacks();
+		});
+		context.waitTicks(60);
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("broken-fog-01-no-fog");
+		boolean kept = context.computeOnClient(mc -> mc.getResourcePackRepository().getSelectedIds().contains(id));
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> {
+			mc.getResourcePackRepository().removePack(id);
+			mc.reloadResourcePacks();
+		});
+		context.waitTicks(60);
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("broken-fog-02-fog-back");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(pack)) {
+				files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		});
+		if (!kept) {
+			throw new AssertionError("A fog shader that doesn't compile took the player's resource packs away");
+		}
+	}
+	*///?}
+
 	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		// No leaf decay or growth below the scene: a chunk changing for its own reasons would
@@ -1756,7 +1838,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
+			//? if >=1.21.4 {
 			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
+			//?} else {
+			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			*///?}
 		}
 		return Set.of(env.split(","));
 	}

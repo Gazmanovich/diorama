@@ -86,4 +86,60 @@ stonecutter parameters {
 	replacements.regex(current.parsed < "1.21.9") {
 		replace("^#version 330$", "#version 150", "(?!)", "never")
 	}
+
+	// From the 1.21.6 spelling to the 1.21.5 one. Each call is a whole statement on one line.
+	val before1_21_6 = listOf(
+		// The GUI pose was a 3D PoseStack instead of a 2D matrix stack.
+		"\\bgraphics\\.pose\\(\\)\\.pushMatrix\\(\\);" to "graphics.pose().pushPose();",
+		"\\bgraphics\\.pose\\(\\)\\.popMatrix\\(\\);" to "graphics.pose().popPose();",
+		"\\bgraphics\\.pose\\(\\)\\.translate\\((.*)\\);" to "graphics.pose().translate($1, 0);",
+		"\\bgraphics\\.pose\\(\\)\\.scale\\((.*)\\);" to "graphics.pose().scale($1, $1, 1);",
+		// A screen's tooltip was set on the screen, which draws it after everything else.
+		"\\bgraphics\\.setTooltipForNextFrame\\(this\\.font, (.*), mouseX, mouseY\\);" to "this.setTooltipForNextRenderPass($1);",
+		// HUD elements were drawn from a callback; the mod's own interface stands in for Fabric's.
+		"import net\\.fabricmc\\.fabric\\.api\\.client\\.rendering\\.v1\\.hud\\.HudElement;" to "import dev.diorama.compat.HudElement;",
+	)
+	for ((pattern, older) in before1_21_6) {
+		replacements.regex(current.parsed < "1.21.6") {
+			replace(pattern, older, "(?!)", "never")
+		}
+	}
+
+	// From the 1.21.5 spelling to the 1.21.4 one.
+	val before1_21_5 = listOf(
+		// Baked quads and models had getters.
+		"\\bquad\\.sprite\\(\\)" to "quad.getSprite()",
+		"\\bquad\\.tintIndex\\(\\)" to "quad.getTintIndex()",
+		"\\bquad\\.direction\\(\\)" to "quad.getDirection()",
+		"\\bmodel\\.particleIcon\\(\\)" to "model.getParticleIcon()",
+		"\\.getMissingBlockStateModel\\(\\)" to ".getMissingModel()",
+		// Chat click and hover events were one class each, with an action.
+		"\\bnew ClickEvent\\.RunCommand\\(" to "new ClickEvent(ClickEvent.Action.RUN_COMMAND, ",
+		"\\bnew HoverEvent\\.ShowText\\(" to "new HoverEvent(HoverEvent.Action.SHOW_TEXT, ",
+		// Placing an entity (the tests do) was moving it.
+		"\\.snapTo\\(" to ".moveTo(",
+	)
+	for ((pattern, older) in before1_21_5) {
+		replacements.regex(current.parsed < "1.21.5") {
+			replace(pattern, older, "(?!)", "never")
+		}
+	}
+
+	// From the 1.21.2 spelling to the 1.21.1 one.
+	val before1_21_2 = listOf(
+		// Colour helpers lived in FastColor.
+		"import net\\.minecraft\\.util\\.ARGB;" to "import net.minecraft.util.FastColor;",
+		"\\bARGB\\.(red|green|blue|color)\\(" to "FastColor.ARGB32.$1(",
+		// World heights: the bottom had another name, and the top was exclusive.
+		"\\.getMinY\\(\\)" to ".getMinBuildHeight()",
+		"\\.getMinSectionY\\(\\)" to ".getMinSection()",
+		"([\\w.]+)\\.getMaxY\\(\\)" to "($1.getMaxBuildHeight() - 1)",
+		// Running a task on the client thread later was telling the client.
+		"\\bmc\\.schedule\\(" to "mc.tell(",
+	)
+	for ((pattern, older) in before1_21_2) {
+		replacements.regex(current.parsed < "1.21.2") {
+			replace(pattern, older, "(?!)", "never")
+		}
+	}
 }

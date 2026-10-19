@@ -1,26 +1,17 @@
 package dev.diorama.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.textures.AddressMode;
-import com.mojang.renderpearl.api.textures.FilterMode;
-//? if >=1.21.11 {
-import com.mojang.renderpearl.api.textures.GpuSampler;
-//?}
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
+import dev.diorama.render.gpu.MapCanvas;
+import dev.diorama.render.gpu.MapTexture;
+import dev.diorama.render.gpu.Sampling;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.navigation.ScreenRectangle;
-import net.minecraft.client.gui.render.TextureSetup;
-import net.minecraft.client.renderer.RenderPipelines;
-import org.joml.Matrix3x2f;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -33,8 +24,7 @@ public final class MapViewport {
 	/** Zooming out past this (GUI pixels per block) switches to overview tiles. */
 	public static final double DETAILED_ZOOM = 0.5;
 
-	private @Nullable GpuTexture maskTexture;
-	private @Nullable GpuTextureView maskView;
+	private @Nullable MapTexture maskTexture;
 	private final int[] maskPixels = new int[MASK * MASK];
 	/** What the mask texture was last built from; it only needs building again when this changes. */
 	private @Nullable MaskInputs maskInputs;
@@ -72,13 +62,12 @@ public final class MapViewport {
 
 	/** Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles. */
 	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
-		ScreenRectangle scissor = new ScreenRectangle(view.x(), view.y(), view.width(), view.height());
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), cave ? 0xFF0C0E12 : 0xFF8C99AB);
 
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0);
-		this.drawFog(graphics, level, view, scissor);
+		this.drawFog(graphics, level, view);
 		graphics.disableScissor();
 	}
 
@@ -155,13 +144,8 @@ public final class MapViewport {
 		int tu1 = (int) Math.floor(u1 / units);
 		int tv1 = (int) Math.floor(v1 / units);
 		// Minified tiles blend across mips; magnified ones stay crisp so blocks keep their edges.
-		//? if >=1.21.11 {
-		GpuSampler sampler = RenderSystem.getSamplerCache().getSampler(
-			AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, view.zoom() >= Projection.PIXELS_PER_UNIT ? FilterMode.NEAREST : FilterMode.LINEAR, true
-		);
-		//?} else {
-		/*FilterMode magnify = view.zoom() >= Projection.PIXELS_PER_UNIT ? FilterMode.NEAREST : FilterMode.LINEAR;
-		*///?}
+		Sampling sampling = view.zoom() >= Projection.PIXELS_PER_UNIT ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+		MapCanvas canvas = MapCanvas.of(graphics);
 		float size = (float) (units * view.zoom());
 		for (int tu = tu0 - 1; tu <= tu1 + 1; tu++) {
 			for (int tv = tv0 - 1; tv <= tv1 + 1; tv++) {
@@ -171,52 +155,21 @@ public final class MapViewport {
 				boolean visible = tu >= tu0 && tu <= tu1 && tv >= tv0 && tv <= tv1;
 				// Tiles just outside the view bake too, so panning finds them ready.
 				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : 100_000));
-				if (!visible || tile == null || tile.view() == null) {
+				if (!visible || tile == null || tile.texture() == null) {
 					continue;
 				}
 				float sx = view.screenX(tu * units);
 				float sy = view.screenY(tv * units);
-				//? if <1.21.11 {
-				/*// Before 1.21.11 a texture carried its own sampling state.
-				FogTextures.sampleWith(tile.view(), AddressMode.CLAMP_TO_EDGE, magnify, true);
-				*///?}
-				graphics.guiRenderState.addGuiElement(QuadElement.rect(
-					RenderPipelines.GUI_TEXTURED,
-					//? if >=1.21.11 {
-					TextureSetup.singleTexture(tile.view(), sampler),
-					//?} else {
-					/*TextureSetup.singleTexture(tile.view()),
-					*///?}
-					new Matrix3x2f(graphics.pose()),
-					sx, sy, sx + size, sy + size,
-					0, 0, 1, 1,
-					-1,
-					graphics.scissorStack.peek()
-				));
-				GpuTextureView overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
+				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
+				MapTexture overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
 				if (overlay != null) {
-					//? if <1.21.11 {
-					/*FogTextures.sampleWith(overlay, AddressMode.CLAMP_TO_EDGE, magnify, true);
-					*///?}
-					graphics.guiRenderState.addGuiElement(QuadElement.rect(
-						RenderPipelines.GUI_TEXTURED,
-						//? if >=1.21.11 {
-						TextureSetup.singleTexture(overlay, sampler),
-						//?} else {
-						/*TextureSetup.singleTexture(overlay),
-						*///?}
-						new Matrix3x2f(graphics.pose()),
-						sx, sy, sx + size, sy + size,
-						0, 0, 1, 1,
-						-1,
-						graphics.scissorStack.peek()
-					));
+					canvas.rect(overlay, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
 				}
 			}
 		}
 	}
 
-	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, ScreenRectangle scissor) {
+	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
 		// Zoomed out past the detailed zoom, the fog's noise grows with the view so it keeps its
@@ -252,33 +205,17 @@ public final class MapViewport {
 		int quality = fast ? 4 : 0;
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
-		//? if >=1.21.11 {
-		TextureSetup textures = TextureSetup.doubleTexture(
-			this.maskView,
-			RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR),
-			FogTextures.noise(),
-			RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR)
-		);
-		//?} else {
-		/*FogTextures.sampleWith(this.maskView, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, false);
-		FogTextures.sampleWith(FogTextures.noise(), AddressMode.REPEAT, FilterMode.LINEAR, false);
-		TextureSetup textures = TextureSetup.doubleTexture(this.maskView, FogTextures.noise());
-		*///?}
-		graphics.guiRenderState.addGuiElement(QuadElement.rect(
-			DioramaPipelines.FOG,
-			textures,
-			new Matrix3x2f(graphics.pose()),
-			view.x(), view.y(), view.x() + view.width(), view.y() + view.height(),
+		MapCanvas.of(graphics).fog(
+			this.maskTexture, FogTextures.noise(),
+			view.x(), view.y(), view.width(), view.height(),
 			mu0, mv0, mu1, mv1,
-			params,
-			scissor
-		));
+			params
+		);
 	}
 
 	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, boolean fast) {
 		if (this.maskTexture == null) {
-			this.maskTexture = FogTextures.createTexture("diorama fog mask", MASK);
-			this.maskView = RenderSystem.getDevice().createTextureView(this.maskTexture);
+			this.maskTexture = MapTexture.create("diorama fog mask", MASK, 1);
 		}
 		int lod = lodFor(level, view);
 		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
@@ -320,7 +257,7 @@ public final class MapViewport {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		this.markClear(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
-		FogTextures.write(this.maskTexture, this.maskPixels, MASK);
+		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 	}
 
 	/**
@@ -426,10 +363,6 @@ public final class MapViewport {
 	}
 
 	public void close() {
-		if (this.maskView != null) {
-			this.maskView.close();
-			this.maskView = null;
-		}
 		if (this.maskTexture != null) {
 			this.maskTexture.close();
 			this.maskTexture = null;

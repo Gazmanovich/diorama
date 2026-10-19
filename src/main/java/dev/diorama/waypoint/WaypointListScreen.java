@@ -140,7 +140,12 @@ public final class WaypointListScreen extends Screen {
 			graphics.text(this.font, shownDetail, left + TEXT_LEFT, y + 14, 0xFF909090, true);
 			boolean overText = mouseX >= left + TEXT_LEFT && mouseX < left + TEXT_LEFT + textWidth && mouseY >= y && mouseY < y + ROW - 1;
 			if (overText && (!name.equals(waypoint.name) || !shownDetail.equals(detail))) {
+				//? if >=1.21.6 {
 				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(waypoint.name), Component.literal(detail)), mouseX, mouseY);
+				//?} else {
+				/*// The screen draws this tooltip after everything else.
+				this.setTooltipForNextRenderPass(List.of(Component.literal(waypoint.name).getVisualOrderText(), Component.literal(detail).getVisualOrderText()));
+				*///?}
 			}
 		}
 	}
