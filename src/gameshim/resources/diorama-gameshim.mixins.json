@@ -1,0 +1,18 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "dev.diorama.gameshim.mixin",
+	"plugin": "dev.diorama.gameshim.ShimMixinPlugin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"InputConstantsMixin",
+		"KeyboardHandlerAccessor",
+		"MinecraftMixin",
+		"MouseHandlerAccessor",
+		"OptionsMixin",
+		"WindowMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

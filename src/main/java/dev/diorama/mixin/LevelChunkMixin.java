@@ -21,7 +21,12 @@ public abstract class LevelChunkMixin {
 	private Level level;
 
 	@Inject(method = "setBlockState", at = @At("RETURN"))
+	//? if >=1.21.5 {
 	private void diorama$onSetBlockState(BlockPos pos, BlockState state, int flags, CallbackInfoReturnable<BlockState> cir) {
+	//?} else {
+	/*// The third parameter was a boolean, isMoving.
+	private void diorama$onSetBlockState(BlockPos pos, BlockState state, boolean isMoving, CallbackInfoReturnable<BlockState> cir) {
+	*///?}
 		BlockState old = cir.getReturnValue();
 		if (old != null && this.level instanceof ClientLevel clientLevel) {
 			MapSession.blockChanged(clientLevel, pos, old, state);

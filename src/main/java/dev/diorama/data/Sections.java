@@ -37,11 +37,16 @@ final class Sections {
 		} catch (ReflectiveOperationException e) {
 			throw new IllegalStateException(e);
 		}
-		//?} else {
+		//?} else if >=1.21.9 {
 		/*// Outside the dev environment the game runs with intermediary names, so the private
 		// fields can't be looked up by name. Storage of zero bits per entry only ever comes with the
 		// single-value palette (Strategy.ZERO_BITS).
 		return states.bitsPerEntry() == 0 ? states.get(0, 0, 0) : null;
+		*///?} else {
+		/*// No bitsPerEntry() yet. The serialized size is one byte for the bits, the palette, and the
+		// storage's longs: a single-value palette needs at most 6 bytes and has no storage, while any
+		// other palette stores 4096 entries of at least one bit, 512 bytes or more.
+		return states.getSerializedSize() < 512 ? states.get(0, 0, 0) : null;
 		*///?}
 	}
 }

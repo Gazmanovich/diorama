@@ -1,0 +1,13 @@
+Diorama game test shim
+
+The interfaces in net.fabricmc.fabric.api.client.gametest.v1 are derived from Fabric API's
+fabric-client-gametest-api-v1 module for Minecraft 1.21.4, and parts of dev.diorama.gameshim
+(the window, input, world creation and game option handling) are adapted from that module's
+implementation. Both were trimmed and changed to run Diorama's client game tests on Minecraft
+versions before 1.21.4.
+
+Fabric API
+Copyright (c) 2016, 2017, 2018, 2019 FabricMC
+Licensed under the Apache License, Version 2.0; see LICENSE-fabric-client-gametest-api-v1 or
+http://www.apache.org/licenses/LICENSE-2.0
+https://github.com/FabricMC/fabric

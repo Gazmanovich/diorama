@@ -6,7 +6,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
 import net.minecraft.client.input.MouseButtonEvent;
+//?}
 import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
@@ -135,19 +137,32 @@ public final class WaypointEditScreen extends Screen {
 		}
 	}
 
+	// Mouse events came as separate numbers before 1.21.9.
+	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+		return this.clicked(event.x(), event.y(), event.button()) || super.mouseClicked(event, doubleClick);
+	}
+	//?} else {
+	/*@Override
+	public boolean mouseClicked(double x, double y, int button) {
+		return this.clicked(x, y, button) || super.mouseClicked(x, y, button);
+	}
+	*///?}
+
+	/** Picks the colour swatch under a left click; false if the click wasn't on one. */
+	private boolean clicked(double x, double y, int button) {
+		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			for (int i = 0; i < Waypoint.PALETTE.length; i++) {
 				int sx = this.swatchX + (i % 8) * (SWATCH + SWATCH_GAP);
 				int sy = this.swatchY + (i / 8) * (SWATCH + SWATCH_GAP);
-				if (event.x() >= sx && event.x() < sx + SWATCH && event.y() >= sy && event.y() < sy + SWATCH) {
+				if (x >= sx && x < sx + SWATCH && y >= sy && y < sy + SWATCH) {
 					this.color = Waypoint.PALETTE[i];
 					return true;
 				}
 			}
 		}
-		return super.mouseClicked(event, doubleClick);
+		return false;
 	}
 
 	/** The waypoint being edited. For tests. */

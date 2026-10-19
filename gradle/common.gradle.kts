@@ -3,6 +3,7 @@ val javaVersion = (project.property("java_version") as String).toInt()
 val resourceProps = mapOf(
 	"version" to project.version.toString(),
 	"minecraft" to project.property("minecraft_dep") as String,
+	"loader" to project.property("loader_version") as String,
 	"java" to javaVersion.toString(),
 )
 
