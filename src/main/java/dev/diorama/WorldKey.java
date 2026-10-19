@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.WeakHashMap;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
@@ -32,12 +33,16 @@ import org.jspecify.annotations.Nullable;
  * when the spawn moves, but worlds that share one share a folder.
  *
  * <p>A level ID can come a moment after the level: Xaero's mods send it with the level,
- * MapModCompanion a second later. So on a server that declared one of the channels that come
- * with IDs, or already sent one, the map and waypoints wait for it a moment rather than open the
- * seed's folder, which may hold another world. An ID that comes later still moves the world to
- * its own folder, dropping what the map took from the loaded chunks so far: the new map takes it
- * again. Maps saved before Diorama read level IDs are under the seed: the first world named with
- * that seed takes the folder over.
+ * MapModCompanion a second later. So on a server that may send one, the map and waypoints wait
+ * for it a moment rather than open the seed's folder, which may hold another world. A server may
+ * send one if it declared one of the channels that come with IDs, already sent one since the
+ * player joined, or named a world before (there's a folder for it). Once a level has a folder, it
+ * keeps it: an ID that comes later only names the levels after it. Moving a world's map and
+ * waypoints while they're open loses what's being written or edited.
+ *
+ * <p>Maps saved under the seed before Diorama read level IDs stay there. Which of the server's
+ * worlds they belong to can't be told: on a network whose servers share a seed, it's all of them
+ * merged, and a server that sends no ID still uses the folder.
  */
 public final class WorldKey {
 	/** How long to wait for a level ID after joining a server that may send one. */
@@ -55,11 +60,15 @@ public final class WorldKey {
 		final long since = System.currentTimeMillis();
 		/** A folder was handed out for this level, so it doesn't start waiting later. */
 		boolean decided;
+		/** The ID the folder was named by when it was handed out, or null for the seed. */
+		@Nullable Integer named;
 	}
 
 	private static final Map<ClientLevel, Naming> LEVELS = new WeakHashMap<>();
 	/** The last ID this server sent since the player joined it, for levels it doesn't name. */
 	private static @Nullable Integer lastId;
+	/** Whether this server named a world on an earlier visit, once asked. See {@link #namedBefore}. */
+	private static @Nullable Boolean namedBefore;
 	/** This server let a wait run out without naming its world, so it isn't waited on again. */
 	private static boolean silent;
 	private static @Nullable Last last;
@@ -91,13 +100,16 @@ public final class WorldKey {
 			return null;
 		}
 		Naming naming = LEVELS.computeIfAbsent(level, l -> new Naming());
-		if (naming.id == null && !naming.decided && expectingId(naming)) {
-			return null;
+		if (!naming.decided) {
+			if (naming.id == null && expectingId(naming, data)) {
+				return null;
+			}
+			naming.decided = true;
+			naming.named = naming.id != null ? naming.id : lastId;
 		}
-		naming.decided = true;
-		Integer id = naming.id != null ? naming.id : lastId;
+		Integer id = naming.named;
 		// A server list entry can be edited in place, so its address and kind are checked too. A
-		// level's seed never changes, and its ID only through serverLevelId.
+		// level's seed never changes, and the ID its folder is named by is fixed once handed out.
 		boolean realm = data.isRealm();
 		Last seen = last;
 		if (seen != null && seen.matches(data, level, data.ip, realm, id)) {
@@ -130,8 +142,8 @@ public final class WorldKey {
 		return naming != null && !naming.decided;
 	}
 
-	private static boolean expectingId(Naming naming) {
-		if (silent || !XaeroChannels.listening() || lastId == null && !XaeroChannels.serverMayNameWorlds()) {
+	private static boolean expectingId(Naming naming, ServerData data) {
+		if (silent || !XaeroChannels.listening() || lastId == null && !XaeroChannels.serverMayNameWorlds() && !namedBefore(data)) {
 			return false;
 		}
 		if (System.currentTimeMillis() - naming.since < (lastId == null ? FIRST_WAIT_MS : LATER_WAIT_MS)) {
@@ -144,12 +156,32 @@ public final class WorldKey {
 		return false;
 	}
 
+	/**
+	 * Whether this address named one of its worlds on an earlier visit. Some servers send the ID
+	 * without declaring a channel, so this is the only sign they will again.
+	 */
+	private static boolean namedBefore(ServerData data) {
+		if (namedBefore == null) {
+			String named = idPrefix(data);
+			try (Stream<Path> worlds = Files.list(Minecraft.getInstance().gameDirectory.toPath().resolve(Diorama.MOD_ID))) {
+				namedBefore = worlds.anyMatch(world -> world.getFileName().toString().startsWith(named));
+			} catch (IOException e) {
+				namedBefore = false;
+			}
+		}
+		return namedBefore;
+	}
+
 	private static String address(ServerData data) {
 		return key(data.isRealm() ? "realms" : "server", data.ip);
 	}
 
+	private static String idPrefix(ServerData data) {
+		return address(data) + "-id-";
+	}
+
 	private static String idKey(ServerData data, int id) {
-		return address(data) + "-id-" + HexFormat.of().toHexDigits(id);
+		return idPrefix(data) + HexFormat.of().toHexDigits(id);
 	}
 
 	/** The folder for a server's world before Diorama read level IDs. */
@@ -158,16 +190,13 @@ public final class WorldKey {
 	}
 
 	/**
-	 * The server named the level the client is in. A map already open for it, under the seed or
-	 * the last ID, is dropped without saving: it only holds the loaded chunks, which the next map
-	 * takes again. A folder saved under the seed, with nothing saved under the ID yet, is moved
-	 * over: it's this world's map from before Diorama read IDs.
+	 * The server named the level the client is in. If the level already has a folder, it keeps
+	 * it, and the ID names the levels after it.
 	 */
 	public static void serverLevelId(int id) {
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel level = mc.level;
-		ServerData data = mc.getCurrentServer();
-		if (level == null || data == null || mc.getSingleplayerServer() != null) {
+		if (level == null || mc.getCurrentServer() == null || mc.getSingleplayerServer() != null) {
 			return;
 		}
 		Naming naming = LEVELS.computeIfAbsent(level, l -> new Naming());
@@ -177,35 +206,10 @@ public final class WorldKey {
 			return;
 		}
 		naming.id = id;
-		String key = idKey(data, id);
-		Diorama.LOGGER.info("The server names this world {}", HexFormat.of().toHexDigits(id));
-		MapSession.discardUnless(key);
-		Path seedFolder = folder(seedKey(data, level));
-		Path idFolder = folder(key);
-		if (Files.isDirectory(seedFolder) && !Files.exists(idFolder)) {
-			move(seedFolder, idFolder);
-		}
-	}
-
-	/** Moves a world's folder, retrying for a moment in case a background thread still has a file in it open. */
-	private static void move(Path from, Path to) {
-		for (int attempt = 1; ; attempt++) {
-			try {
-				Files.move(from, to);
-				Diorama.LOGGER.info("Moved this world's map from {} to {}", from.getFileName(), to.getFileName());
-				return;
-			} catch (IOException e) {
-				if (attempt == 10) {
-					Diorama.LOGGER.warn("Couldn't move {} to {}", from, to, e);
-					return;
-				}
-				try {
-					Thread.sleep(100);
-				} catch (InterruptedException interrupted) {
-					Thread.currentThread().interrupt();
-					return;
-				}
-			}
+		if (!naming.decided) {
+			Diorama.LOGGER.info("The server names this world {}", HexFormat.of().toHexDigits(id));
+		} else if (!Integer.valueOf(id).equals(naming.named)) {
+			Diorama.LOGGER.info("The server named this world {} after its map opened, so the name applies from the next world on", HexFormat.of().toHexDigits(id));
 		}
 	}
 
@@ -213,6 +217,7 @@ public final class WorldKey {
 	public static void onJoinOrLeave() {
 		LEVELS.clear();
 		lastId = null;
+		namedBefore = null;
 		silent = false;
 	}
 

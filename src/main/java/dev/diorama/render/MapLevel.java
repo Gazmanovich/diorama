@@ -739,26 +739,6 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Ends without saving anything, for a map that turned out to be in the wrong folder. Tiles
-	 * waiting to be written are dropped.
-	 */
-	public void discard() {
-		if (this.closed) {
-			return;
-		}
-		this.closed = true;
-		if (this.store != null) {
-			this.store.discard();
-		}
-		for (MapTile tile : this.tiles.values()) {
-			tile.close();
-		}
-		this.tiles.clear();
-		this.coverageVersion++;
-		this.chunks.clear();
-	}
-
-	/**
 	 * Saves surface bakes that finished since the last update, waiting a moment for the ones still
 	 * running: they hold the latest look of their tiles.
 	 */

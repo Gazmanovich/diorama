@@ -46,8 +46,6 @@ public final class MapSession {
 	private static long lastTallyLog;
 
 	private final ClientLevel level;
-	/** The world folder this map saves into, see {@link WorldKey}. */
-	private final @Nullable String key;
 	private final MapLevel map;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
@@ -55,7 +53,6 @@ public final class MapSession {
 
 	private MapSession(ClientLevel level, @Nullable String key) {
 		this.level = level;
-		this.key = key;
 		// The Nether's roof: its sky view looks down from just under it.
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
@@ -89,17 +86,6 @@ public final class MapSession {
 	public static void close() {
 		if (current != null) {
 			current.map.close();
-			current = null;
-		}
-	}
-
-	/**
-	 * Ends the session without saving if it isn't saving into this world folder: the server named
-	 * the world after the map opened. The next session maps the loaded chunks again.
-	 */
-	public static void discardUnless(String key) {
-		if (current != null && !key.equals(current.key)) {
-			current.map.discard();
 			current = null;
 		}
 	}
