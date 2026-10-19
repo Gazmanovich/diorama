@@ -29,6 +29,9 @@ stonecutter parameters {
 		"import net\\.fabricmc\\.fabric\\.api\\.client\\.keymapping\\.v1\\.KeyMappingHelper;" to "import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;",
 		"\\bKeyMappingHelper\\.registerKeyMapping\\(" to "KeyBindingHelper.registerKeyBinding(",
 		"\\bClientCommands\\b" to "ClientCommandManager",
+		// Fabric API's payload type registries.
+		"\\bPayloadTypeRegistry\\.clientboundPlay\\(" to "PayloadTypeRegistry.playS2C(",
+		"\\bPayloadTypeRegistry\\.serverboundPlay\\(" to "PayloadTypeRegistry.playC2S(",
 		// Chat lines moved into the multiplayer chat package.
 		"net\\.minecraft\\.client\\.multiplayer\\.chat\\.GuiMessage\\b" to "net.minecraft.client.GuiMessage",
 	)

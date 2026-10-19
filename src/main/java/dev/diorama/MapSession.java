@@ -47,16 +47,15 @@ public final class MapSession {
 	private boolean underground;
 	private MapStyle style = MapStyle.get();
 
-	private MapSession(ClientLevel level) {
+	private MapSession(ClientLevel level, @Nullable String key) {
 		this.level = level;
 		// The Nether's roof: its sky view looks down from just under it.
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
-		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level));
+		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
 	}
 
 	/** {@code .minecraft/diorama/<world>/<dimension>}, or null outside a world. */
-	private static @Nullable Path mapFolder(ClientLevel level) {
-		String key = WorldKey.current(level);
+	private static @Nullable Path mapFolder(ClientLevel level, @Nullable String key) {
 		if (key == null) {
 			return null;
 		}
@@ -112,14 +111,21 @@ public final class MapSession {
 		session.tickSession(mc);
 	}
 
-	/** The session for this level, starting a new one if the client moved to it. */
+	/**
+	 * The session for this level, starting a new one if the client moved to it. None while the
+	 * server may still name the world: its chunks are mapped once the folder is known.
+	 */
 	private static @Nullable MapSession forLevel(@Nullable ClientLevel level) {
 		if (current != null && current.level != level) {
 			current.map.close();
 			current = null;
 		}
 		if (level != null && current == null) {
-			current = new MapSession(level);
+			String key = WorldKey.current(level);
+			if (key == null && WorldKey.waiting(level)) {
+				return null;
+			}
+			current = new MapSession(level, key);
 			BlockLooks.invalidate();
 		}
 		return current;
