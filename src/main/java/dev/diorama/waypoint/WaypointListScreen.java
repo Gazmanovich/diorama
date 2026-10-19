@@ -152,12 +152,16 @@ public final class WaypointListScreen extends Screen {
 				this.rebuildWidgets();
 			}).build();
 		}
-		// A world with nothing left to import is the one the player picked before.
-		if (found.worlds().stream().anyMatch(world -> XaeroImport.missing(world, store).isEmpty())) {
+		if (found.worlds().stream().allMatch(world -> XaeroImport.missing(world, store).isEmpty())) {
 			return null;
 		}
 		return Button.builder(Component.translatable("diorama.xaero.import_pick"), b ->
 			this.minecraft.gui.setScreen(new XaeroWorldScreen(this, found.worlds()))).build();
+	}
+
+	/** What the last import brought in, or null before one. */
+	@Nullable Component imported() {
+		return this.imported;
 	}
 
 	/** Imports one of Xaero's worlds and says how it went. */

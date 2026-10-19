@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
@@ -59,9 +60,10 @@ public final class XaeroImport {
 	/**
 	 * One of Xaero's worlds for this world folder or server: {@code id} is the file name's first
 	 * part ({@code waypoints}, {@code mw$default}, {@code mw2,1,-3}), {@code name} what Xaero's
-	 * shows for it, if it has one.
+	 * shows for it, if it has one. {@code dimension} is the one dimension its waypoints are from,
+	 * or null for a world gathered from every dimension's file of that id.
 	 */
-	public record World(String id, @Nullable String name, List<Entry> entries, int destinationsSkipped) {
+	public record World(String id, @Nullable String name, @Nullable String dimension, List<Entry> entries) {
 		public String label() {
 			return this.name != null && !this.name.isBlank() ? this.name : this.id;
 		}
@@ -69,7 +71,8 @@ public final class XaeroImport {
 
 	/**
 	 * What Xaero's has for the world the client is in. {@code chosen} is the world Xaero's itself
-	 * would open, or null when that can't be told and the player has to pick from {@code worlds}.
+	 * would open, or null when that can't be told: then {@code worlds} lists each dimension's file
+	 * on its own for the player to pick from.
 	 */
 	public record Found(List<World> worlds, @Nullable World chosen) {
 	}
@@ -90,19 +93,19 @@ public final class XaeroImport {
 		}
 		IntegratedServer server = mc.getSingleplayerServer();
 		ServerData data = mc.getCurrentServer();
-		List<String> roots;
-		if (server != null) {
-			roots = singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
-		} else if (data != null && !data.isRealm()) {
-			roots = serverFolders(data.ip);
-		} else {
-			// Xaero's names a Realm by its owner and id, which only the Realms screen knows.
-			return null;
-		}
-		BlockPos spawn = mc.level.getRespawnData().pos();
-		String spawnId = "mw" + (spawn.getX() >> 6) + "," + (spawn.getY() >> 6) + "," + (spawn.getZ() >> 6);
-		int height = mc.player != null ? mc.player.getBlockY() : 64;
 		try {
+			List<String> roots;
+			if (server != null) {
+				roots = singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			} else if (data != null && !data.isRealm()) {
+				roots = serverFolders(data.ip, byAddress(FabricLoader.getInstance().getConfigDir().resolve("xaero").resolve("minimap").resolve("client.cfg")));
+			} else {
+				// Xaero's names a Realm by its owner and id, which only the Realms screen knows.
+				return null;
+			}
+			BlockPos spawn = mc.level.getRespawnData().pos();
+			String spawnId = "mw" + (spawn.getX() >> 6) + "," + (spawn.getY() >> 6) + "," + (spawn.getZ() >> 6);
+			int height = mc.player != null ? mc.player.getBlockY() : 64;
 			return find(base, roots, server != null, spawnId, height);
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't read Xaero's Minimap waypoints from {}", base, e);
@@ -120,7 +123,8 @@ public final class XaeroImport {
 		if (root == null) {
 			return null;
 		}
-		Map<String, World> worlds = new LinkedHashMap<>();
+		// Each world id's files, one per dimension.
+		Map<String, List<World>> worlds = new LinkedHashMap<>();
 		try (Stream<Path> dimensions = Files.list(root)) {
 			for (Path folder : dimensions.filter(Files::isDirectory).sorted().toList()) {
 				String dimension = dimension(folder.getFileName().toString());
@@ -145,59 +149,50 @@ public final class XaeroImport {
 							id = parts[0];
 							name = parts[1].replace("%us%", "_").replace("§§", ":");
 						}
-						if (Files.size(file) > MAX_FILE) {
-							Diorama.LOGGER.warn("Skipping {}: too big for a Xaero's Minimap waypoint file", file);
-							continue;
-						}
-						List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-						World parsed = parse(lines, dimension, height);
-						World previous = worlds.get(id);
-						if (previous == null) {
-							worlds.put(id, new World(id, name, parsed.entries(), parsed.destinationsSkipped()));
-						} else {
-							List<Entry> entries = new ArrayList<>(previous.entries());
-							entries.addAll(parsed.entries());
-							worlds.put(id, new World(id, previous.name() != null ? previous.name() : name, entries,
-								previous.destinationsSkipped() + parsed.destinationsSkipped()));
-						}
+						worlds.computeIfAbsent(id, key -> new ArrayList<>()).add(new World(id, name, dimension, parse(read(file), dimension, height)));
 					}
 				}
 			}
 		}
-		// Decided before dropping empty worlds: if Xaero's own world for here is empty, another
-		// world's waypoints aren't this one's.
-		boolean shared = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER);
-		World chosen = shared ? null : chosen(worlds, singleplayer, root.resolve("config.txt"), spawnId);
+		String chosenId = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER) ? null
+			: chosenId(worlds.keySet(), singleplayer, root.resolve("config.txt"), spawnId);
+		List<World> chosen = chosenId == null ? null : worlds.get(chosenId);
 		if (chosen != null) {
-			return chosen.entries().isEmpty() ? null : new Found(List.of(chosen), chosen);
+			// Xaero's uses the same id in every dimension, so its world here is all of them.
+			List<Entry> entries = chosen.stream().flatMap(world -> world.entries().stream()).toList();
+			String name = chosen.stream().map(World::name).filter(n -> n != null).findFirst().orElse(null);
+			World world = new World(chosenId, name, null, entries);
+			// If Xaero's own world for here is empty, another world's waypoints aren't this one's.
+			return entries.isEmpty() ? null : new Found(List.of(world), world);
 		}
-		List<World> candidates = worlds.values().stream().filter(world -> !world.entries().isEmpty()).toList();
+		List<World> candidates = worlds.values().stream().flatMap(List::stream).filter(world -> !world.entries().isEmpty()).toList();
 		return candidates.isEmpty() ? null : new Found(candidates, null);
 	}
 
 	/**
-	 * The world Xaero's would open, following its own rules, or null when that can't be told from
-	 * here. Singleplayer: {@code waypoints}. On a server, the world comes from the server's level
-	 * id when the server runs Xaero's (an {@code mw$<id>} name this can't see), else from Xaero's
-	 * World Map when installed ({@code mw$default} unless the player set it up otherwise), else
-	 * from Xaero's config: the world it pinned on the first visit (multiworld detection off, the
-	 * default) or the one for the current spawn (detection on).
+	 * The id of the world Xaero's would open, following its own rules, or null when that can't be
+	 * told from here. Singleplayer: {@code waypoints}. On a server, the world comes from the
+	 * server's level id when the server runs Xaero's (an {@code mw$<id>} name this can't see),
+	 * else from Xaero's World Map when installed (its own choice per dimension, {@code mw$default}
+	 * unless the player set it up otherwise), else from Xaero's config: the world it pinned on
+	 * the first visit (multiworld detection off, the default) or the one for the current spawn
+	 * (detection on).
 	 */
-	private static @Nullable World chosen(Map<String, World> worlds, boolean singleplayer, Path config, String spawnId) throws IOException {
+	private static @Nullable String chosenId(Set<String> ids, boolean singleplayer, Path config, String spawnId) throws IOException {
 		if (singleplayer) {
-			return worlds.get("waypoints");
+			return "waypoints";
 		}
-		boolean named = worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"));
-		if (named) {
-			// World Map's default is the one name that doesn't depend on the server.
-			return worlds.size() == 1 ? worlds.get("mw$default") : null;
+		if (ids.stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"))) {
+			// World Map's default is the one such name that doesn't depend on the server or on
+			// how the player set World Map up.
+			return ids.equals(Set.of("mw$default")) ? "mw$default" : null;
 		}
 		if (!Files.isRegularFile(config)) {
 			return null;
 		}
 		boolean detection = false;
 		String pinned = null;
-		for (String line : Files.readAllLines(config, StandardCharsets.UTF_8)) {
+		for (String line : read(config)) {
 			String[] parts = line.split(":");
 			if (parts.length >= 2 && parts[0].equals("usingMultiworldDetection")) {
 				detection = parts[1].equals("true");
@@ -205,8 +200,33 @@ public final class XaeroImport {
 				pinned = parts[1];
 			}
 		}
-		String id = detection ? spawnId : pinned;
-		return id == null ? null : worlds.get(id);
+		return detection ? spawnId : pinned;
+	}
+
+	/**
+	 * Xaero's "differentiate by server address" option from its client config: true or false, or
+	 * null when the file or the line isn't there (older Xaero's kept its options elsewhere).
+	 */
+	static @Nullable Boolean byAddress(Path clientConfig) throws IOException {
+		if (!Files.isRegularFile(clientConfig)) {
+			return null;
+		}
+		for (String line : read(clientConfig)) {
+			String[] parts = line.split("=");
+			if (parts.length == 2 && parts[0].trim().equals("differentiate_by_server_address")) {
+				return parts[1].trim().equals("true");
+			}
+		}
+		return null;
+	}
+
+	/** A file's lines, or none if it's too big to be one of Xaero's. */
+	private static List<String> read(Path file) throws IOException {
+		if (Files.size(file) > MAX_FILE) {
+			Diorama.LOGGER.warn("Skipping {}: too big for a Xaero's Minimap file", file);
+			return List.of();
+		}
+		return Files.readAllLines(file, StandardCharsets.UTF_8);
 	}
 
 	/** The first folder in {@code names} under {@code base}, matching case the way Xaero's does. */
@@ -237,10 +257,14 @@ public final class XaeroImport {
 
 	/**
 	 * Xaero's folder names for a server address, newest naming first (Xaero's renames older ones
-	 * when it starts, but a player who stopped updating it has those), then the shared folder
-	 * Xaero's uses when told not to tell servers apart by address.
+	 * when it starts, but a player who stopped updating it has those). {@code byAddress} is
+	 * Xaero's option to tell servers apart by address: when it's off, every server shares one
+	 * folder; when it isn't known, that folder comes last.
 	 */
-	public static List<String> serverFolders(String address) {
+	public static List<String> serverFolders(String address, @Nullable Boolean byAddress) {
+		if (Boolean.FALSE.equals(byAddress)) {
+			return List.of(SHARED_FOLDER);
+		}
 		List<String> names = new ArrayList<>();
 		for (int version = 4; version >= 0; version--) {
 			String name = serverFolder(address, version);
@@ -248,7 +272,9 @@ public final class XaeroImport {
 				names.add(name);
 			}
 		}
-		names.add(SHARED_FOLDER);
+		if (byAddress == null) {
+			names.add(SHARED_FOLDER);
+		}
 		return names;
 	}
 
@@ -295,9 +321,8 @@ public final class XaeroImport {
 	 * never reach the file.) The last field marks destinations, but Xaero's sets it on death
 	 * points as well; only an ordinary waypoint carrying it is a one-off destination.
 	 */
-	static World parse(List<String> lines, String dimension, int height) {
+	static List<Entry> parse(List<String> lines, String dimension, int height) {
 		List<Entry> entries = new ArrayList<>();
-		int destinations = 0;
 		for (String line : lines) {
 			String[] args = line.split(":");
 			if (args.length < 10 || !args[0].equalsIgnoreCase("waypoint")) {
@@ -311,7 +336,6 @@ public final class XaeroImport {
 				int color = Integer.parseInt(args[6]);
 				int type = Integer.parseInt(args[8]);
 				if (type == 3 || (type == 0 && args.length > 13 && args[13].equals("true"))) {
-					destinations++;
 					continue;
 				}
 				if (Math.abs(x) > MAX_HORIZONTAL || Math.abs(z) > MAX_HORIZONTAL || Math.abs(y) > MAX_VERTICAL) {
@@ -332,7 +356,7 @@ public final class XaeroImport {
 				// Xaero's skips a line it can't read, and so do we.
 			}
 		}
-		return new World("", null, entries, destinations);
+		return entries;
 	}
 
 	/** Xaero's names its death points with translation keys; the name it shows for them. */
