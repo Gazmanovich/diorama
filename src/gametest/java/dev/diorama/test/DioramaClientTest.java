@@ -57,6 +57,12 @@ import org.jspecify.annotations.Nullable;
  * what the map actually draws, and asserts what can be measured along the way.
  */
 public class DioramaClientTest implements FabricClientGameTest {
+	/**
+	 * The test servers' port: free when the run starts, so test runs on one machine don't collide,
+	 * and the same for every server in the run, so they all share one address.
+	 */
+	private static final int SERVER_PORT = freePort();
+
 	@Override
 	public void runTest(ClientGameTestContext context) {
 		context.getInput().resizeWindow(1600, 900);
@@ -147,7 +153,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * first finds them again, even after its spawn moved.
 	 */
 	private static void multiplayer(ClientGameTestContext context) {
-		String address = WorldKey.key("server", "localhost:25601");
+		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
 			// Start from nothing saved for this address.
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
@@ -252,7 +258,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown, byte @Nullable [] levelId) {
 		levelIdOnJoin = levelId;
 		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", "25601");
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
 		properties.setProperty("gamemode", "creative");
 		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
@@ -416,6 +422,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!seen) {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
+		}
+	}
+
+	private static int freePort() {
+		try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+			return socket.getLocalPort();
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
 		}
 	}
 
