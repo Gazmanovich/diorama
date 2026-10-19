@@ -1,7 +1,7 @@
 package dev.diorama.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-//? if >=26.1 {
+//? if >=26.2 {
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
@@ -36,7 +36,7 @@ final class FogTextures {
 	}
 
 	static GpuTexture createTexture(String label, int size) {
-		//? if >=26.1 {
+		//? if >=26.2 {
 		return RenderSystem.getDevice().createTexture(
 			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
 		);
@@ -51,7 +51,7 @@ final class FogTextures {
 		ByteBuffer buffer = MemoryUtil.memAlloc(size * size * 4).order(ByteOrder.LITTLE_ENDIAN);
 		try {
 			buffer.asIntBuffer().put(abgr);
-			//? if >=26.1 {
+			//? if >=26.2 {
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, 0, 0, 0, 0, size, size);
 			//?} else {
 			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, NativeImage.Format.RGBA, 0, 0, 0, 0, size, size);

@@ -1027,7 +1027,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			throw new AssertionError("Home is missing");
 		});
-		//? if >=26.1 {
+		//? if >=26.2 {
 		context.getInput().lookAt(home);
 		//?} else {
 		/*context.runOnClient(mc -> mc.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, net.minecraft.world.phys.Vec3.atCenterOf(home)));
