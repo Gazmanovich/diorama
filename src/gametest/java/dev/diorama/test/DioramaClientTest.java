@@ -784,7 +784,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 		// Open map rebound to C, which the map also uses for caves: the player's binding wins, so
 		// pressing it again closes the map.
+		// Before 1.21.9 a key reaches only one binding, and vanilla's Save Toolbar Activator is on C,
+		// so a player moving Open map to C clears that one too; the test does the same.
 		context.runOnClient(mc -> {
+			mc.options.keySaveHotbarActivator.setKey(InputConstants.UNKNOWN);
 			DioramaClient.OPEN_MAP.setKey(InputConstants.getKey("key.keyboard.c"));
 			net.minecraft.client.KeyMapping.resetMapping();
 		});
@@ -796,6 +799,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
+			mc.options.keySaveHotbarActivator.setKey(mc.options.keySaveHotbarActivator.getDefaultKey());
 			DioramaClient.OPEN_MAP.setKey(DioramaClient.OPEN_MAP.getDefaultKey());
 			net.minecraft.client.KeyMapping.resetMapping();
 		});
