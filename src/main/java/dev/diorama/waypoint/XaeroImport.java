@@ -164,9 +164,10 @@ public final class XaeroImport {
 		}
 		// On a server Xaero's picks by what the server says and how World Map is set up, which
 		// its files don't fully record, so the player confirms. World Map picks a world per
-		// dimension, so with its names around each dimension's file is offered on its own.
-		boolean perDimension = worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"));
+		// dimension, and the shared folder holds every server's files under the same ids, so in
+		// either case each dimension's file is offered on its own.
 		boolean shared = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER);
+		boolean perDimension = shared || worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"));
 		String likely = singleplayer || shared || perDimension ? null : xaeroChoice(root.resolve("config.txt"), spawnId);
 		List<World> candidates = new ArrayList<>();
 		for (Map.Entry<String, List<World>> world : worlds.entrySet()) {

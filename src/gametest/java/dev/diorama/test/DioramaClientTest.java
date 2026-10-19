@@ -1438,6 +1438,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (perDimension.worlds().size() != 4 || perDimension.worlds().stream().anyMatch(w -> w.likely() || w.dimension() == null)) {
 					throw new AssertionError("With World Map's world in the mix, the server import offers " + perDimension.worlds());
 				}
+				// With Xaero's told not to tell servers apart, one folder holds every server's files
+				// under the same ids: each dimension stays its own row, and none is marked.
+				java.nio.file.Path shared = base.resolve("Multiplayer_Any Address");
+				xaeroFixture("server/config.txt", shared.resolve("config.txt"));
+				xaeroFixture("server/overworld.txt", shared.resolve("dim%0").resolve("mw-1,1,0_1.txt"));
+				xaeroFixture("server/nether.txt", shared.resolve("dim%-1").resolve("mw-1,1,0_1.txt"));
+				XaeroImport.Found anyServer = XaeroImport.find(base, XaeroImport.serverFolders("localhost:25580", false), false, "mw7,1,3", 64);
+				if (anyServer.worlds().size() != 2 || anyServer.worlds().stream().anyMatch(w -> w.likely() || w.dimension() == null)) {
+					throw new AssertionError("The shared server folder offers " + anyServer.worlds());
+				}
 				org.apache.commons.io.FileUtils.deleteDirectory(base.toFile());
 			} catch (java.io.IOException e) {
 				throw new AssertionError(e);
