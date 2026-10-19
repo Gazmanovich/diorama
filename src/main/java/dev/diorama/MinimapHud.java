@@ -14,6 +14,7 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -53,8 +54,11 @@ public final class MinimapHud implements HudElement {
 		//?} else {
 		/*if (session == null || player == null || mc.level == null || !settings.minimap || mc.options.hideGui
 		*///?}
-			|| mc.gui.screen() instanceof MapScreen || !ServerRules.minimapAllowed()) {
-			// Not drawn: a hold picks up afresh when it is again, rather than having run out meanwhile.
+			|| mc.gui.screen() instanceof MapScreen || mc.gui.screen() instanceof AbstractContainerScreen<?>
+			|| !ServerRules.minimapAllowed()) {
+			// Not drawn. Inventories and chests count, because the item lists other mods (JEI, REI,
+			// EMI) put beside them run into the minimap's corner.
+			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
 			return;
 		}
