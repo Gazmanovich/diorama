@@ -15,7 +15,6 @@ import com.mojang.blaze3d.platform.NativeImage;
 
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldBuilder;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -137,7 +136,7 @@ final class ShimContext implements ClientGameTestContext {
 		// The main render target still holds it when the next frame's tasks run.
 		ShimThreading.waitFrames(1);
 		return computeOnClient(minecraft -> {
-			Path folder = FabricLoader.getInstance().getGameDir().resolve("screenshots");
+			Path folder = minecraft.gameDirectory.toPath().resolve("screenshots");
 			Path file = folder.resolve("%04d_%s.png".formatted(SCREENSHOT_COUNTER.getAndIncrement(), name));
 			try (NativeImage image = Screenshot.takeScreenshot(minecraft.getMainRenderTarget())) {
 				Files.createDirectories(folder);

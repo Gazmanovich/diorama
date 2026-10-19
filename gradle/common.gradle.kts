@@ -1,16 +1,16 @@
-// Shared by both build scripts: Java level, resource expansion and the jar's contents.
+// Shared by every build script: Java level, resource expansion and the jar's contents.
 val javaVersion = (project.property("java_version") as String).toInt()
 val resourceProps = mapOf(
 	"version" to project.version.toString(),
 	"minecraft" to project.property("minecraft_dep") as String,
 	"loader" to project.property("loader_version") as String,
 	"java" to javaVersion.toString(),
-)
+) + listOfNotNull(project.findProperty("neoforge_dep")?.let { "neoforge" to it as String })
 
 tasks.named<ProcessResources>("processResources") {
 	val props = resourceProps
 	inputs.properties(props)
-	filesMatching(listOf("fabric.mod.json", "diorama.mixins.json")) {
+	filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml", "diorama.mixins.json")) {
 		expand(props)
 	}
 }

@@ -2,6 +2,7 @@ plugins {
 	id("dev.kikugie.stonecutter")
 	id("net.fabricmc.fabric-loom") version "1.18-SNAPSHOT" apply false
 	id("net.fabricmc.fabric-loom-remap") version "1.18-SNAPSHOT" apply false
+	id("net.neoforged.moddev") version "2.0.148" apply false
 }
 
 // The version the source files are written for. Keep it at the newest version: the renames below
@@ -10,6 +11,10 @@ plugins {
 stonecutter active "26.3"
 
 stonecutter parameters {
+	// The mod loader the jar is for, as //? if fabric and //? if neoforge conditions. Versions named
+	// <minecraft>-neoforge are NeoForge (settings.gradle.kts); the rest are Fabric.
+	constants.match(if (current.project.endsWith("-neoforge")) "neoforge" else "fabric", "fabric", "neoforge")
+
 	// Names that changed without changing behaviour, as regexes from the newer spelling to the
 	// older one, applied to every version before the rename. One-way: the reverse pattern never
 	// matches. Renamed in 26.1:
@@ -25,10 +30,9 @@ stonecutter parameters {
 		"\\.addGuiElement\\(" to ".submitGuiElement(",
 		// ChunkPos was a class with fields.
 		"getPos\\(\\)\\.([xz])\\(\\)" to "getPos().$1",
-		// Fabric API's key binding and client command helpers.
+		// Fabric API's key binding helper.
 		"import net\\.fabricmc\\.fabric\\.api\\.client\\.keymapping\\.v1\\.KeyMappingHelper;" to "import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;",
 		"\\bKeyMappingHelper\\.registerKeyMapping\\(" to "KeyBindingHelper.registerKeyBinding(",
-		"\\bClientCommands\\b" to "ClientCommandManager",
 		// Fabric API's payload type registries.
 		"\\bPayloadTypeRegistry\\.clientboundPlay\\(" to "PayloadTypeRegistry.playS2C(",
 		"\\bPayloadTypeRegistry\\.serverboundPlay\\(" to "PayloadTypeRegistry.playC2S(",

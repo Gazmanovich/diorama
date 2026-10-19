@@ -10,7 +10,6 @@ import com.mojang.blaze3d.platform.InputConstants;
 
 import dev.diorama.gameshim.mixin.KeyboardHandlerAccessor;
 import dev.diorama.gameshim.mixin.MouseHandlerAccessor;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.KeyMapping;
 import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.minecraft.client.Minecraft;
@@ -54,7 +53,8 @@ final class ShimInput implements TestInput {
 	@Override
 	public void pressKey(KeyMapping keyMapping) {
 		ShimThreading.checkOnTestThread("pressKey");
-		InputConstants.Key key = KeyBindingHelper.getBoundKeyOf(keyMapping);
+		// The key it is bound to, as the options file saves it.
+		InputConstants.Key key = InputConstants.getKey(keyMapping.saveString());
 		if (key.getType() == InputConstants.Type.MOUSE) {
 			pressMouse(key.getValue());
 			return;

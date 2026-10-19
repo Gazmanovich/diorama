@@ -2,13 +2,13 @@ package dev.diorama.waypoint;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
@@ -142,22 +142,25 @@ public final class WaypointShare {
 			.withHoverEvent(new HoverEvent.ShowText(Component.translatable("diorama.share.add_hover", shared.name(), shared.x(), y, shared.z()))));
 	}
 
-	/** {@code /diorama waypoint add <x> <y> <z> <colour> "<dimension>" "<initials>" <name>}, which the "Add" link runs. */
-	public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
-		dispatcher.register(ClientCommands.literal("diorama")
-			.then(ClientCommands.literal("waypoint")
-				.then(ClientCommands.literal("add")
-					.then(ClientCommands.argument("x", IntegerArgumentType.integer())
-						.then(ClientCommands.argument("y", IntegerArgumentType.integer())
-							.then(ClientCommands.argument("z", IntegerArgumentType.integer())
-								.then(ClientCommands.argument("colour", IntegerArgumentType.integer(0, 15))
-									.then(ClientCommands.argument("dimension", StringArgumentType.string())
-										.then(ClientCommands.argument("initials", StringArgumentType.string())
-											.then(ClientCommands.argument("name", StringArgumentType.greedyString())
+	/**
+	 * {@code /diorama waypoint add <x> <y> <z> <colour> "<dimension>" "<initials>" <name>}, which the
+	 * "Add" link runs. Built with Brigadier alone, so it goes in either loader's client commands.
+	 */
+	public static <S> void register(CommandDispatcher<S> dispatcher) {
+		dispatcher.register(LiteralArgumentBuilder.<S>literal("diorama")
+			.then(LiteralArgumentBuilder.<S>literal("waypoint")
+				.then(LiteralArgumentBuilder.<S>literal("add")
+					.then(RequiredArgumentBuilder.<S, Integer>argument("x", IntegerArgumentType.integer())
+						.then(RequiredArgumentBuilder.<S, Integer>argument("y", IntegerArgumentType.integer())
+							.then(RequiredArgumentBuilder.<S, Integer>argument("z", IntegerArgumentType.integer())
+								.then(RequiredArgumentBuilder.<S, Integer>argument("colour", IntegerArgumentType.integer(0, 15))
+									.then(RequiredArgumentBuilder.<S, String>argument("dimension", StringArgumentType.string())
+										.then(RequiredArgumentBuilder.<S, String>argument("initials", StringArgumentType.string())
+											.then(RequiredArgumentBuilder.<S, String>argument("name", StringArgumentType.greedyString())
 												.executes(WaypointShare::add)))))))))));
 	}
 
-	private static int add(CommandContext<FabricClientCommandSource> context) {
+	private static <S> int add(CommandContext<S> context) {
 		String name = StringArgumentType.getString(context, "name");
 		Waypoint waypoint = new Waypoint(
 			cut(name, MAX_NAME),

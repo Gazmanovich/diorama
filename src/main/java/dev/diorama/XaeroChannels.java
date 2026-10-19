@@ -2,9 +2,11 @@ package dev.diorama;
 
 import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
+//? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
+//?}
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -66,7 +68,10 @@ public final class XaeroChannels {
 		}
 	}
 
-	/** Listens on the channels no Xaero mod has. Call once, at startup. */
+	//? if fabric {
+	// Listens on the channels no Xaero mod has. Call once, at startup. Fabric only so far: on
+	// NeoForge nothing listens, so worlds are named by their seed and the radar shows no players
+	// the server tracks.
 	public static void register() {
 		// Fair-Play Minimap used the minimap's channel name in some versions.
 		listen(MINIMAP, "xaerominimap", "xaerominimapfair");
@@ -87,6 +92,7 @@ public final class XaeroChannels {
 		// Paper drops messages on channels the client hasn't registered.
 		ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
 	}
+	//?}
 
 	/** The whole message is read, as the game rejects packets with bytes left over. Public for tests. */
 	public static StreamCodec<FriendlyByteBuf, Message> codec(CustomPacketPayload.Type<Message> type) {
@@ -101,6 +107,7 @@ public final class XaeroChannels {
 		});
 	}
 
+	//? if fabric {
 	private static void receive(Message message) {
 		switch (message.kind()) {
 			case LEVEL_ID -> {
@@ -147,6 +154,7 @@ public final class XaeroChannels {
 			return null;
 		}
 	}
+	//?}
 
 	/** Left the server, or a network moved the player to another of its servers. */
 	public static void onJoinOrLeave() {
@@ -163,6 +171,10 @@ public final class XaeroChannels {
 	 * MapModCompanion does. Servers declare their channels as the player joins.
 	 */
 	static boolean serverMayNameWorlds() {
+		//? if fabric {
 		return ClientPlayNetworking.canSend(MINIMAP.id()) || ClientPlayNetworking.canSend(WORLD_MAP.id()) || ClientPlayNetworking.canSend(WORLD_INFO);
+		//?} else {
+		/*return false;
+		*///?}
 	}
 }

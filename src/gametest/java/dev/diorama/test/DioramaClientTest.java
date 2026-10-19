@@ -146,12 +146,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
+		// Level IDs and tracked players come over Xaero's channels, which Diorama listens on through
+		// Fabric API networking, on Fabric only so far.
+		//? if fabric {
 		if (tests.contains("server-id")) {
 			serverLevelIds(context);
 		}
 		if (tests.contains("tracked-players")) {
 			trackedPlayers(context);
 		}
+		//?}
 	}
 
 	/**
@@ -198,6 +202,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * on the first visit, and keeps it for that visit when the ID comes. From the next visit on,
 	 * the map waits for the ID, since the address named a world before.
 	 */
+	//? if fabric {
 	private static void serverLevelIds(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
@@ -253,6 +258,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("The seed's folder lost its waypoint or took another world's: " + old);
 		}
 	}
+	//?}
 
 	/** Bob's offline-mode UUID, and his position as XaeroTracker sent it: x 640.5, y 120, z 30.5 in the overworld. */
 	private static final UUID BOB = UUID.fromString("faa5dca3-c3d4-354b-ae1b-dde9e5a14b3b");
@@ -266,6 +272,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * with their face and name, move when the server says they moved, hide under fair play, and
 	 * go when the server stops tracking them.
 	 */
+	//? if fabric {
 	private static void trackedPlayers(ClientGameTestContext context) {
 		java.util.Properties properties = new java.util.Properties();
 		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
@@ -347,6 +354,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
 			new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, message[0], java.util.Arrays.copyOfRange(message, 1, message.length)));
 	}
+	//?}
 
 	private static int indexAfter(byte[] bytes, byte[] pattern) {
 		for (int i = 0; i + pattern.length <= bytes.length; i++) {
