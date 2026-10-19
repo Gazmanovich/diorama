@@ -22,7 +22,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Every waypoint in the current dimension, nearest first, with buttons to edit, hide, delete and,
- * for players allowed to use /tp, teleport.
+ * for players allowed to use /tp, teleport. When Xaero's Minimap has waypoints for this world that
+ * aren't here yet, a button imports them.
  */
 public final class WaypointListScreen extends Screen {
 	private static final int ROW = 24;
@@ -41,6 +42,11 @@ public final class WaypointListScreen extends Screen {
 	private boolean canTeleport;
 	/** Set by the add-waypoint key; tick() opens the editor. */
 	private boolean newWaypointPressed;
+	private boolean xaeroRead;
+	private XaeroImport.@Nullable Found xaero;
+	/** What the last import brought in, shown above the import button. */
+	private @Nullable Component imported;
+	private boolean importButtonShown;
 
 	public WaypointListScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.waypoints.title"));
@@ -56,8 +62,14 @@ public final class WaypointListScreen extends Screen {
 			this.rows.addAll(store.in(this.minecraft.level.dimension().identifier().toString()));
 			this.rows.sort(Comparator.comparingDouble(w -> w.distanceTo(player.getX(), player.getY(), player.getZ())));
 		}
+		if (!this.xaeroRead) {
+			this.xaeroRead = true;
+			this.xaero = XaeroImport.find();
+		}
+		Button importButton = this.importButton(store);
+		int importRow = (importButton != null ? ROW : 0) + (this.imported != null ? 12 : 0);
 		this.listTop = 40;
-		this.visibleRows = Math.max(1, (this.height - this.listTop - 40) / ROW);
+		this.visibleRows = Math.max(1, (this.height - this.listTop - 40 - importRow) / ROW);
 		this.scroll = Math.max(0, Math.min(this.scroll, this.rows.size() - this.visibleRows));
 		int left = (this.width - LIST_WIDTH) / 2;
 		//? if >=1.21.11 {
@@ -96,6 +108,11 @@ public final class WaypointListScreen extends Screen {
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))).bounds(bx, y, 44, 20).build());
 		}
 		int bottom = this.height - 30;
+		this.importButtonShown = importButton != null;
+		if (importButton != null) {
+			this.addRenderableWidget(importButton);
+			importButton.setRectangle(204, 20, this.width / 2 - 102, bottom - ROW);
+		}
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 			.bounds(this.width / 2 - 102, bottom, 100, 20).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose()).bounds(this.width / 2 + 2, bottom, 100, 20).build());
@@ -148,6 +165,57 @@ public final class WaypointListScreen extends Screen {
 				*///?}
 			}
 		}
+		if (this.imported != null) {
+			int below = this.importButtonShown ? ROW : 0;
+			graphics.centeredText(this.font, this.imported, this.width / 2, this.height - 30 - below - 12, 0xFFA0E0A0);
+		}
+	}
+
+	/**
+	 * "Import from Xaero's Minimap (N)" when Xaero's has waypoints for this singleplayer world
+	 * that aren't here; on a server, or when it's unclear which of Xaero's worlds this is, the
+	 * button asks the player.
+	 */
+	private @Nullable Button importButton(@Nullable WaypointStore store) {
+		XaeroImport.Found found = this.xaero;
+		if (found == null || store == null) {
+			return null;
+		}
+		XaeroImport.World chosen = found.chosen();
+		if (chosen != null) {
+			int count = XaeroImport.missing(chosen, store).size();
+			return count == 0 ? null : Button.builder(Component.translatable("diorama.xaero.import", count), b -> {
+				this.importFrom(chosen);
+				this.rebuildWidgets();
+			}).build();
+		}
+		if (found.worlds().stream().allMatch(world -> XaeroImport.missing(world, store).isEmpty())) {
+			return null;
+		}
+		return Button.builder(Component.translatable("diorama.xaero.import_pick"), b ->
+			this.minecraft.gui.setScreen(new XaeroWorldScreen(this, found.worlds()))).build();
+	}
+
+	/** What the last import brought in, or null before one. */
+	@Nullable Component imported() {
+		return this.imported;
+	}
+
+	/** Imports one of Xaero's worlds and says how it went. */
+	void importFrom(XaeroImport.World world) {
+		WaypointStore store = WaypointStore.get();
+		if (store == null || this.minecraft.level == null) {
+			return;
+		}
+		List<Waypoint> added = XaeroImport.importInto(world, store);
+		String here = this.minecraft.level.dimension().identifier().toString();
+		long elsewhere = added.stream().filter(w -> !w.dimension.equals(here)).count();
+		Component count = added.size() == 1
+			? Component.translatable("diorama.xaero.count_one")
+			: Component.translatable("diorama.xaero.count", added.size());
+		this.imported = elsewhere == 0
+			? Component.translatable("diorama.xaero.imported", count)
+			: Component.translatable("diorama.xaero.imported_elsewhere", count, elsewhere);
 	}
 
 	/** The text, cut to the width with an ellipsis the way vanilla clips a label, if it's wider. */
