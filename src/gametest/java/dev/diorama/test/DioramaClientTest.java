@@ -176,9 +176,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * A network's two servers whose worlds share a seed, each naming its world with a level ID a
 	 * second after the player joins, as MapModCompanion does: they keep separate maps and
-	 * waypoints. A server that names its world without declaring a channel, on the first visit,
-	 * gets the seed's folder, and keeps it for that visit when the ID comes. Coming back, the
-	 * map waits for the ID, since the address named a world before.
+	 * waypoints. A server that names its world without declaring a channel gets the seed's folder
+	 * on the first visit, and keeps it for that visit when the ID comes. From the next visit on,
+	 * the map waits for the ID, since the address named a world before.
 	 */
 	private static void serverLevelIds(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:25601");
@@ -214,11 +214,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!seeded.startsWith(address + "-world-")) {
 			throw new AssertionError("A level ID after the map opened moved it out of the seed's folder: " + seeded);
 		}
+		// The ID came, so this time the map waits for it, still with no channel declared.
+		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of(), List.of("Old Camp"), false, LOBBY_ID);
 		// Listen where MapModCompanion does, so the server declares a channel that comes with
 		// level IDs, as servers that send them do.
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(WORLD_INFO, (message, ctx) -> {
 		});
-		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of(), List.of("Old Camp"), false, LOBBY_ID);
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
 		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);

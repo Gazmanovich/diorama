@@ -191,13 +191,20 @@ public final class WorldKey {
 
 	/**
 	 * The server named the level the client is in. If the level already has a folder, it keeps
-	 * it, and the ID names the levels after it.
+	 * it, and the ID names the levels after it. The ID's folder is made either way, so the next
+	 * visit knows to wait for the ID (see {@link #namedBefore}).
 	 */
 	public static void serverLevelId(int id) {
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel level = mc.level;
-		if (level == null || mc.getCurrentServer() == null || mc.getSingleplayerServer() != null) {
+		ServerData data = mc.getCurrentServer();
+		if (level == null || data == null || mc.getSingleplayerServer() != null) {
 			return;
+		}
+		try {
+			Files.createDirectories(folder(idKey(data, id)));
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't make the folder for this server's world {}", HexFormat.of().toHexDigits(id), e);
 		}
 		Naming naming = LEVELS.computeIfAbsent(level, l -> new Naming());
 		lastId = id;
