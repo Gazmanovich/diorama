@@ -60,14 +60,27 @@ public record QuadElement(
 		);
 	}
 
+	//? if >=1.21.9 {
 	@Override
 	public void buildVertices(VertexConsumer consumer) {
 		for (int i = 0; i < 4; i++) {
-			VertexConsumer vertex = consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1]);
-			if (this.uvs != null) {
-				vertex.setUv(this.uvs[i * 2], this.uvs[i * 2 + 1]);
-			}
-			vertex.setColor(this.color);
+			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1]), i);
 		}
+	}
+	//?} else {
+	/*// GUI elements were drawn at a depth the renderer handed in.
+	@Override
+	public void buildVertices(VertexConsumer consumer, float z) {
+		for (int i = 0; i < 4; i++) {
+			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1], z), i);
+		}
+	}
+	*///?}
+
+	private void vertex(VertexConsumer vertex, int i) {
+		if (this.uvs != null) {
+			vertex.setUv(this.uvs[i * 2], this.uvs[i * 2 + 1]);
+		}
+		vertex.setColor(this.color);
 	}
 }

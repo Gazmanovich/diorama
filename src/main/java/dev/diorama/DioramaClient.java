@@ -20,7 +20,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.KeyMapping;
 
 public class DioramaClient implements ClientModInitializer {
+	//? if >=1.21.9 {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Diorama.id("map"));
+	//?} else {
+	/*// Key categories were bare translation keys; this is the one Category.register makes.
+	public static final String CATEGORY = "key.category.diorama.map";
+	*///?}
 	public static final KeyMapping OPEN_MAP = new KeyMapping("key.diorama.open_map", InputConstants.KEY_M, CATEGORY);
 	public static final KeyMapping NEW_WAYPOINT = new KeyMapping("key.diorama.new_waypoint", InputConstants.KEY_B, CATEGORY);
 	public static final KeyMapping WAYPOINT_LIST = new KeyMapping("key.diorama.waypoints", InputConstants.KEY_U, CATEGORY);

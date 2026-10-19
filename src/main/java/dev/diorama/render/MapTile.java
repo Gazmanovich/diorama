@@ -194,8 +194,10 @@ public final class MapTile {
 			buffer.asIntBuffer().put(pixels, 0, edge * edge);
 			//? if >=26.2 {
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, level, 0, x, y, edge, edge);
-			//?} else {
+			//?} else if >=1.21.9 {
 			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer, NativeImage.Format.RGBA, level, 0, x, y, edge, edge);
+			*///?} else {
+			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(target, buffer.asIntBuffer(), NativeImage.Format.RGBA, level, 0, x, y, edge, edge);
 			*///?}
 		} finally {
 			MemoryUtil.memFree(buffer);
