@@ -101,6 +101,17 @@ public final class WaypointStore {
 		this.save();
 	}
 
+	/**
+	 * Adds several waypoints with one save, for an import. Death markers among them don't push
+	 * older ones out; the next death trims them as usual.
+	 */
+	public void addAll(List<Waypoint> added) {
+		if (!added.isEmpty()) {
+			this.waypoints.addAll(added);
+			this.save();
+		}
+	}
+
 	public void remove(Waypoint waypoint) {
 		this.waypoints.remove(waypoint);
 		this.save();

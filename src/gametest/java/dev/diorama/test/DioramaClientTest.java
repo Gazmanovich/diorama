@@ -22,6 +22,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.XaeroImport;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection;
@@ -113,6 +114,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("waypoints")) {
 				waypoints(context, world);
+			}
+			if (tests.contains("xaero-import")) {
+				xaeroImport(context, world);
 			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
@@ -1423,6 +1427,226 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/**
+	 * Importing from Xaero's Minimap, with files Xaero's Minimap 26.6.0 wrote in a real game
+	 * (src/gametest/resources/xaero/): put where Xaero's keeps them for this world, the waypoint
+	 * list offers them, and importing brings their names (a colon, a death point Xaero's names
+	 * with a translation key), colours, hidden state, death marker and the Nether one across.
+	 * A second look offers nothing, even after the player moved, so the one Xaero's stored
+	 * without a height isn't taken for a new one. With several of Xaero's worlds and no telling
+	 * which, the player picks. Then how a server's worlds are offered.
+	 */
+	private static void xaeroImport(ClientGameTestContext context, TestSingleplayerContext world) {
+		// The folder names Xaero's gave a save called "Xaero_Test [1]" and a server at localhost:25580.
+		if (!XaeroImport.singleplayerFolders("Xaero_Test [1]").get(0).equals("Xaero%us%Test %lb%1%rb%")
+			|| !XaeroImport.serverFolders("localhost:25580", true).get(0).equals("Multiplayer_localhost")) {
+			throw new AssertionError("Xaero's folder names come out as " + XaeroImport.singleplayerFolders("Xaero_Test [1]") + " and "
+				+ XaeroImport.serverFolders("localhost:25580", true));
+		}
+		java.nio.file.Path root = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("xaero").resolve("minimap").resolve(XaeroImport.singleplayerFolders(
+			mc.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString()).get(0)));
+		xaeroFixture("singleplayer/overworld.txt", root.resolve("dim%0").resolve("waypoints.txt"));
+		xaeroFixture("singleplayer/nether.txt", root.resolve("dim%-1").resolve("waypoints.txt"));
+		// Next to them, an End file that isn't UTF-8 (a name in Latin-1): it's skipped, and the
+		// rest is still offered.
+		try {
+			java.nio.file.Files.createDirectories(root.resolve("dim%1"));
+			java.nio.file.Files.write(root.resolve("dim%1").resolve("waypoints.txt"),
+				"waypoint:Caf\u00e9:C:10:64:10:0:false:0:gui.xaero_default:false:0:0:false\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+		Set<UUID> before = context.computeOnClient(mc -> new java.util.HashSet<>(WaypointStore.get().all().stream().map(w -> w.id).toList()));
+
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-01-offered");
+		String offer = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (!"Import from Xaero's Minimap (8)".equals(offer)) {
+			throw new AssertionError("The waypoint list offers " + offer);
+		}
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap (8)")));
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-02-imported");
+
+		List<Waypoint> imported = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> !before.contains(w.id)).toList());
+		java.util.Map<String, Waypoint> byName = new java.util.HashMap<>();
+		imported.forEach(w -> byName.put(w.name, w));
+		if (imported.size() != 8 || !byName.keySet().equals(Set.of("Latest Death", "No Height", "Pink Tree", "Hidden Cave", "Base_2 - East", "Iron: Farm", "Home", "Nether Hub"))) {
+			throw new AssertionError("Imported " + byName.keySet());
+		}
+		Waypoint home = byName.get("Home");
+		if (home.x != -232 || home.y != 78 || home.z != -118 || !home.dimension.equals("minecraft:overworld") || home.color != Waypoint.PALETTE[0]) {
+			throw new AssertionError("Home came in at " + home.x + "," + home.y + "," + home.z + " in " + home.dimension + ", colour " + Integer.toHexString(home.color));
+		}
+		if (byName.get("Latest Death").kind != Waypoint.Kind.DEATH || byName.get("Home").kind != Waypoint.Kind.MANUAL) {
+			throw new AssertionError("Xaero's death point didn't come in as a death marker, or another waypoint did");
+		}
+		if (byName.get("Hidden Cave").visible || !byName.get("Home").visible) {
+			throw new AssertionError("The waypoint hidden in Xaero's isn't hidden, or a shown one is");
+		}
+		if (!byName.get("Nether Hub").dimension.equals("minecraft:the_nether") || byName.get("Nether Hub").y != 128) {
+			throw new AssertionError("Nether Hub came in as " + byName.get("Nether Hub").dimension + " at y " + byName.get("Nether Hub").y);
+		}
+		// Xaero's colour 16 is its magenta; dark blue is index 1.
+		if (byName.get("Pink Tree").color != Waypoint.PALETTE[8] || byName.get("No Height").color != Waypoint.PALETTE[6]) {
+			throw new AssertionError("Pink Tree is " + Integer.toHexString(byName.get("Pink Tree").color) + ", No Height " + Integer.toHexString(byName.get("No Height").color));
+		}
+
+		// Higher up, and with the list opened afresh, there's nothing left to import.
+		context.setScreen(() -> null);
+		world.getServer().runCommand("tp @a ~ ~20 ~");
+		context.waitTicks(10);
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		String again = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (again != null) {
+			throw new AssertionError("After importing, the list still offers " + again);
+		}
+		context.setScreen(() -> null);
+		// The death point's name came from the game's language. Under another language, or with
+		// Xaero's (which has its own translation) removed, it reads differently, and it's still
+		// the same death point.
+		context.runOnClient(mc -> byName.get("Latest Death").name = "Derni\u00e8re mort");
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		String otherLanguage = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (otherLanguage != null) {
+			throw new AssertionError("With the death point named in another language, the list offers " + otherLanguage);
+		}
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			imported.forEach(store::remove);
+			try {
+				org.apache.commons.io.FileUtils.deleteDirectory(root.toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+
+		// Two of Xaero's other worlds and no "waypoints" one: which is this world can't be told,
+		// so the list asks, and the player takes one.
+		xaeroFixture("singleplayer/overworld.txt", root.resolve("dim%0").resolve("mw$1_Survival.txt"));
+		xaeroFixture("singleplayer/nether.txt", root.resolve("dim%0").resolve("mw$2_Old Base.txt"));
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap...")));
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-03-pick");
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Survival, Overworld: 7 new")));
+		context.waitTicks(5);
+		context.takeScreenshot("xaero-04-picked");
+		List<Waypoint> picked = context.computeOnClient(mc -> {
+			buttonLabelled(mc.gui.screen(), "Survival, Overworld: imported");
+			buttonLabelled(mc.gui.screen(), "Old Base, Overworld: 1 new");
+			return WaypointStore.get().all().stream().filter(w -> !before.contains(w.id)).toList();
+		});
+		if (picked.size() != 7 || picked.stream().noneMatch(w -> w.name.equals("Iron: Farm"))) {
+			throw new AssertionError("Picking Survival imported " + picked.stream().map(w -> w.name).toList());
+		}
+		// Back in the list, Old Base is still on offer.
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Done")));
+		context.waitTicks(5);
+		String still = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
+		if (!"Import from Xaero's Minimap...".equals(still)) {
+			throw new AssertionError("Back from the picker, the list offers " + still);
+		}
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			picked.forEach(store::remove);
+			try {
+				org.apache.commons.io.FileUtils.deleteDirectory(root.toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+
+		// A server's folder as Xaero's wrote it on a vanilla server, plus a copy under another
+		// spawn's name, as a map reset leaves behind. On a server the player always confirms, with
+		// the world Xaero's would open listed first: the one its config pins with multiworld
+		// detection off, the current spawn's with it on. With Xaero's World Map's world in the
+		// mix too, each dimension's file is offered on its own and none is marked.
+		context.runOnClient(mc -> {
+			java.nio.file.Path base = mc.gameDirectory.toPath().resolve("xaero-import-test");
+			java.nio.file.Path server = base.resolve("Multiplayer_localhost");
+			java.nio.file.Path config = server.resolve("config.txt");
+			xaeroFixture("server/config.txt", config);
+			xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw-1,1,0_1.txt"));
+			xaeroFixture("server/nether.txt", server.resolve("dim%-1").resolve("mw-1,1,0_1.txt"));
+			xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw7,1,3_2.txt"));
+			List<String> folders = XaeroImport.serverFolders("localhost:25580", true);
+			try {
+				XaeroImport.Found pinned = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				if (pinned == null || pinned.chosen() != null || pinned.worlds().size() != 2
+					|| !pinned.worlds().get(0).id().equals("mw-1,1,0") || !pinned.worlds().get(0).likely() || pinned.worlds().get(1).likely()) {
+					throw new AssertionError("With detection off, the server's worlds aren't offered with the pinned one first and marked");
+				}
+				Set<String> names = Set.copyOf(pinned.worlds().get(0).entries().stream().map(e -> e.waypoint().name).toList());
+				if (!names.equals(Set.of("Latest Death", "Mine: Deep", "Spawn Shop", "Fortress"))) {
+					throw new AssertionError("The pinned server world brought " + names);
+				}
+				java.nio.file.Files.writeString(config, java.nio.file.Files.readString(config).replace("usingMultiworldDetection:false", "usingMultiworldDetection:true"));
+				XaeroImport.Found bySpawn = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				if (!bySpawn.worlds().get(0).id().equals("mw7,1,3") || !bySpawn.worlds().get(0).likely()) {
+					throw new AssertionError("With detection on, the current spawn's world isn't offered first");
+				}
+				xaeroFixture("server/overworld.txt", server.resolve("dim%0").resolve("mw$default_Default.txt"));
+				XaeroImport.Found perDimension = XaeroImport.find(base, folders, false, "mw7,1,3", 64);
+				// Two worlds' Overworld files, one's Nether file, World Map's.
+				if (perDimension.worlds().size() != 4 || perDimension.worlds().stream().anyMatch(w -> w.likely() || w.dimension() == null)) {
+					throw new AssertionError("With World Map's world in the mix, the server import offers " + perDimension.worlds());
+				}
+				// With Xaero's told not to tell servers apart, one folder holds every server's files
+				// under the same ids: each dimension stays its own row, and none is marked.
+				java.nio.file.Path shared = base.resolve("Multiplayer_Any Address");
+				xaeroFixture("server/config.txt", shared.resolve("config.txt"));
+				xaeroFixture("server/overworld.txt", shared.resolve("dim%0").resolve("mw-1,1,0_1.txt"));
+				xaeroFixture("server/nether.txt", shared.resolve("dim%-1").resolve("mw-1,1,0_1.txt"));
+				XaeroImport.Found anyServer = XaeroImport.find(base, XaeroImport.serverFolders("localhost:25580", false), false, "mw7,1,3", 64);
+				if (anyServer.worlds().size() != 2 || anyServer.worlds().stream().anyMatch(w -> w.likely() || w.dimension() == null)) {
+					throw new AssertionError("The shared server folder offers " + anyServer.worlds());
+				}
+				org.apache.commons.io.FileUtils.deleteDirectory(base.toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+	}
+
+	private static void xaeroFixture(String name, java.nio.file.Path to) {
+		try (java.io.InputStream in = DioramaClientTest.class.getResourceAsStream("/xaero/" + name)) {
+			if (in == null) {
+				throw new AssertionError("Missing fixture " + name);
+			}
+			java.nio.file.Files.createDirectories(to.getParent());
+			java.nio.file.Files.copy(in, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** Presses a button the way a click does. */
+	private static void press(net.minecraft.client.gui.components.Button button) {
+		//? if >=1.21.9 {
+		button.onPress(null);
+		//?} else {
+		/*button.onPress();
+		*///?}
+	}
+
+	/** The label of the waypoint list's import button, or null if it has none. */
+	private static @Nullable String importButtonLabel(net.minecraft.client.gui.screens.Screen screen) {
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().startsWith("Import from Xaero's")) {
+				return button.getMessage().getString();
+			}
+		}
+		return null;
+	}
+
 	/** The screen's text fields, top to bottom and left to right. */
 	private static List<net.minecraft.client.gui.components.EditBox> editBoxes(net.minecraft.client.gui.screens.Screen screen) {
 		java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
@@ -1853,10 +2077,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 {
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer");
 			//?} else {
 			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
 			*///?}
 		}
 		return Set.of(env.split(","));
