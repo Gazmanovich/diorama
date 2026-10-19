@@ -5,7 +5,9 @@ import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
+import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
+import dev.diorama.XaeroChannels;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import net.minecraft.client.Minecraft;
@@ -24,6 +26,7 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 /**
  * Diorama's entrypoint on NeoForge: what {@code dev.diorama.fabric.DioramaFabric} does on Fabric,
@@ -57,12 +60,16 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			ServerRules.onDisconnect();
 			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
+			TrackedPlayers.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
-		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> WorldKey.onJoinOrLeave());
-		// Not XaeroChannels: on NeoForge Diorama doesn't listen on Xaero's channels yet, so it names
-		// a server's worlds by their seed, as it does on Fabric when Xaero's mods are there, and
-		// the radar shows no players the server tracks.
+		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
+			WorldKey.onJoinOrLeave();
+			XaeroChannels.onJoinOrLeave();
+			TrackedPlayers.clear();
+		});
+		modBus.addListener(RegisterPayloadHandlersEvent.class, XaeroChannels::register);
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking. This
 		// fires as the window is asked to close, before the last frame, so from then on nothing may
 		// start the map again (Minecraft.isRunning() is false).

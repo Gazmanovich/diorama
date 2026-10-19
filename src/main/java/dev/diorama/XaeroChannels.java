@@ -2,11 +2,20 @@ package dev.diorama;
 
 import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 //? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
-//?}
+//?} else {
+/*import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.PacketFlow;
+import net.neoforged.fml.ModList;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+*///?}
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -33,9 +42,9 @@ import org.jspecify.annotations.Nullable;
  * to the other can't remove them. It doesn't answer at all while Xaero's World Map is installed:
  * an answer moves the server's tracking from the World Map's channel to Diorama.
  *
- * <p>Fabric allows one handler per channel, and registering a channel twice throws at startup.
- * So a channel is only Diorama's when the Xaero mod that owns it isn't installed. With both of
- * Xaero's mods installed, they keep their channels and Diorama names worlds by their seed.
+ * <p>Fabric and NeoForge allow one handler per channel, and registering a channel twice throws at
+ * startup. So a channel is only Diorama's when the Xaero mod that owns it isn't installed. With
+ * both of Xaero's mods installed, they keep their channels and Diorama names worlds by their seed.
  */
 public final class XaeroChannels {
 	/** Message kinds, the first byte of every message. */
@@ -69,30 +78,67 @@ public final class XaeroChannels {
 	}
 
 	//? if fabric {
-	// Listens on the channels no Xaero mod has. Call once, at startup. Fabric only so far: on
-	// NeoForge nothing listens, so worlds are named by their seed and the radar shows no players
-	// the server tracks.
+	/** Listens on the channels no Xaero mod has. Call once, at startup. */
 	public static void register() {
+		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
+			PayloadTypeRegistry.clientboundPlay().register(type, codec(type));
+			PayloadTypeRegistry.serverboundPlay().register(type, codec(type));
+			// Registering a handler also tells the server Diorama listens here. Plugins need that:
+			// Paper drops messages on channels the client hasn't registered.
+			ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
+		}
+	}
+	//?} else {
+	/*// Listens on the channels no Xaero mod has. NeoForge calls it once, at startup.
+	public static void register(RegisterPayloadHandlersEvent event) {
+		// Registered the way Xaero's mods register theirs: a NeoForge server with Xaero's mod on it
+		// refuses a client whose channel has another version or direction. Optional, so servers
+		// without the channel still let the player in. As the player joins a server that isn't
+		// NeoForge, NeoForge tells it about optional channels, which Paper needs before it passes
+		// messages on.
+		PayloadRegistrar registrar = event.registrar("1.0").optional();
+		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
+			registrar.playBidirectional(type, codec(type), (message, context) -> {
+				// The integrated server shares the registration, so a LAN guest's messages come here too.
+				if (context.flow() == PacketFlow.CLIENTBOUND) {
+					receive(message);
+				}
+			});
+		}
+	}
+	*///?}
+
+	/** The channels whose Xaero mod isn't installed. */
+	private static List<CustomPacketPayload.Type<Message>> unclaimed() {
+		List<CustomPacketPayload.Type<Message>> unclaimed = new ArrayList<>(2);
 		// Fair-Play Minimap used the minimap's channel name in some versions.
-		listen(MINIMAP, "xaerominimap", "xaerominimapfair");
-		listen(WORLD_MAP, "xaeroworldmap");
+		if (unclaimed(MINIMAP, "xaerominimap", "xaerominimapfair")) {
+			unclaimed.add(MINIMAP);
+		}
+		if (unclaimed(WORLD_MAP, "xaeroworldmap")) {
+			unclaimed.add(WORLD_MAP);
+		}
+		listening = !unclaimed.isEmpty();
+		return unclaimed;
 	}
 
-	private static void listen(CustomPacketPayload.Type<Message> type, String... xaeroMods) {
+	private static boolean unclaimed(CustomPacketPayload.Type<Message> type, String... xaeroMods) {
 		for (String mod : xaeroMods) {
-			if (FabricLoader.getInstance().isModLoaded(mod)) {
+			if (modLoaded(mod)) {
 				Diorama.LOGGER.info("{} is installed, so it keeps {} to itself", mod, type.id());
-				return;
+				return false;
 			}
 		}
-		listening = true;
-		PayloadTypeRegistry.clientboundPlay().register(type, codec(type));
-		PayloadTypeRegistry.serverboundPlay().register(type, codec(type));
-		// Registering a handler also tells the server Diorama listens here. Plugins need that:
-		// Paper drops messages on channels the client hasn't registered.
-		ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
+		return true;
 	}
-	//?}
+
+	private static boolean modLoaded(String mod) {
+		//? if fabric {
+		return FabricLoader.getInstance().isModLoaded(mod);
+		//?} else {
+		/*return ModList.get().isLoaded(mod);
+		*///?}
+	}
 
 	/** The whole message is read, as the game rejects packets with bytes left over. Public for tests. */
 	public static StreamCodec<FriendlyByteBuf, Message> codec(CustomPacketPayload.Type<Message> type) {
@@ -107,7 +153,6 @@ public final class XaeroChannels {
 		});
 	}
 
-	//? if fabric {
 	private static void receive(Message message) {
 		switch (message.kind()) {
 			case LEVEL_ID -> {
@@ -136,14 +181,28 @@ public final class XaeroChannels {
 	}
 
 	private static void answer(CustomPacketPayload.Type<Message> channel) {
-		if (FabricLoader.getInstance().isModLoaded("xaeroworldmap")) {
+		if (modLoaded("xaeroworldmap")) {
 			return;
 		}
+		//? if neoforge {
+		/*// NeoForge throws on a message to a server that didn't declare the channel. Servers that
+		// track players declare it, as they read the answer.
+		ClientPacketListener connection = Minecraft.getInstance().getConnection();
+		if (connection == null || !connection.hasChannel(channel)) {
+			Diorama.LOGGER.info("The server sent a handshake on {} but doesn't listen there, so it isn't answered", channel.id());
+			return;
+		}
+		*///?}
 		if (trackerChannel == null || channel == MINIMAP && trackerChannel != MINIMAP) {
 			trackerChannel = channel;
 			TrackedPlayers.clear();
 		}
-		ClientPlayNetworking.send(new Message(channel, HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array()));
+		Message answer = new Message(channel, HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array());
+		//? if fabric {
+		ClientPlayNetworking.send(answer);
+		//?} else {
+		/*connection.send(answer);
+		*///?}
 	}
 
 	private static @Nullable CompoundTag readNbt(byte[] body) {
@@ -154,7 +213,6 @@ public final class XaeroChannels {
 			return null;
 		}
 	}
-	//?}
 
 	/** Left the server, or a network moved the player to another of its servers. */
 	public static void onJoinOrLeave() {
@@ -174,7 +232,8 @@ public final class XaeroChannels {
 		//? if fabric {
 		return ClientPlayNetworking.canSend(MINIMAP.id()) || ClientPlayNetworking.canSend(WORLD_MAP.id()) || ClientPlayNetworking.canSend(WORLD_INFO);
 		//?} else {
-		/*return false;
+		/*ClientPacketListener connection = Minecraft.getInstance().getConnection();
+		return connection != null && (connection.hasChannel(MINIMAP) || connection.hasChannel(WORLD_MAP) || connection.hasChannel(WORLD_INFO));
 		*///?}
 	}
 }
