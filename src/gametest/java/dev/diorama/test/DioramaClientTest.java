@@ -176,9 +176,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * A network's two servers whose worlds share a seed, each naming its world with a level ID a
 	 * second after the player joins, as MapModCompanion does: they keep separate maps and
-	 * waypoints. The map saved under the seed before Diorama read level IDs moves to the first of
-	 * them, and only that one. A server that names its world without declaring a channel first
-	 * gets the map opened under the seed for a moment, and nothing of it is saved there.
+	 * waypoints. A server that names its world without declaring a channel, on the first visit,
+	 * gets the seed's folder, and keeps it for that visit when the ID comes. Coming back, the
+	 * map waits for the ID, since the address named a world before.
 	 */
 	private static void serverLevelIds(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:25601");
@@ -210,21 +210,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			});
 		}
-		String seeded = playOnServer(context, "diorama-shared", "id-none", null, "Old Camp", List.of(), List.of(), null, null);
+		String seeded = playOnServer(context, "diorama-shared", "id-late", null, "Old Camp", List.of(), List.of(), null, LOBBY_ID);
 		if (!seeded.startsWith(address + "-world-")) {
-			throw new AssertionError("A server that sends no level ID didn't get the seed's folder: " + seeded);
+			throw new AssertionError("A level ID after the map opened moved it out of the seed's folder: " + seeded);
 		}
 		// Listen where MapModCompanion does, so the server declares a channel that comes with
 		// level IDs, as servers that send them do.
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(WORLD_INFO, (message, ctx) -> {
 		});
-		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of("Old Camp"), List.of(), true, LOBBY_ID);
-		assertGone(context, seeded, "after the lobby took it over");
+		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of(), List.of("Old Camp"), false, LOBBY_ID);
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
-		assertGone(context, seeded, "after visiting survival");
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
-		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Old Camp", "Lobby Camp"), List.of("Survival Camp"), true, LOBBY_ID);
-		assertGone(context, seeded, "after the map opened there before the lobby named its world");
+		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);
 		levelIdOnJoin = null;
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
@@ -232,11 +229,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!lobby.equals(lobbyAgain)) {
 			throw new AssertionError("Coming back to the lobby opened another folder: " + lobby + " then " + lobbyAgain);
 		}
-	}
-
-	private static void assertGone(ClientGameTestContext context, String key, String when) {
-		if (context.computeOnClient(mc -> java.nio.file.Files.exists(WorldKey.folder(key)))) {
-			throw new AssertionError("The seed's folder is there " + when);
+		List<String> old = context.computeOnClient(mc -> WaypointStore.open(seeded).all().stream().map(w -> w.name).toList());
+		if (!old.equals(List.of("Old Camp"))) {
+			throw new AssertionError("The seed's folder lost its waypoint or took another world's: " + old);
 		}
 	}
 
@@ -263,8 +258,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			try (TestDedicatedServerConnection connection = server.connect()) {
 				server.runCommand("time set noon");
 				server.runCommand("weather clear");
-				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150
-					&& (levelId == null || String.valueOf(WorldKey.current()).contains("-id-")), 2400);
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 150, 2400);
 				settle(context, 60);
 				// The fullscreen map zoomed out, before this visit has spread far: anything
 				// beyond the loaded chunks would be another world's saved map.

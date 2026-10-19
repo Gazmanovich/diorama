@@ -350,37 +350,6 @@ public final class TileStore {
 		}
 	}
 
-	/**
-	 * Closes without writing what's still waiting to be written. Returns once a write already
-	 * under way has finished, so nothing lands in the folder afterwards.
-	 */
-	public void discard() {
-		this.closed = true;
-		synchronized (this) {
-			this.handedOver.clear();
-			this.mergeQueued.clear();
-			this.unwritten.clear();
-			this.cache.clear();
-			this.staleOverviews.clear();
-		}
-		boolean interrupted = false;
-		Future<?> barrier = WRITER.submit(() -> {
-		});
-		while (true) {
-			try {
-				barrier.get();
-				break;
-			} catch (InterruptedException e) {
-				interrupted = true;
-			} catch (ExecutionException e) {
-				break;
-			}
-		}
-		if (interrupted) {
-			Thread.currentThread().interrupt();
-		}
-	}
-
 	/** Writes the newest pixels of a tile. Writer thread. */
 	private void write(TileKey key) {
 		if (this.closed) {
