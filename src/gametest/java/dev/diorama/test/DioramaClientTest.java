@@ -1447,6 +1447,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 			mc.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString()).get(0)));
 		xaeroFixture("singleplayer/overworld.txt", root.resolve("dim%0").resolve("waypoints.txt"));
 		xaeroFixture("singleplayer/nether.txt", root.resolve("dim%-1").resolve("waypoints.txt"));
+		// Next to them, an End file that isn't UTF-8 (a name in Latin-1): it's skipped, and the
+		// rest is still offered.
+		try {
+			java.nio.file.Files.createDirectories(root.resolve("dim%1"));
+			java.nio.file.Files.write(root.resolve("dim%1").resolve("waypoints.txt"),
+				"waypoint:Caf\u00e9:C:10:64:10:0:false:0:gui.xaero_default:false:0:0:false\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
 		Set<UUID> before = context.computeOnClient(mc -> new java.util.HashSet<>(WaypointStore.get().all().stream().map(w -> w.id).toList()));
 
 		context.setScreen(() -> new WaypointListScreen(null));

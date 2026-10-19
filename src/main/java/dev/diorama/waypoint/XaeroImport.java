@@ -138,26 +138,39 @@ public final class XaeroImport {
 				if (dimension == null) {
 					continue;
 				}
-				try (Stream<Path> files = Files.list(folder)) {
-					for (Path file : files.filter(Files::isRegularFile).sorted().toList()) {
-						String fileName = file.getFileName().toString();
-						if (!fileName.endsWith(".txt")) {
+				// A folder or file that can't be read is skipped, and the rest still imports.
+				List<Path> files;
+				try (Stream<Path> list = Files.list(folder)) {
+					files = list.filter(Files::isRegularFile).sorted().toList();
+				} catch (IOException | RuntimeException e) {
+					Diorama.LOGGER.warn("Skipping Xaero's Minimap folder {}: can't read it", folder, e);
+					continue;
+				}
+				for (Path file : files) {
+					String fileName = file.getFileName().toString();
+					if (!fileName.endsWith(".txt")) {
+						continue;
+					}
+					String stem = fileName.substring(0, fileName.length() - ".txt".length());
+					String id = stem;
+					String name = null;
+					if (!stem.equals("waypoints")) {
+						// Xaero's own rule: other files are <id>_<name>, and it skips any without a name.
+						String[] parts = stem.split("_");
+						if (parts.length < 2) {
 							continue;
 						}
-						String stem = fileName.substring(0, fileName.length() - ".txt".length());
-						String id = stem;
-						String name = null;
-						if (!stem.equals("waypoints")) {
-							// Xaero's own rule: other files are <id>_<name>, and it skips any without a name.
-							String[] parts = stem.split("_");
-							if (parts.length < 2) {
-								continue;
-							}
-							id = parts[0];
-							name = parts[1].replace("%us%", "_").replace("§§", ":");
-						}
-						worlds.computeIfAbsent(id, key -> new ArrayList<>()).add(new World(id, name, dimension, parse(read(file), dimension, height), false));
+						id = parts[0];
+						name = parts[1].replace("%us%", "_").replace("§§", ":");
 					}
+					List<String> lines;
+					try {
+						lines = read(file);
+					} catch (IOException | RuntimeException e) {
+						Diorama.LOGGER.warn("Skipping Xaero's Minimap file {}: can't read it", file, e);
+						continue;
+					}
+					worlds.computeIfAbsent(id, key -> new ArrayList<>()).add(new World(id, name, dimension, parse(lines, dimension, height), false));
 				}
 			}
 		}
@@ -197,15 +210,22 @@ public final class XaeroImport {
 	/**
 	 * The world Xaero's own minimap opens on a server whose files carry no server-given names:
 	 * the one its config pinned on the first visit (multiworld detection off, the default) or the
-	 * one for the current spawn (detection on). Null if the config doesn't say.
+	 * one for the current spawn (detection on). Null if the config doesn't say or can't be read.
 	 */
-	private static @Nullable String xaeroChoice(Path config, String spawnId) throws IOException {
+	private static @Nullable String xaeroChoice(Path config, String spawnId) {
 		if (!Files.isRegularFile(config)) {
+			return null;
+		}
+		List<String> lines;
+		try {
+			lines = read(config);
+		} catch (IOException | RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't read Xaero's Minimap world config {}", config, e);
 			return null;
 		}
 		boolean detection = false;
 		String pinned = null;
-		for (String line : read(config)) {
+		for (String line : lines) {
 			String[] parts = line.split(":");
 			if (parts.length >= 2 && parts[0].equals("usingMultiworldDetection")) {
 				detection = parts[1].equals("true");
@@ -218,13 +238,21 @@ public final class XaeroImport {
 
 	/**
 	 * Xaero's "differentiate by server address" option from its client config: true or false, or
-	 * null when the file or the line isn't there (older Xaero's kept its options elsewhere).
+	 * null when the file or the line isn't there (older Xaero's kept its options elsewhere) or the
+	 * file can't be read.
 	 */
-	static @Nullable Boolean byAddress(Path clientConfig) throws IOException {
+	static @Nullable Boolean byAddress(Path clientConfig) {
 		if (!Files.isRegularFile(clientConfig)) {
 			return null;
 		}
-		for (String line : read(clientConfig)) {
+		List<String> lines;
+		try {
+			lines = read(clientConfig);
+		} catch (IOException | RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't read Xaero's Minimap options {}", clientConfig, e);
+			return null;
+		}
+		for (String line : lines) {
 			String[] parts = line.split("=");
 			if (parts.length == 2 && parts[0].trim().equals("differentiate_by_server_address")) {
 				return parts[1].trim().equals("true");
