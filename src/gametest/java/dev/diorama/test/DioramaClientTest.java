@@ -192,7 +192,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * the map waits for the ID, since the address named a world before.
 	 */
 	private static void serverLevelIds(ClientGameTestContext context) {
-		String address = WorldKey.key("server", "localhost:25601");
+		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
 				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(address)).toList()) {
