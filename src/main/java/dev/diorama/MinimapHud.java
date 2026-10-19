@@ -48,7 +48,7 @@ public final class MinimapHud implements HudElement {
 		MapSession session = MapSession.get();
 		LocalPlayer player = mc.player;
 		Settings settings = Settings.get();
-		//? if >=26.1 {
+		//? if >=26.2 {
 		if (session == null || player == null || mc.level == null || !settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
 		/*if (session == null || player == null || mc.level == null || !settings.minimap || mc.options.hideGui

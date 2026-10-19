@@ -19,7 +19,12 @@ public final class BiomeTints {
 	private static final ColorResolver[] RESOLVERS = {
 		BiomeColors.GRASS_COLOR_RESOLVER,
 		BiomeColors.FOLIAGE_COLOR_RESOLVER,
+		//? if >=1.21.5 {
 		BiomeColors.DRY_FOLIAGE_COLOR_RESOLVER,
+		//?} else {
+		/*// Dry foliage (leaf litter) came in 1.21.5; nothing reads this slot before.
+		BiomeColors.FOLIAGE_COLOR_RESOLVER,
+		*///?}
 		BiomeColors.WATER_COLOR_RESOLVER,
 	};
 

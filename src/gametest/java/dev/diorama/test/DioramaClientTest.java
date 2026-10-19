@@ -57,6 +57,12 @@ import org.jspecify.annotations.Nullable;
  * what the map actually draws, and asserts what can be measured along the way.
  */
 public class DioramaClientTest implements FabricClientGameTest {
+	/**
+	 * The test servers' port: free when the run starts, so test runs on one machine don't collide,
+	 * and the same for every server in the run, so they all share one address.
+	 */
+	private static final int SERVER_PORT = freePort();
+
 	@Override
 	public void runTest(ClientGameTestContext context) {
 		context.getInput().resizeWindow(1600, 900);
@@ -117,6 +123,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("overlays")) {
 				overlays(context, world);
 			}
+			//? if <1.21.6 {
+			/*if (tests.contains("broken-fog")) {
+				brokenFog(context);
+			}
+			*///?}
 			if (spawnCell != null) {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
@@ -145,7 +156,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * first finds them again, even after its spawn moved.
 	 */
 	private static void multiplayer(ClientGameTestContext context) {
-		String address = WorldKey.key("server", "localhost:25601");
+		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
 			// Start from nothing saved for this address.
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
@@ -179,12 +190,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * A network's two servers whose worlds share a seed, each naming its world with a level ID a
 	 * second after the player joins, as MapModCompanion does: they keep separate maps and
-	 * waypoints. A server that names its world without declaring a channel, on the first visit,
-	 * gets the seed's folder, and keeps it for that visit when the ID comes. Coming back, the
-	 * map waits for the ID, since the address named a world before.
+	 * waypoints. A server that names its world without declaring a channel gets the seed's folder
+	 * on the first visit, and keeps it for that visit when the ID comes. From the next visit on,
+	 * the map waits for the ID, since the address named a world before.
 	 */
 	private static void serverLevelIds(ClientGameTestContext context) {
-		String address = WorldKey.key("server", "localhost:25601");
+		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
 				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(address)).toList()) {
@@ -217,11 +228,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!seeded.startsWith(address + "-world-")) {
 			throw new AssertionError("A level ID after the map opened moved it out of the seed's folder: " + seeded);
 		}
+		// The ID came, so this time the map waits for it, still with no channel declared.
+		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of(), List.of("Old Camp"), false, LOBBY_ID);
 		// Listen where MapModCompanion does, so the server declares a channel that comes with
 		// level IDs, as servers that send them do.
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(WORLD_INFO, (message, ctx) -> {
 		});
-		String lobby = playOnServer(context, "diorama-shared", "id-lobby", null, "Lobby Camp", List.of(), List.of("Old Camp"), false, LOBBY_ID);
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
 		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);
@@ -252,7 +264,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 */
 	private static void trackedPlayers(ClientGameTestContext context) {
 		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", "25601");
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
 		properties.setProperty("gamemode", "creative");
 		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
 		// Bob is higher up than the radar's default height range reaches, which hides players as it does mobs.
@@ -379,7 +391,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown, byte @Nullable [] levelId) {
 		levelIdOnJoin = levelId;
 		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", "25601");
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
 		properties.setProperty("gamemode", "creative");
 		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
@@ -543,6 +555,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!seen) {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
+		}
+	}
+
+	private static int freePort() {
+		try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+			return socket.getLocalPort();
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
 		}
 	}
 
@@ -841,7 +861,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void camera(ClientGameTestContext context, double[] eye, float yaw, float pitch, double fov, int ticks) {
 		context.runOnClient(mc -> {
 			int option = Math.clamp((int) Math.ceil(fov), 30, 110);
+			//? if >=1.21.2 {
 			double narrowest = mc.player.getFieldOfViewModifier(true, 1.0F);
+			//?} else {
+			/*// The modifier took the effect scale from the options.
+			mc.options.fovEffectScale().set(1.0);
+			double narrowest = mc.player.getFieldOfViewModifier();
+			*///?}
 			mc.options.fov().set(option);
 			mc.options.fovEffectScale().set(Math.clamp((1 - fov / option) / (1 - narrowest), 0.0, 1.0));
 			mc.player.setDeltaMovement(Vec3.ZERO);
@@ -903,7 +929,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 							int[] ours = {tints.grass()[i], tints.foliage()[i], tints.dryFoliage()[i], tints.water()[i]};
 							int[] game = {
 								BiomeColors.getAverageGrassColor(mc.level, pos), BiomeColors.getAverageFoliageColor(mc.level, pos),
+								//? if >=1.21.5 {
 								BiomeColors.getAverageDryFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								//?} else {
+								/*// No dry foliage before 1.21.5; the mod fills that slot with foliage.
+								BiomeColors.getAverageFoliageColor(mc.level, pos), BiomeColors.getAverageWaterColor(mc.level, pos)
+								*///?}
 							};
 							columns++;
 							for (int k = 0; k < 4; k++) {
@@ -993,7 +1024,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 		// Open map rebound to C, which the map also uses for caves: the player's binding wins, so
 		// pressing it again closes the map.
+		// Before 1.21.9 a key reaches only one binding, and vanilla's Save Toolbar Activator is on C,
+		// so a player moving Open map to C clears that one too; the test does the same.
 		context.runOnClient(mc -> {
+			mc.options.keySaveHotbarActivator.setKey(InputConstants.UNKNOWN);
 			DioramaClient.OPEN_MAP.setKey(InputConstants.getKey("key.keyboard.c"));
 			net.minecraft.client.KeyMapping.resetMapping();
 		});
@@ -1005,6 +1039,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
+			mc.options.keySaveHotbarActivator.setKey(mc.options.keySaveHotbarActivator.getDefaultKey());
 			DioramaClient.OPEN_MAP.setKey(DioramaClient.OPEN_MAP.getDefaultKey());
 			net.minecraft.client.KeyMapping.resetMapping();
 		});
@@ -1236,7 +1271,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			throw new AssertionError("Home is missing");
 		});
-		//? if >=26.1 {
+		//? if >=26.2 {
 		context.getInput().lookAt(home);
 		//?} else {
 		/*context.runOnClient(mc -> mc.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, net.minecraft.world.phys.Vec3.atCenterOf(home)));
@@ -1422,7 +1457,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Waypoint sent = new Waypoint("Mine: east-2_b", 120, 40, -80, "minecraft:the_nether", Waypoint.PALETTE[3]);
 			String text = WaypointShare.format(sent).orElseThrow(() -> new AssertionError("Couldn't format a short waypoint"));
+			//? if >=1.21.9 {
 			if (text.length() > 256 || !text.codePoints().allMatch(net.minecraft.util.StringUtil::isAllowedChatCharacter)) {
+			//?} else {
+			/*if (text.length() > 256 || !text.chars().allMatch(c -> net.minecraft.util.StringUtil.isAllowedChatCharacter((char) c))) {
+			*///?}
 				throw new AssertionError("Chat would refuse " + text);
 			}
 			WaypointShare.Shared back = WaypointShare.parse("<Alex> " + text).orElseThrow(() -> new AssertionError("Couldn't read back " + text));
@@ -1462,7 +1501,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Take the command from the [Add] link on the line chat actually received, and run it the
 		// way a chat click does: from the open chat screen, which Minecraft puts back after
 		// running the command. The malformed share's line has no link.
+		//? if >=1.21.9 {
 		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
 			String command = null;
@@ -1479,7 +1522,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (command == null) {
 				throw new AssertionError("The shared line in chat has no [Add] link");
 			}
+			//? if >=1.21.6 {
 			mc.player.connection.sendUnattendedCommand(net.minecraft.commands.Commands.trimOptionalPrefix(command), mc.gui.screen());
+			//?} else {
+			/*// What a chat click ran before 1.21.6.
+			mc.player.connection.sendUnsignedCommand(command.startsWith("/") ? command.substring(1) : command);
+			*///?}
 		});
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
@@ -1518,14 +1566,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!teleport.active) {
 				throw new AssertionError("Teleport is off in a world where the player may use /tp");
 			}
+			//? if >=1.21.9 {
 			teleport.onPress(null);
+			//?} else {
+			/*teleport.onPress();
+			*///?}
 		});
 		context.waitFor(mc -> mc.player.distanceToSqr(editedX + 0.5, target.y, target.z + 0.5) < 4, 100);
 
 		// Share it: a name with a colon goes out without upsetting the server.
 		context.setScreen(() -> new WaypointEditScreen(null, target, false));
 		context.waitTicks(2);
+		//? if >=1.21.9 {
 		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress(null));
+		//?} else {
+		/*context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Share in chat").onPress());
+		*///?}
 		context.waitTicks(20);
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
@@ -1555,9 +1611,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
+			//? if >=1.21.5 {
 			if (style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.RunCommand run) {
 				command[0] = run.command();
 			}
+			//?} else {
+			/*net.minecraft.network.chat.ClickEvent click = style.getClickEvent();
+			if (click != null && click.getAction() == net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND) {
+				command[0] = click.getValue();
+			}
+			*///?}
 			return java.util.Optional.empty();
 		}, net.minecraft.network.chat.Style.EMPTY);
 		return command[0];
@@ -1636,6 +1699,60 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * Chunk grid, slime chunks and spawn spots on a built scene: a stone platform high in open sky
 	 * across a chunk border, lit by one torch, with a closed stone box on one corner.
 	 */
+	//? if <1.21.6 {
+	/*// Opt-in with DIORAMA_TESTS=broken-fog. A resource pack whose fog shader doesn't compile, the way a
+	// strict graphics driver might reject ours. Before 1.21.6 the game's own shader path clears the
+	// player's resource packs (or crashes) when a shader fails, so the map has to draw without fog and
+	// leave the packs alone, then bring the fog back once a reload fixes the shader.
+	private static void brokenFog(ClientGameTestContext context) {
+		String id = "file/diorama-broken-fog";
+		java.nio.file.Path pack = context.computeOnClient(mc -> mc.getResourcePackDirectory().resolve("diorama-broken-fog"));
+		context.runOnClient(mc -> {
+			try {
+				java.nio.file.Files.createDirectories(pack.resolve("assets/diorama/shaders/core"));
+				int format = net.minecraft.SharedConstants.getCurrentVersion().getPackVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+				java.nio.file.Files.writeString(pack.resolve("pack.mcmeta"), "{\"pack\": {\"pack_format\": " + format + ", \"description\": \"Diorama test: a fog shader that doesn't compile\"}}");
+				java.nio.file.Files.writeString(pack.resolve("assets/diorama/shaders/core/fog.fsh"), "#version 150\nvoid main() { this is not glsl }\n");
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+			mc.getResourcePackRepository().reload();
+			if (!mc.getResourcePackRepository().addPack(id)) {
+				throw new AssertionError("The broken fog test pack didn't load");
+			}
+			mc.reloadResourcePacks();
+		});
+		context.waitTicks(60);
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("broken-fog-01-no-fog");
+		boolean kept = context.computeOnClient(mc -> mc.getResourcePackRepository().getSelectedIds().contains(id));
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> {
+			mc.getResourcePackRepository().removePack(id);
+			mc.reloadResourcePacks();
+		});
+		context.waitTicks(60);
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 0.75, TileKey.SURFACE);
+		settle(context, 60);
+		context.takeScreenshot("broken-fog-02-fog-back");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(pack)) {
+				files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		});
+		if (!kept) {
+			throw new AssertionError("A fog shader that doesn't compile took the player's resource packs away");
+		}
+	}
+	*///?}
+
 	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		// No leaf decay or growth below the scene: a chunk changing for its own reasons would
@@ -1945,7 +2062,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
+			//? if >=1.21.4 {
 			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
+			//?} else {
+			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
+			return Set.of("tour", "radar", "waypoints", "fog-of-war", "settings", "overlays", "dimensions", "saved-map");
+			*///?}
 		}
 		return Set.of(env.split(","));
 	}

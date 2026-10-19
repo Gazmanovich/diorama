@@ -1,68 +1,27 @@
 package dev.diorama.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-//? if >=26.1 {
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.device.GpuDevice;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
-//?} else {
-/*import com.mojang.blaze3d.platform.NativeImage;
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.textures.TextureFormat;
-*///?}
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import dev.diorama.render.gpu.MapTexture;
 import java.util.Random;
 import org.jspecify.annotations.Nullable;
-import org.lwjgl.system.MemoryUtil;
 
-/** GPU textures shared by every fog draw. */
+/** The noise texture every fog draw shares. */
 final class FogTextures {
 	static final int NOISE_SIZE = 256;
 
-	private static @Nullable GpuTextureView noise;
+	private static @Nullable MapTexture noise;
 
 	private FogTextures() {
 	}
 
-	static GpuTextureView noise() {
+	static MapTexture noise() {
 		if (noise == null) {
 			noise = createNoise();
 		}
 		return noise;
 	}
 
-	static GpuTexture createTexture(String label, int size) {
-		//? if >=26.1 {
-		return RenderSystem.getDevice().createTexture(
-			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1
-		);
-		//?} else {
-		/*return RenderSystem.getDevice().createTexture(
-			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, TextureFormat.RGBA8, size, size, 1, 1
-		);
-		*///?}
-	}
-
-	static void write(GpuTexture texture, int[] abgr, int size) {
-		ByteBuffer buffer = MemoryUtil.memAlloc(size * size * 4).order(ByteOrder.LITTLE_ENDIAN);
-		try {
-			buffer.asIntBuffer().put(abgr);
-			//? if >=26.1 {
-			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, 0, 0, 0, 0, size, size);
-			//?} else {
-			/*RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, buffer, NativeImage.Format.RGBA, 0, 0, 0, 0, size, size);
-			*///?}
-		} finally {
-			MemoryUtil.memFree(buffer);
-		}
-	}
-
 	/** Tileable value noise, a coarser scale in each channel from red to alpha. */
-	private static GpuTextureView createNoise() {
+	private static MapTexture createNoise() {
 		int size = NOISE_SIZE;
 		float[][] channels = {
 			fractal(size, 6, 1L),
@@ -78,10 +37,9 @@ final class FogTextures {
 			int a = Math.round(channels[3][i] * 255);
 			pixels[i] = (a << 24) | (b << 16) | (g << 8) | r;
 		}
-		GpuTexture texture = createTexture("diorama fog noise", size);
-		write(texture, pixels, size);
-		GpuDevice device = RenderSystem.getDevice();
-		return device.createTextureView(texture);
+		MapTexture texture = MapTexture.create("diorama fog noise", size, 1);
+		texture.write(0, 0, 0, size, pixels);
+		return texture;
 	}
 
 	private static float[] fractal(int size, int cells, long seed) {

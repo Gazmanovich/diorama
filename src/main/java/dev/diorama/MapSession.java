@@ -14,14 +14,10 @@ import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.client.player.LocalPlayer;
-import dev.diorama.data.SeenBlocks;
-import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
@@ -376,17 +372,11 @@ public final class MapSession {
 		}
 	}
 
-	private static final int SIGHT_RADIUS = 24;
-	private static final int SIGHT_MAX_BLOCKS = 60_000;
 	private @Nullable BlockPos lastSightOrigin;
 	private int sightCooldown;
+	private @Nullable CaveSight sight;
 
-	/**
-	 * Marks the blocks the player can see. Spreads from their eyes through open space within
-	 * {@link #SIGHT_RADIUS}, but only into blocks a straight line from the eyes reaches without
-	 * passing through a solid block. Solid blocks on that line count as seen; the spread stops
-	 * there. So neither a cave behind a wall nor a room around a bend gets revealed.
-	 */
+	/** Marks the blocks the player can see (see {@link CaveSight}) when their eyes move to a new block. */
 	private void updateSight(LocalPlayer player) {
 		BlockLooks looks = BlockLooks.get();
 		BlockPos eye = BlockPos.containing(player.getEyePosition());
@@ -395,45 +385,12 @@ public final class MapSession {
 		}
 		this.lastSightOrigin = eye;
 		this.sightCooldown = 40;
-		Vec3 eyes = player.getEyePosition();
-		SeenBlocks seen = this.map.seen();
-		LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
-		LongOpenHashSet visited = new LongOpenHashSet();
-		queue.enqueue(eye.asLong());
-		visited.add(eye.asLong());
-		int[] box = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE};
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		int r2 = SIGHT_RADIUS * SIGHT_RADIUS;
-		while (!queue.isEmpty() && visited.size() < SIGHT_MAX_BLOCKS) {
-			long packed = queue.dequeueLong();
-			int x = BlockPos.getX(packed);
-			int y = BlockPos.getY(packed);
-			int z = BlockPos.getZ(packed);
-			reveal(seen, x, y, z, box);
-			for (Direction d : DIRECTIONS) {
-				int nx = x + d.getStepX();
-				int ny = y + d.getStepY();
-				int nz = z + d.getStepZ();
-				int dx = nx - eye.getX();
-				int dy = ny - eye.getY();
-				int dz = nz - eye.getZ();
-				if (dx * dx + dy * dy + dz * dz > r2 || ny < this.level.getMinY() || ny > this.level.getMaxY()) {
-					continue;
-				}
-				long next = BlockPos.asLong(nx, ny, nz);
-				if (!visited.add(next) || !this.inSight(looks, eyes, nx, ny, nz)) {
-					continue;
-				}
-				int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(nx, ny, nz)));
-				if (id >= 0 && looks.kind[id] == BlockLooks.SOLID) {
-					reveal(seen, nx, ny, nz, box);
-				} else {
-					queue.enqueue(next);
-				}
-			}
+		if (this.sight == null) {
+			this.sight = new CaveSight(this.level);
 		}
+		int[] box = this.sight.spread(looks, player.getEyePosition(), this.map.seen());
 		if (Diorama.DEBUG) {
-			Diorama.LOGGER.info("Sight from {}: visited {}, newly seen box {}", eye, visited.size(), java.util.Arrays.toString(box));
+			Diorama.LOGGER.info("Sight from {}: visited {}, newly seen box {}", eye, this.sight.visited(), java.util.Arrays.toString(box));
 		}
 		if (box[0] != Integer.MAX_VALUE) {
 			this.map.revealed(box[0], box[1], box[2], box[3], box[4], box[5]);
@@ -441,57 +398,6 @@ public final class MapSession {
 	}
 
 	private static final Direction[] DIRECTIONS = Direction.values();
-
-	/** True if the line from the eyes to the block's centre passes only through open blocks. */
-	private boolean inSight(BlockLooks looks, Vec3 eyes, int tx, int ty, int tz) {
-		double dx = tx + 0.5 - eyes.x;
-		double dy = ty + 0.5 - eyes.y;
-		double dz = tz + 0.5 - eyes.z;
-		int x = Mth.floor(eyes.x);
-		int y = Mth.floor(eyes.y);
-		int z = Mth.floor(eyes.z);
-		int stepX = dx > 0 ? 1 : -1;
-		int stepY = dy > 0 ? 1 : -1;
-		int stepZ = dz > 0 ? 1 : -1;
-		double deltaX = dx == 0 ? Double.MAX_VALUE : Math.abs(1 / dx);
-		double deltaY = dy == 0 ? Double.MAX_VALUE : Math.abs(1 / dy);
-		double deltaZ = dz == 0 ? Double.MAX_VALUE : Math.abs(1 / dz);
-		double maxX = dx == 0 ? Double.MAX_VALUE : (dx > 0 ? x + 1 - eyes.x : eyes.x - x) * deltaX;
-		double maxY = dy == 0 ? Double.MAX_VALUE : (dy > 0 ? y + 1 - eyes.y : eyes.y - y) * deltaY;
-		double maxZ = dz == 0 ? Double.MAX_VALUE : (dz > 0 ? z + 1 - eyes.z : eyes.z - z) * deltaZ;
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		for (int i = 0; i < 4 * SIGHT_RADIUS; i++) {
-			if (maxX < maxY && maxX < maxZ) {
-				x += stepX;
-				maxX += deltaX;
-			} else if (maxY < maxZ) {
-				y += stepY;
-				maxY += deltaY;
-			} else {
-				z += stepZ;
-				maxZ += deltaZ;
-			}
-			if (x == tx && y == ty && z == tz) {
-				return true;
-			}
-			int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(pos.set(x, y, z)));
-			if (id >= 0 && looks.kind[id] == BlockLooks.SOLID) {
-				return false;
-			}
-		}
-		return false;
-	}
-
-	private static void reveal(SeenBlocks seen, int x, int y, int z, int[] box) {
-		if (seen.markSeen(x, y, z)) {
-			box[0] = Math.min(box[0], x);
-			box[1] = Math.min(box[1], y);
-			box[2] = Math.min(box[2], z);
-			box[3] = Math.max(box[3], x);
-			box[4] = Math.max(box[4], y);
-			box[5] = Math.max(box[5], z);
-		}
-	}
 
 	private void updateUnderground(LocalPlayer player) {
 		if (this.level.dimensionType().hasCeiling()) {

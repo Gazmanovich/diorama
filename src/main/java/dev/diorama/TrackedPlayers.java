@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -47,22 +46,38 @@ public final class TrackedPlayers {
 		if (id == null) {
 			return;
 		}
-		if (tag.getBooleanOr("r", false)) {
+		//? if >=1.21.5 {
+		boolean removed = tag.getBooleanOr("r", false);
+		//?} else {
+		/*// Before 1.21.5 a missing value read as false, 0 or "".
+		boolean removed = tag.getBoolean("r");
+		*///?}
+		if (removed) {
 			PLAYERS.remove(id);
 			STAND_INS.remove(id);
 		} else {
+			//? if >=1.21.5 {
 			PLAYERS.put(id, new Tracked(tag.getDoubleOr("x", 0), tag.getDoubleOr("y", 0), tag.getDoubleOr("z", 0), tag.getStringOr("d", "")));
+			//?} else {
+			/*PLAYERS.put(id, new Tracked(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z"), tag.getString("d")));
+			*///?}
 		}
 	}
 
 	private static @Nullable UUID uuid(CompoundTag tag) {
-		Optional<int[]> ints = tag.getIntArray("i");
-		if (ints.isPresent() && ints.get().length == 4) {
-			return UUIDUtil.uuidFromIntArray(ints.get());
+		//? if >=1.21.5 {
+		int[] ints = tag.getIntArray("i").orElse(new int[0]);
+		long[] longs = tag.getLongArray("i").orElse(new long[0]);
+		//?} else {
+		/*// Before 1.21.5 a missing or other-typed array read as empty.
+		int[] ints = tag.getIntArray("i");
+		long[] longs = tag.getLongArray("i");
+		*///?}
+		if (ints.length == 4) {
+			return UUIDUtil.uuidFromIntArray(ints);
 		}
-		Optional<long[]> longs = tag.getLongArray("i");
-		if (longs.isPresent() && longs.get().length == 2) {
-			return new UUID(longs.get()[0], longs.get()[1]);
+		if (longs.length == 2) {
+			return new UUID(longs[0], longs[1]);
 		}
 		return null;
 	}
@@ -102,7 +117,12 @@ public final class TrackedPlayers {
 				continue;
 			}
 			RemotePlayer standIn = STAND_INS.computeIfAbsent(id, uuid -> new RemotePlayer(level, info.getProfile()));
+			//? if >=1.21.5 {
 			standIn.snapTo(tracked.x(), tracked.y(), tracked.z());
+			//?} else {
+			/*// Sets the previous position too, as snapTo does, so the face doesn't slide from the old spot.
+			standIn.moveTo(tracked.x(), tracked.y(), tracked.z());
+			*///?}
 			out.add(standIn);
 		}
 		return out;
