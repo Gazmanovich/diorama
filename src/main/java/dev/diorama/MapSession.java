@@ -113,8 +113,12 @@ public final class MapSession {
 		if (BlockLooks.get() == null) {
 			BlockLooks.build();
 		} else if (session.style != MapStyle.get()) {
+			// Only a change the tiles show re-bakes them; the fog edge is drawn over them.
+			boolean rebake = !MapStyle.get().looksLike(session.style);
 			session.style = MapStyle.get();
-			session.map.colorsChanged();
+			if (rebake) {
+				session.map.colorsChanged();
+			}
 		} else if (BlockLooks.isStale()) {
 			BlockLooks.build();
 			session.map.colorsChanged();

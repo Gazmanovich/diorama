@@ -11,7 +11,7 @@ package dev.diorama;
  * </ul>
  */
 public final class Projection {
-	// The default style's angle until a style is applied; Settings only applies one that differs.
+	// The default style's angle until a style is applied.
 	private static volatile double sin = Math.sin(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
 	private static volatile double cos = Math.cos(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
 
