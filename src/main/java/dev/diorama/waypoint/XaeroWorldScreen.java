@@ -6,12 +6,14 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import org.jspecify.annotations.Nullable;
 
 /**
- * Asks which of Xaero's Minimap's worlds is the one the player is in, when Xaero's kept several
- * and there's no telling which it would open. Each dimension's file is its own row, since Xaero's
- * World Map picks a world per dimension, and each shows its first few waypoint names, which is
- * how a player recognises it. Stays open, so the player can take one for each dimension.
+ * Asks which of Xaero's Minimap's worlds is the one the player is in: on a server, where Xaero's
+ * picks by things its files don't fully record, or when Xaero's kept several. Each row shows its
+ * first few waypoint names, which is how a player recognises it, and the world Xaero's own rule
+ * points at comes first. With Xaero's World Map's names around, each dimension's file is its own
+ * row, since World Map picks a world per dimension. Stays open, so the player can take several.
  */
 final class XaeroWorldScreen extends Screen {
 	private static final int ROW = 36;
@@ -41,6 +43,9 @@ final class XaeroWorldScreen extends Screen {
 			Component label = fresh == 0
 				? Component.translatable("diorama.xaero.world_done", world.label(), dimensionName(world.dimension()))
 				: Component.translatable("diorama.xaero.world", world.label(), dimensionName(world.dimension()), fresh);
+			if (world.likely()) {
+				label = Component.translatable("diorama.xaero.likely", label);
+			}
 			Button button = Button.builder(label, b -> {
 				this.parent.importFrom(world);
 				this.rebuildWidgets();
@@ -70,8 +75,11 @@ final class XaeroWorldScreen extends Screen {
 		}
 	}
 
-	/** "Overworld", "Nether", "End", or the id of any other dimension. */
-	private static Component dimensionName(String id) {
+	/** "Overworld", "Nether", "End", the id of any other dimension, or "all dimensions" for null. */
+	private static Component dimensionName(@Nullable String id) {
+		if (id == null) {
+			return Component.translatable("diorama.xaero.all_dimensions");
+		}
 		return switch (id) {
 			case "minecraft:overworld" -> Component.translatable("diorama.xaero.overworld");
 			case "minecraft:the_nether" -> Component.translatable("diorama.xaero.nether");

@@ -28,8 +28,9 @@ public final class WaypointListScreen extends Screen {
 	private int visibleRows;
 	private boolean xaeroRead;
 	private XaeroImport.@Nullable Found xaero;
-	/** What the last import brought in, shown where the import button was. */
+	/** What the last import brought in, shown above the import button. */
 	private @Nullable Component imported;
+	private boolean importButtonShown;
 
 	public WaypointListScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.waypoints.title"));
@@ -49,8 +50,8 @@ public final class WaypointListScreen extends Screen {
 			this.xaeroRead = true;
 			this.xaero = XaeroImport.find();
 		}
-		Button importButton = this.imported == null ? this.importButton(store) : null;
-		int importRow = importButton != null || this.imported != null ? ROW : 0;
+		Button importButton = this.importButton(store);
+		int importRow = (importButton != null ? ROW : 0) + (this.imported != null ? 12 : 0);
 		this.listTop = 40;
 		this.visibleRows = Math.max(1, (this.height - this.listTop - 40 - importRow) / ROW);
 		this.scroll = Math.max(0, Math.min(this.scroll, this.rows.size() - this.visibleRows));
@@ -86,6 +87,7 @@ public final class WaypointListScreen extends Screen {
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))).bounds(bx, y, 44, 20).build());
 		}
 		int bottom = this.height - 30;
+		this.importButtonShown = importButton != null;
 		if (importButton != null) {
 			this.addRenderableWidget(importButton);
 			importButton.setRectangle(204, 20, this.width / 2 - 102, bottom - ROW);
@@ -131,13 +133,15 @@ public final class WaypointListScreen extends Screen {
 			graphics.text(this.font, detail, left + 22, y + 14, 0xFF909090, true);
 		}
 		if (this.imported != null) {
-			graphics.centeredText(this.font, this.imported, this.width / 2, this.height - 30 - ROW + 6, 0xFFA0E0A0);
+			int below = this.importButtonShown ? ROW : 0;
+			graphics.centeredText(this.font, this.imported, this.width / 2, this.height - 30 - below - 12, 0xFFA0E0A0);
 		}
 	}
 
 	/**
-	 * "Import from Xaero's Minimap (N)" when Xaero's has waypoints for this world that aren't
-	 * here; when it's unclear which of Xaero's worlds this is, the button asks the player.
+	 * "Import from Xaero's Minimap (N)" when Xaero's has waypoints for this singleplayer world
+	 * that aren't here; on a server, or when it's unclear which of Xaero's worlds this is, the
+	 * button asks the player.
 	 */
 	private @Nullable Button importButton(@Nullable WaypointStore store) {
 		XaeroImport.Found found = this.xaero;

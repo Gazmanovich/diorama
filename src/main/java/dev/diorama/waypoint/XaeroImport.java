@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,18 +62,19 @@ public final class XaeroImport {
 	 * One of Xaero's worlds for this world folder or server: {@code id} is the file name's first
 	 * part ({@code waypoints}, {@code mw$default}, {@code mw2,1,-3}), {@code name} what Xaero's
 	 * shows for it, if it has one. {@code dimension} is the one dimension its waypoints are from,
-	 * or null for a world gathered from every dimension's file of that id.
+	 * or null for a world gathered from every dimension's file of that id. {@code likely} marks
+	 * the world Xaero's own rule would open here, as far as its files tell.
 	 */
-	public record World(String id, @Nullable String name, @Nullable String dimension, List<Entry> entries) {
+	public record World(String id, @Nullable String name, @Nullable String dimension, List<Entry> entries, boolean likely) {
 		public String label() {
 			return this.name != null && !this.name.isBlank() ? this.name : this.id;
 		}
 	}
 
 	/**
-	 * What Xaero's has for the world the client is in. {@code chosen} is the world Xaero's itself
-	 * would open, or null when that can't be told: then {@code worlds} lists each dimension's file
-	 * on its own for the player to pick from.
+	 * What Xaero's has for the world the client is in. {@code chosen} is the world to import
+	 * without asking, which only singleplayer has; otherwise the player picks from
+	 * {@code worlds}, the likely one first.
 	 */
 	public record Found(List<World> worlds, @Nullable World chosen) {
 	}
@@ -115,8 +117,8 @@ public final class XaeroImport {
 
 	/**
 	 * Xaero's worlds in the first of {@code roots} that exists under {@code base}, and which one
-	 * Xaero's would open. {@code height} stands in for heights Xaero's didn't store. Separate
-	 * from {@link #find()} for tests and tools.
+	 * Xaero's would likely open. {@code height} stands in for heights Xaero's didn't store.
+	 * Separate from {@link #find()} for tests and tools.
 	 */
 	public static @Nullable Found find(Path base, List<String> roots, boolean singleplayer, String spawnId, int height) throws IOException {
 		Path root = existing(base, roots);
@@ -149,44 +151,49 @@ public final class XaeroImport {
 							id = parts[0];
 							name = parts[1].replace("%us%", "_").replace("§§", ":");
 						}
-						worlds.computeIfAbsent(id, key -> new ArrayList<>()).add(new World(id, name, dimension, parse(read(file), dimension, height)));
+						worlds.computeIfAbsent(id, key -> new ArrayList<>()).add(new World(id, name, dimension, parse(read(file), dimension, height), false));
 					}
 				}
 			}
 		}
-		String chosenId = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER) ? null
-			: chosenId(worlds.keySet(), singleplayer, root.resolve("config.txt"), spawnId);
-		List<World> chosen = chosenId == null ? null : worlds.get(chosenId);
-		if (chosen != null) {
-			// Xaero's uses the same id in every dimension, so its world here is all of them.
-			List<Entry> entries = chosen.stream().flatMap(world -> world.entries().stream()).toList();
-			String name = chosen.stream().map(World::name).filter(n -> n != null).findFirst().orElse(null);
-			World world = new World(chosenId, name, null, entries);
-			// If Xaero's own world for here is empty, another world's waypoints aren't this one's.
-			return entries.isEmpty() ? null : new Found(List.of(world), world);
+		if (singleplayer && worlds.containsKey("waypoints")) {
+			// Xaero's always opens "waypoints" in singleplayer. If it's empty, another world's
+			// waypoints aren't this one's.
+			World world = merge("waypoints", worlds.get("waypoints"), true);
+			return world.entries().isEmpty() ? null : new Found(List.of(world), world);
 		}
-		List<World> candidates = worlds.values().stream().flatMap(List::stream).filter(world -> !world.entries().isEmpty()).toList();
+		// On a server Xaero's picks by what the server says and how World Map is set up, which
+		// its files don't fully record, so the player confirms. World Map picks a world per
+		// dimension, so with its names around each dimension's file is offered on its own.
+		boolean perDimension = worlds.keySet().stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"));
+		boolean shared = root.getFileName().toString().equalsIgnoreCase(SHARED_FOLDER);
+		String likely = singleplayer || shared || perDimension ? null : xaeroChoice(root.resolve("config.txt"), spawnId);
+		List<World> candidates = new ArrayList<>();
+		for (Map.Entry<String, List<World>> world : worlds.entrySet()) {
+			if (perDimension) {
+				candidates.addAll(world.getValue());
+			} else {
+				candidates.add(merge(world.getKey(), world.getValue(), world.getKey().equals(likely)));
+			}
+		}
+		candidates.removeIf(world -> world.entries().isEmpty());
+		candidates.sort(Comparator.comparing(world -> !world.likely()));
 		return candidates.isEmpty() ? null : new Found(candidates, null);
 	}
 
+	/** One world from its files in every dimension: Xaero's uses the same id in each. */
+	private static World merge(String id, List<World> files, boolean likely) {
+		List<Entry> entries = files.stream().flatMap(world -> world.entries().stream()).toList();
+		String name = files.stream().map(World::name).filter(n -> n != null).findFirst().orElse(null);
+		return new World(id, name, null, entries, likely);
+	}
+
 	/**
-	 * The id of the world Xaero's would open, following its own rules, or null when that can't be
-	 * told from here. Singleplayer: {@code waypoints}. On a server, the world comes from the
-	 * server's level id when the server runs Xaero's (an {@code mw$<id>} name this can't see),
-	 * else from Xaero's World Map when installed (its own choice per dimension, {@code mw$default}
-	 * unless the player set it up otherwise), else from Xaero's config: the world it pinned on
-	 * the first visit (multiworld detection off, the default) or the one for the current spawn
-	 * (detection on).
+	 * The world Xaero's own minimap opens on a server whose files carry no server-given names:
+	 * the one its config pinned on the first visit (multiworld detection off, the default) or the
+	 * one for the current spawn (detection on). Null if the config doesn't say.
 	 */
-	private static @Nullable String chosenId(Set<String> ids, boolean singleplayer, Path config, String spawnId) throws IOException {
-		if (singleplayer) {
-			return "waypoints";
-		}
-		if (ids.stream().anyMatch(id -> id.startsWith("mw$") || id.startsWith("cm$"))) {
-			// World Map's default is the one such name that doesn't depend on the server or on
-			// how the player set World Map up.
-			return ids.equals(Set.of("mw$default")) ? "mw$default" : null;
-		}
+	private static @Nullable String xaeroChoice(Path config, String spawnId) throws IOException {
 		if (!Files.isRegularFile(config)) {
 			return null;
 		}
