@@ -1456,7 +1456,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!"Import from Xaero's Minimap (8)".equals(offer)) {
 			throw new AssertionError("The waypoint list offers " + offer);
 		}
-		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap (8)").onPress(null));
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap (8)")));
 		context.waitTicks(5);
 		context.takeScreenshot("xaero-02-imported");
 
@@ -1512,10 +1512,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		xaeroFixture("singleplayer/nether.txt", root.resolve("dim%0").resolve("mw$2_Old Base.txt"));
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
-		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap...").onPress(null));
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Import from Xaero's Minimap...")));
 		context.waitTicks(5);
 		context.takeScreenshot("xaero-03-pick");
-		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Survival, Overworld: 7 new").onPress(null));
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Survival, Overworld: 7 new")));
 		context.waitTicks(5);
 		context.takeScreenshot("xaero-04-picked");
 		List<Waypoint> picked = context.computeOnClient(mc -> {
@@ -1527,7 +1527,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Picking Survival imported " + picked.stream().map(w -> w.name).toList());
 		}
 		// Back in the list, Old Base is still on offer.
-		context.runOnClient(mc -> buttonLabelled(mc.gui.screen(), "Done").onPress(null));
+		context.runOnClient(mc -> press(buttonLabelled(mc.gui.screen(), "Done")));
 		context.waitTicks(5);
 		String still = context.computeOnClient(mc -> importButtonLabel(mc.gui.screen()));
 		if (!"Import from Xaero's Minimap...".equals(still)) {
@@ -1606,6 +1606,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 		} catch (java.io.IOException e) {
 			throw new AssertionError(e);
 		}
+	}
+
+	/** Presses a button the way a click does. */
+	private static void press(net.minecraft.client.gui.components.Button button) {
+		//? if >=1.21.9 {
+		button.onPress(null);
+		//?} else {
+		/*button.onPress();
+		*///?}
 	}
 
 	/** The label of the waypoint list's import button, or null if it has none. */
