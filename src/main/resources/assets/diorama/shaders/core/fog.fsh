@@ -68,7 +68,8 @@ layout(std140) uniform DynamicTransforms {
 *///?}
 
 // Share of known ground per mask texel, in the red channel. Green is 1 where every texel this
-// shader can read from a pixel in that texel is fully known.
+// shader can read from a pixel in that texel is fully known, blue is 1 where every one is fully
+// unknown.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
@@ -117,6 +118,14 @@ bool fast;
 // noise, so the texture reads are skipped. The rest still runs: the lowest layers leave a faint
 // veil even over known ground.
 bool clear;
+// Every mask texel this pixel can read is fully unknown: every known share is exactly 0, so the
+// mask reads are skipped. The noise still shapes the fog there, so its reads stay.
+bool deep;
+
+// The known share at uv, without the read where the answer is already known.
+float knownAt(vec2 uv) {
+    return deep ? 0.0 : texture(Sampler0, uv).r;
+}
 
 // Known share blurred over a radius in map units, so chunk-shaped edges melt away.
 float knownBlur(vec2 uv, float units) {
@@ -140,6 +149,9 @@ float knownSoft(vec2 uv) {
     if (clear) {
         return 1.0;
     }
+    if (deep) {
+        return 0.0;
+    }
     if (blurUnits < 5.0 || fast) {
         return knownBlur(uv, blurUnits);
     }
@@ -159,7 +171,12 @@ float noiseAt(vec2 uv) {
     float coarsePeriod = NOISE_PERIOD * exp2(scaleSteps + 1.0);
     vec2 coarse = noiseOrigin + uv * unitsPerUv / coarsePeriod;
     // The fine noise has half the period, so it runs twice as far from the same origin.
-    return mix(noiseLayer(coarse * 2.0), noiseLayer(coarse), scaleFraction);
+    float fine = noiseLayer(coarse * 2.0);
+    // At the detailed zoom and closer there is only the one scale: mix() would return fine anyway.
+    if (scaleFraction == 0.0) {
+        return fine;
+    }
+    return mix(fine, noiseLayer(coarse), scaleFraction);
 }
 
 float thicknessFrom(float known, float n) {
@@ -199,11 +216,13 @@ void main() {
     scaleFraction = mod(fogCode, 16.0) / 16.0;
     fogScale = exp2(scaleSteps + scaleFraction);
     // MapViewport.fogReach repeats how far the reads below can reach (these sizes, the blur taps,
-    // the layer shift and the sun probe), to know where the clear flag is safe. Change both together.
+    // the layer shift and the sun probe), to know where the clear and deep flags are safe. Change both together.
     fogHeight = cave ? 4.0 : 10.0;
     blurUnits = cave ? 2.5 : 7.0;
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
-    clear = texelFetch(Sampler0, texel, 0).g > 0.5;
+    vec4 flags = texelFetch(Sampler0, texel, 0);
+    clear = flags.g > 0.5;
+    deep = flags.b > 0.5;
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
@@ -225,7 +244,7 @@ void main() {
         float occlusion = 0.0;
         if (!fast) {
             vec2 probe = ground + toSun;
-            float toward = thicknessAt(probe, clear ? 1.0 : texture(Sampler0, probe).r);
+            float toward = thicknessAt(probe, clear ? 1.0 : knownAt(probe));
             occlusion = clamp((toward - th) / fogHeight * 2.2, 0.0, 1.0);
         }
         float light = clamp(0.2 + 0.7 * (h / fogHeight) + 0.3 - occlusion * 0.7, 0.0, 1.0);
@@ -247,13 +266,13 @@ void main() {
 
     // Ground that is known right here stays visible; fog only rolls over its edges. Caves use the
     // sharp mask so narrow tunnels stay clear; the surface uses the blurred one so banks stay soft.
-    float here = cave ? texture(Sampler0, maskUv).r : soft;
+    float here = cave ? knownAt(maskUv) : soft;
     alpha *= 1.0 - 0.85 * smoothstep(0.45, 0.95, here);
 
     // Where there is no map at all, nothing should show through, or the edge of the data would
     // read as a hard line inside the bank.
     // The cover takes the colour the layers already have here, so it doesn't show as a band.
-    float empty = 1.0 - smoothstep(0.3, 0.85, texture(Sampler0, maskUv).r);
+    float empty = 1.0 - smoothstep(0.3, 0.85, knownAt(maskUv));
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;

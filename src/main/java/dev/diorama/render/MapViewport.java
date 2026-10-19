@@ -256,7 +256,7 @@ public final class MapViewport {
 		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
-		this.markClear(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
+		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 	}
 
@@ -286,22 +286,31 @@ public final class MapViewport {
 		};
 	}
 
-	private final int[] unknownCounts = new int[(MASK + 1) * (MASK + 1)];
+	private final int[] notKnownCounts = new int[(MASK + 1) * (MASK + 1)];
+	private final int[] notUnknownCounts = new int[(MASK + 1) * (MASK + 1)];
 
 	/**
-	 * Sets the green channel where every texel within reach is fully known. The shader can skip
-	 * all its texture reads there: there is no fog thickness anywhere such a pixel looks. Texels
-	 * past the mask's edge read as the edge texel, so the reach just stops at the edge.
+	 * Sets the green channel where every texel within reach is fully known, and the blue channel
+	 * where every one is fully unknown. The shader skips its mask reads there, because it knows
+	 * what they would return: over clear ground there is no fog thickness anywhere it looks, so it
+	 * skips the noise too; deep in the fog only the noise is left to read. Texels past the mask's
+	 * edge read as the edge texel, so the reach just stops at the edge.
 	 */
-	private void markClear(int[] reach) {
+	private void markReach(int[] reach) {
 		int row = MASK + 1;
-		int[] counts = this.unknownCounts;
-		// counts[(j + 1) * row + i + 1]: texels short of fully known in the rectangle from (0, 0) to (i, j).
+		// counts[(j + 1) * row + i + 1]: texels short of fully known (or with any known share) in the
+		// rectangle from (0, 0) to (i, j).
+		int[] notKnown = this.notKnownCounts;
+		int[] notUnknown = this.notUnknownCounts;
 		for (int j = 0; j < MASK; j++) {
-			int line = 0;
+			int lineNotKnown = 0;
+			int lineNotUnknown = 0;
 			for (int i = 0; i < MASK; i++) {
-				line += (this.maskPixels[j * MASK + i] & 0xFF) == 0xFF ? 0 : 1;
-				counts[(j + 1) * row + i + 1] = counts[j * row + i + 1] + line;
+				int known = this.maskPixels[j * MASK + i] & 0xFF;
+				lineNotKnown += known == 0xFF ? 0 : 1;
+				lineNotUnknown += known == 0 ? 0 : 1;
+				notKnown[(j + 1) * row + i + 1] = notKnown[j * row + i + 1] + lineNotKnown;
+				notUnknown[(j + 1) * row + i + 1] = notUnknown[j * row + i + 1] + lineNotUnknown;
 			}
 		}
 		for (int j = 0; j < MASK; j++) {
@@ -310,9 +319,14 @@ public final class MapViewport {
 			for (int i = 0; i < MASK; i++) {
 				int left = Math.max(0, i - reach[0]);
 				int right = Math.min(MASK - 1, i + reach[1]) + 1;
-				int unknown = counts[bottom * row + right] - counts[top * row + right] - counts[bottom * row + left] + counts[top * row + left];
-				if (unknown == 0) {
+				int a = bottom * row + right;
+				int b = top * row + right;
+				int c = bottom * row + left;
+				int d = top * row + left;
+				if (notKnown[a] - notKnown[b] - notKnown[c] + notKnown[d] == 0) {
 					this.maskPixels[j * MASK + i] |= 0xFF00;
+				} else if (notUnknown[a] - notUnknown[b] - notUnknown[c] + notUnknown[d] == 0) {
+					this.maskPixels[j * MASK + i] |= 0xFF0000;
 				}
 			}
 		}
