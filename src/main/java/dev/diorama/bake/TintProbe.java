@@ -9,6 +9,9 @@ import net.minecraft.world.level.CardinalLighting;
 /*import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockAndTintGetter;
 *///?}
+//? if <1.21.2 {
+/*import net.minecraft.world.level.LightLayer;
+*///?}
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -103,6 +106,17 @@ final class TintProbe implements BlockAndTintGetter {
 	@Override
 	public @Nullable LevelLightEngine getLightEngine() {
 		return null;
+	}
+
+	// There's no empty light engine to hand out before 1.21.2: answer light questions directly.
+	@Override
+	public int getBrightness(LightLayer layer, BlockPos pos) {
+		return 15;
+	}
+
+	@Override
+	public int getRawBrightness(BlockPos pos, int darkening) {
+		return 15 - darkening;
 	}
 	*///?}
 

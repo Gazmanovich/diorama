@@ -366,53 +366,58 @@ public final class BlockLooks {
 		static final Tint NONE = new Tint(TINT_NONE, -1);
 
 		/**
-		 * Reads tint code's answer in the probe's world. For a biome colour the map doesn't blend
-		 * itself (a mod's own), it takes the code's colour out of the world instead.
+		 * Asks tint code for its colour in the probe's world. For a biome colour the map doesn't
+		 * blend itself (a mod's own), or code that fails in the stand-in world, it takes the code's
+		 * colour out of the world instead, as the map did before it asked in a world at all.
 		 */
-		static Tint of(TintProbe probe, int inWorld, IntSupplier outOfWorld) {
+		static Tint ask(TintProbe probe, IntSupplier inWorld, IntSupplier outOfWorld) {
+			probe.reset();
+			int color;
+			try {
+				color = inWorld.getAsInt();
+			} catch (RuntimeException e) {
+				color = -1;
+			}
 			byte kind = probe.kind();
 			if (kind != TINT_NONE) {
 				return new Tint(kind, -1);
 			}
-			int color = probe.askedForBiome() ? outOfWorld.getAsInt() : inWorld;
+			if (probe.askedForBiome() || color == -1) {
+				try {
+					color = outOfWorld.getAsInt();
+				} catch (RuntimeException e) {
+					return NONE;
+				}
+			}
 			// -1 (no tint code) and white both leave the texture as it is.
 			return (color & 0xFFFFFF) == 0xFFFFFF ? NONE : new Tint(TINT_NONE, color & 0xFFFFFF);
 		}
 	}
 
-	/**
-	 * Asks a block's tint code for one tint layer in the probe's empty world. A mod's tint code may
-	 * not expect that world, so a failure counts as no tint.
-	 */
+	/** Asks a block's tint code how one tint layer is coloured. */
 	private static Tint blockTint(BlockColors colors, BlockState state, int index, TintProbe probe) {
-		probe.reset();
-		try {
-			//? if >=26.1 {
-			BlockTintSource source = colors.getTintSource(state, index);
-			return source == null ? Tint.NONE : Tint.of(probe, source.colorInWorld(state, probe, BlockPos.ZERO), () -> source.color(state));
-			//?} else {
-			/*return Tint.of(probe, colors.getColor(state, probe, BlockPos.ZERO, index), () -> colors.getColor(state, null, null, index));
-			*///?}
-		} catch (RuntimeException e) {
-			return Tint.NONE;
-		}
+		//? if >=26.1 {
+		BlockTintSource source = colors.getTintSource(state, index);
+		return source == null ? Tint.NONE : Tint.ask(probe, () -> source.colorInWorld(state, probe, BlockPos.ZERO), () -> source.color(state));
+		//?} else {
+		/*return Tint.ask(probe, () -> colors.getColor(state, probe, BlockPos.ZERO, index), () -> colors.getColor(state, null, null, index));
+		*///?}
 	}
 
 	/** The same for a fluid's tint code. */
 	private static Tint fluidTint(FluidState fluid, TintProbe probe) {
-		probe.reset();
 		try {
 			//? if >=26.1 {
 			BlockTintSource source = Minecraft.getInstance().getModelManager().getFluidStateModelSet().get(fluid).tintSource();
 			BlockState block = fluid.createLegacyBlock();
-			return source == null ? Tint.NONE : Tint.of(probe, source.colorInWorld(block, probe, BlockPos.ZERO), () -> source.color(block));
+			return source == null ? Tint.NONE : Tint.ask(probe, () -> source.colorInWorld(block, probe, BlockPos.ZERO), () -> source.color(block));
 			//?} else if fabric {
 			/*FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getType());
 			return handler == null ? Tint.NONE
-				: Tint.of(probe, handler.getFluidColor(probe, BlockPos.ZERO, fluid), () -> handler.getFluidColor(null, null, fluid));
+				: Tint.ask(probe, () -> handler.getFluidColor(probe, BlockPos.ZERO, fluid), () -> handler.getFluidColor(null, null, fluid));
 			*///?} else {
 			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
-			return Tint.of(probe, extensions.getTintColor(fluid, probe, BlockPos.ZERO), extensions::getTintColor);
+			return Tint.ask(probe, () -> extensions.getTintColor(fluid, probe, BlockPos.ZERO), extensions::getTintColor);
 			*///?}
 		} catch (RuntimeException e) {
 			return Tint.NONE;
