@@ -96,6 +96,14 @@ final class BlazeBakeBackend implements BakeBackend {
 		*///?}
 	}
 
+	/** 26.2 gives every pipeline a colour target; a depth-only one marks its only slot unused, as its pass does. */
+	private static RenderPipeline.Builder depthOnly(RenderPipeline.Builder builder) {
+		//? if <26.3 {
+		/*builder.withUnusedColorTargetState(0);
+		*///?}
+		return builder;
+	}
+
 	/** Whether the pipeline compiled; compiles it the first time. */
 	private static boolean ready(RenderPipeline pipeline) {
 		//? if >=26.3 {
@@ -152,6 +160,9 @@ final class BlazeBakeBackend implements BakeBackend {
 			for (int i = 0; i < this.colors.size(); i++) {
 				d = d.withColorAttachment(this.colors.get(i), this.clears.get(i));
 			}
+			if (this.colors.isEmpty()) {
+				d = d.withUnusedColorAttachment();
+			}
 			if (this.depth != null) {
 				d = d.withDepthAttachment(this.depth, this.depthClear);
 			}
@@ -170,7 +181,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		.withColorTargetState(target(GpuFormat.R8_UNORM))
 		.withPrimitiveTopology(PrimitiveTopology.POINTS)
 		.build();
-	private static final RenderPipeline SHADOW = faces("bake_shadow", "SHADOW", CASTER)
+	private static final RenderPipeline SHADOW = depthOnly(faces("bake_shadow", "SHADOW", CASTER))
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
 	private static final RenderPipeline OPAQUE = faces("bake_opaque", null, FACE)
