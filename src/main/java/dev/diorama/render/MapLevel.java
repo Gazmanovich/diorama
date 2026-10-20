@@ -810,10 +810,11 @@ public final class MapLevel implements ChunkSource {
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
-		// GPU bakes need frames this wait holds up: trace those tiles instead.
-		dev.diorama.render.gpu.GpuTileBaker.cancelAll();
 		long deadline = System.currentTimeMillis() + 3000;
 		while (true) {
+			// GPU bakes need frames this wait holds up: trace those tiles instead, including ones
+			// whose mesh a baker thread finishes while it waits.
+			dev.diorama.render.gpu.GpuTileBaker.cancelAll();
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
 				this.inFlight.remove(image.key());

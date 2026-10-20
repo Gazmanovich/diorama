@@ -124,7 +124,6 @@ public final class GpuTileBaker {
 			if (job == null) {
 				return;
 			}
-			budget -= cost();
 			try {
 				if (job.mesh.empty) {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
@@ -133,6 +132,9 @@ public final class GpuTileBaker {
 				} else if (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT || !BACKEND.draw(job)) {
 					// Bigger than the textures that hold its sky occlusion, or this GPU can't: trace it.
 					job.fail();
+				} else {
+					// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
+					budget -= cost();
 				}
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("GPU bake of {} failed", job.mesh.key, t);

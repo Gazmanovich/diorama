@@ -100,8 +100,14 @@ final class GlBakeBackend implements BakeBackend {
 		}
 		long start = System.nanoTime();
 		Saved saved = Saved.take();
+		// Made here and handed to the readback; deleted here if the draw fails before that.
+		int startQuery = 0;
+		int colors = 0;
+		int info = 0;
+		int endQuery = 0;
+		boolean queued = false;
 		try {
-			int startQuery = this.timestamps ? glGenQueries() : 0;
+			startQuery = this.timestamps ? glGenQueries() : 0;
 			if (startQuery != 0) {
 				glQueryCounter(startQuery, GL_TIMESTAMP);
 			}
@@ -195,13 +201,12 @@ final class GlBakeBackend implements BakeBackend {
 
 			// Into pixel buffers; the fence says when they're there.
 			GlState.bindFramebuffer(GL_READ_FRAMEBUFFER, this.outputFbo);
-			int colors = glGenBuffers();
+			colors = glGenBuffers();
 			glBindBuffer(GL_PIXEL_PACK_BUFFER, colors);
 			glBufferData(GL_PIXEL_PACK_BUFFER, (long) size * size * 4, GL_STREAM_READ);
 			Saved.plainPixelStore();
 			glReadBuffer(GL_COLOR_ATTACHMENT0);
 			glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, 0L);
-			int info = 0;
 			if (job.mesh.overlays != null) {
 				info = glGenBuffers();
 				glBindBuffer(GL_PIXEL_PACK_BUFFER, info);
@@ -211,7 +216,6 @@ final class GlBakeBackend implements BakeBackend {
 				glReadPixels(0, 0, size, size, GL_RED, GL_UNSIGNED_BYTE, 0L);
 				glReadBuffer(GL_COLOR_ATTACHMENT0);
 			}
-			int endQuery = 0;
 			if (startQuery != 0) {
 				endQuery = glGenQueries();
 				glQueryCounter(endQuery, GL_TIMESTAMP);
@@ -219,9 +223,22 @@ final class GlBakeBackend implements BakeBackend {
 			long fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 			long recordNanos = System.nanoTime() - start;
 			this.readbacks.add(new Readback(job, colors, info, fence, startQuery, endQuery, recordNanos));
+			queued = true;
 			job.pending();
 			GpuTileBaker.recorded(recordNanos);
 		} finally {
+			if (!queued) {
+				for (int buffer : new int[] {colors, info}) {
+					if (buffer != 0) {
+						glDeleteBuffers(buffer);
+					}
+				}
+				for (int query : new int[] {startQuery, endQuery}) {
+					if (query != 0) {
+						glDeleteQueries(query);
+					}
+				}
+			}
 			saved.restore();
 			job.free();
 		}
