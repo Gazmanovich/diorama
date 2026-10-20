@@ -31,7 +31,7 @@ import org.jspecify.annotations.Nullable;
 /*import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry;
 import net.fabricmc.loader.api.FabricLoader;
-*///?} else if <26.1 && >=1.21.11 {
+*///?} else if <26.1 && >=1.21.9 {
 /*import net.minecraft.data.AtlasIds;
 import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?} else if <26.1 {
@@ -410,7 +410,7 @@ public final class BlockLooks {
 				sprite = handler.getFluidSprites(null, null, fluid)[0];
 				tint = handler.getFluidColor(null, null, fluid);
 			}
-			*///?} else if >=1.21.11 {
+			*///?} else if >=1.21.9 {
 			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
 			sprite = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS).getSprite(extensions.getStillTexture());
 			tint = extensions.getTintColor();
