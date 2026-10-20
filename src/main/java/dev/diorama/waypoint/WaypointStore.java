@@ -57,11 +57,14 @@ public final class WaypointStore {
 		this.load();
 	}
 
-	/** The store for the world the client is in, loading it when the world changes. */
+	/**
+	 * The store for the world the client is in, loading it when the world changes. Null while the
+	 * world isn't known, which includes a dimension change waiting for the server to name its
+	 * level: the loaded store is kept through that, or its temporary waypoints would go.
+	 */
 	public static @Nullable WaypointStore get() {
 		String key = WorldKey.current();
 		if (key == null) {
-			current = null;
 			return null;
 		}
 		if (current == null || !current.worldKey.equals(key)) {

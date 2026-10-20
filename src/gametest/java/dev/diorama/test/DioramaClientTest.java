@@ -1610,24 +1610,35 @@ public class DioramaClientTest implements FabricClientGameTest {
 		mapMenu(context);
 	}
 
+	/** The temporary waypoint kept from the menu, and one left temporary, for after rejoining. */
+	private static @Nullable UUID keptTemporary;
+	private static @Nullable UUID leftTemporary;
+
 	/**
 	 * The map's right-click menu, used with the mouse: teleporting to a spot, temporary waypoints,
-	 * a waypoint's own menu, sharing a location, and Esc closing the menu before the map.
+	 * a waypoint's own menu, sharing a location, and what closes the menu.
 	 */
 	private static void mapMenu(ClientGameTestContext context) {
 		openMapOnPlayer(context);
 
-		// Teleport here: the player lands standing on the block the map shows at the click.
-		rightClickMap(context, 24, 0);
+		// Teleport here: the player lands standing on the block the map shows at the click, which
+		// is the first solid block on the camera ray through that point.
+		double[] click = rightClickMap(context, 24, 0);
 		context.takeScreenshot("map-menu-01-spot");
 		int[] spot = menuSpot(context);
+		int hitY = spot[1] - 1;
+		boolean onRay = spot[0] == (int) Math.floor(click[0])
+			&& click[1] >= Projection.v(hitY + 1, spot[2]) - 1e-6 && click[1] <= Projection.v(hitY, spot[2] + 1) + 1e-6;
+		if (!onRay) {
+			throw new AssertionError("The menu offers " + spot[0] + "," + spot[1] + "," + spot[2] + ", which isn't the block shown at the click");
+		}
 		clickMenu(context, "Teleport here");
 		context.waitFor(mc -> mc.player.distanceToSqr(spot[0] + 0.5, spot[1], spot[2] + 0.5) < 0.5, 100);
 		context.runOnClient(mc -> {
 			if (mc.gui.screen() != null) {
 				throw new AssertionError("The map stayed open after Teleport here");
 			}
-			if (mc.level.getBlockState(new BlockPos(spot[0], spot[1] - 1, spot[2])).isAir()) {
+			if (mc.level.getBlockState(new BlockPos(spot[0], hitY, spot[2])).isAir()) {
 				throw new AssertionError("Teleport here put the player over air at " + spot[0] + "," + spot[1] + "," + spot[2]);
 			}
 		});
@@ -1651,6 +1662,35 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Esc with the menu open didn't just close the menu");
 			}
 		});
+
+		// So does a click on the Settings button: it doesn't open the settings.
+		rightClickMap(context, -12, 0);
+		double[] settings = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(mc.gui.screen().width - 32) * scale, 7 * scale};
+		});
+		moveCursor(context, settings[0], settings[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		context.runOnClient(mc -> {
+			if (!(mc.gui.screen() instanceof MapScreen map) || map.menu() != null) {
+				throw new AssertionError("Clicking Settings with the menu open didn't just close the menu");
+			}
+		});
+
+		// Where the map has nothing, the menu says so and offers nothing.
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + 100_000, Projection.v(mc.player.getY(), mc.player.getZ()), 4.0, TileKey.SURFACE));
+		context.waitTicks(3);
+		double[] middle = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {mc.gui.screen().width / 2.0 * scale, mc.gui.screen().height / 2.0 * scale};
+		});
+		rightClickAt(context, middle[0], middle[1]);
+		List<String> nothing = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (!nothing.equals(List.of("Nothing mapped here"))) {
+			throw new AssertionError("Off the map, the menu shows " + nothing);
+		}
+		openMapOnPlayer(context);
 
 		// Two temporary waypoints: they're on the map but not in the file. One gets kept.
 		int[] first = addTemporary(context, -12, 0);
@@ -1688,6 +1728,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 
 		// The second is kept: it's in the file now.
+		UUID keptId = context.computeOnClient(mc -> temporaryAt(second).id);
 		rightClickPin(context, second);
 		clickMenu(context, "Keep waypoint");
 		String kept = context.computeOnClient(mc -> {
@@ -1697,27 +1738,32 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError(e);
 			}
 		});
-		if (!kept.contains("\"x\": " + second[0] + ",") || !kept.contains("\"Temporary\"")) {
+		if (!kept.contains(keptId.toString())) {
 			throw new AssertionError("Keep waypoint didn't save it:\n" + kept);
 		}
+		keptTemporary = keptId;
 		// One more, left temporary, for leaving the world to clear.
-		addTemporary(context, 10, 6);
+		int[] third = addTemporary(context, 10, 6);
+		leftTemporary = context.computeOnClient(mc -> temporaryAt(third).id);
 
-		// Share location: a second click posts it, and the line carries an [Add] link.
+		// Share location: nothing goes out until the second click, then one line, with an [Add] link.
 		rightClickMap(context, 8, -8);
+		int[] shared = menuSpot(context);
+		String line = "xaero-waypoint:Shared location:SL:" + shared[0] + ":" + shared[1] + ":" + shared[2] + ":";
 		clickMenu(context, "Share location in chat");
-		boolean sharedEarly = context.computeOnClient(mc -> !(mc.gui.screen() instanceof MapScreen));
-		if (sharedEarly) {
+		context.waitTicks(20);
+		long early = context.computeOnClient(mc -> chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).count());
+		boolean stillOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && map.menu() != null);
+		if (early != 0 || !stillOpen) {
 			throw new AssertionError("Share location went through without a second click");
 		}
 		clickMenu(context, "Click again to post in chat");
 		context.waitTicks(20);
 		assertConnected(context, "sharing a location");
 		context.runOnClient(mc -> {
-			boolean linked = chatMessages(mc).stream().anyMatch(message ->
-				message.content().getString().contains("xaero-waypoint:Shared location:") && linkIn(message.content()) != null);
-			if (!linked) {
-				throw new AssertionError("The shared location isn't in chat with an [Add] link");
+			List<net.minecraft.client.multiplayer.chat.GuiMessage> lines = chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).toList();
+			if (lines.size() != 1 || linkIn(lines.get(0).content()) == null) {
+				throw new AssertionError("Expected one shared location line with an [Add] link in chat, found " + lines.size());
 			}
 		});
 		context.takeScreenshot("map-menu-06-shared-location");
@@ -1728,10 +1774,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitFor(mc -> mc.player != null && WorldKey.current() != null, 600);
 		context.runOnClient(mc -> {
 			List<Waypoint> all = WaypointStore.get().all();
-			if (all.stream().anyMatch(w -> w.kind == Waypoint.Kind.TEMPORARY)) {
+			if (all.stream().anyMatch(w -> w.id.equals(leftTemporary) || w.kind == Waypoint.Kind.TEMPORARY)) {
 				throw new AssertionError("A temporary waypoint was still there after leaving the world");
 			}
-			if (all.stream().noneMatch(w -> w.name.equals("Temporary"))) {
+			if (all.stream().noneMatch(w -> w.id.equals(keptTemporary) && w.kind == Waypoint.Kind.MANUAL)) {
 				throw new AssertionError("The temporary waypoint kept from the menu is gone after leaving the world");
 			}
 		});
@@ -1744,16 +1790,25 @@ public class DioramaClientTest implements FabricClientGameTest {
 		menuFrame(context);
 	}
 
-	/** Right-clicks the map {@code east} blocks east and {@code down} map rows below the player. */
-	private static void rightClickMap(ClientGameTestContext context, int east, int down) {
+	/**
+	 * Right-clicks the map {@code east} blocks east and {@code down} map rows below the player,
+	 * and returns the map point clicked, {u, v}.
+	 */
+	private static double[] rightClickMap(ClientGameTestContext context, int east, int down) {
 		double[] at = context.computeOnClient(mc -> {
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
 			double u = mc.player.getBlockX() + east + 0.5;
 			double v = Projection.v(mc.player.getY(), mc.player.getZ()) + down;
 			double scale = mc.getWindow().getGuiScale();
-			return new double[] {view.screenX(u) * scale, view.screenY(v) * scale};
+			return new double[] {u, v, view.screenX(u) * scale, view.screenY(v) * scale};
 		});
-		moveCursor(context, at[0], at[1]);
+		rightClickAt(context, at[2], at[3]);
+		return new double[] {at[0], at[1]};
+	}
+
+	/** Right-clicks the map at a window position, which must open its menu. */
+	private static void rightClickAt(ClientGameTestContext context, double x, double y) {
+		moveCursor(context, x, y);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
 		context.waitTicks(3);
 		menuFrame(context);

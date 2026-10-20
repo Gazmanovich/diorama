@@ -209,12 +209,15 @@ public final class MapScreen extends Screen {
 	}
 	*///?}
 
-	/** A press on the open menu, which comes before the widgets it covers; false if it's elsewhere. */
+	/**
+	 * A press while the menu is open, which the widgets don't get: on the menu it's for the menu,
+	 * and anywhere else its release only closes the menu. False when the menu isn't open.
+	 */
 	private boolean menuPressed(double x, double y) {
-		if (this.menu == null || !this.menu.contains(x, y)) {
+		if (this.menu == null) {
 			return false;
 		}
-		this.pressOnMenu = true;
+		this.pressOnMenu = this.menu.contains(x, y);
 		this.pressX = x;
 		this.pressY = y;
 		this.dragged = false;
