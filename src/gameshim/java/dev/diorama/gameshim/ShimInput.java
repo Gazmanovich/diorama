@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.lwjgl.glfw.GLFW;
-
 import com.mojang.blaze3d.platform.InputConstants;
 
 import dev.diorama.gameshim.mixin.KeyboardHandlerAccessor;
@@ -13,10 +11,22 @@ import dev.diorama.gameshim.mixin.MouseHandlerAccessor;
 import net.minecraft.client.KeyMapping;
 import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.minecraft.client.Minecraft;
+import net.minecraft.commands.arguments.EntityAnchorArgument;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+//? if >=1.21.9 {
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+//?}
+//? if >=26.3 {
+import org.lwjgl.sdl.SDLKeyboard;
+//?}
 
 /**
- * Simulated input, after Fabric API's TestInputImpl: events go straight into the game's mouse
- * handler, as if GLFW had sent them. The real mouse and keyboard are cut off (see the mixins).
+ * Simulated input, after Fabric API's TestInputImpl: events go straight into the game's keyboard
+ * and mouse handlers, as if the window system had sent them. The real mouse and keyboard are cut
+ * off (see the mixins).
  */
 final class ShimInput implements TestInput {
 	private final ShimContext context;
@@ -30,7 +40,7 @@ final class ShimInput implements TestInput {
 	public void holdMouse(int button) {
 		ShimThreading.checkOnTestThread("holdMouse");
 		if (mouseDown.add(button)) {
-			context.runOnClient(minecraft -> mouse(minecraft).diorama$onPress(window(minecraft), button, GLFW.GLFW_PRESS, 0));
+			context.runOnClient(minecraft -> mouseButton(minecraft, button, InputConstants.PRESS));
 		}
 	}
 
@@ -38,7 +48,7 @@ final class ShimInput implements TestInput {
 	public void releaseMouse(int button) {
 		ShimThreading.checkOnTestThread("releaseMouse");
 		if (mouseDown.remove(button)) {
-			context.runOnClient(minecraft -> mouse(minecraft).diorama$onPress(window(minecraft), button, GLFW.GLFW_RELEASE, 0));
+			context.runOnClient(minecraft -> mouseButton(minecraft, button, InputConstants.RELEASE));
 		}
 	}
 
@@ -60,8 +70,8 @@ final class ShimInput implements TestInput {
 			return;
 		}
 		context.runOnClient(minecraft -> {
-			minecraft.keyboardHandler.keyPress(window(minecraft), key.getValue(), 0, GLFW.GLFW_PRESS, 0);
-			minecraft.keyboardHandler.keyPress(window(minecraft), key.getValue(), 0, GLFW.GLFW_RELEASE, 0);
+			key(minecraft, key, InputConstants.PRESS);
+			key(minecraft, key, InputConstants.RELEASE);
 		});
 		context.waitTick();
 	}
@@ -69,21 +79,39 @@ final class ShimInput implements TestInput {
 	@Override
 	public void typeChars(String chars) {
 		ShimThreading.checkOnTestThread("typeChars");
-		context.runOnClient(minecraft -> chars.codePoints().forEach(c ->
-			((KeyboardHandlerAccessor) minecraft.keyboardHandler).diorama$charTyped(window(minecraft), c, 0)));
+		context.runOnClient(minecraft -> chars.codePoints().forEach(c -> {
+			KeyboardHandlerAccessor keyboard = (KeyboardHandlerAccessor) minecraft.keyboardHandler;
+			//? if >=26.1 {
+			keyboard.diorama$charTyped(window(minecraft), new CharacterEvent(c));
+			//?} else if >=1.21.9 {
+			/*keyboard.diorama$charTyped(window(minecraft), new CharacterEvent(c, 0));
+			*///?} else {
+			/*keyboard.diorama$charTyped(window(minecraft), c, 0);
+			*///?}
+		}));
+	}
+
+	@Override
+	public void lookAt(BlockPos pos) {
+		ShimThreading.checkOnTestThread("lookAt");
+		context.runOnClient(minecraft -> {
+			if (minecraft.player == null) {
+				throw new IllegalStateException("The player must be in a world to look");
+			}
+			minecraft.player.lookAt(EntityAnchorArgument.Anchor.EYES, Vec3.atCenterOf(pos));
+		});
 	}
 
 	@Override
 	public void setCursorPos(double x, double y) {
 		ShimThreading.checkOnTestThread("setCursorPos");
-		context.runOnClient(minecraft -> mouse(minecraft).diorama$onMove(window(minecraft), x, y));
+		context.runOnClient(minecraft -> moveTo(minecraft, x, y));
 	}
 
 	@Override
 	public void moveCursor(double deltaX, double deltaY) {
 		ShimThreading.checkOnTestThread("moveCursor");
-		context.runOnClient(minecraft -> mouse(minecraft).diorama$onMove(window(minecraft),
-			minecraft.mouseHandler.xpos() + deltaX, minecraft.mouseHandler.ypos() + deltaY));
+		context.runOnClient(minecraft -> moveTo(minecraft, minecraft.mouseHandler.xpos() + deltaX, minecraft.mouseHandler.ypos() + deltaY));
 	}
 
 	@Override
@@ -100,8 +128,43 @@ final class ShimInput implements TestInput {
 		for (int button : new ArrayList<>(mouseDown)) {
 			releaseMouse(button);
 		}
-		context.runOnClient(minecraft -> mouse(minecraft).diorama$onMove(window(minecraft),
+		context.runOnClient(minecraft -> moveTo(minecraft,
 			minecraft.getWindow().getScreenWidth() * 0.5, minecraft.getWindow().getScreenHeight() * 0.5));
+	}
+
+	private static void key(Minecraft minecraft, InputConstants.Key key, int action) {
+		//? if >=26.3 {
+		// Keys are scancodes, with the key code they make on this keyboard layout.
+		KeyEvent event = new KeyEvent(key.getValue(), SDLKeyboard.SDL_GetKeyFromScancode(key.getValue(), (short) 0, false), 0);
+		((KeyboardHandlerAccessor) minecraft.keyboardHandler).diorama$keyPress(window(minecraft), action, event);
+		//?} else if >=1.21.9 {
+		/*KeyEvent event = key.getType() == InputConstants.Type.SCANCODE
+			? new KeyEvent(InputConstants.UNKNOWN.getValue(), key.getValue(), 0)
+			: new KeyEvent(key.getValue(), 0, 0);
+		((KeyboardHandlerAccessor) minecraft.keyboardHandler).diorama$keyPress(window(minecraft), action, event);
+		*///?} else {
+		/*if (key.getType() == InputConstants.Type.SCANCODE) {
+			minecraft.keyboardHandler.keyPress(window(minecraft), InputConstants.UNKNOWN.getValue(), key.getValue(), action, 0);
+		} else {
+			minecraft.keyboardHandler.keyPress(window(minecraft), key.getValue(), 0, action, 0);
+		}
+		*///?}
+	}
+
+	private static void mouseButton(Minecraft minecraft, int button, int action) {
+		//? if >=1.21.9 {
+		mouse(minecraft).diorama$onButton(window(minecraft), new MouseButtonInfo(button, 0), action);
+		//?} else {
+		/*mouse(minecraft).diorama$onPress(window(minecraft), button, action, 0);
+		*///?}
+	}
+
+	private static void moveTo(Minecraft minecraft, double x, double y) {
+		//? if >=26.3 {
+		mouse(minecraft).diorama$onMove(window(minecraft), x, y, x - minecraft.mouseHandler.xpos(), y - minecraft.mouseHandler.ypos());
+		//?} else {
+		/*mouse(minecraft).diorama$onMove(window(minecraft), x, y);
+		*///?}
 	}
 
 	private static MouseHandlerAccessor mouse(Minecraft minecraft) {
@@ -109,6 +172,10 @@ final class ShimInput implements TestInput {
 	}
 
 	private static long window(Minecraft minecraft) {
-		return minecraft.getWindow().getWindow();
+		//? if >=1.21.9 {
+		return minecraft.getWindow().handle();
+		//?} else {
+		/*return minecraft.getWindow().getWindow();
+		*///?}
 	}
 }

@@ -15,6 +15,9 @@ logoFile = "assets/diorama/icon.png"
 [[mixins]]
 config = "diorama.mixins.json"
 
+[[accessTransformers]]
+file = "META-INF/accesstransformer.cfg"
+
 [[dependencies.diorama]]
 modId = "neoforge"
 type = "required"

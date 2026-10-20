@@ -49,7 +49,12 @@ public final class GameShim {
 	/** Called at the end of every client tick; starts the tests once the game has loaded. */
 	public static void onTickEnd(Minecraft minecraft, Supplier<List<Test>> tests) {
 		ShimThreading.onTickEnd();
-		if (!started && minecraft.getOverlay() == null) {
+		//? if >=26.2 {
+		boolean loaded = minecraft.gui.overlay() == null;
+		//?} else {
+		/*boolean loaded = minecraft.getOverlay() == null;
+		*///?}
+		if (!started && loaded) {
 			started = true;
 			start(minecraft, tests);
 		}
@@ -70,7 +75,11 @@ public final class GameShim {
 
 	private static void start(Minecraft minecraft, Supplier<List<Test>> tests) {
 		// The window may not have focus; the game should behave as if it had.
-		minecraft.setWindowActive(true);
+		//? if >=26.1 {
+		((WindowHooks) (Object) minecraft.getWindow()).diorama$focus();
+		//?} else {
+		/*minecraft.setWindowActive(true);
+		*///?}
 		Path result = minecraft.gameDirectory.toPath().resolve("gameshim-result.txt");
 		Thread thread = new Thread(() -> run(tests, result), "Client game test (Diorama shim)");
 		thread.setDaemon(true);
@@ -125,7 +134,7 @@ public final class GameShim {
 			if (minecraft.level != null) {
 				throw new AssertionError("Client game test " + name + " finished while still in a world");
 			}
-			if (!(minecraft.screen instanceof TitleScreen)) {
+			if (!(minecraft.gui.screen() instanceof TitleScreen)) {
 				throw new AssertionError("Client game test " + name + " did not finish on the title screen");
 			}
 		});

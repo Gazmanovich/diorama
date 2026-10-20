@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -11,6 +13,8 @@ import java.util.function.Supplier;
 import org.apache.commons.lang3.function.FailableConsumer;
 import org.apache.commons.lang3.function.FailableFunction;
 
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -22,6 +26,9 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
+import net.minecraft.client.input.MouseButtonInfo;
+//?}
 import net.minecraft.network.chat.Component;
 
 /** The shim's {@link ClientGameTestContext}, after Fabric API's ClientGameTestContextImpl. */
@@ -81,7 +88,7 @@ final class ShimContext implements ClientGameTestContext {
 	@Override
 	public void setScreen(Supplier<Screen> screen) {
 		ShimThreading.checkOnTestThread("setScreen");
-		runOnClient(minecraft -> minecraft.setScreen(screen.get()));
+		runOnClient(minecraft -> minecraft.gui.setScreen(screen.get()));
 	}
 
 	@Override
@@ -89,9 +96,10 @@ final class ShimContext implements ClientGameTestContext {
 		ShimThreading.checkOnTestThread("clickScreenButton");
 		Objects.requireNonNull(translationKey, "translationKey");
 		runOnClient(minecraft -> {
-			if (!clickButton(minecraft.screen, translationKey)) {
+			Screen current = minecraft.gui.screen();
+			if (!clickButton(current, translationKey)) {
 				throw new AssertionError("Could not find button '%s' in screen '%s'".formatted(
-					translationKey, minecraft.screen == null ? null : minecraft.screen.getClass().getName()));
+					translationKey, current == null ? null : current.getClass().getName()));
 			}
 		});
 	}
@@ -122,7 +130,11 @@ final class ShimContext implements ClientGameTestContext {
 
 	private static boolean pressIfMatches(AbstractWidget widget, String text) {
 		if (widget instanceof Button button && text.equals(button.getMessage().getString())) {
-			button.onPress();
+			//? if >=1.21.9 {
+			button.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0));
+			//?} else {
+			/*button.onPress();
+			*///?}
 			return true;
 		}
 		return false;
@@ -135,17 +147,47 @@ final class ShimContext implements ClientGameTestContext {
 		// A frame drawn entirely after this call, so it shows everything the test did before it.
 		// The main render target still holds it when the next frame's tasks run.
 		ShimThreading.waitFrames(1);
-		return computeOnClient(minecraft -> {
+		CompletableFuture<Path> written = new CompletableFuture<>();
+		runOnClient(minecraft -> {
 			Path folder = minecraft.gameDirectory.toPath().resolve("screenshots");
 			Path file = folder.resolve("%04d_%s.png".formatted(SCREENSHOT_COUNTER.getAndIncrement(), name));
-			try (NativeImage image = Screenshot.takeScreenshot(minecraft.getMainRenderTarget())) {
-				Files.createDirectories(folder);
-				image.writeToFile(file);
-			} catch (IOException e) {
-				throw new AssertionError("Failed to write screenshot " + file, e);
-			}
-			return file;
+			//? if >=26.2 {
+			RenderTarget target = minecraft.gameRenderer.mainRenderTarget();
+			//?} else {
+			/*RenderTarget target = minecraft.getMainRenderTarget();
+			*///?}
+			//? if >=1.21.5 {
+			// The GPU copies the frame out, and the game hands the image over a frame or two later.
+			Screenshot.takeScreenshot(target, image -> write(image, file, written));
+			//?} else {
+			/*write(Screenshot.takeScreenshot(target), file, written);
+			*///?}
 		});
+		// A few frames normally; a lost callback fails the test instead of hanging it.
+		for (int frames = 0; !written.isDone(); frames++) {
+			if (frames == 600) {
+				throw new AssertionError("Timed out waiting for screenshot " + name);
+			}
+			ShimThreading.waitFrames(1);
+		}
+		try {
+			return written.get();
+		} catch (ExecutionException e) {
+			throw ShimThreading.sneakyThrow(e.getCause());
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new AssertionError("Interrupted while writing screenshot " + name, e);
+		}
+	}
+
+	private static void write(NativeImage image, Path file, CompletableFuture<Path> written) {
+		try (image) {
+			Files.createDirectories(file.getParent());
+			image.writeToFile(file);
+			written.complete(file);
+		} catch (IOException | RuntimeException e) {
+			written.completeExceptionally(new AssertionError("Failed to write screenshot " + file, e));
+		}
 	}
 
 	@Override

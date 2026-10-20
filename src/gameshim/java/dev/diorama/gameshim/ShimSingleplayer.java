@@ -50,10 +50,19 @@ final class ShimSingleplayer implements TestSingleplayerContext {
 			if (minecraft.level == null) {
 				throw new IllegalStateException("Exited the world before closing singleplayer context");
 			}
-			minecraft.level.disconnect();
+			//? if >=1.21.6 {
+			minecraft.level.disconnect(Component.translatable("menu.savingLevel"));
+			minecraft.disconnect(new GenericMessageScreen(Component.translatable("menu.savingLevel")), false);
+			//?} else {
+			/*minecraft.level.disconnect();
 			minecraft.disconnect(new GenericMessageScreen(Component.translatable("menu.savingLevel")));
+			*///?}
 		});
 		context.waitFor(minecraft -> minecraft.level == null && server.isShutdown(), SHUTDOWN_TIMEOUT_TICKS);
+		//? if >=26.1 {
+		// As Fabric's runner does from 26.1, before the title screen replaces the saving screen.
+		context.waitTicks(2);
+		//?}
 		context.setScreen(TitleScreen::new);
 	}
 }

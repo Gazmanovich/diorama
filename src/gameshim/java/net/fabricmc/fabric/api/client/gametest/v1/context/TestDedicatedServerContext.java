@@ -26,7 +26,7 @@ package net.fabricmc.fabric.api.client.gametest.v1.context;
  * this type is here so tests that use it on newer versions still compile.
  */
 public interface TestDedicatedServerContext extends TestServerContext, AutoCloseable {
-	TestServerConnection connect();
+	TestDedicatedServerConnection connect();
 
 	@Override
 	void close();

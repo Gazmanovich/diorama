@@ -2317,10 +2317,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return Set.of("styles");
 		}
 		if (env == null || env.isBlank()) {
-			//? if >=1.21.4 {
+			//? if >=1.21.4 && fabric {
 			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
 			//?} else {
-			/*// Before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
+			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
 			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
 			*///?}
 		}

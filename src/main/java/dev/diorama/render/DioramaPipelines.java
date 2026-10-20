@@ -27,7 +27,7 @@ public final class DioramaPipelines {
 	 * builds it like its own vanilla GUI_TEXTURED_SNIPPET, with the globals and a second sampler added.
 	 */
 	//? if >=26.3 {
-	public static final RenderPipeline FOG = RenderPipelines.register(
+	public static final RenderPipeline FOG = register(
 		RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
 			.withLocation(Diorama.id("pipeline/fog"))
 			.withBindGroupLayout(BindGroupLayouts.PROJECTION)
@@ -41,7 +41,7 @@ public final class DioramaPipelines {
 			.build()
 	);
 	//?} else if >=26.2 {
-	/*public static final RenderPipeline FOG = RenderPipelines.register(
+	/*public static final RenderPipeline FOG = register(
 		RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
 			.withLocation(Diorama.id("pipeline/fog"))
 			.withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
@@ -54,7 +54,7 @@ public final class DioramaPipelines {
 			.build()
 	);
 	*///?} else if >=26.1 {
-	/*public static final RenderPipeline FOG = RenderPipelines.register(
+	/*public static final RenderPipeline FOG = register(
 		RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET, RenderPipelines.GLOBALS_SNIPPET)
 			.withLocation(Diorama.id("pipeline/fog"))
 			.withVertexShader(Diorama.id("core/fog"))
@@ -66,7 +66,7 @@ public final class DioramaPipelines {
 			.build()
 	);
 	*///?} else {
-	/*public static final RenderPipeline FOG = RenderPipelines.register(
+	/*public static final RenderPipeline FOG = register(
 		RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET, RenderPipelines.GLOBALS_SNIPPET)
 			.withLocation(Diorama.id("pipeline/fog"))
 			.withVertexShader(Diorama.id("core/fog"))
@@ -81,6 +81,17 @@ public final class DioramaPipelines {
 	*///?}
 
 	private DioramaPipelines() {
+	}
+
+	// Fabric: into vanilla's list, which shaders compile from. NeoForge constructs mods in parallel and
+	// that list isn't thread-safe, so there DioramaNeoForge hands the pipeline to NeoForge's
+	// RegisterRenderPipelinesEvent instead.
+	private static RenderPipeline register(RenderPipeline pipeline) {
+		//? if fabric {
+		return RenderPipelines.register(pipeline);
+		//?} else {
+		/*return pipeline;
+		*///?}
 	}
 
 	// Forces class loading so the pipeline is registered before shaders compile.

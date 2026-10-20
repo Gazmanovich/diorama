@@ -103,13 +103,17 @@ stonecutter parameters {
 		"\\bgraphics\\.pose\\(\\)\\.scale\\((.*)\\);" to "graphics.pose().scale($1, $1, 1);",
 		// A screen's tooltip was set on the screen, which draws it after everything else.
 		"\\bgraphics\\.setTooltipForNextFrame\\(this\\.font, (.*), mouseX, mouseY\\);" to "this.setTooltipForNextRenderPass($1);",
-		// HUD elements were drawn from a callback; the mod's own interface stands in for Fabric's.
-		"import net\\.fabricmc\\.fabric\\.api\\.client\\.rendering\\.v1\\.hud\\.HudElement;" to "import dev.diorama.compat.HudElement;",
 	)
 	for ((pattern, older) in before1_21_6) {
 		replacements.regex(current.parsed < "1.21.6") {
 			replace(pattern, older, "(?!)", "never")
 		}
+	}
+
+	// HUD elements implement Fabric API's interface, or the mod's own where Fabric API has none
+	// (before 1.21.6, where they draw from a callback) or isn't there at all (NeoForge, GUI layers).
+	replacements.regex(current.parsed < "1.21.6" || current.project.endsWith("-neoforge")) {
+		replace("import net\\.fabricmc\\.fabric\\.api\\.client\\.rendering\\.v1\\.hud\\.HudElement;", "import dev.diorama.compat.HudElement;", "(?!)", "never")
 	}
 
 	// From the 1.21.5 spelling to the 1.21.4 one.

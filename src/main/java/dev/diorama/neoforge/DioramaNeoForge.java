@@ -5,9 +5,13 @@ import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
+import dev.diorama.Settings;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+//? if >=1.21.6 {
+import dev.diorama.render.DioramaPipelines;
+//?}
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import net.minecraft.client.Minecraft;
@@ -17,12 +21,16 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+//? if >=1.21.6 {
+import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
+//?}
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -30,20 +38,32 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 /**
  * Diorama's entrypoint on NeoForge: what {@code dev.diorama.fabric.DioramaFabric} does on Fabric,
- * through NeoForge's events. Only the NeoForge jar contains this package. It is written for
- * NeoForge on 1.21.1, the only version built for NeoForge so far.
+ * through NeoForge's events. Only the NeoForge jars contain this package.
  */
 @Mod(value = Diorama.MOD_ID, dist = Dist.CLIENT)
 public final class DioramaNeoForge {
 	public DioramaNeoForge(IEventBus modBus) {
 		DioramaClient.init();
-		modBus.addListener(RegisterKeyMappingsEvent.class, event -> DioramaClient.KEY_MAPPINGS.forEach(event::register));
+		// The settings file sits in the game directory, and from NeoForge 21.5 mods are constructed
+		// before Minecraft exists. Client setup comes after; load them there, on the main thread.
+		modBus.addListener(FMLClientSetupEvent.class, event -> event.enqueueWork(Settings::get));
+		modBus.addListener(RegisterKeyMappingsEvent.class, event -> {
+			//? if >=1.21.9 {
+			event.registerCategory(DioramaClient.CATEGORY);
+			//?}
+			DioramaClient.KEY_MAPPINGS.forEach(event::register);
+		});
+		//? if >=1.21.6 {
+		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> event.registerPipeline(DioramaPipelines.FOG));
+		//?}
 		// Above the whole vanilla HUD, in the same order as on Fabric: waypoint labels, then the
 		// minimap over them. Each layer already sits 200 deeper than the one before, which the Fabric
 		// jars before 1.21.6 have to make up for themselves.
 		modBus.addListener(RegisterGuiLayersEvent.class, event -> {
-			event.registerAboveAll(Diorama.id("waypoints"), new WaypointHud()::render);
-			event.registerAboveAll(Diorama.id("minimap"), new MinimapHud()::render);
+			WaypointHud waypoints = new WaypointHud();
+			MinimapHud minimap = new MinimapHud();
+			event.registerAboveAll(Diorama.id("waypoints"), (graphics, deltaTracker) -> waypoints.extractRenderState(graphics, deltaTracker));
+			event.registerAboveAll(Diorama.id("minimap"), (graphics, deltaTracker) -> minimap.extractRenderState(graphics, deltaTracker));
 		});
 
 		// Fired for the integrated server's chunks too, on its own thread.

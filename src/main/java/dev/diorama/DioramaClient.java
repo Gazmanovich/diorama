@@ -19,9 +19,13 @@ import net.minecraft.client.Minecraft;
  * dev.diorama.neoforge.DioramaNeoForge} on NeoForge.
  */
 public final class DioramaClient {
-	//? if >=1.21.9 {
+	//? if >=1.21.9 && fabric {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Diorama.id("map"));
-	//?} else {
+	//?} else if >=1.21.9 {
+	/*// NeoForge constructs mods in parallel and vanilla's category list isn't thread-safe, so there
+	// DioramaNeoForge registers it through RegisterKeyMappingsEvent instead.
+	public static final KeyMapping.Category CATEGORY = new KeyMapping.Category(Diorama.id("map"));
+	*///?} else {
 	/*// Key categories were bare translation keys; this is the one Category.register makes.
 	public static final String CATEGORY = "key.category.diorama.map";
 	*///?}
@@ -52,7 +56,12 @@ public final class DioramaClient {
 		//? if >=1.21.6 {
 		DioramaPipelines.init();
 		//?}
+		//? if fabric {
+		// The settings file sits in the game directory. Fabric calls this from inside Minecraft's
+		// constructor; NeoForge constructs mods before Minecraft exists, so DioramaNeoForge loads them
+		// at client setup instead.
 		Settings.get();
+		//?}
 	}
 
 	/** Called at the end of every client tick. */
