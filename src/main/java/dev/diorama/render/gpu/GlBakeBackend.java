@@ -578,9 +578,14 @@ final class GlBakeBackend implements BakeBackend {
 		return program;
 	}
 
-	/** The pass's defines after the version line; no explicit locations; the vertex index under its GL name. */
+	/**
+	 * The pass's defines after the version line; no explicit locations; the vertex index under its GL name.
+	 * GLSL 1.50, what OpenGL 3.2 promises: up to 1.21.8 the game asks for no more, and with explicit
+	 * locations gone the shaders need nothing newer.
+	 */
 	private static String prepare(String source, String defines) {
 		String text = LOCATION.matcher(source).replaceAll("")
+			.replace("#version 330", "#version 150")
 			.replace("#extension GL_ARB_separate_shader_objects : require", "")
 			.replace("gl_VertexIndex", "gl_VertexID");
 		int line = text.indexOf('\n');
