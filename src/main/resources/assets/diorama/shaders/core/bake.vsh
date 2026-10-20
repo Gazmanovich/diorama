@@ -42,8 +42,9 @@ void main() {
     float v = p.z * Camera.x - p.y * Camera.y + Camera.z;
     float t = -(p.y * Camera.x + p.z * Camera.y) + Camera.w;
     float d = (DepthRange.y - t) / (DepthRange.y - DepthRange.x);
-    // 128 blocks across the tile; its north edge lands on the first row of the texture.
-    gl_Position = vec4(p.x / 64.0 - 1.0, v / 64.0 - 1.0, bake_ndc_depth(d), 1.0);
+    // 128 blocks across the tile at 4 pixels each, plus a pixel all round for outlines; the
+    // north edge lands on the first rows of the texture.
+    gl_Position = vec4((p.x * 4.0 + 1.0) / 257.0 - 1.0, (v * 4.0 + 1.0) / 257.0 - 1.0, bake_ndc_depth(d), 1.0);
     localPos = p;
     faceUv = c;
     faceColor = Color;

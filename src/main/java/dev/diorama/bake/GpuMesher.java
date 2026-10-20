@@ -133,7 +133,8 @@ public final class GpuMesher {
 		boolean[] hereWater = new boolean[zSpan];
 		int lowest = Integer.MAX_VALUE;
 
-		for (int x = x0; x < x1; x++) {
+		// One column more each side: the bake draws a pixel past the tile's edges for outlines.
+		for (int x = x0 - 1; x <= x1; x++) {
 			// Above the tallest block every cell is open: that is where the rays start.
 			java.util.Arrays.fill(above, true);
 			java.util.Arrays.fill(aboveWater, false);
@@ -243,7 +244,7 @@ public final class GpuMesher {
 		int reachZ = (int) Math.ceil(flat * 0.479) + 1;
 		int reachY = (int) Math.ceil(TileBaker.SHADOW_DISTANCE * Math.sin(elevation)) + 1;
 		int cx0 = x0 - reachX;
-		int cx1 = x1 + 1;
+		int cx1 = x1 + 2;
 		// With nothing solid in view the region still has to exist: it places the tile's origin.
 		int bottom = mesh.lowestY == Integer.MAX_VALUE ? Math.max(minY, mesh.topY - 1) : Math.max(minY, mesh.lowestY);
 		int cz0 = zLow(minV, bottom, mesh.sin, mesh.cos) - 1;
@@ -257,10 +258,7 @@ public final class GpuMesher {
 				}
 				// One above the column's top block: nothing above it casts.
 				int top = Math.min(chunk.surface(x & 15, z & 15) + 1, mesh.topY + reachY);
-				// A block far below the column's top only shades the bottom of a pit or a cave
-				// mouth: stop a little past the longest shadow's drop.
-				int floor = Math.max(bottom, top - 72);
-				for (int y = top; y >= floor; y--) {
+				for (int y = top; y >= bottom; y--) {
 					if (reader.solid(x, y, z) != 1) {
 						continue;
 					}

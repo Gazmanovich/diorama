@@ -29,12 +29,9 @@ vec3 mix_water(vec3 under, vec4 water, float depth) {
     return under * (1.0 - a) + w * light * a;
 }
 
-// The average camera depth of a pixel's known samples, or -1 when none are known.
+// The average camera depth of a pixel's known samples, or -1 when none are known. Pixels are
+// counted from the scene's one-pixel border, so the tile's own run from 1 to 512.
 float pixel_depth(ivec2 pixel) {
-    // The tracer bakes a border for this; here a pixel past the edge simply doesn't count.
-    if (pixel.x < 0 || pixel.y < 0 || pixel.x >= 512 || pixel.y >= 512) {
-        return -1.0;
-    }
     float sum = 0.0;
     int known = 0;
     for (int i = 0; i < 4; i++) {
@@ -61,7 +58,7 @@ vec3 to_srgb(vec3 l) {
 }
 
 void main() {
-    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    ivec2 pixel = ivec2(gl_FragCoord.xy) + ivec2(1);
     vec3 sum = vec3(0.0);
     int known = 0;
     for (int i = 0; i < 4; i++) {

@@ -763,6 +763,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		long both = 0;
 		long differ = 0;
 		long knownMismatch = 0;
+		// Pixels both bakes know, but to a different share of their samples: that decides which
+		// pixel a merge with the saved tile keeps, and the fog's coverage.
+		long alphaDiffer = 0;
 		double sumDiff = 0;
 		double cpuMs = 0;
 		double mesh = 0;
@@ -811,6 +814,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 					if (!ck) {
 						continue;
 					}
+					if ((c >>> 24) != (p >>> 24)) {
+						alphaDiffer++;
+					}
 					int dr = Math.abs((c & 0xFF) - (p & 0xFF));
 					int dg = Math.abs(((c >> 8) & 0xFF) - ((p >> 8) & 0xFF));
 					int db = Math.abs(((c >> 16) & 0xFF) - ((p >> 16) & 0xFF));
@@ -835,9 +841,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		int ok = Math.max(1, n - failed);
 		return String.format(java.util.Locale.ROOT,
 			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f (sky %.1f), pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
-				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch",
+				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch, %.3f%% known with a different alpha",
 			name, n, failed, cpuMs / n, mesh / ok, sky / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
-			both == 0 ? 0 : sumDiff / both, both == 0 ? 0 : differ * 100.0 / both, knownMismatch * 100.0 / ((long) n * size * size)
+			both == 0 ? 0 : sumDiff / both, both == 0 ? 0 : differ * 100.0 / both, knownMismatch * 100.0 / ((long) n * size * size),
+			both == 0 ? 0 : alphaDiffer * 100.0 / both
 		);
 	}
 

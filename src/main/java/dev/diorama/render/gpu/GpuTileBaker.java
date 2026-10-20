@@ -58,8 +58,9 @@ import org.lwjgl.system.MemoryUtil;
 public final class GpuTileBaker {
 	public static final boolean ENABLED = "1".equals(System.getenv("DIORAMA_GPU_BAKE"));
 	/** Most tiles drawn in one frame, so a burst of bakes doesn't land on one frame. */
-	private static final int PER_FRAME = Integer.getInteger("diorama.gpuBakesPerFrame", 2);
-	private static final int SCENE = Projection.TILE_PIXELS * 2;
+	private static final int PER_FRAME = Math.max(1, Integer.getInteger("diorama.gpuBakesPerFrame", 2));
+	/** The tile plus a pixel all round, which outlines compare against, at two samples each way. */
+	private static final int SCENE = (Projection.TILE_PIXELS + 2) * 2;
 	private static final int SHADOW_SIZE = 2048;
 	private static final int FACE_BYTES = 20;
 	private static final int CASTER_BYTES = 8;
@@ -149,6 +150,8 @@ public final class GpuTileBaker {
 	}
 
 	private static final ConcurrentLinkedQueue<Job> QUEUE = new ConcurrentLinkedQueue<>();
+	/** Jobs drawn and waiting for their pixels to come back. */
+	private static final java.util.Set<Job> PENDING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private static @Nullable Targets targets;
 	private static long timestampSlot;
 
@@ -168,6 +171,21 @@ public final class GpuTileBaker {
 	 */
 	public static void submit(GpuMesher.Mesh mesh, Consumer<Result> done) {
 		QUEUE.add(new Job(mesh, done));
+	}
+
+	/**
+	 * Fails every job not finished yet, queued or drawn, so their callers fall back at once. For
+	 * waits on the render thread, which the GPU's results need to arrive. A result that still
+	 * arrives later is dropped.
+	 */
+	public static void cancelAll() {
+		Job job;
+		while ((job = QUEUE.poll()) != null) {
+			job.fail();
+		}
+		for (Job pending : PENDING) {
+			pending.fail();
+		}
 	}
 
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
@@ -205,89 +223,101 @@ public final class GpuTileBaker {
 		encoder.writeTimestamp(t.timestamps, slot);
 		encoder.writeToBuffer(t.ubo.slice(), job.uniforms);
 
-		GpuBuffer faceBuffer = job.faceCount() == 0 ? null : device.createBuffer(() -> "Diorama bake faces", GpuBuffer.USAGE_VERTEX, job.faces);
-		GpuBuffer casterBuffer = job.casterCount == 0 ? null : device.createBuffer(() -> "Diorama bake casters", GpuBuffer.USAGE_VERTEX, job.casters);
-		RenderSystem.AutoStorageIndexBuffer quads = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
-		GpuBuffer indices = quads.getBuffer(6);
-		IndexType indexType = quads.type();
-		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+		GpuBuffer faceBuffer = null;
+		GpuBuffer casterBuffer = null;
+		try {
+			faceBuffer = job.faceCount() == 0 ? null : device.createBuffer(() -> "Diorama bake faces", GpuBuffer.USAGE_VERTEX, job.faces);
+			casterBuffer = job.casterCount == 0 ? null : device.createBuffer(() -> "Diorama bake casters", GpuBuffer.USAGE_VERTEX, job.casters);
+			RenderSystem.AutoStorageIndexBuffer quads = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
+			GpuBuffer indices = quads.getBuffer(6);
+			IndexType indexType = quads.type();
+			GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 
-		try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake shadow")
-			.withDepthAttachment(t.shadowView, OptionalDouble.of(0.0))
-			.build())) {
+			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake shadow")
+				.withDepthAttachment(t.shadowView, OptionalDouble.of(0.0))
+				.build())) {
+				if (casterBuffer != null) {
+					pass.setPipeline(shadow);
+					pass.setUniform("DioramaBake", t.ubo);
+					pass.setVertexBuffer(0, t.corners.slice());
+					pass.setVertexBuffer(1, casterBuffer.slice());
+					pass.setIndexBuffer(indices, indexType);
+					pass.drawIndexed(6, job.casterCount, 0, 0, 0);
+				}
+			}
+			try (RenderPass pass = encoder.createRenderPass(
+				() -> "Diorama bake scene", t.sceneColorView, Optional.of(VOID), t.sceneDepthView, OptionalDouble.of(0.0)
+			)) {
+				if (faceBuffer != null && job.opaqueCount + job.tintedCount > 0) {
+					pass.setPipeline(opaque);
+					pass.setUniform("DioramaBake", t.ubo);
+					pass.setUniform("ShadowMap", t.shadowView, nearest);
+					pass.setVertexBuffer(0, t.corners.slice());
+					pass.setIndexBuffer(indices, indexType);
+					if (job.opaqueCount > 0) {
+						pass.setVertexBuffer(1, faceBuffer.slice(0, (long) job.opaqueCount * FACE_BYTES));
+						pass.drawIndexed(6, job.opaqueCount, 0, 0, 0);
+					}
+					if (job.tintedCount > 0) {
+						pass.setPipeline(tinted);
+						pass.setVertexBuffer(1, faceBuffer.slice((long) job.opaqueCount * FACE_BYTES, (long) job.tintedCount * FACE_BYTES));
+						pass.drawIndexed(6, job.tintedCount, 0, 0, 0);
+					}
+				}
+			}
+			try (RenderPass pass = encoder.createRenderPass(
+				() -> "Diorama bake water", t.waterColorView, Optional.of(CLEAR), t.waterDepthView, OptionalDouble.of(0.0)
+			)) {
+				if (faceBuffer != null && job.waterCount > 0) {
+					pass.setPipeline(water);
+					pass.setUniform("DioramaBake", t.ubo);
+					pass.setUniform("ShadowMap", t.shadowView, nearest);
+					pass.setVertexBuffer(0, t.corners.slice());
+					pass.setIndexBuffer(indices, indexType);
+					pass.setVertexBuffer(1, faceBuffer.slice((long) (job.opaqueCount + job.tintedCount) * FACE_BYTES, (long) job.waterCount * FACE_BYTES));
+					pass.drawIndexed(6, job.waterCount, 0, 0, 0);
+				}
+			}
+			try (RenderPass pass = encoder.createRenderPass(() -> "Diorama bake composite", t.outputView, Optional.empty())) {
+				pass.setPipeline(composite);
+				pass.setUniform("DioramaBake", t.ubo);
+				pass.setUniform("SceneColor", t.sceneColorView, nearest);
+				pass.setUniform("SceneDepth", t.sceneDepthView, nearest);
+				pass.setUniform("WaterColor", t.waterColorView, nearest);
+				pass.setUniform("WaterDepth", t.waterDepthView, nearest);
+				pass.draw(3, 1, 0, 0);
+			}
+			encoder.writeTimestamp(t.timestamps, slot + 1);
+
+			int size = Projection.TILE_PIXELS;
+			GpuBuffer readback = device.createBuffer(() -> "Diorama bake readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size * 4);
+			GpuQueryPool timestamps = t.timestamps;
+			long[] recorded = new long[1];
+			PENDING.add(job);
+			encoder.copyTextureToBuffer(t.output, readback, 0L, () -> {
+				try {
+					int[] pixels = new int[size * size];
+					try (GpuBufferSlice.MappedView view = readback.map(true, false)) {
+						view.data().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
+					}
+					job.done(pixels, recorded[0], gpuNanos(timestamps, slot));
+				} catch (Throwable e) {
+					Diorama.LOGGER.error("Reading back GPU tile {} failed", job.mesh.key, e);
+					job.fail();
+				} finally {
+					readback.close();
+				}
+			}, 0);
+			recorded[0] = System.nanoTime() - start;
+		} finally {
+			if (faceBuffer != null) {
+				faceBuffer.close();
+			}
 			if (casterBuffer != null) {
-				pass.setPipeline(shadow);
-				pass.setUniform("DioramaBake", t.ubo);
-				pass.setVertexBuffer(0, t.corners.slice());
-				pass.setVertexBuffer(1, casterBuffer.slice());
-				pass.setIndexBuffer(indices, indexType);
-				pass.drawIndexed(6, job.casterCount, 0, 0, 0);
+				casterBuffer.close();
 			}
+			job.free();
 		}
-		try (RenderPass pass = encoder.createRenderPass(
-			() -> "Diorama bake scene", t.sceneColorView, Optional.of(VOID), t.sceneDepthView, OptionalDouble.of(0.0)
-		)) {
-			if (faceBuffer != null && job.opaqueCount + job.tintedCount > 0) {
-				pass.setPipeline(opaque);
-				pass.setUniform("DioramaBake", t.ubo);
-				pass.setUniform("ShadowMap", t.shadowView, nearest);
-				pass.setVertexBuffer(0, t.corners.slice());
-				pass.setIndexBuffer(indices, indexType);
-				if (job.opaqueCount > 0) {
-					pass.setVertexBuffer(1, faceBuffer.slice(0, (long) job.opaqueCount * FACE_BYTES));
-					pass.drawIndexed(6, job.opaqueCount, 0, 0, 0);
-				}
-				if (job.tintedCount > 0) {
-					pass.setPipeline(tinted);
-					pass.setVertexBuffer(1, faceBuffer.slice((long) job.opaqueCount * FACE_BYTES, (long) job.tintedCount * FACE_BYTES));
-					pass.drawIndexed(6, job.tintedCount, 0, 0, 0);
-				}
-			}
-		}
-		try (RenderPass pass = encoder.createRenderPass(
-			() -> "Diorama bake water", t.waterColorView, Optional.of(CLEAR), t.waterDepthView, OptionalDouble.of(0.0)
-		)) {
-			if (faceBuffer != null && job.waterCount > 0) {
-				pass.setPipeline(water);
-				pass.setUniform("DioramaBake", t.ubo);
-				pass.setUniform("ShadowMap", t.shadowView, nearest);
-				pass.setVertexBuffer(0, t.corners.slice());
-				pass.setIndexBuffer(indices, indexType);
-				pass.setVertexBuffer(1, faceBuffer.slice((long) (job.opaqueCount + job.tintedCount) * FACE_BYTES, (long) job.waterCount * FACE_BYTES));
-				pass.drawIndexed(6, job.waterCount, 0, 0, 0);
-			}
-		}
-		try (RenderPass pass = encoder.createRenderPass(() -> "Diorama bake composite", t.outputView, Optional.empty())) {
-			pass.setPipeline(composite);
-			pass.setUniform("DioramaBake", t.ubo);
-			pass.setUniform("SceneColor", t.sceneColorView, nearest);
-			pass.setUniform("SceneDepth", t.sceneDepthView, nearest);
-			pass.setUniform("WaterColor", t.waterColorView, nearest);
-			pass.setUniform("WaterDepth", t.waterDepthView, nearest);
-			pass.draw(3, 1, 0, 0);
-		}
-		encoder.writeTimestamp(t.timestamps, slot + 1);
-
-		int size = Projection.TILE_PIXELS;
-		GpuBuffer readback = device.createBuffer(() -> "Diorama bake readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size * 4);
-		GpuQueryPool timestamps = t.timestamps;
-		long recorded = System.nanoTime();
-		encoder.copyTextureToBuffer(t.output, readback, 0L, () -> {
-			int[] pixels = new int[size * size];
-			try (GpuBufferSlice.MappedView view = readback.map(true, false)) {
-				view.data().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-			} finally {
-				readback.close();
-			}
-			job.done(pixels, recorded - start, gpuNanos(timestamps, slot));
-		}, 0);
-		if (faceBuffer != null) {
-			faceBuffer.close();
-		}
-		if (casterBuffer != null) {
-			casterBuffer.close();
-		}
-		job.free();
 		return true;
 	}
 
@@ -395,6 +425,8 @@ public final class GpuTileBaker {
 		final GpuMesher.Mesh mesh;
 		final Consumer<Result> callback;
 		final long submitted = System.nanoTime();
+		/** Set by the first of done or fail; the other is then ignored. */
+		final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
 		final long packNanos;
 		final int opaqueCount;
 		final int tintedCount;
@@ -528,6 +560,10 @@ public final class GpuTileBaker {
 		}
 
 		void done(int[] pixels, long recordNanos, long gpuNanos) {
+			PENDING.remove(this);
+			if (!this.completed.compareAndSet(false, true)) {
+				return;
+			}
 			Timing timing = new Timing(
 				this.mesh.buildNanos, this.mesh.skyNanos, this.packNanos, recordNanos, gpuNanos, System.nanoTime() - this.submitted,
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
@@ -537,6 +573,10 @@ public final class GpuTileBaker {
 		}
 
 		void fail() {
+			PENDING.remove(this);
+			if (!this.completed.compareAndSet(false, true)) {
+				return;
+			}
 			this.free();
 			this.callback.accept(new Result(null, new Timing(this.mesh.buildNanos, this.mesh.skyNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
 		}

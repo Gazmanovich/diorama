@@ -517,6 +517,9 @@ public final class MapLevel implements ChunkSource {
 		TileImage image;
 		while ((image = this.finished.poll()) != null) {
 			this.inFlight.remove(image.key());
+			if (SLOT_STATS) {
+				this.slotReleased(image.key());
+			}
 			boolean background = this.backgroundBakes.remove(image.key());
 			if (this.closed) {
 				continue;
@@ -572,6 +575,9 @@ public final class MapLevel implements ChunkSource {
 			order.sort(Map.Entry.comparingByValue());
 			for (Map.Entry<TileKey, Double> entry : order) {
 				if (this.inFlight.size() >= limit) {
+					if (SLOT_STATS) {
+						this.slotsFull++;
+					}
 					break;
 				}
 				TileKey key = entry.getKey();
@@ -601,9 +607,38 @@ public final class MapLevel implements ChunkSource {
 		this.evict();
 	}
 
+	/**
+	 * Experiment only, with {@code -Ddiorama.slotStats=true}: how long tiles hold a bake slot, from
+	 * being scheduled to their result reaching {@link #update}, and how often a wanted tile found
+	 * every slot taken.
+	 */
+	private static final boolean SLOT_STATS = Boolean.getBoolean("diorama.slotStats");
+	private final Map<TileKey, Long> slotTaken = new HashMap<>();
+	private final long[] slotNanos = new long[2];
+	private final int[] slotCount = new int[2];
+	private int slotsFull;
+
+	private void slotReleased(TileKey key) {
+		Long taken = this.slotTaken.remove(key);
+		if (taken == null) {
+			return;
+		}
+		int kind = key.isCave() ? 1 : 0;
+		this.slotNanos[kind] += System.nanoTime() - taken;
+		this.slotCount[kind]++;
+		if ((this.slotCount[0] + this.slotCount[1]) % 50 == 0) {
+			Diorama.LOGGER.info("SLOTS held ms: surface {} over {}, cave {} over {}; updates with every slot taken: {}",
+				this.slotCount[0] == 0 ? 0 : this.slotNanos[0] / this.slotCount[0] / 1_000_000, this.slotCount[0],
+				this.slotCount[1] == 0 ? 0 : this.slotNanos[1] / this.slotCount[1] / 1_000_000, this.slotCount[1], this.slotsFull);
+		}
+	}
+
 	/** Bakes one tile on a baker thread: all of it if {@code blocks} is null, else those blocks. */
 	private void bake(TileKey key, BlockLooks looks, @Nullable BitSet blocks) {
 		this.inFlight.add(key);
+		if (SLOT_STATS) {
+			this.slotTaken.put(key, System.nanoTime());
+		}
 		int generation = this.generation(key);
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
@@ -779,6 +814,10 @@ public final class MapLevel implements ChunkSource {
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
+		//? if >=26.3 {
+		// GPU bakes need frames this wait holds up: trace those tiles instead.
+		dev.diorama.render.gpu.GpuTileBaker.cancelAll();
+		//?}
 		long deadline = System.currentTimeMillis() + 3000;
 		while (true) {
 			TileImage image;
