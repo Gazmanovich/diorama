@@ -38,6 +38,7 @@ import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtension
 /*import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?}
+import net.minecraft.client.renderer.texture.MissingTextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 //? if >=26.1 {
@@ -422,6 +423,10 @@ public final class BlockLooks {
 		} catch (RuntimeException e) {
 			// Keep the sprite if only the tint failed.
 			tint = -1;
+		}
+		if (sprite != null && sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation())) {
+			// An unregistered fluid or a missing texture: better the block's particle colour than purple.
+			sprite = null;
 		}
 		float[] avg = sprite == null ? null : spriteAverage(sprite, cache);
 		int color = avg == null || avg[3] <= 0 ? -1 : FaceColor.pack(avg[0], avg[1], avg[2]);
