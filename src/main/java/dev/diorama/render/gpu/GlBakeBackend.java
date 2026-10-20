@@ -81,6 +81,12 @@ final class GlBakeBackend implements BakeBackend {
 	private int casterVbo;
 	private int ubo;
 	private boolean timestamps;
+	/**
+	 * Up to 1.21.8 the game asks for OpenGL 3.2, so what the bake needs from 3.3 is looked for one
+	 * by one: drivers usually offer it anyway, or the extension it came from.
+	 */
+	private static boolean coreDivisor;
+	private static boolean samplerObjects;
 	private final ArrayDeque<Readback> readbacks = new ArrayDeque<>();
 
 	/** A bake's pixels on their way back. */
@@ -332,7 +338,7 @@ final class GlBakeBackend implements BakeBackend {
 		for (int i = 0; i < textures.length; i++) {
 			GlState.activeTexture(i);
 			GlState.bindTexture(textures[i]);
-			glBindSampler(i, 0);
+			noSampler(i);
 		}
 	}
 
@@ -341,11 +347,14 @@ final class GlBakeBackend implements BakeBackend {
 			this.usable = false;
 			try {
 				GLCapabilities caps = GL.getCapabilities();
-				if (!caps.OpenGL33) {
-					Diorama.LOGGER.warn("GPU baking needs OpenGL 3.3; tracing tiles instead");
+				coreDivisor = caps.glVertexAttribDivisor != 0;
+				if (!coreDivisor && !caps.GL_ARB_instanced_arrays) {
+					Diorama.LOGGER.warn("GPU baking needs instanced vertex attributes (OpenGL 3.3); tracing tiles instead");
 					return false;
 				}
-				this.timestamps = true;
+				samplerObjects = caps.glBindSampler != 0;
+				this.timestamps = caps.glQueryCounter != 0 && caps.glGetQueryObjecti64v != 0;
+				Diorama.LOGGER.info("GPU baking on OpenGL {}", glGetString(GL_VERSION));
 				Saved saved = Saved.take();
 				try {
 					this.create(caps);
@@ -417,7 +426,7 @@ final class GlBakeBackend implements BakeBackend {
 		this.corners();
 		for (int a = 1; a < ATTRIBUTES.length; a++) {
 			glEnableVertexAttribArray(a);
-			glVertexAttribDivisor(a, 1);
+			divisor(a, 1);
 		}
 		this.pointFaces(0);
 		this.casterVao = glGenVertexArrays();
@@ -426,7 +435,7 @@ final class GlBakeBackend implements BakeBackend {
 		this.corners();
 		glBindBuffer(GL_ARRAY_BUFFER, this.casterVbo);
 		glEnableVertexAttribArray(1);
-		glVertexAttribDivisor(1, 1);
+		divisor(1, 1);
 		glVertexAttribIPointer(1, 4, GL_SHORT, CASTER_BYTES, 0);
 		this.emptyVao = glGenVertexArrays();
 		GlState.forgetBuffers();
@@ -436,12 +445,27 @@ final class GlBakeBackend implements BakeBackend {
 		}
 	}
 
+	private static void divisor(int attribute, int divisor) {
+		if (coreDivisor) {
+			glVertexAttribDivisor(attribute, divisor);
+		} else {
+			org.lwjgl.opengl.ARBInstancedArrays.glVertexAttribDivisorARB(attribute, divisor);
+		}
+	}
+
+	/** Leaves the unit's texture to sample with its own settings; vanilla binds sampler objects from 1.21.11. */
+	private static void noSampler(int unit) {
+		if (samplerObjects) {
+			glBindSampler(unit, 0);
+		}
+	}
+
 	/** Attribute 0 of the bound vertex array: the quad corner, from the corner buffer. */
 	private void corners() {
 		glBindBuffer(GL_ARRAY_BUFFER, this.cornerVbo);
 		glEnableVertexAttribArray(0);
 		glVertexAttribPointer(0, 4, GL_UNSIGNED_BYTE, true, 4, 0);
-		glVertexAttribDivisor(0, 0);
+		divisor(0, 0);
 	}
 
 	private static int texture(int internalFormat, int width, int height, int format, int type) {
@@ -600,7 +624,7 @@ final class GlBakeBackend implements BakeBackend {
 			for (int u = 0; u < UNITS; u++) {
 				GlState.activeTexture(u);
 				textures[u] = glGetInteger(GL_TEXTURE_BINDING_2D);
-				samplers[u] = glGetInteger(GL_SAMPLER_BINDING);
+				samplers[u] = samplerObjects ? glGetInteger(GL_SAMPLER_BINDING) : 0;
 			}
 			GlState.activeTexture(active);
 			int[] pixelStore = new int[PIXEL_STORE.length];
@@ -640,7 +664,9 @@ final class GlBakeBackend implements BakeBackend {
 			for (int u = 0; u < UNITS; u++) {
 				GlState.activeTexture(u);
 				GlState.bindTexture(this.textures[u]);
-				glBindSampler(u, this.samplers[u]);
+				if (samplerObjects) {
+					glBindSampler(u, this.samplers[u]);
+				}
 			}
 			GlState.activeTexture(this.activeTexture);
 			GlState.useProgram(this.program);
