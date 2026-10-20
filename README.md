@@ -2,7 +2,7 @@
 
 # Diorama
 
-Diorama is a client-side mod for Minecraft, on Fabric for 1.21 to 26.3 and on NeoForge for 1.21.1, that draws your world as an angled voxel map, like a baked diorama, in a minimap and a fullscreen map you can pan and zoom.
+Diorama is a client-side mod for Minecraft, on Fabric for 1.21 to 26.3 and on NeoForge for 1.21 to 26.3, that draws your world as an angled voxel map, like a baked diorama, in a minimap and a fullscreen map you can pan and zoom.
 
 The map is ray traced from the chunk data your client already has. The camera looks north and down at 50°, so you see block tops and their south faces. Each pixel's ray walks the real blocks, so overhangs, bridges and tree canopies come out right. A second ray toward a low sun casts long shadows, more rays measure how much sky each spot can see so the ground under trees and overhangs darkens, and higher ground is a little brighter, so hills still read as hills when you zoom far out. Water gets darker with depth. A "Depth shading" setting turns all of this down to a flatter look. Tiles bake on background threads and only re-bake the parts an edit can affect.
 
@@ -39,12 +39,12 @@ One source tree builds a jar for each supported Minecraft version, using [Stonec
 ./gradlew :26.2:build
 ./gradlew :26.1:build   # also runs on 26.1.1 and 26.1.2
 ./gradlew :1.21.11:build
-./gradlew :1.21.1-neoforge:build   # NeoForge 21.1.178 or later
+./gradlew :1.21.1-neoforge:build   # NeoForge 21.1.178 or later; every NeoForge version is <minecraft>-neoforge
 ```
 
 Each jar lands in `versions/<version>/build/libs/`. 1.21.11 ships obfuscated, so its build remaps the mod to the names a normal install uses.
 
-Versions named `<minecraft>-neoforge` build for NeoForge; the rest build for Fabric. Everything but the entrypoints is shared: `dev.diorama.fabric` hooks the mod up to Fabric API and `dev.diorama.neoforge` to NeoForge's events, and each jar contains only its own package and metadata (`fabric.mod.json` or `META-INF/neoforge.mods.toml`). Other differences between the loaders sit in `//? if fabric` and `//? if neoforge` blocks.
+Versions named `<minecraft>-neoforge` build for NeoForge; the rest build for Fabric. NeoForge gets a jar for each Minecraft version it has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3. From 1.21.6 the map draws through parts of the game that are private; Fabric API's access wideners open them for the Fabric jars, and a per-version access transformer, written by `build.neoforge.gradle.kts`, opens them for the NeoForge jars. Everything but the entrypoints is shared: `dev.diorama.fabric` hooks the mod up to Fabric API and `dev.diorama.neoforge` to NeoForge's events, and each jar contains only its own package and metadata (`fabric.mod.json` or `META-INF/neoforge.mods.toml`). Other differences between the loaders sit in `//? if fabric` and `//? if neoforge` blocks.
 
 `./gradlew :26.3:runClientGameTest` (or `:1.21.11:runClientGameTest`) launches the game, creates a world and runs every test scenario: the map views, radar, waypoints, importing waypoints from Xaero's Minimap, fog of war, settings, overlays, the Nether and the End, saving the map across a restart, and two worlds on one dedicated server. Each scenario asserts what it can measure and saves screenshots to `versions/<version>/build/run/clientGameTest/screenshots/` for the rest. Set `DIORAMA_TESTS` to a comma-separated list (`tour`, `radar`, `waypoints`, `xaero-import`, `fog-of-war`, `settings`, `overlays`, `dimensions`, `saved-map`, `multiplayer`) to run only some, `DIORAMA_GIF=1` to also save frames for GIFs, and `DIORAMA_DEBUG=1` for extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store page.
 
