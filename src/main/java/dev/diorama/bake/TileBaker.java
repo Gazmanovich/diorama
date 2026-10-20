@@ -447,6 +447,14 @@ public final class TileBaker {
 			int shape = this.looks.shape[id];
 			boolean partial = shape != 0;
 			if (partial) {
+				int wet = this.looks.wetShapes.get(id);
+				if (wet >= 0 && waterId < 0) {
+					// Waterlogged: the ray is in water from where it came into the cell.
+					waterId = wet;
+					waterT = t;
+					waterBy = by;
+					waterBz = bz;
+				}
 				if (this.enterShape(this.looks.shapes[shape], fx, y0, z0, by, bz, t, Math.min(tMaxY, tMaxZ), enteredTop)) {
 					t = this.shapeT;
 					enteredTop = this.shapeTop;
@@ -589,7 +597,8 @@ public final class TileBaker {
 			this.albedoG *= nudge;
 			this.albedoB *= nudge;
 		}
-		// The open cell in front of the face the ray hit.
+		// The open cell in front of the face the ray hit; for a face inset in a smaller block,
+		// the cell in front of where a full cube's face would be.
 		int frontY = top ? by + 1 : by;
 		int frontZ = top ? bz : bz + 1;
 		float ao = top

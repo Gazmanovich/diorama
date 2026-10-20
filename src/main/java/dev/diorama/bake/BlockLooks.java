@@ -117,6 +117,11 @@ public final class BlockLooks {
 	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused.
 	 */
 	public float[][] shapes;
+	/**
+	 * For a waterlogged block smaller than a cube, the state id of the fluid around it: rays that
+	 * pass beside the block, or reach it from above, go through that fluid.
+	 */
+	public final it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap wetShapes = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
 
 	private BlockLooks(int size) {
 		this.kind = new byte[size];
@@ -317,6 +322,16 @@ public final class BlockLooks {
 			looks.constantTint[id] = look.tint().constant();
 		}
 		looks.shapes = shapes.toArray(new float[0][]);
+		looks.wetShapes.defaultReturnValue(-1);
+		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
+			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+			if (id >= 0 && id < size && looks.shape[id] != 0 && !state.getFluidState().isEmpty()) {
+				int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
+				if (fluid >= 0 && fluid < size && looks.kind[fluid] == WATER) {
+					looks.wetShapes.put(id, fluid);
+				}
+			}
+		}
 		current = looks;
 		//? if >=26.1 {
 		builtFrom = models;
@@ -361,22 +376,23 @@ public final class BlockLooks {
 				boxes = List.of(outline.bounds());
 			}
 			float[] flat = new float[boxes.size() * 6];
+			int n = 0;
 			boolean full = false;
-			for (int i = 0; i < boxes.size(); i++) {
-				AABB box = boxes.get(i);
-				// Some mods' outlines reach into the next block; only the part in this one counts.
-				flat[i * 6] = clamp01(box.minX);
-				flat[i * 6 + 1] = clamp01(box.minY);
-				flat[i * 6 + 2] = clamp01(box.minZ);
-				flat[i * 6 + 3] = clamp01(box.maxX);
-				flat[i * 6 + 4] = clamp01(box.maxY);
-				flat[i * 6 + 5] = clamp01(box.maxZ);
-				full |= flat[i * 6] == 0 && flat[i * 6 + 1] == 0 && flat[i * 6 + 2] == 0
-					&& flat[i * 6 + 3] == 1 && flat[i * 6 + 4] == 1 && flat[i * 6 + 5] == 1;
+			for (AABB box : boxes) {
+				// Some mods' outlines reach into the next block; only the part in this one counts,
+				// and a box wholly outside it is dropped.
+				float[] b = {clamp01(box.minX), clamp01(box.minY), clamp01(box.minZ), clamp01(box.maxX), clamp01(box.maxY), clamp01(box.maxZ)};
+				if (b[0] >= b[3] || b[1] >= b[4] || b[2] >= b[5]) {
+					continue;
+				}
+				System.arraycopy(b, 0, flat, n, 6);
+				n += 6;
+				full |= b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1 && b[4] == 1 && b[5] == 1;
 			}
-			if (!full) {
-				index = byBoxes.computeIfAbsent(java.util.Arrays.toString(flat), key -> {
-					shapes.add(flat);
+			float[] kept = java.util.Arrays.copyOf(flat, n);
+			if (!full && n > 0) {
+				index = byBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
+					shapes.add(kept);
 					return shapes.size() - 1;
 				});
 			}
