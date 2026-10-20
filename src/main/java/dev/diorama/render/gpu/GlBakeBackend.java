@@ -117,8 +117,7 @@ final class GlBakeBackend implements BakeBackend {
 			int skyFaces = job.opaqueCount + job.waterCount;
 			if (job.voxels != null && skyFaces > 0) {
 				this.bindTextures(this.voxels);
-				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-				glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+				Saved.plainPixelStore();
 				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, VOXEL_WIDTH, job.voxelRows, GL_RED_INTEGER, GL_UNSIGNED_INT, job.voxels);
 				this.target(this.skyFbo, SKY_WIDTH, SKY_HEIGHT);
 				GlState.depthTest(false);
@@ -193,8 +192,7 @@ final class GlBakeBackend implements BakeBackend {
 			int colors = glGenBuffers();
 			glBindBuffer(GL_PIXEL_PACK_BUFFER, colors);
 			glBufferData(GL_PIXEL_PACK_BUFFER, (long) size * size * 4, GL_STREAM_READ);
-			glPixelStorei(GL_PACK_ALIGNMENT, 4);
-			glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+			Saved.plainPixelStore();
 			glReadBuffer(GL_COLOR_ATTACHMENT0);
 			glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, 0L);
 			int info = 0;
@@ -578,13 +576,21 @@ final class GlBakeBackend implements BakeBackend {
 	}
 
 	/**
-	 * The GL state a bake touches that vanilla doesn't keep a copy of, or keeps one we must
-	 * leave true: taken before, put back after.
+	 * The GL state a bake changes, taken before and put back after. What vanilla keeps a copy of
+	 * goes back through {@link GlState}, so the copy stays true too: vanilla can rely on state it
+	 * set before the frame hook (culling, before 1.21.5) without setting it again.
 	 */
 	private record Saved(
 		int program, int vao, int arrayBuffer, int uniformBuffer, int uboBinding, int pack, int unpack, int drawFbo, int readFbo,
-		int[] viewport, int activeTexture, int[] textures, int[] samplers, int packAlignment, int packRowLength, int unpackAlignment, int unpackRowLength
+		int[] viewport, int activeTexture, int[] textures, int[] samplers, int[] pixelStore,
+		boolean cull, boolean scissor, boolean depthTest, int depthFunc, boolean depthMask, boolean blend0, boolean blend1, int[] blendFunc, boolean[] colorMask
 	) {
+		/** Pixel store settings a bake sets: pack and unpack alignment, row length and skips. */
+		private static final int[] PIXEL_STORE = {
+			GL_PACK_ALIGNMENT, GL_PACK_ROW_LENGTH, GL_PACK_SKIP_PIXELS, GL_PACK_SKIP_ROWS,
+			GL_UNPACK_ALIGNMENT, GL_UNPACK_ROW_LENGTH, GL_UNPACK_SKIP_PIXELS, GL_UNPACK_SKIP_ROWS
+		};
+
 		static Saved take() {
 			int[] viewport = new int[4];
 			glGetIntegerv(GL_VIEWPORT, viewport);
@@ -597,13 +603,37 @@ final class GlBakeBackend implements BakeBackend {
 				samplers[u] = glGetInteger(GL_SAMPLER_BINDING);
 			}
 			GlState.activeTexture(active);
+			int[] pixelStore = new int[PIXEL_STORE.length];
+			for (int i = 0; i < PIXEL_STORE.length; i++) {
+				pixelStore[i] = glGetInteger(PIXEL_STORE[i]);
+			}
+			boolean[] colorMask = new boolean[4];
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				ByteBuffer mask = stack.malloc(4);
+				glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+				for (int i = 0; i < 4; i++) {
+					colorMask[i] = mask.get(i) != 0;
+				}
+			}
+			int[] blendFunc = {
+				glGetInteger(GL_BLEND_SRC_RGB), glGetInteger(GL_BLEND_DST_RGB), glGetInteger(GL_BLEND_SRC_ALPHA), glGetInteger(GL_BLEND_DST_ALPHA)
+			};
 			return new Saved(
 				glGetInteger(GL_CURRENT_PROGRAM), glGetInteger(GL_VERTEX_ARRAY_BINDING), glGetInteger(GL_ARRAY_BUFFER_BINDING),
 				glGetInteger(GL_UNIFORM_BUFFER_BINDING), glGetIntegeri(GL_UNIFORM_BUFFER_BINDING, UBO_BINDING),
 				glGetInteger(GL_PIXEL_PACK_BUFFER_BINDING), glGetInteger(GL_PIXEL_UNPACK_BUFFER_BINDING),
-				glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING), glGetInteger(GL_READ_FRAMEBUFFER_BINDING), viewport, active, textures, samplers,
-				glGetInteger(GL_PACK_ALIGNMENT), glGetInteger(GL_PACK_ROW_LENGTH), glGetInteger(GL_UNPACK_ALIGNMENT), glGetInteger(GL_UNPACK_ROW_LENGTH)
+				glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING), glGetInteger(GL_READ_FRAMEBUFFER_BINDING), viewport, active, textures, samplers, pixelStore,
+				glIsEnabled(GL_CULL_FACE), glIsEnabled(GL_SCISSOR_TEST), glIsEnabled(GL_DEPTH_TEST), glGetInteger(GL_DEPTH_FUNC),
+				glGetBoolean(GL_DEPTH_WRITEMASK), glIsEnabledi(GL_BLEND, 0), glIsEnabledi(GL_BLEND, 1), blendFunc, colorMask
 			);
+		}
+
+		/** Packed and unpacked rows start at the buffer's start and run on unbroken: what a bake's buffers are. */
+		static void plainPixelStore() {
+			for (int i = 0; i < PIXEL_STORE.length; i++) {
+				int name = PIXEL_STORE[i];
+				glPixelStorei(name, name == GL_PACK_ALIGNMENT || name == GL_UNPACK_ALIGNMENT ? 4 : 0);
+			}
 		}
 
 		void restore() {
@@ -623,10 +653,17 @@ final class GlBakeBackend implements BakeBackend {
 			GlState.bindFramebuffer(GL_DRAW_FRAMEBUFFER, this.drawFbo);
 			GlState.bindFramebuffer(GL_READ_FRAMEBUFFER, this.readFbo);
 			GlState.viewportAt(this.viewport[0], this.viewport[1], this.viewport[2], this.viewport[3]);
-			glPixelStorei(GL_PACK_ALIGNMENT, this.packAlignment);
-			glPixelStorei(GL_PACK_ROW_LENGTH, this.packRowLength);
-			glPixelStorei(GL_UNPACK_ALIGNMENT, this.unpackAlignment);
-			glPixelStorei(GL_UNPACK_ROW_LENGTH, this.unpackRowLength);
+			for (int i = 0; i < PIXEL_STORE.length; i++) {
+				glPixelStorei(PIXEL_STORE[i], this.pixelStore[i]);
+			}
+			GlState.cull(this.cull);
+			GlState.scissor(this.scissor);
+			GlState.depthTest(this.depthTest);
+			GlState.depthFunc(this.depthFunc);
+			GlState.depthMask(this.depthMask);
+			GlState.blendFuncSeparate(this.blendFunc[0], this.blendFunc[1], this.blendFunc[2], this.blendFunc[3]);
+			GlState.restoreBlend(this.blend0, this.blend1);
+			GlState.colorMask(this.colorMask[0], this.colorMask[1], this.colorMask[2], this.colorMask[3]);
 			GlState.forgetBuffers();
 		}
 	}

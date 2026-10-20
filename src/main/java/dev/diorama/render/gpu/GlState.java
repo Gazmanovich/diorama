@@ -81,6 +81,49 @@ final class GlState {
 		GlStateManager._disableScissorTest();
 	}
 
+	static void cull(boolean on) {
+		if (on) {
+			GlStateManager._enableCull();
+		} else {
+			GlStateManager._disableCull();
+		}
+	}
+
+	static void scissor(boolean on) {
+		if (on) {
+			GlStateManager._enableScissorTest();
+		} else {
+			GlStateManager._disableScissorTest();
+		}
+	}
+
+	static void colorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+		//? if >=26.1 {
+		GlStateManager._colorMask((red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0));
+		//?} else {
+		/*GlStateManager._colorMask(red, green, blue, alpha);
+		*///?}
+	}
+
+	/** Blending as it was on the first two attachments; before 26.2 there is one switch for all. */
+	static void restoreBlend(boolean first, boolean second) {
+		//? if >=26.2 {
+		for (int i = 0; i < 2; i++) {
+			if (i == 0 ? first : second) {
+				GlStateManager._enableBlend(i);
+			} else {
+				GlStateManager._disableBlend(i);
+			}
+		}
+		//?} else {
+		/*if (first) {
+			GlStateManager._enableBlend();
+		} else {
+			GlStateManager._disableBlend();
+		}
+		*///?}
+	}
+
 	static void viewport(int width, int height) {
 		GlStateManager._viewport(0, 0, width, height);
 	}

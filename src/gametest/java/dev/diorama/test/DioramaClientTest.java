@@ -775,6 +775,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			});
 			context.waitFor(mc -> results.size() == keys.size(), 600);
+			// Every round has to match, not only the one kept for its timing: a bake that went
+			// wrong once mustn't hide behind a quicker right one.
+			writeGpuComparison(out, name + " round " + round, keys, cpu, cpuNanos, results, false);
 			if (round == 0) {
 				gpu.putAll(results);
 				continue;
@@ -787,7 +790,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
-		String report = writeGpuComparison(out, name, keys, cpu, cpuNanos, gpu);
+		String report = writeGpuComparison(out, name, keys, cpu, cpuNanos, gpu, true);
 		if (overlays != null) {
 			// Overlay bits are compared where both bakes know the pixel.
 			long both = 0;
@@ -822,7 +825,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/** Saves the traced and GPU tiles as 3x3 pictures with their difference, and sums up both. */
 	private static String writeGpuComparison(
 		java.nio.file.Path out, String name, java.util.List<TileKey> keys, int[][] cpu, long[] cpuNanos,
-		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu
+		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu, boolean save
 	) {
 		int size = Projection.TILE_PIXELS;
 		java.awt.image.BufferedImage cpuImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
@@ -895,13 +898,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
-		try {
-			java.nio.file.Files.createDirectories(out);
-			javax.imageio.ImageIO.write(cpuImage, "png", out.resolve(name + "-cpu.png").toFile());
-			javax.imageio.ImageIO.write(gpuImage, "png", out.resolve(name + "-gpu.png").toFile());
-			javax.imageio.ImageIO.write(diffImage, "png", out.resolve(name + "-diff.png").toFile());
-		} catch (java.io.IOException e) {
-			throw new java.io.UncheckedIOException(e);
+		if (save) {
+			try {
+				java.nio.file.Files.createDirectories(out);
+				javax.imageio.ImageIO.write(cpuImage, "png", out.resolve(name + "-cpu.png").toFile());
+				javax.imageio.ImageIO.write(gpuImage, "png", out.resolve(name + "-gpu.png").toFile());
+				javax.imageio.ImageIO.write(diffImage, "png", out.resolve(name + "-diff.png").toFile());
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
 		}
 		int n = keys.size();
 		int ok = Math.max(1, n - failed);
