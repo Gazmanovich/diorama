@@ -359,14 +359,16 @@ public final class MapLevel implements ChunkSource {
 		}
 		long now = System.currentTimeMillis();
 		for (int layer : layers) {
-			// Under a roof the sky view is lit like a cave, so light reaches it the same way.
+			// Under a roof the sky view is lit by block light like a cave, so light reaches it the same way.
 			boolean cave = layer != TileKey.SURFACE || this.roofless();
 			if (!cave && !visibleFromSky) {
 				continue;
 			}
-			int reachX = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_X;
-			int reachZ = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Z;
-			int reachY = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Y;
+			// Under a roof light also falls from above, so shadows reach as far as on the surface.
+			boolean shadows = !cave || this.roofless();
+			int reachX = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_X : 0);
+			int reachZ = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Z : 0);
+			int reachY = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Y : 0);
 			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {

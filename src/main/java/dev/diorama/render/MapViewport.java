@@ -64,7 +64,10 @@ public final class MapViewport {
 	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
-		graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), cave ? 0xFF0C0E12 : 0xFF8C99AB);
+		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
+		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
+		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
+		graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0);
 		this.drawFog(graphics, level, view);
@@ -201,8 +204,9 @@ public final class MapViewport {
 		int noiseV = Math.floorMod((long) (originV / snap), 8);
 		boolean cave = view.layer() != TileKey.SURFACE;
 		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
-		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast fog.
-		int quality = fast ? 4 : 0;
+		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast
+		// fog, and 1 for smoke instead of clouds over the sky view under a roof.
+		int quality = (fast ? 4 : 0) | (level.roofless() ? 1 : 0);
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		MapCanvas.of(graphics).fog(

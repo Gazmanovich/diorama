@@ -15,7 +15,7 @@ Places the map has no data for sit under animated fog. Underground, the map swit
 - **Radar** for other players and mobs, each shown as its own face, framed red, yellow or green for hostile, neutral or passive, with markers for whether they're above or below you.
 - **Waypoints** on the map and as labels in the world, plus a marker wherever you die. Share one in chat from its edit screen; shared waypoints, including Xaero's, get an [Add] link in chat. Teleport to one if you're allowed to use `/tp`. Coming from Xaero's Minimap? The waypoint list offers to import its waypoints for the world you're in.
 - **Saved map.** Everything your client loads is saved per world and dimension, so the map is still there next time, and you can zoom out over everywhere you've been.
-- **The Nether** from above: the sky view starts under the bedrock roof and shows everything below it, lit by block light.
+- **The Nether** from above: the sky view starts under the bedrock roof and shows everything below it, lit from above as if the roof were lifted off, with each biome's fog thickening the deeper the ground lies. Unexplored places sit under smoke instead of clouds.
 - **Overlays** on the fullscreen map: chunk grid, slime chunks (singleplayer) and the spots where monsters can spawn.
 - **Settings** for all of the above, from a button on the fullscreen map.
 

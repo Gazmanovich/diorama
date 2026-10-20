@@ -14,8 +14,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Every texture pixel fires four rays along the camera direction. Each ray walks the blocks in
  * its column (the camera faces due north, so a ray never changes x) until it hits something solid.
  * That hit is then lit: in the surface view by the sun, with a second ray toward it for shadows;
- * in a cave slice by the game's own block and sky light. Corner ambient occlusion and partial
- * colour from plants, glass and water come on top.
+ * in a cave slice by the game's own block and sky light. Under a roof (the Nether) it is lit from
+ * above as if the rock over the first open space were lifted off, and fades into the biome's fog
+ * with depth. Corner ambient occlusion and partial colour from plants, glass and water come on top.
  */
 public final class TileBaker {
 	/** Rotated-grid sample offsets inside a pixel. */
@@ -23,12 +24,7 @@ public final class TileBaker {
 	/** One sample in the middle of the pixel: a quarter of the work, with jaggier block edges. */
 	private static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
 	private static volatile boolean fast;
-	/**
-	 * Prototype switch for comparing looks under a roof: 0 lit only by block light, 1 lit as if the
-	 * rock above the first open space were lifted off, 2 that plus the Nether's fog with depth.
-	 */
-	public static volatile int netherLook = 2;
-	/** Under a lifted lid: light filling shadows, direct light from above, and the block light glow. */
+	/** Under a roof: light filling shadows, direct light from above, and the block light glow. */
 	private static final float LID_AMBIENT = 0.26F;
 	private static final float LID_KEY = 0.52F;
 	private static final float[] LID_KEY_TINT = {1.1F, 1.0F, 0.88F};
@@ -39,6 +35,8 @@ public final class TileBaker {
 	private static final float HAZE_MAX = 0.72F;
 	/** The fog is lit a little brighter than its colour in the game, which is what the far distance fades to. */
 	private static final float HAZE_LIGHT = 1.6F;
+	/** The brightest a biome's fog colour may be before {@link #HAZE_LIGHT}, in linear luminance. */
+	private static final float HAZE_MAX_LUMINANCE = 0.025F;
 
 	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
 	private static final double SUN_AZIMUTH_X = -0.878;
@@ -107,9 +105,9 @@ public final class TileBaker {
 	private final BlockLooks looks;
 	private final VoxelReader reader;
 	private final boolean cave;
-	/** The sky view of a dimension with a roof: it starts under the roof, skips rock and is lit like a cave. */
+	/** The sky view of a dimension with a roof: it starts under the roof and skips rock. */
 	private final boolean roofless;
-	/** Lit by block light and the sky light that reaches in, not the sun: caves, and under a roof. */
+	/** Starts inside rock, which it skips, and isn't lit by the sun: caves, and under a roof. */
 	private final boolean lit;
 	private final int startY;
 	private final int limitY;
@@ -131,10 +129,12 @@ public final class TileBaker {
 	private final double sunX;
 	private final double sunY;
 	private final double sunZ;
-	/** In a dimension with a roof, light falls in from above as if the rock over the first open space were lifted off. */
+	/**
+	 * In a dimension with a roof, the sky view and cave slices alike: light falls in from above as
+	 * if the rock over the first open space were lifted off, and the biome's fog thickens with depth
+	 * below the cut.
+	 */
 	private final boolean lifted;
-	/** Under a lifted lid, the Nether's fog thickens with depth below the cut. */
-	private final boolean haze;
 	/** Per column, the lowest y of the lifted rock; see {@link #lid}. */
 	private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap lidAt = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
 	/** The fog colour per biome cell (quart), in sRGB. */
@@ -187,9 +187,7 @@ public final class TileBaker {
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
-		int look = netherLook;
-		this.lifted = this.lit && source.roof() != ChunkSource.NO_ROOF && look >= 1;
-		this.haze = this.lifted && look >= 2;
+		this.lifted = this.lit && source.roof() != ChunkSource.NO_ROOF;
 		this.lidAt.defaultReturnValue(Integer.MIN_VALUE);
 		this.fogAt.defaultReturnValue(-1);
 	}
@@ -203,7 +201,7 @@ public final class TileBaker {
 		int lid = this.lidAt.get(key);
 		if (lid == Integer.MIN_VALUE) {
 			int y = this.startY - 1;
-			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.haze && this.reader.solid(x, y - 1, z) == 1)) {
+			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.lifted && this.reader.solid(x, y - 1, z) == 1)) {
 				y--;
 			}
 			lid = y + 1;
@@ -247,9 +245,12 @@ public final class TileBaker {
 			g += (float) (w * SRGB_TO_LINEAR[(c >> 8) & 0xFF]);
 			b += (float) (w * SRGB_TO_LINEAR[c & 0xFF]);
 		}
-		this.hazeR = r * HAZE_LIGHT;
-		this.hazeG = g * HAZE_LIGHT;
-		this.hazeB = b * HAZE_LIGHT;
+		// The soul sand valley's and basalt deltas' fogs are several times brighter than the
+		// rest and wash those biomes out pale; each fog keeps its hue but no more than this light.
+		float scale = HAZE_LIGHT * Math.min(1, HAZE_MAX_LUMINANCE / Math.max(1e-6F, luminance(r, g, b)));
+		this.liftedR = r * scale;
+		this.liftedG = g * scale;
+		this.liftedB = b * scale;
 	}
 
 	private int fogCell(int qx, int qy, int qz) {
@@ -277,9 +278,7 @@ public final class TileBaker {
 			return 0x1B4745;
 		}
 		if (biome.is(net.minecraft.world.level.biome.Biomes.BASALT_DELTAS)) {
-			// The game's 0x685F70 is far paler than the other biomes' fogs and washes the deltas
-			// out; this keeps its hue at their brightness.
-			return 0x3A353F;
+			return 0x685F70;
 		}
 		return NETHER_WASTES_FOG;
 	}
@@ -541,7 +540,7 @@ public final class TileBaker {
 				if (solid == VoxelReader.UNKNOWN) {
 					return false;
 				}
-				if (solid == 1 || this.haze && this.sealed(x, by, bz, tMaxY < tMaxZ)) {
+				if (solid == 1 || this.lifted && this.sealed(x, by, bz, tMaxY < tMaxZ)) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
@@ -706,7 +705,7 @@ public final class TileBaker {
 		float emission = this.looks.emission[id] / 15.0F;
 		if (this.looks.kind[id] == BlockLooks.LAVA) {
 			// In the Nether's fog a lava sea reads as one glow rather than a field of speckles.
-			float crust = 1 + (this.haze ? 0.1F : 0.3F) * blockNoise(x, by, bz);
+			float crust = 1 + (this.lifted ? 0.1F : 0.3F) * blockNoise(x, by, bz);
 			this.albedoR *= crust;
 			this.albedoG *= crust * crust;
 			this.albedoB *= crust;
@@ -749,7 +748,7 @@ public final class TileBaker {
 			lg = (base * 0.96F + warm * 0.75F + cool * 0.65F) * ao;
 			lb = (base * 1.08F + warm * 0.5F + cool * 0.75F) * ao;
 			if (this.cave) {
-				// Deeper below the cut reads darker; under a roof the whole view is one level.
+				// Deeper below the cut reads darker.
 				float depth = (float) (this.startY - hitY);
 				float fade = 1 - Math.min(0.5F, depth / 60.0F);
 				lr *= fade;
@@ -799,7 +798,7 @@ public final class TileBaker {
 		if (emission > 0) {
 			// In the fog, small lights like shroomlights and glowstone glow softer, so they don't
 			// speckle the view; lava keeps its full glow.
-			float e = this.haze && this.looks.kind[id] != BlockLooks.LAVA ? 0.3F + emission * 0.45F : 0.35F + emission * 0.85F;
+			float e = this.lifted && this.looks.kind[id] != BlockLooks.LAVA ? 0.3F + emission * 0.45F : 0.35F + emission * 0.85F;
 			lr = Math.max(lr, e);
 			lg = Math.max(lg, e);
 			lb = Math.max(lb, e);
@@ -813,14 +812,14 @@ public final class TileBaker {
 		this.outR = this.albedoR * lr;
 		this.outG = this.albedoG * lg;
 		this.outB = this.albedoB * lb;
-		if (this.haze) {
+		if (this.lifted) {
 			// The deeper below the cut, the more of the biome's fog lies in front: ledges near the
 			// roof stand out over the floor and the lava sea far below.
 			float f = (float) Math.min(HAZE_MAX, 1 - Math.exp(-(this.startY - hitY) / HAZE_DEPTH));
-			this.hazeColor(x + fx, hitY, hitZ);
-			this.outR += (this.hazeR - this.outR) * f;
-			this.outG += (this.hazeG - this.outG) * f;
-			this.outB += (this.hazeB - this.outB) * f;
+			this.liftedColor(x + fx, hitY, hitZ);
+			this.outR += (this.liftedR - this.outR) * f;
+			this.outG += (this.liftedG - this.outG) * f;
+			this.outB += (this.liftedB - this.outB) * f;
 		}
 	}
 
