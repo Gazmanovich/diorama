@@ -103,6 +103,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
 			}
+			if (tests.contains("nether-looks")) {
+				netherLooks(context, world);
+			}
 			if (tests.contains("bench")) {
 				bench(context);
 			}
@@ -594,6 +597,85 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/**
+	 * Opt-in with {@code DIORAMA_TESTS=nether-looks}: the Nether in each prototype look, at spawn
+	 * and over the nearest fortress, in the cave slice and under the roof, near and far.
+	 */
+	private static void netherLooks(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos fortress = world.getServer().computeOnServer(server -> {
+			ServerLevel nether = server.getLevel(net.minecraft.world.level.Level.NETHER);
+			HolderSet<Structure> wanted = HolderSet.direct(server.registryAccess().lookupOrThrow(Registries.STRUCTURE).getOrThrow(BuiltinStructures.FORTRESS));
+			var found = nether.getChunkSource().getGenerator().findNearestMapStructure(nether, wanted, BlockPos.ZERO, 100, false);
+			return found == null ? new BlockPos(48, 70, 48) : found.getFirst();
+		});
+		String[][] spots = {{"spawn", "0 70 0"}, {"fortress", fortress.getX() + " 75 " + fortress.getZ()}};
+		for (String[] spot : spots) {
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + spot[1]);
+			context.waitTicks(40);
+			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
+				&& MapSession.get().map().chunkCount() > 200, 2400);
+			context.runOnClient(mc -> {
+				Settings.get().radarHostile = false;
+				Settings.get().radarNeutral = false;
+				Settings.get().radarPassive = false;
+			});
+			settle(context, 200);
+			if (spot[0].equals("spawn")) {
+				// What the dark, dotted ground west of spawn is made of: runs of blocks down each column.
+				world.getServer().runOnServer(server -> {
+					ServerLevel nether = server.getLevel(net.minecraft.world.level.Level.NETHER);
+					for (int x = -60; x <= -10; x += 25) {
+						for (int z = -20; z <= 40; z += 20) {
+							StringBuilder runs = new StringBuilder();
+							String last = null;
+							int count = 0;
+							for (int y = 127; y >= 0; y--) {
+								String name = nether.getBlockState(new BlockPos(x, y, z)).getBlock().toString().replace("Block{minecraft:", "").replace("}", "");
+								if (name.equals(last)) {
+									count++;
+								} else {
+									if (last != null) {
+										runs.append(' ').append(last).append('x').append(count).append("@").append(y + 1);
+									}
+									last = name;
+									count = 1;
+								}
+							}
+							runs.append(' ').append(last).append('x').append(count).append("@0");
+							dev.diorama.Diorama.LOGGER.info("COLUMN {},{}:{}", x, z, runs);
+						}
+					}
+				});
+			}
+			for (int look : new int[] {0, 2}) {
+				int l = look;
+				context.runOnClient(mc -> {
+					dev.diorama.bake.TileBaker.netherLook = l;
+					MapSession.get().map().colorsChanged();
+				});
+				String name = "nether-" + spot[0] + "-look" + look;
+				context.setScreen(() -> null);
+				settle(context, 60);
+				context.takeScreenshot(name + "-minimap");
+				context.setScreen(MapScreen::new);
+				settle(context, 60);
+				context.takeScreenshot(name + "-slice");
+				lookAtPlayer(context, 2.6, TileKey.SURFACE);
+				settle(context, 80);
+				context.takeScreenshot(name + "-roof-near");
+				lookAtPlayer(context, 1.0, TileKey.SURFACE);
+				settle(context, 80);
+				context.takeScreenshot(name + "-roof-mid");
+				lookAtPlayer(context, 0.6, TileKey.SURFACE);
+				settle(context, 80);
+				context.takeScreenshot(name + "-roof-far");
+				context.setScreen(() -> null);
+			}
+		}
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null, 2400);
 	}
 
 	/** The Nether and the End: the minimap, and the fullscreen map near and far. */

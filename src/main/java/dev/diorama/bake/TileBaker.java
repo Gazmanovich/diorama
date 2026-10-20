@@ -23,6 +23,22 @@ public final class TileBaker {
 	/** One sample in the middle of the pixel: a quarter of the work, with jaggier block edges. */
 	private static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
 	private static volatile boolean fast;
+	/**
+	 * Prototype switch for comparing looks under a roof: 0 lit only by block light, 1 lit as if the
+	 * rock above the first open space were lifted off, 2 that plus the Nether's fog with depth.
+	 */
+	public static volatile int netherLook = 2;
+	/** Under a lifted lid: light filling shadows, direct light from above, and the block light glow. */
+	private static final float LID_AMBIENT = 0.26F;
+	private static final float LID_KEY = 0.52F;
+	private static final float[] LID_KEY_TINT = {1.1F, 1.0F, 0.88F};
+	private static final float[] LID_FILL_TINT = {1.0F, 0.86F, 0.84F};
+	private static final float LID_GLOW = 0.7F;
+	/** Depth below the cut at which the Nether's fog has covered about two thirds of a surface. */
+	private static final double HAZE_DEPTH = 55;
+	private static final float HAZE_MAX = 0.72F;
+	/** The fog is lit a little brighter than its colour in the game, which is what the far distance fades to. */
+	private static final float HAZE_LIGHT = 1.6F;
 
 	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
 	private static final double SUN_AZIMUTH_X = -0.878;
@@ -115,6 +131,14 @@ public final class TileBaker {
 	private final double sunX;
 	private final double sunY;
 	private final double sunZ;
+	/** In a dimension with a roof, light falls in from above as if the rock over the first open space were lifted off. */
+	private final boolean lifted;
+	/** Under a lifted lid, the Nether's fog thickens with depth below the cut. */
+	private final boolean haze;
+	/** Per column, the lowest y of the lifted rock; see {@link #lid}. */
+	private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap lidAt = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+	/** The fog colour per biome cell (quart), in sRGB. */
+	private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap fogAt = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
 	/** Sky visibility at block corners, 0..1, worked out once per bake. */
 	private final it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap skyAtCorner = new it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap();
 
@@ -163,6 +187,101 @@ public final class TileBaker {
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
+		int look = netherLook;
+		this.lifted = this.lit && source.roof() != ChunkSource.NO_ROOF && look >= 1;
+		this.haze = this.lifted && look >= 2;
+		this.lidAt.defaultReturnValue(Integer.MIN_VALUE);
+		this.fogAt.defaultReturnValue(-1);
+	}
+
+	/**
+	 * The lowest y of the rock lifted off this column: the solid blocks from the cut down to the
+	 * first open space, the same rock a camera ray skips. Light rays treat it as open.
+	 */
+	private int lid(int x, int z) {
+		long key = ((long) x << 32) | (z & 0xFFFFFFFFL);
+		int lid = this.lidAt.get(key);
+		if (lid == Integer.MIN_VALUE) {
+			int y = this.startY - 1;
+			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.haze && this.reader.solid(x, y - 1, z) == 1)) {
+				y--;
+			}
+			lid = y + 1;
+			this.lidAt.put(key, lid);
+		}
+		return lid;
+	}
+
+	/**
+	 * Whether an open cell the camera ray meets inside the rock is only a sealed pocket: a lone air
+	 * bubble or buried lava spring, with rock again in the next cell along the ray. Nobody can see
+	 * those, and drawn they speckle the solid rock with dots.
+	 */
+	private boolean sealed(int x, int by, int bz, boolean nextIsBelow) {
+		int next = nextIsBelow ? this.reader.solid(x, by - 1, bz) : this.reader.solid(x, by, bz - 1);
+		return next == 1;
+	}
+
+	private float hazeR;
+	private float hazeG;
+	private float hazeB;
+
+	/** Sets {@code haze*} to the Nether's fog colour at a point, linear, blended between biome cells so borders don't step. */
+	private void hazeColor(double x, double y, double z) {
+		double qx = x / 4 - 0.5;
+		double qz = z / 4 - 0.5;
+		int x0 = (int) Math.floor(qx);
+		int z0 = (int) Math.floor(qz);
+		int qy = (int) Math.floor(y) >> 2;
+		double fx = qx - x0;
+		double fz = qz - z0;
+		float r = 0;
+		float g = 0;
+		float b = 0;
+		for (int i = 0; i < 4; i++) {
+			int cx = x0 + (i & 1);
+			int cz = z0 + (i >> 1);
+			double w = ((i & 1) == 0 ? 1 - fx : fx) * ((i >> 1) == 0 ? 1 - fz : fz);
+			int c = this.fogCell(cx, qy, cz);
+			r += (float) (w * SRGB_TO_LINEAR[(c >> 16) & 0xFF]);
+			g += (float) (w * SRGB_TO_LINEAR[(c >> 8) & 0xFF]);
+			b += (float) (w * SRGB_TO_LINEAR[c & 0xFF]);
+		}
+		this.hazeR = r * HAZE_LIGHT;
+		this.hazeG = g * HAZE_LIGHT;
+		this.hazeB = b * HAZE_LIGHT;
+	}
+
+	private int fogCell(int qx, int qy, int qz) {
+		long key = ((long) (qx & 0x3FFFFFF) << 38) | ((long) (qz & 0x3FFFFFF) << 12) | ((qy + 2048) & 0xFFF);
+		int color = this.fogAt.get(key);
+		if (color < 0) {
+			ChunkSnapshot snapshot = this.reader.snapshot(qx << 2, qz << 2);
+			color = snapshot == null ? NETHER_WASTES_FOG : fogColor(snapshot.noiseBiome(qx, qy, qz));
+			this.fogAt.put(key, color);
+		}
+		return color;
+	}
+
+	// The Nether biomes' fog colours in the game.
+	private static final int NETHER_WASTES_FOG = 0x330808;
+
+	private static int fogColor(net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome) {
+		if (biome.is(net.minecraft.world.level.biome.Biomes.CRIMSON_FOREST)) {
+			return 0x330303;
+		}
+		if (biome.is(net.minecraft.world.level.biome.Biomes.WARPED_FOREST)) {
+			return 0x1A051A;
+		}
+		if (biome.is(net.minecraft.world.level.biome.Biomes.SOUL_SAND_VALLEY)) {
+			return 0x1B4745;
+		}
+		if (biome.is(net.minecraft.world.level.biome.Biomes.BASALT_DELTAS)) {
+			// The game's 0x685F70 is far paler than the other biomes' fogs and washes the deltas
+			// out; this keeps its hue at their brightness.
+			return 0x3A353F;
+		}
+		return NETHER_WASTES_FOG;
 	}
 
 	/**
@@ -422,7 +541,7 @@ public final class TileBaker {
 				if (solid == VoxelReader.UNKNOWN) {
 					return false;
 				}
-				if (solid == 1) {
+				if (solid == 1 || this.haze && this.sealed(x, by, bz, tMaxY < tMaxZ)) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
@@ -586,7 +705,8 @@ public final class TileBaker {
 			: this.ambientOcclusionSouth(x, by, bz + 1, fx, hitY - by);
 		float emission = this.looks.emission[id] / 15.0F;
 		if (this.looks.kind[id] == BlockLooks.LAVA) {
-			float crust = 1 + 0.3F * blockNoise(x, by, bz);
+			// In the Nether's fog a lava sea reads as one glow rather than a field of speckles.
+			float crust = 1 + (this.haze ? 0.1F : 0.3F) * blockNoise(x, by, bz);
 			this.albedoR *= crust;
 			this.albedoG *= crust * crust;
 			this.albedoB *= crust;
@@ -595,7 +715,29 @@ public final class TileBaker {
 		float lr;
 		float lg;
 		float lb;
-		if (this.lit) {
+		if (this.lifted) {
+			// Lit like the surface with the lid off: direct light from above casts shadows under
+			// ledges and down the faces of pillars, and spots that see little of the open space
+			// above get less of the fill. Block light glows on top.
+			double[] j = SUN_JITTER[sample];
+			double sx = this.sunX + j[0];
+			double sy = this.sunY + j[1];
+			double sz = this.sunZ + j[2];
+			double lambert = top ? 1 : Math.max(0, sz) / sy;
+			float direct = 0;
+			if (lambert > 0) {
+				double ox = x + fx;
+				double oy = top ? by + 1 + 1e-4 : hitY;
+				double oz = top ? hitZ : bz + 1 + 1e-4;
+				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (LID_KEY * lambert);
+			}
+			float sky = top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by);
+			float ambient = LID_AMBIENT * ao * (1 - this.style.skyOcclusion() * (1 - (0.15F + 0.85F * sky)));
+			float warm = (float) Math.pow(this.reader.blockLight(x, frontY, frontZ) / 15.0F, 1.5) * LID_GLOW;
+			lr = ambient * LID_FILL_TINT[0] + direct * LID_KEY_TINT[0] + warm * 0.9F * ao;
+			lg = ambient * LID_FILL_TINT[1] + direct * LID_KEY_TINT[1] + warm * 0.75F * ao;
+			lb = ambient * LID_FILL_TINT[2] + direct * LID_KEY_TINT[2] + warm * 0.5F * ao;
+		} else if (this.lit) {
 			int skyLight = this.reader.skyLight(x, frontY, frontZ);
 			float bl = this.reader.blockLight(x, frontY, frontZ) / 15.0F;
 			float sl = skyLight / 15.0F * 0.8F;
@@ -655,7 +797,9 @@ public final class TileBaker {
 			}
 		}
 		if (emission > 0) {
-			float e = 0.35F + emission * 0.85F;
+			// In the fog, small lights like shroomlights and glowstone glow softer, so they don't
+			// speckle the view; lava keeps its full glow.
+			float e = this.haze && this.looks.kind[id] != BlockLooks.LAVA ? 0.3F + emission * 0.45F : 0.35F + emission * 0.85F;
 			lr = Math.max(lr, e);
 			lg = Math.max(lg, e);
 			lb = Math.max(lb, e);
@@ -669,6 +813,15 @@ public final class TileBaker {
 		this.outR = this.albedoR * lr;
 		this.outG = this.albedoG * lg;
 		this.outB = this.albedoB * lb;
+		if (this.haze) {
+			// The deeper below the cut, the more of the biome's fog lies in front: ledges near the
+			// roof stand out over the floor and the lava sea far below.
+			float f = (float) Math.min(HAZE_MAX, 1 - Math.exp(-(this.startY - hitY) / HAZE_DEPTH));
+			this.hazeColor(x + fx, hitY, hitZ);
+			this.outR += (this.hazeR - this.outR) * f;
+			this.outG += (this.hazeG - this.outG) * f;
+			this.outB += (this.hazeB - this.outB) * f;
+		}
 	}
 
 	private void mixWater(int waterId, int x, int by, int bz, double u, double z0, double tEntry, double tHit, int sample) {
@@ -766,10 +919,11 @@ public final class TileBaker {
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
-		if (cy < this.rayTop && this.occludes(cx, cy, cz)) {
+		if (cy < this.rayTop && this.occludes(cx, cy, cz) && !(this.lifted && cy >= this.lid(cx, cz))) {
 			return true;
 		}
-		int top = this.rayTop;
+		// Under a lifted lid nothing above the cut is left to block light.
+		int top = this.lifted ? Math.min(this.rayTop, this.startY) : this.rayTop;
 		if (dy > 0) {
 			// A ray that only climbs can't be blocked once it is above every solid block in the
 			// chunks it can reach, so it stops there instead of walking on through open sky.
@@ -810,7 +964,7 @@ public final class TileBaker {
 			if (solid == VoxelReader.UNKNOWN) {
 				return false;
 			}
-			if (solid == 1) {
+			if (solid == 1 && !(this.lifted && cy >= this.lid(cx, cz))) {
 				return true;
 			}
 		}
