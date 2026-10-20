@@ -248,9 +248,9 @@ public final class TileBaker {
 		// The soul sand valley's and basalt deltas' fogs are several times brighter than the
 		// rest and wash those biomes out pale; each fog keeps its hue but no more than this light.
 		float scale = HAZE_LIGHT * Math.min(1, HAZE_MAX_LUMINANCE / Math.max(1e-6F, luminance(r, g, b)));
-		this.liftedR = r * scale;
-		this.liftedG = g * scale;
-		this.liftedB = b * scale;
+		this.hazeR = r * scale;
+		this.hazeG = g * scale;
+		this.hazeB = b * scale;
 	}
 
 	private int fogCell(int qx, int qy, int qz) {
@@ -816,10 +816,10 @@ public final class TileBaker {
 			// The deeper below the cut, the more of the biome's fog lies in front: ledges near the
 			// roof stand out over the floor and the lava sea far below.
 			float f = (float) Math.min(HAZE_MAX, 1 - Math.exp(-(this.startY - hitY) / HAZE_DEPTH));
-			this.liftedColor(x + fx, hitY, hitZ);
-			this.outR += (this.liftedR - this.outR) * f;
-			this.outG += (this.liftedG - this.outG) * f;
-			this.outB += (this.liftedB - this.outB) * f;
+			this.hazeColor(x + fx, hitY, hitZ);
+			this.outR += (this.hazeR - this.outR) * f;
+			this.outG += (this.hazeG - this.outG) * f;
+			this.outB += (this.hazeB - this.outB) * f;
 		}
 	}
 
