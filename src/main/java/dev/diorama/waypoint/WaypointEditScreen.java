@@ -100,7 +100,7 @@ public final class WaypointEditScreen extends Screen {
 			this.share.active = valid;
 		}
 		if (this.teleport != null) {
-			this.teleport.active = valid && canTeleport();
+			this.teleport.active = valid && Waypoints.canTeleport();
 		}
 	}
 
@@ -191,19 +191,9 @@ public final class WaypointEditScreen extends Screen {
 		if (shown == null) {
 			return;
 		}
-		java.util.Optional<String> text = WaypointShare.format(shown);
-		if (text.isEmpty()) {
-			//? if >=26.1 {
-			this.minecraft.gui.hud.getChat().addClientSystemMessage(Component.translatable("diorama.share.too_long"));
-			//?} else {
-			/*this.minecraft.gui.getChat().addMessage(Component.translatable("diorama.share.too_long"));
-			*///?}
-			return;
+		if (WaypointShare.send(shown)) {
+			this.onClose();
 		}
-		if (this.minecraft.player != null) {
-			this.minecraft.player.connection.sendChat(text.get());
-		}
-		this.onClose();
 	}
 
 	private void teleport() {
@@ -211,16 +201,8 @@ public final class WaypointEditScreen extends Screen {
 		if (shown == null) {
 			return;
 		}
-		if (this.minecraft.player != null) {
-			this.minecraft.player.connection.sendCommand("tp @s " + shown.x + " " + shown.y + " " + shown.z);
-		}
+		Waypoints.teleport(shown.x, shown.y, shown.z);
 		this.onClose();
-	}
-
-	/** The server only sends the commands a player may use, so {@code tp} being there means it's allowed. */
-	static boolean canTeleport() {
-		var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
-		return connection != null && connection.getCommands().getRoot().getChild("tp") != null;
 	}
 
 	private void save() {
@@ -240,6 +222,11 @@ public final class WaypointEditScreen extends Screen {
 		this.waypoint.z = shown.z;
 		this.waypoint.color = this.color;
 		this.waypoint.visible = this.visible;
+		// Saving a temporary waypoint from the editor keeps it; otherwise a renamed one would still
+		// vanish on leaving the world.
+		if (this.waypoint.kind == Waypoint.Kind.TEMPORARY) {
+			this.waypoint.kind = Waypoint.Kind.MANUAL;
+		}
 		if (this.isNew) {
 			store.add(this.waypoint);
 		} else {

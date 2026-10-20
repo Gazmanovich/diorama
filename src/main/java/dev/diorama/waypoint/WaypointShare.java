@@ -68,6 +68,27 @@ public final class WaypointShare {
 		return line.length() > MAX_CHAT ? Optional.empty() : Optional.of(line);
 	}
 
+	/**
+	 * Posts a waypoint in chat for others to add. False if it can't fit in a chat line, which
+	 * chat is told about instead.
+	 */
+	public static boolean send(Waypoint waypoint) {
+		Minecraft mc = Minecraft.getInstance();
+		Optional<String> text = format(waypoint);
+		if (text.isEmpty()) {
+			//? if >=26.1 {
+			mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("diorama.share.too_long"));
+			//?} else {
+			/*mc.gui.getChat().addMessage(Component.translatable("diorama.share.too_long"));
+			*///?}
+			return false;
+		}
+		if (mc.player != null) {
+			mc.player.connection.sendChat(text.get());
+		}
+		return true;
+	}
+
 	/** Xaero's escapes for characters that mean something in the share line. */
 	static String encode(String text) {
 		return text.replace("-", "^min^").replace("_", "-").replace(":", "^col^").replace("*", "^ast^");
