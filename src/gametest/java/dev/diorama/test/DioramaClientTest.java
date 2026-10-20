@@ -92,6 +92,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 			settle(context, 100);
+			context.runOnClient(mc -> dev.diorama.bake.VoxelReaderChecks.check(MapSession.get().map(),
+				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
 			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
@@ -1221,6 +1223,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("tellraw @a \"§n§o§m§i§n§i§m§a§p\"");
 		context.waitTicks(20);
 		context.takeScreenshot("radar-04-no-minimap");
+		//? if fabric {
+		// A proxy can join another backend without disconnecting; its rules start afresh.
+		context.runOnClient(mc -> {
+			dev.diorama.ServerRules.onServerMessage(net.minecraft.network.chat.Component.literal("§x§a§e§r§o§m§m§n§e§t§h§e§r§i§s§f§a§i§r"));
+			net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.invoker().onPlayReady(
+				mc.getConnection(), net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.getSender(), mc);
+			if (!dev.diorama.ServerRules.minimapAllowed() || !dev.diorama.ServerRules.radarAllowed()
+				|| dev.diorama.ServerRules.fogOfWar(false) != dev.diorama.ServerRules.alwaysFogOfWar()) {
+				throw new AssertionError("The new server inherited the previous server's map restrictions");
+			}
+			dev.diorama.ServerRules.onServerMessage(net.minecraft.network.chat.Component.literal("§f§a§i§r§x§a§e§r§o"));
+			if (!dev.diorama.ServerRules.fogOfWar(true)) {
+				throw new AssertionError("The new server inherited the previous server's Nether exemption");
+			}
+		});
+		//?}
 		world.getServer().runCommand("tellraw @a \"§r§e§s§e§t§x§a§e§r§o\"");
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("kill @e[type=!player]");

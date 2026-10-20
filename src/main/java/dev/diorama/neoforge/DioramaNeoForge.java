@@ -85,6 +85,7 @@ public final class DioramaNeoForge {
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
+			ServerRules.onDisconnect();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

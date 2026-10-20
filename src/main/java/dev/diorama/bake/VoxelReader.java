@@ -22,12 +22,12 @@ final class VoxelReader {
 	static final int UNKNOWN = -1;
 	static final int AIR_ID = Block.BLOCK_STATE_REGISTRY.getId(Blocks.AIR.defaultBlockState());
 	/** The ids of a section with nothing in it. Shared and never written. */
-	private static final char[] AIR_SECTION = new char[4096];
+	private static final int[] AIR_SECTION = new int[4096];
 	/** The solid mask of a section with nothing solid in it. Shared and never written. */
 	private static final long[] NOTHING_SOLID = new long[64];
 
 	static {
-		Arrays.fill(AIR_SECTION, (char) AIR_ID);
+		Arrays.fill(AIR_SECTION, AIR_ID);
 	}
 
 	/**
@@ -56,7 +56,7 @@ final class VoxelReader {
 	private int sectionX = Integer.MIN_VALUE;
 	private int sectionY = Integer.MIN_VALUE;
 	private int sectionZ = Integer.MIN_VALUE;
-	private char @Nullable [] sectionIds;
+	private int @Nullable [] sectionIds;
 	// The same for the last solid lookup, with its own section: shadow and sky rays interleave
 	// with camera rays. The mask is null when the chunk is missing.
 	private int solidX = Integer.MIN_VALUE;
@@ -91,7 +91,7 @@ final class VoxelReader {
 		if (sx != this.sectionX || sy != this.sectionY || sz != this.sectionZ) {
 			this.enterSection(sx, sy, sz);
 		}
-		char[] ids = this.sectionIds;
+		int[] ids = this.sectionIds;
 		return ids == null ? UNKNOWN : ids[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
 	}
 
@@ -103,7 +103,7 @@ final class VoxelReader {
 			}
 			this.sectionIds = null;
 		} else {
-			char[] ids = chunk.section(sy - chunk.snapshot.minSectionY);
+			int[] ids = chunk.section(sy - chunk.snapshot.minSectionY);
 			this.sectionIds = ids == null ? AIR_SECTION : ids;
 		}
 		this.sectionX = sx;
@@ -230,7 +230,7 @@ final class VoxelReader {
 
 	private static final class Decoded {
 		final ChunkSnapshot snapshot;
-		final char[][] sections;
+		final int[][] sections;
 		final boolean[] decoded;
 		/** Per section, one bit per block, set where it is {@link BlockLooks#SOLID}; built when first read. */
 		final long[][] solid;
@@ -239,7 +239,7 @@ final class VoxelReader {
 
 		Decoded(ChunkSnapshot snapshot) {
 			this.snapshot = snapshot;
-			this.sections = new char[snapshot.sectionCount()][];
+			this.sections = new int[snapshot.sectionCount()][];
 			this.decoded = new boolean[snapshot.sectionCount()];
 			this.solid = new long[snapshot.sectionCount()][];
 		}
@@ -251,7 +251,7 @@ final class VoxelReader {
 			}
 			long[] mask = this.solid[index];
 			if (mask == null) {
-				char[] ids = this.section(index);
+				int[] ids = this.section(index);
 				if (ids == null) {
 					mask = NOTHING_SOLID;
 				} else {
@@ -286,7 +286,7 @@ final class VoxelReader {
 			return this.solidTop;
 		}
 
-		char @Nullable [] section(int index) {
+		int @Nullable [] section(int index) {
 			if (index < 0 || index >= this.sections.length) {
 				return null;
 			}
@@ -295,20 +295,20 @@ final class VoxelReader {
 				PalettedContainer<BlockState> states = this.snapshot.section(index);
 				BlockState uniform = this.snapshot.uniformSection(index);
 				if (uniform != null) {
-					char[] ids = new char[4096];
-					java.util.Arrays.fill(ids, (char) Block.BLOCK_STATE_REGISTRY.getId(uniform));
+					int[] ids = new int[4096];
+					java.util.Arrays.fill(ids, Block.BLOCK_STATE_REGISTRY.getId(uniform));
 					this.sections[index] = ids;
 				} else if (states != null) {
-					char[] ids = new char[4096];
+					int[] ids = new int[4096];
 					BlockState lastState = null;
-					char lastId = 0;
+					int lastId = 0;
 					for (int y = 0; y < 16; y++) {
 						for (int z = 0; z < 16; z++) {
 							for (int x = 0; x < 16; x++) {
 								BlockState state = states.get(x, y, z);
 								if (state != lastState) {
 									lastState = state;
-									lastId = (char) Block.BLOCK_STATE_REGISTRY.getId(state);
+									lastId = Block.BLOCK_STATE_REGISTRY.getId(state);
 								}
 								ids[(y << 8) | (z << 4) | x] = lastId;
 							}

@@ -65,6 +65,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
+			ServerRules.onDisconnect();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
