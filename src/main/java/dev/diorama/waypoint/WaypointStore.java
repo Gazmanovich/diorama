@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The waypoints of one world, saved as JSON in {@code .minecraft/diorama/<world>/waypoints.json}.
- * Client thread only.
+ * Temporary waypoints stay in memory only. Client thread only.
  */
 public final class WaypointStore {
 	/** How many death markers to keep; older ones are dropped as new deaths come in. */
@@ -68,6 +68,14 @@ public final class WaypointStore {
 			current = new WaypointStore(key);
 		}
 		return current;
+	}
+
+	/**
+	 * Called on leaving a world. Everything but temporary waypoints is already on disk, so dropping
+	 * the loaded store is what makes those go: rejoining the same world reads the file again.
+	 */
+	public static void onLeave() {
+		current = null;
 	}
 
 	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests and tools. */
@@ -192,7 +200,7 @@ public final class WaypointStore {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("waypoints.json.tmp");
 			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-				GSON.toJson(this.waypoints, writer);
+				GSON.toJson(this.waypoints.stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList(), writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException | RuntimeException e) {

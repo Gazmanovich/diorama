@@ -9,7 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.jspecify.annotations.Nullable;
 
-/** Making waypoints: where the player stands, at a picked spot, and where they die. */
+/** Making waypoints (where the player stands, at a picked spot, where they die) and going to them. */
 public final class Waypoints {
 	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -37,6 +37,33 @@ public final class Waypoints {
 		int count = store.all().size() + 1;
 		int color = Waypoint.PALETTE[ThreadLocalRandom.current().nextInt(9)];
 		return new Waypoint("Waypoint " + count, pos.getX(), pos.getY(), pos.getZ(), dimension, color);
+	}
+
+	/** Adds a temporary waypoint at a block position: no editor, and it's never saved. */
+	public static void addTemporary(BlockPos pos) {
+		String dimension = dimension();
+		WaypointStore store = WaypointStore.get();
+		if (dimension == null || store == null) {
+			return;
+		}
+		String name = net.minecraft.network.chat.Component.translatable("diorama.waypoint.temporary").getString();
+		Waypoint temporary = new Waypoint(name, pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFFFFFFF);
+		temporary.kind = Waypoint.Kind.TEMPORARY;
+		store.add(temporary);
+	}
+
+	/** The server only sends the commands a player may use, so {@code tp} being there means it's allowed. */
+	public static boolean canTeleport() {
+		var connection = Minecraft.getInstance().getConnection();
+		return connection != null && connection.getCommands().getRoot().getChild("tp") != null;
+	}
+
+	/** Sends {@code /tp} to a block position. */
+	public static void teleport(int x, int y, int z) {
+		LocalPlayer player = Minecraft.getInstance().player;
+		if (player != null) {
+			player.connection.sendCommand("tp @s " + x + " " + y + " " + z);
+		}
 	}
 
 	/** Adds a death marker where the player stands. Called when the server reports their death. */

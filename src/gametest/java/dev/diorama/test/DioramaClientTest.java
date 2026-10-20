@@ -1,6 +1,7 @@
 package dev.diorama.test;
 
 import dev.diorama.DioramaClient;
+import dev.diorama.MapMenu;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -141,9 +142,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if (spawnCell != null && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
-				savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+				if (tests.contains("waypoints")) {
+					temporaryGone(context);
+				}
+				if (spawnCell != null) {
+					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+				}
 			}
 		}
 		if (tests.contains("multiplayer")) {
@@ -1323,9 +1329,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		context.waitTicks(3);
 
-		// Right-click a spot left of the player: the editor opens on the block shown there, which
-		// is the first solid block on the camera ray through that point (a canopy can hide the
-		// ground behind it).
+		// Right-click a spot left of the player and pick Add waypoint here: the editor opens on the
+		// block shown there, which is the first solid block on the camera ray through that point
+		// (a canopy can hide the ground behind it).
 		double[] click = context.computeOnClient(mc -> {
 			MapScreen screen = (MapScreen) mc.gui.screen();
 			MapViewport.View view = screen.view();
@@ -1337,9 +1343,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.getInput().setCursorPos(click[2], click[3]);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
 		context.waitTicks(3);
+		clickMenu(context, "Add waypoint here");
 		boolean editorOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
 		if (!editorOpen) {
-			throw new AssertionError("Right-clicking the map didn't open the waypoint editor");
+			throw new AssertionError("Add waypoint here in the map's menu didn't open the waypoint editor");
 		}
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-04-editor");
@@ -1600,6 +1607,255 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(20);
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
+		mapMenu(context);
+	}
+
+	/**
+	 * The map's right-click menu, used with the mouse: teleporting to a spot, temporary waypoints,
+	 * a waypoint's own menu, sharing a location, and Esc closing the menu before the map.
+	 */
+	private static void mapMenu(ClientGameTestContext context) {
+		openMapOnPlayer(context);
+
+		// Teleport here: the player lands standing on the block the map shows at the click.
+		rightClickMap(context, 24, 0);
+		context.takeScreenshot("map-menu-01-spot");
+		int[] spot = menuSpot(context);
+		clickMenu(context, "Teleport here");
+		context.waitFor(mc -> mc.player.distanceToSqr(spot[0] + 0.5, spot[1], spot[2] + 0.5) < 0.5, 100);
+		context.runOnClient(mc -> {
+			if (mc.gui.screen() != null) {
+				throw new AssertionError("The map stayed open after Teleport here");
+			}
+			if (mc.level.getBlockState(new BlockPos(spot[0], spot[1] - 1, spot[2])).isAir()) {
+				throw new AssertionError("Teleport here put the player over air at " + spot[0] + "," + spot[1] + "," + spot[2]);
+			}
+		});
+		for (int i = 0; i < (MENU_GIF ? 12 : 0); i++) {
+			context.waitTicks(3);
+			menuFrame(context);
+		}
+		openMapOnPlayer(context);
+		menuFrame(context);
+		context.takeScreenshot("map-menu-02-arrived");
+
+		// Esc closes the menu, not the map.
+		rightClickMap(context, -12, 0);
+		//? if >=1.21.9 {
+		context.runOnClient(mc -> mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_ESCAPE, 0, 0)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gui.screen().keyPressed(InputConstants.KEY_ESCAPE, 0, 0));
+		*///?}
+		context.runOnClient(mc -> {
+			if (!(mc.gui.screen() instanceof MapScreen map) || map.menu() != null) {
+				throw new AssertionError("Esc with the menu open didn't just close the menu");
+			}
+		});
+
+		// Two temporary waypoints: they're on the map but not in the file. One gets kept.
+		int[] first = addTemporary(context, -12, 0);
+		int[] second = addTemporary(context, 0, -10);
+		context.waitTicks(5);
+		context.takeScreenshot("map-menu-03-temporary");
+		String file = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		if (file.contains("TEMPORARY")) {
+			throw new AssertionError("A temporary waypoint was saved:\n" + file);
+		}
+
+		// The first one's own menu: Delete asks for a second click.
+		rightClickPin(context, first);
+		context.takeScreenshot("map-menu-04-waypoint");
+		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (!labels.get(0).equals("Temporary") || !labels.contains("Keep waypoint") || !labels.contains("Teleport")) {
+			throw new AssertionError("A temporary waypoint's menu shows " + labels);
+		}
+		clickMenu(context, "Delete");
+		boolean deletedEarly = context.computeOnClient(mc -> temporaryAt(first) == null);
+		if (deletedEarly) {
+			throw new AssertionError("Delete went through without a second click");
+		}
+		context.takeScreenshot("map-menu-05-delete-confirm");
+		clickMenu(context, "Click again to delete");
+		boolean deleted = context.computeOnClient(mc -> temporaryAt(first) == null);
+		if (!deleted) {
+			throw new AssertionError("Deleting from the waypoint's menu left it in place");
+		}
+
+		// The second is kept: it's in the file now.
+		rightClickPin(context, second);
+		clickMenu(context, "Keep waypoint");
+		String kept = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		if (!kept.contains("\"x\": " + second[0] + ",") || !kept.contains("\"Temporary\"")) {
+			throw new AssertionError("Keep waypoint didn't save it:\n" + kept);
+		}
+		// One more, left temporary, for leaving the world to clear.
+		addTemporary(context, 10, 6);
+
+		// Share location: a second click posts it, and the line carries an [Add] link.
+		rightClickMap(context, 8, -8);
+		clickMenu(context, "Share location in chat");
+		boolean sharedEarly = context.computeOnClient(mc -> !(mc.gui.screen() instanceof MapScreen));
+		if (sharedEarly) {
+			throw new AssertionError("Share location went through without a second click");
+		}
+		clickMenu(context, "Click again to post in chat");
+		context.waitTicks(20);
+		assertConnected(context, "sharing a location");
+		context.runOnClient(mc -> {
+			boolean linked = chatMessages(mc).stream().anyMatch(message ->
+				message.content().getString().contains("xaero-waypoint:Shared location:") && linkIn(message.content()) != null);
+			if (!linked) {
+				throw new AssertionError("The shared location isn't in chat with an [Add] link");
+			}
+		});
+		context.takeScreenshot("map-menu-06-shared-location");
+	}
+
+	/** Back in the world after leaving it: the temporary waypoint is gone, the kept one is still there. */
+	private static void temporaryGone(ClientGameTestContext context) {
+		context.waitFor(mc -> mc.player != null && WorldKey.current() != null, 600);
+		context.runOnClient(mc -> {
+			List<Waypoint> all = WaypointStore.get().all();
+			if (all.stream().anyMatch(w -> w.kind == Waypoint.Kind.TEMPORARY)) {
+				throw new AssertionError("A temporary waypoint was still there after leaving the world");
+			}
+			if (all.stream().noneMatch(w -> w.name.equals("Temporary"))) {
+				throw new AssertionError("The temporary waypoint kept from the menu is gone after leaving the world");
+			}
+		});
+	}
+
+	private static void openMapOnPlayer(ClientGameTestContext context) {
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 20);
+		menuFrame(context);
+	}
+
+	/** Right-clicks the map {@code east} blocks east and {@code down} map rows below the player. */
+	private static void rightClickMap(ClientGameTestContext context, int east, int down) {
+		double[] at = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			double u = mc.player.getBlockX() + east + 0.5;
+			double v = Projection.v(mc.player.getY(), mc.player.getZ()) + down;
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {view.screenX(u) * scale, view.screenY(v) * scale};
+		});
+		moveCursor(context, at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(3);
+		menuFrame(context);
+		boolean open = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && map.menu() != null);
+		if (!open) {
+			throw new AssertionError("Right-clicking the map didn't open its menu");
+		}
+	}
+
+	/** Right-clicks the pin of the waypoint at a position. */
+	private static void rightClickPin(ClientGameTestContext context, int[] pos) {
+		double[] at = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
+				if (pin.waypoint().x == pos[0] && pin.waypoint().y == pos[1] && pin.waypoint().z == pos[2]) {
+					return new double[] {pin.x() * scale, pin.y() * scale};
+				}
+			}
+			throw new AssertionError("No pin at " + pos[0] + "," + pos[1] + "," + pos[2]);
+		});
+		moveCursor(context, at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(3);
+		menuFrame(context);
+	}
+
+	/** Adds a temporary waypoint from the menu, and returns where the menu said it is. */
+	private static int[] addTemporary(ClientGameTestContext context, int east, int down) {
+		rightClickMap(context, east, down);
+		int[] spot = menuSpot(context);
+		clickMenu(context, "Add temporary waypoint");
+		boolean added = context.computeOnClient(mc -> temporaryAt(spot) != null);
+		if (!added) {
+			throw new AssertionError("Add temporary waypoint didn't add one at " + spot[0] + "," + spot[1] + "," + spot[2]);
+		}
+		return spot;
+	}
+
+	private static @Nullable Waypoint temporaryAt(int[] pos) {
+		for (Waypoint waypoint : WaypointStore.get().all()) {
+			if (waypoint.kind == Waypoint.Kind.TEMPORARY && waypoint.x == pos[0] && waypoint.y == pos[1] && waypoint.z == pos[2]) {
+				return waypoint;
+			}
+		}
+		return null;
+	}
+
+	/** The block position the open spot menu's first line names: "x, y, z · N m". */
+	private static int[] menuSpot(ClientGameTestContext context) {
+		String line = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels().get(0));
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("(-?\\d+), (-?\\d+), (-?\\d+) · \\d+ m").matcher(line);
+		if (!m.matches()) {
+			throw new AssertionError("The spot menu starts with " + line);
+		}
+		return new int[] {Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+	}
+
+	/** Clicks a line of the map's right-click menu with the mouse, the way a player would. */
+	private static void clickMenu(ClientGameTestContext context, String label) {
+		double[] at = context.computeOnClient(mc -> {
+			MapMenu menu = mc.gui.screen() instanceof MapScreen map ? map.menu() : null;
+			if (menu == null) {
+				throw new AssertionError("The map's menu isn't open, looking for " + label);
+			}
+			float[] centre = menu.centreOf(label);
+			if (centre == null) {
+				throw new AssertionError("The map's menu has no " + label + ": " + menu.labels());
+			}
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {centre[0] * scale, centre[1] * scale};
+		});
+		moveCursor(context, at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		menuFrame(context);
+	}
+
+	/** {@code DIORAMA_GIF=1}: frames of the menu tour for a GIF. */
+	private static final boolean MENU_GIF = "1".equals(System.getenv("DIORAMA_GIF"));
+	/** Where the cursor is, in window pixels; screenshots don't show it, so frames are named with it. */
+	private static double[] cursor = {800, 450};
+	private static int menuFrames;
+
+	/** Moves the cursor, gliding there a frame at a time when GIF frames are wanted. */
+	private static void moveCursor(ClientGameTestContext context, double x, double y) {
+		int steps = MENU_GIF ? 10 : 1;
+		double[] from = cursor;
+		for (int i = 1; i <= steps; i++) {
+			double t = i / (double) steps;
+			double ease = t * t * (3 - 2 * t);
+			cursor = new double[] {from[0] + (x - from[0]) * ease, from[1] + (y - from[1]) * ease};
+			context.getInput().setCursorPos(cursor[0], cursor[1]);
+			context.waitTick();
+			menuFrame(context);
+		}
+		context.waitTicks(1);
+	}
+
+	private static void menuFrame(ClientGameTestContext context) {
+		if (MENU_GIF) {
+			context.takeScreenshot(String.format("map-menu-gif-%03d-%d-%d", menuFrames++, Math.round(cursor[0]), Math.round(cursor[1])));
+		}
 	}
 
 	/**
