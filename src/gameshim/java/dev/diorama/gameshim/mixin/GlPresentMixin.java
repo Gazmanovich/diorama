@@ -40,10 +40,12 @@ public abstract class GlPresentMixin {
 		int dstX0, int dstY0, int dstX1, int dstY1, int mask, int filter, Operation<Void> original,
 		//? if >=1.21.6 {
 		@Local(argsOnly = true) GpuTextureView view) {
-		boolean main = view.texture() == mainColorTexture();
+		Object mainTexture = mainColorTexture();
+		boolean main = mainTexture != null && view.texture() == mainTexture;
 		//?} else {
 		/*@Local(argsOnly = true) GpuTexture texture) {
-		boolean main = texture == mainColorTexture();
+		Object mainTexture = mainColorTexture();
+		boolean main = mainTexture != null && texture == mainTexture;
 		*///?}
 		if (main) {
 			WindowHooks window = (WindowHooks) (Object) Minecraft.getInstance().getWindow();
@@ -55,11 +57,19 @@ public abstract class GlPresentMixin {
 		original.call(access, readFramebuffer, drawFramebuffer, srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
 	}
 
+	// Null while NeoForge's loading screen still shows frames, before the game has a render target.
 	private static Object mainColorTexture() {
+		Minecraft minecraft = Minecraft.getInstance();
 		//? if >=26.2 {
-		return Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTexture();
+		if (minecraft == null || minecraft.gameRenderer == null) {
+			return null;
+		}
+		return minecraft.gameRenderer.mainRenderTarget().getColorTexture();
 		//?} else {
-		/*return Minecraft.getInstance().getMainRenderTarget().getColorTexture();
+		/*if (minecraft == null || minecraft.getMainRenderTarget() == null) {
+			return null;
+		}
+		return minecraft.getMainRenderTarget().getColorTexture();
 		*///?}
 	}
 }

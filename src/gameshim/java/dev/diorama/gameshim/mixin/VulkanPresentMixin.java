@@ -27,7 +27,9 @@ public abstract class VulkanPresentMixin {
 	@WrapOperation(method = "blitFromTexture", at = @At(value = "INVOKE", target = "Lorg/lwjgl/vulkan/VkImageBlit$Buffer;dstOffsets(Lorg/lwjgl/vulkan/VkOffset3D$Buffer;)Lorg/lwjgl/vulkan/VkImageBlit$Buffer;"))
 	private VkImageBlit.Buffer diorama$showAtRealSize(VkImageBlit.Buffer region, VkOffset3D.Buffer dstOffsets, Operation<VkImageBlit.Buffer> original,
 		@Local(argsOnly = true) GpuTextureView view) {
-		if (view.texture() == Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTexture()) {
+		// The game has no render target yet while NeoForge's loading screen still shows frames.
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft != null && minecraft.gameRenderer != null && view.texture() == minecraft.gameRenderer.mainRenderTarget().getColorTexture()) {
 			WindowHooks window = (WindowHooks) (Object) Minecraft.getInstance().getWindow();
 			dstOffsets.position(0);
 			dstOffsets.x(0).y(window.diorama$realFramebufferHeight()).z(0);
