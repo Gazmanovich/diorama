@@ -74,8 +74,9 @@ public final class WaypointStore {
 	}
 
 	/**
-	 * Called on leaving a world. Everything but temporary waypoints is already on disk, so dropping
-	 * the loaded store is what makes those go: rejoining the same world reads the file again.
+	 * Called on leaving a world, and on joining one, since a network moves the player to another of
+	 * its servers by joining again without leaving. Everything but temporary waypoints is already
+	 * on disk, so dropping the loaded store is what makes those go: the next world reads its file.
 	 */
 	public static void onLeave() {
 		current = null;

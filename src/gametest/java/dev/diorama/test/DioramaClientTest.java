@@ -1663,6 +1663,30 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		});
 
+		// A button held since before the menu opened doesn't close it when let go.
+		double[] held = mapPoint(context, -12, 0);
+		moveCursor(context, held[2], held[3]);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		rightClickAt(context, held[2], held[3]);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		boolean keptOpen = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu() != null);
+		if (!keptOpen) {
+			throw new AssertionError("Letting go of a button held from before closed the menu");
+		}
+
+		// C changes the view under the menu, so it closes the menu.
+		//? if >=1.21.9 {
+		context.runOnClient(mc -> mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_C, 0, 0)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gui.screen().keyPressed(InputConstants.KEY_C, 0, 0));
+		*///?}
+		boolean closedByC = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu() == null);
+		if (!closedByC) {
+			throw new AssertionError("Switching to caves left the menu open");
+		}
+		openMapOnPlayer(context);
+
 		// So does a click on the Settings button: it doesn't open the settings.
 		rightClickMap(context, -12, 0);
 		double[] settings = context.computeOnClient(mc -> {
@@ -1795,15 +1819,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * and returns the map point clicked, {u, v}.
 	 */
 	private static double[] rightClickMap(ClientGameTestContext context, int east, int down) {
-		double[] at = context.computeOnClient(mc -> {
+		double[] at = mapPoint(context, east, down);
+		rightClickAt(context, at[2], at[3]);
+		return new double[] {at[0], at[1]};
+	}
+
+	/** The map point {@code east} blocks east and {@code down} rows below the player, and its window position: {u, v, x, y}. */
+	private static double[] mapPoint(ClientGameTestContext context, int east, int down) {
+		return context.computeOnClient(mc -> {
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
 			double u = mc.player.getBlockX() + east + 0.5;
 			double v = Projection.v(mc.player.getY(), mc.player.getZ()) + down;
 			double scale = mc.getWindow().getGuiScale();
 			return new double[] {u, v, view.screenX(u) * scale, view.screenY(v) * scale};
 		});
-		rightClickAt(context, at[2], at[3]);
-		return new double[] {at[0], at[1]};
 	}
 
 	/** Right-clicks the map at a window position, which must open its menu. */

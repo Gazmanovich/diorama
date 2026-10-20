@@ -57,6 +57,8 @@ public final class MapScreen extends Screen {
 	private @Nullable MapMenu menu;
 	/** Whether the current mouse press started on the menu. */
 	private boolean pressOnMenu;
+	/** The button of the latest press, until it's released. */
+	private int pressButton = -1;
 
 	public MapScreen() {
 		super(Component.translatable("diorama.screen.title"));
@@ -168,7 +170,7 @@ public final class MapScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		return this.menuPressed(event.x(), event.y()) || this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y());
+		return this.menuPressed(event.x(), event.y(), event.button()) || this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y(), event.button());
 	}
 
 	@Override
@@ -189,7 +191,7 @@ public final class MapScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean mouseClicked(double x, double y, int button) {
-		return this.menuPressed(x, y) || this.clicked(super.mouseClicked(x, y, button), x, y);
+		return this.menuPressed(x, y, button) || this.clicked(super.mouseClicked(x, y, button), x, y, button);
 	}
 
 	@Override
@@ -213,11 +215,12 @@ public final class MapScreen extends Screen {
 	 * A press while the menu is open, which the widgets don't get: on the menu it's for the menu,
 	 * and anywhere else its release only closes the menu. False when the menu isn't open.
 	 */
-	private boolean menuPressed(double x, double y) {
+	private boolean menuPressed(double x, double y, int button) {
 		if (this.menu == null) {
 			return false;
 		}
 		this.pressOnMenu = this.menu.contains(x, y);
+		this.pressButton = button;
 		this.pressX = x;
 		this.pressY = y;
 		this.dragged = false;
@@ -225,7 +228,8 @@ public final class MapScreen extends Screen {
 	}
 
 	/** A press; {@code widgetTook} if a widget (the settings button) took it. */
-	private boolean clicked(boolean widgetTook, double x, double y) {
+	private boolean clicked(boolean widgetTook, double x, double y, int button) {
+		this.pressButton = button;
 		if (widgetTook) {
 			this.dragged = true;
 			return true;
@@ -238,6 +242,12 @@ public final class MapScreen extends Screen {
 
 	/** A release; false leaves it to the screen's widgets. */
 	private boolean released(double x, double y, int button) {
+		// Only the release of the latest press counts: letting go of a button held since before
+		// the menu opened mustn't close it.
+		if (button != this.pressButton) {
+			return true;
+		}
+		this.pressButton = -1;
 		boolean moved = this.dragged || Math.hypot(x - this.pressX, y - this.pressY) > 3;
 		if (this.pressOnMenu) {
 			this.pressOnMenu = false;
@@ -425,20 +435,25 @@ public final class MapScreen extends Screen {
 			return true;
 		}
 		LocalPlayer player = this.minecraft.player;
+		// Each of these changes the view, which an open menu belongs to, so they close it.
 		switch (key) {
 			case InputConstants.KEY_C -> {
+				this.menu = null;
 				this.layer = this.layer == TileKey.SURFACE && player != null ? MapSession.caveLayerFor(player.getY()) : TileKey.SURFACE;
 				return true;
 			}
 			case InputConstants.KEY_PAGEUP -> {
+				this.menu = null;
 				this.shiftSlice(4, player);
 				return true;
 			}
 			case InputConstants.KEY_PAGEDOWN -> {
+				this.menu = null;
 				this.shiftSlice(-4, player);
 				return true;
 			}
 			case InputConstants.KEY_SPACE -> {
+				this.menu = null;
 				this.following = true;
 				return true;
 			}
