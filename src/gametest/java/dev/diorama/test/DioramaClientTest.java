@@ -106,6 +106,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("bench")) {
 				bench(context);
 			}
+			if (tests.contains("gpu-bake")) {
+				gpuBake(context, world);
+			}
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
@@ -668,6 +671,181 @@ public class DioramaClientTest implements FabricClientGameTest {
 		best.forEach((mode, nanos) -> dev.diorama.Diorama.LOGGER.info("BENCH {}: {} ms per tile", mode, nanos / 9 / 1_000_000));
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
 	}
+
+	/**
+	 * The GPU bake experiment: bakes the nine tiles around a few places with the tracer and on the
+	 * GPU, saves both and their difference as pictures in {@code gpu-bake/}, and logs what each
+	 * cost. Opt-in with {@code DIORAMA_TESTS=gpu-bake}; {@code DIORAMA_GPU_SPOTS="x y z;x y z"}
+	 * picks the places.
+	 */
+	private static void gpuBake(ClientGameTestContext context, TestSingleplayerContext world) {
+		//? if >=26.3 {
+		String env = System.getenv("DIORAMA_GPU_SPOTS");
+		String[] spots = env != null && !env.isBlank() ? env.split(";") : new String[] {"", "600 140 -300", "-800 140 900"};
+		java.nio.file.Path out = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("gpu-bake"));
+		StringBuilder summary = new StringBuilder();
+		for (int spot = 0; spot < spots.length; spot++) {
+			if (!spots[spot].isBlank()) {
+				world.getServer().runCommand("tp @a " + spots[spot]);
+				context.waitTicks(40);
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+			}
+			settle(context, 200);
+			int[] centre = context.computeOnClient(mc -> new int[] {
+				(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
+				(int) Math.floor(Projection.v(mc.player.getY(), mc.player.getZ()) / Projection.TILE_UNITS)
+			});
+			java.util.List<TileKey> keys = new java.util.ArrayList<>();
+			for (int dv = -1; dv <= 1; dv++) {
+				for (int du = -1; du <= 1; du++) {
+					keys.add(new TileKey(TileKey.SURFACE, centre[0] + du, centre[1] + dv));
+				}
+			}
+			int[][] cpu = new int[keys.size()][];
+			long[] cpuNanos = new long[keys.size()];
+			java.util.Arrays.fill(cpuNanos, Long.MAX_VALUE);
+			java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu = new java.util.concurrent.ConcurrentHashMap<>();
+			// Three rounds each, keeping the best: the first GPU round also compiles the shaders.
+			for (int round = 0; round < 3; round++) {
+				context.runOnClient(mc -> {
+					for (int i = 0; i < keys.size(); i++) {
+						long start = System.nanoTime();
+						dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, false);
+						cpuNanos[i] = Math.min(cpuNanos[i], System.nanoTime() - start);
+						cpu[i] = image.mips()[0];
+					}
+				});
+				java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> results = new java.util.concurrent.ConcurrentHashMap<>();
+				context.runOnClient(mc -> {
+					for (int i = 0; i < keys.size(); i++) {
+						int index = i;
+						dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get());
+						dev.diorama.render.gpu.GpuTileBaker.submit(mesh, r -> results.put(index, r));
+					}
+				});
+				context.waitFor(mc -> results.size() == keys.size(), 600);
+				if (round == 0) {
+					// The first round compiles the shaders: keep its pixels only if nothing better comes.
+					gpu.putAll(results);
+					continue;
+				}
+				for (var e : results.entrySet()) {
+					var old = gpu.get(e.getKey());
+					if (old == null || old.pixels() == null || e.getValue().timing().meshNanos() + e.getValue().timing().recordNanos()
+						< old.timing().meshNanos() + old.timing().recordNanos()) {
+						gpu.put(e.getKey(), e.getValue());
+					}
+				}
+			}
+			String report = writeGpuComparison(out, "spot" + spot, keys, cpu, cpuNanos, gpu);
+			dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
+			summary.append(report).append('\n');
+		}
+		try {
+			java.nio.file.Files.createDirectories(out);
+			java.nio.file.Files.writeString(out.resolve("summary.txt"), summary.toString());
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+		//?}
+	}
+
+	//? if >=26.3 {
+	/** Saves the traced and GPU tiles as 3x3 pictures with their difference, and sums up both. */
+	private static String writeGpuComparison(
+		java.nio.file.Path out, String name, java.util.List<TileKey> keys, int[][] cpu, long[] cpuNanos,
+		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu
+	) {
+		int size = Projection.TILE_PIXELS;
+		java.awt.image.BufferedImage cpuImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.image.BufferedImage gpuImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.image.BufferedImage diffImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_RGB);
+		long both = 0;
+		long differ = 0;
+		long knownMismatch = 0;
+		double sumDiff = 0;
+		double cpuMs = 0;
+		double mesh = 0;
+		double sky = 0;
+		double pack = 0;
+		double record = 0;
+		double gpuMs = 0;
+		double latency = 0;
+		long faces = 0;
+		long casters = 0;
+		long bytes = 0;
+		int failed = 0;
+		for (int i = 0; i < keys.size(); i++) {
+			cpuMs += cpuNanos[i] / 1e6;
+			var result = gpu.get(i);
+			int[] g = result == null ? null : result.pixels();
+			if (g == null) {
+				failed++;
+			} else {
+				var t = result.timing();
+				mesh += t.meshNanos() / 1e6;
+				sky += t.skyNanos() / 1e6;
+				pack += t.packNanos() / 1e6;
+				record += t.recordNanos() / 1e6;
+				gpuMs += t.gpuNanos() / 1e6;
+				latency += t.latencyNanos() / 1e6;
+				faces += t.faces();
+				casters += t.casters();
+				bytes += t.bytes();
+			}
+			int ox = (i % 3) * size;
+			int oy = (i / 3) * size;
+			for (int y = 0; y < size; y++) {
+				for (int x = 0; x < size; x++) {
+					int c = cpu[i][y * size + x];
+					int p = g == null ? 0 : g[y * size + x];
+					cpuImage.setRGB(ox + x, oy + y, argb(c));
+					gpuImage.setRGB(ox + x, oy + y, argb(p));
+					boolean ck = (c >>> 24) > 0;
+					boolean gk = (p >>> 24) > 0;
+					if (ck != gk) {
+						knownMismatch++;
+						diffImage.setRGB(ox + x, oy + y, 0xFF00FF);
+						continue;
+					}
+					if (!ck) {
+						continue;
+					}
+					int dr = Math.abs((c & 0xFF) - (p & 0xFF));
+					int dg = Math.abs(((c >> 8) & 0xFF) - ((p >> 8) & 0xFF));
+					int db = Math.abs(((c >> 16) & 0xFF) - ((p >> 16) & 0xFF));
+					both++;
+					sumDiff += (dr + dg + db) / 3.0;
+					if (Math.max(dr, Math.max(dg, db)) > 24) {
+						differ++;
+					}
+					diffImage.setRGB(ox + x, oy + y, (Math.min(255, dr * 4) << 16) | (Math.min(255, dg * 4) << 8) | Math.min(255, db * 4));
+				}
+			}
+		}
+		try {
+			java.nio.file.Files.createDirectories(out);
+			javax.imageio.ImageIO.write(cpuImage, "png", out.resolve(name + "-cpu.png").toFile());
+			javax.imageio.ImageIO.write(gpuImage, "png", out.resolve(name + "-gpu.png").toFile());
+			javax.imageio.ImageIO.write(diffImage, "png", out.resolve(name + "-diff.png").toFile());
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+		int n = keys.size();
+		int ok = Math.max(1, n - failed);
+		return String.format(java.util.Locale.ROOT,
+			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f (sky %.1f), pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
+				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch",
+			name, n, failed, cpuMs / n, mesh / ok, sky / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
+			both == 0 ? 0 : sumDiff / both, both == 0 ? 0 : differ * 100.0 / both, knownMismatch * 100.0 / ((long) n * size * size)
+		);
+	}
+
+	/** ABGR as the tiles store it to ARGB for a picture. */
+	private static int argb(int abgr) {
+		return (abgr & 0xFF00FF00) | ((abgr & 0xFF) << 16) | ((abgr >> 16) & 0xFF);
+	}
+	//?}
 
 	/**
 	 * Builds {@link ShowcaseScene}'s castle beside the nearest village and photographs it for the

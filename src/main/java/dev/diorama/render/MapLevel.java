@@ -608,6 +608,12 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
+		//? if >=26.3 {
+		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED && !key.isCave() && !this.roofless() && overlays == null) {
+			this.bakeOnGpu(key, looks, generation, fog, store);
+			return;
+		}
+		//?}
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
@@ -620,6 +626,36 @@ public final class MapLevel implements ChunkSource {
 			}
 		});
 	}
+
+	//? if >=26.3 {
+	/**
+	 * The experiment's path: the mesh is built on a baker thread, drawn on the render thread, and
+	 * the pixels come back here a frame or two later. Always the whole tile, which costs the GPU
+	 * little. Falls back to tracing if the GPU couldn't draw it.
+	 */
+	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable TileStore store) {
+		BAKERS.execute(() -> {
+			try {
+				int[] saved = store == null ? null : store.read(key);
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks);
+				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
+					try {
+						TileImage image = result.pixels() != null
+							? TileBaker.gpuImage(key, result.pixels(), saved)
+							: TileBaker.bake(key, this, looks, null, fog, saved, null);
+						this.finished.add(image.withGeneration(generation));
+					} catch (Throwable t) {
+						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
+						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+					}
+				}));
+			} catch (Throwable t) {
+				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
+				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+			}
+		});
+	}
+	//?}
 
 	private void loadOverview(TileKey key, TileStore store) {
 		this.inFlight.add(key);
