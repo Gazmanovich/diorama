@@ -41,6 +41,8 @@ public final class VoxelReader {
 	private final ChunkSource source;
 	/** {@link BlockLooks#kind}, for {@link #solid}; null when only {@link #state} is used. */
 	private final byte @Nullable [] kinds;
+	/** {@link BlockLooks#shape}, so {@link #solid} can tell blocks smaller than a cube; may be null. */
+	private final int @Nullable [] shapes;
 	private final int minY;
 	private final int maxY;
 	/**
@@ -63,14 +65,20 @@ public final class VoxelReader {
 	private int solidY = Integer.MIN_VALUE;
 	private int solidZ = Integer.MIN_VALUE;
 	private long @Nullable [] solidMask;
+	private long @Nullable [] partialMask;
 
 	VoxelReader(ChunkSource source) {
 		this(source, null);
 	}
 
 	public VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
+		this(source, kinds, null);
+	}
+
+	VoxelReader(ChunkSource source, byte @Nullable [] kinds, int @Nullable [] shapes) {
 		this.source = source;
 		this.kinds = kinds;
+		this.shapes = shapes;
 		this.minY = source.minY();
 		this.maxY = source.maxY();
 		// No chunk has this x, so every slot starts empty.
@@ -113,7 +121,8 @@ public final class VoxelReader {
 
 	/**
 	 * 1 if the block is {@link BlockLooks#SOLID}, the kind that stops shadow and sky rays and
-	 * casts ambient occlusion, 0 if not, or {@link #UNKNOWN}. Reads a bit per block, built once per
+	 * casts ambient occlusion, 2 if it is solid but smaller than a cube (rays then need its
+	 * shape), 0 if not, or {@link #UNKNOWN}. Reads a bit per block, built once per
 	 * section, which keeps far more of the world in the CPU's caches than the ids do.
 	 */
 	public int solid(int x, int y, int z) {
@@ -131,7 +140,7 @@ public final class VoxelReader {
 			return UNKNOWN;
 		}
 		int i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-		return (int) (mask[i >> 6] >>> i) & 1;
+		return ((int) (mask[i >> 6] >>> i) & 1) + ((int) (this.partialMask[i >> 6] >>> i) & 1);
 	}
 
 	private void enterSolidSection(int sx, int sy, int sz) {
@@ -142,7 +151,9 @@ public final class VoxelReader {
 			}
 			this.solidMask = null;
 		} else {
-			this.solidMask = chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds);
+			int index = sy - chunk.snapshot.minSectionY;
+			this.solidMask = chunk.solid(index, this.kinds, this.shapes);
+			this.partialMask = chunk.partial(index);
 		}
 		this.solidX = sx;
 		this.solidY = sy;
@@ -172,7 +183,7 @@ public final class VoxelReader {
 					chunk = this.cache.get(key);
 				}
 				if (chunk != null) {
-					top = Math.max(top, chunk.solidTop(this.kinds));
+					top = Math.max(top, chunk.solidTop(this.kinds, this.shapes));
 				}
 			}
 		}
@@ -234,6 +245,8 @@ public final class VoxelReader {
 		final boolean[] decoded;
 		/** Per section, one bit per block, set where it is {@link BlockLooks#SOLID}; built when first read. */
 		final long[][] solid;
+		/** The same, set where a solid block is smaller than a cube. */
+		final long[][] partial;
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
@@ -242,16 +255,18 @@ public final class VoxelReader {
 			this.sections = new int[snapshot.sectionCount()][];
 			this.decoded = new boolean[snapshot.sectionCount()];
 			this.solid = new long[snapshot.sectionCount()][];
+			this.partial = new long[snapshot.sectionCount()][];
 		}
 
 		/** The section's solid mask, indexed as its ids. */
-		long[] solid(int index, byte[] kinds) {
+		long[] solid(int index, byte[] kinds, int @Nullable [] shapes) {
 			if (index < 0 || index >= this.solid.length) {
 				return NOTHING_SOLID;
 			}
 			long[] mask = this.solid[index];
 			if (mask == null) {
 				int[] ids = this.section(index);
+				long[] partial = NOTHING_SOLID;
 				if (ids == null) {
 					mask = NOTHING_SOLID;
 				} else {
@@ -259,19 +274,31 @@ public final class VoxelReader {
 					for (int i = 0; i < 4096; i++) {
 						if (kinds[ids[i]] == BlockLooks.SOLID) {
 							mask[i >> 6] |= 1L << i;
+							if (shapes != null && shapes[ids[i]] != 0) {
+								if (partial == NOTHING_SOLID) {
+									partial = new long[64];
+								}
+								partial[i >> 6] |= 1L << i;
+							}
 						}
 					}
 				}
+				this.partial[index] = partial;
 				this.solid[index] = mask;
 			}
 			return mask;
 		}
 
-		int solidTop(byte[] kinds) {
+		/** The section's mask of solid blocks smaller than a cube; read after {@link #solid}. */
+		long[] partial(int index) {
+			return index < 0 || index >= this.partial.length || this.partial[index] == null ? NOTHING_SOLID : this.partial[index];
+		}
+
+		int solidTop(byte[] kinds, int @Nullable [] shapes) {
 			if (this.solidTop == Integer.MAX_VALUE) {
 				int top = Integer.MIN_VALUE;
 				for (int index = this.sections.length - 1; index >= 0 && top == Integer.MIN_VALUE; index--) {
-					long[] mask = this.solid(index, kinds);
+					long[] mask = this.solid(index, kinds, shapes);
 					for (int word = 63; word >= 0; word--) {
 						if (mask[word] != 0) {
 							// Bits run x, then z, then y: 64 bits are a quarter of one y layer.

@@ -144,7 +144,7 @@ public final class TileBaker {
 		this.key = key;
 		this.overlays = overlays;
 		this.looks = looks;
-		this.reader = new VoxelReader(source, looks.kind);
+		this.reader = new VoxelReader(source, looks.kind, looks.shape);
 		this.cave = key.isCave();
 		this.roofless = !this.cave && source.roof() != ChunkSource.NO_ROOF;
 		this.lit = this.cave || this.roofless;
@@ -422,7 +422,7 @@ public final class TileBaker {
 				if (solid == VoxelReader.UNKNOWN) {
 					return false;
 				}
-				if (solid == 1) {
+				if (solid > 0) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
@@ -787,7 +787,8 @@ public final class TileBaker {
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
-		if (cy < this.rayTop && this.occludes(cx, cy, cz) && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
+		int start = cy < this.rayTop ? this.reader.solid(cx, cy, cz) : 0;
+		if (start == 1 || start == 2 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
 			return true;
 		}
 		int top = this.rayTop;
@@ -831,7 +832,7 @@ public final class TileBaker {
 			if (solid == VoxelReader.UNKNOWN) {
 				return false;
 			}
-			if (solid == 1 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
+			if (solid == 1 || solid == 2 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
 				return true;
 			}
 		}
@@ -908,7 +909,7 @@ public final class TileBaker {
 	}
 
 	private boolean occludes(int x, int y, int z) {
-		return this.reader.solid(x, y, z) == 1;
+		return this.reader.solid(x, y, z) > 0;
 	}
 
 	/** Smooth corner occlusion on a top face, from the eight blocks around the cell above it. */
