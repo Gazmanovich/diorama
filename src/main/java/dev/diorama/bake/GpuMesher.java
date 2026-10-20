@@ -59,6 +59,13 @@ public final class GpuMesher {
 		}
 	}
 
+	/**
+	 * Each thread's face lists, reused by its next build: a tile's lists run to several MB, and
+	 * making new ones for every bake kept the collector busy. So a mesh's faces only last until
+	 * the same thread builds another; pack them first ({@code GpuTileBaker.submit} does).
+	 */
+	private static final ThreadLocal<Quads[]> LISTS = ThreadLocal.withInitial(() -> new Quads[] {new Quads(), new Quads(), new Quads(), new Quads()});
+
 	/** Everything one tile draws, plus the region its shadow casters cover. */
 	public static final class Mesh {
 		public final TileKey key;
@@ -69,13 +76,13 @@ public final class GpuMesher {
 		public final double sin;
 		public final double cos;
 		/** Solid and lava faces, and faces of unknown chunks. */
-		public final Quads opaque = new Quads();
+		public final Quads opaque;
 		/** Water a ray enters, through its top or south face. */
-		public final Quads water = new Quads();
+		public final Quads water;
 		/** Plants and glass, which tint what is behind them; sorted far to near before drawing. */
-		public final Quads tinted = new Quads();
+		public final Quads tinted;
 		/** Sun-facing faces of solid blocks, for the shadow map. */
-		public final Quads casters = new Quads();
+		public final Quads casters;
 		/** Lowest y of a face the camera sees, or {@code Integer.MAX_VALUE} for none. */
 		public int lowestY = Integer.MAX_VALUE;
 		// The caster region, in blocks.
@@ -90,6 +97,14 @@ public final class GpuMesher {
 		public long skyNanos;
 
 		Mesh(TileKey key, int topY, int minY, double sin, double cos) {
+			Quads[] lists = LISTS.get();
+			for (Quads list : lists) {
+				list.count = 0;
+			}
+			this.opaque = lists[0];
+			this.water = lists[1];
+			this.tinted = lists[2];
+			this.casters = lists[3];
 			this.key = key;
 			this.topY = topY;
 			this.minY = minY;
@@ -305,7 +320,8 @@ public final class GpuMesher {
 			int from = (int) (order[q] & 0xFFFFFF) * 8;
 			System.arraycopy(quads.data, from, sorted, q * 8, 8);
 		}
-		quads.data = sorted;
+		// Back into the list, which is reused: see LISTS.
+		System.arraycopy(sorted, 0, quads.data, 0, n * 8);
 	}
 
 	private static int solidColor(TileBaker helper, int id, int x, int y, int z, boolean top, int emission, byte kind, MapStyle style) {
