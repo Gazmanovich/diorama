@@ -486,12 +486,19 @@ final class GlBakeBackend implements BakeBackend {
 		return fbo;
 	}
 
-	/** A shader from the mod's jar with its include put in place. */
+	/**
+	 * A shader from the mod's jar with its include put in place. Block comments go first: the
+	 * other version's lines can sit in one, and so can an include line that mustn't be expanded.
+	 * A line commented out with {@code //} stays put, as only a directive starting its line counts.
+	 */
 	private static String shader(String name) throws IOException {
-		String text = read("/assets/diorama/shaders/" + name);
-		String include = read("/assets/diorama/shaders/include/bake.glsl");
-		return text.replace("#include <diorama:bake.glsl>", include).replace("#moj_import <diorama:bake.glsl>", include);
+		String text = BLOCK_COMMENT.matcher(read("/assets/diorama/shaders/" + name)).replaceAll("");
+		String include = java.util.regex.Matcher.quoteReplacement(BLOCK_COMMENT.matcher(read("/assets/diorama/shaders/include/bake.glsl")).replaceAll(""));
+		return INCLUDE.matcher(text).replaceAll(include);
 	}
+
+	private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
+	private static final Pattern INCLUDE = Pattern.compile("(?m)^#(include|moj_import) <diorama:bake\\.glsl>$");
 
 	private static String read(String path) throws IOException {
 		try (InputStream in = GlBakeBackend.class.getResourceAsStream(path)) {
