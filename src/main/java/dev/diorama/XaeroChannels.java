@@ -88,7 +88,23 @@ public final class XaeroChannels {
 			ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
 		}
 	}
-	//?} else {
+	//?} else if >=1.21.6 {
+	/*// Listens on the channels no Xaero mod has. NeoForge calls it once, at startup.
+	public static void register(RegisterPayloadHandlersEvent event) {
+		// Registered the way Xaero's mods register theirs: a NeoForge server with Xaero's mod on it
+		// refuses a client whose channel has another version or direction. Optional, so servers
+		// without the channel still let the player in. As the player joins a server that isn't
+		// NeoForge, NeoForge tells it about optional channels, which Paper needs before it passes
+		// messages on.
+		PayloadRegistrar registrar = event.registrar("1.0").optional();
+		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
+			// From NeoForge 21.6 the client's handler is its own argument, and NeoForge won't start
+			// with a clientbound channel that has none. The server side (a LAN guest's messages to
+			// the integrated server) has nothing to do.
+			registrar.playBidirectional(type, codec(type), (message, context) -> {}, (message, context) -> receive(message));
+		}
+	}
+	*///?} else {
 	/*// Listens on the channels no Xaero mod has. NeoForge calls it once, at startup.
 	public static void register(RegisterPayloadHandlersEvent event) {
 		// Registered the way Xaero's mods register theirs: a NeoForge server with Xaero's mod on it
