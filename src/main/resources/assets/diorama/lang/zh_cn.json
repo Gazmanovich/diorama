@@ -77,7 +77,6 @@
 	"diorama.settings.waypoints_world": "在世界中显示",
 	"diorama.settings.deaths": "死亡标记",
 	"diorama.settings.look": "外观",
-	"diorama.settings.depth_shading": "深度着色",
 	"diorama.settings.outlines": "方块描边",
 	"diorama.settings.rounded_fog": "圆形的迷雾",
 	"diorama.settings.fog_of_war": "始终显示迷雾",
