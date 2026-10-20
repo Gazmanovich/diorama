@@ -13,6 +13,7 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFactor;
 import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.CompareOp;
@@ -45,15 +46,24 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * Draws surface tiles on the GPU from {@link GpuMesher} meshes instead of tracing them: an
+ * Draws map tiles on the GPU from {@link GpuMesher} meshes instead of tracing them: an
  * experiment, on with {@code DIORAMA_GPU_BAKE=1}.
  *
- * <p>A bake is five passes on the render thread: a shadow map from the sun; the solid faces into a
- * colour and depth target twice the tile's size, so each pixel gets four samples like the
- * tracer's; plants and glass blended over them; the water's surface into its own target; and a
- * pass that mixes water by depth, averages the samples, draws outlines and grades the colour into
- * the tile's pixels. Those are copied back to the CPU, which takes a frame or two, and handed to
- * the caller as the same ABGR ints a traced bake makes.
+ * <p>A bake is a few passes on the render thread:
+ * <ol>
+ *   <li>sky occlusion at every face corner, into a texture: the tracer's rays against the solid
+ *   blocks around the tile, which the mesher packs;</li>
+ *   <li>a shadow map from the sun;</li>
+ *   <li>the solid faces into a colour and depth target twice the tile's size, so each pixel gets
+ *   four samples like the tracer's, with a second target for overlay bits and what the
+ *   composite needs to know about each sample's surface;</li>
+ *   <li>plants and glass added up near to far into their own target;</li>
+ *   <li>the water's surface into its own target;</li>
+ *   <li>a composite that tints by the plants and glass, mixes water by depth, averages the
+ *   samples, draws outlines and grades the colour into the tile's pixels.</li>
+ * </ol>
+ * Those are copied back to the CPU, which takes a frame or two, and handed to the caller as the
+ * same ABGR ints a traced bake makes, with the overlay bits when asked for.
  */
 public final class GpuTileBaker {
 	public static final boolean ENABLED = "1".equals(System.getenv("DIORAMA_GPU_BAKE"));
@@ -66,7 +76,13 @@ public final class GpuTileBaker {
 	/** The tile plus a pixel all round, which outlines compare against, at two samples each way. */
 	private static final int SCENE = (Projection.TILE_PIXELS + 2) * 2;
 	private static final int SHADOW_SIZE = 2048;
-	private static final int FACE_BYTES = 20;
+	/** The sky texture holds a slot per face corner; see {@code bake.vsh}. */
+	private static final int SKY_WIDTH = 2048;
+	private static final int SKY_HEIGHT = 1024;
+	/** The voxel texture holds the mesher's packed solid bits, a word per texel. */
+	private static final int VOXEL_WIDTH = 4096;
+	private static final int VOXEL_HEIGHT = 512;
+	private static final int FACE_BYTES = 24;
 	private static final int CASTER_BYTES = 8;
 
 	private static final VertexFormat CORNER = VertexFormat.builder(0)
@@ -77,56 +93,64 @@ public final class GpuTileBaker {
 		.addAttribute("Color", GpuFormat.RGBA8_UNORM)
 		.addAttribute("Occlusion", GpuFormat.RGBA8_UNORM)
 		.addAttribute("FaceLight", GpuFormat.RGBA8_UNORM)
+		.addAttribute("SkyIndex", GpuFormat.R32_SINT)
 		.build();
 	private static final VertexFormat CASTER = VertexFormat.builder(1)
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
 		.build();
 
-	private static final BindGroupLayout BAKE = BindGroupLayout.builder()
-		.withUniform("DioramaBake", UniformType.UNIFORM_BUFFER)
-		.build();
-	private static final BindGroupLayout SHADOW_MAP = BindGroupLayout.builder()
-		.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
-		.build();
-	private static final BindGroupLayout VOXELS = BindGroupLayout.builder()
-		.withUniform("Voxels", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
-		.build();
+	private static final BindGroupLayout BAKE = sampled("DioramaBake", UniformType.UNIFORM_BUFFER);
+	private static final BindGroupLayout SHADOW_MAP = sampled("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER);
+	private static final BindGroupLayout SKY = sampled("Sky", UniformType.COMBINED_IMAGE_SAMPLER);
+	private static final BindGroupLayout VOXELS = sampled("Voxels", UniformType.COMBINED_IMAGE_SAMPLER);
 	private static final BindGroupLayout SCENE_SAMPLERS = BindGroupLayout.builder()
 		.withUniform("SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
 		.withUniform("SceneDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+		.withUniform("SceneAux", UniformType.COMBINED_IMAGE_SAMPLER)
+		.withUniform("Tint", UniformType.COMBINED_IMAGE_SAMPLER)
 		.withUniform("WaterColor", UniformType.COMBINED_IMAGE_SAMPLER)
 		.withUniform("WaterDepth", UniformType.COMBINED_IMAGE_SAMPLER)
-		.withUniform("SceneInfo", UniformType.COMBINED_IMAGE_SAMPLER)
 		.build();
 
-	private static final ColorTargetState HDR = new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL);
-	/** The overlay bits a sample shows; plants and glass leave them as they are. */
-	private static final ColorTargetState INFO = new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM, ColorTargetState.WRITE_ALL);
-	private static final ColorTargetState INFO_KEPT = new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM, ColorTargetState.WRITE_NONE);
+	private static BindGroupLayout sampled(String name, UniformType type) {
+		return BindGroupLayout.builder().withUniform(name, type).build();
+	}
+
+	private static ColorTargetState target(GpuFormat format) {
+		return new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL);
+	}
 
 	// Not registered: compiled the first time they're used, so a broken shader only stops the experiment.
+	private static final RenderPipeline SKY_PASS = faces("bake_sky", "SKY_PASS", FACE)
+		.withBindGroupLayout(VOXELS)
+		.withColorTargetState(target(GpuFormat.R8_UNORM))
+		.withPrimitiveTopology(PrimitiveTopology.POINTS)
+		.build();
 	private static final RenderPipeline SHADOW = faces("bake_shadow", "SHADOW", CASTER)
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
 	private static final RenderPipeline OPAQUE = faces("bake_opaque", null, FACE)
 		.withBindGroupLayout(SHADOW_MAP)
-		.withBindGroupLayout(VOXELS)
-		.withColorTargetState(0, HDR)
-		.withColorTargetState(1, INFO)
+		.withBindGroupLayout(SKY)
+		.withColorTargetState(0, target(GpuFormat.RGBA16_FLOAT))
+		.withColorTargetState(1, target(GpuFormat.RGBA16_FLOAT))
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
-	// Colour blends by the face's weight; alpha, which says the pixel is known, stays.
+	// Near to far: each face adds its colour times what the ones in front let through (the
+	// target's alpha), and lets through less behind it.
 	private static final RenderPipeline TINTED = faces("bake_tinted", "TINTED", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
-		.withBindGroupLayout(VOXELS)
-		.withColorTargetState(0, new ColorTargetState(Optional.of(BlendFunction.ENTITY_OUTLINE_BLIT), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
-		.withColorTargetState(1, INFO_KEPT)
+		.withBindGroupLayout(SKY)
+		.withColorTargetState(new ColorTargetState(
+			Optional.of(new BlendFunction(BlendFactor.DST_ALPHA, BlendFactor.ONE, BlendFactor.ZERO, BlendFactor.ONE_MINUS_SRC_ALPHA)),
+			GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL
+		))
 		.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
 		.build();
 	private static final RenderPipeline WATER = faces("bake_water", "WATER", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
-		.withBindGroupLayout(VOXELS)
-		.withColorTargetState(HDR)
+		.withBindGroupLayout(SKY)
+		.withColorTargetState(target(GpuFormat.RGBA16_FLOAT))
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
 	private static final RenderPipeline COMPOSITE = RenderPipeline.builder()
@@ -136,7 +160,7 @@ public final class GpuTileBaker {
 		.withBindGroupLayout(BAKE)
 		.withBindGroupLayout(SCENE_SAMPLERS)
 		.withColorTargetState(0, ColorTargetState.DEFAULT)
-		.withColorTargetState(1, INFO)
+		.withColorTargetState(1, target(GpuFormat.R8_UNORM))
 		.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
 		.build();
 
@@ -215,22 +239,22 @@ public final class GpuTileBaker {
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
 	public static void frame() {
 		long now = System.nanoTime();
-		double cost = Math.max(renderCost, gpuCost);
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
-			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost);
+			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
 		}
 		lastFrame = now;
-		while (budget >= cost) {
+		while (budget >= cost()) {
 			Job job = QUEUE.poll();
 			if (job == null) {
 				return;
 			}
-			budget -= cost;
+			budget -= cost();
 			try {
 				if (job.mesh.empty) {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
 					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+					job.free();
 				} else if (!draw(job)) {
 					job.fail();
 				}
@@ -241,14 +265,25 @@ public final class GpuTileBaker {
 		}
 	}
 
+	/** What the next bake is expected to cost, in the dearer of render-thread and GPU time. */
+	private static double cost() {
+		return Math.max(renderCost, gpuCost);
+	}
+
 	private static boolean draw(Job job) {
 		long start = System.nanoTime();
+		int skyFaces = job.opaqueCount + job.waterCount;
+		if (job.voxelRows > VOXEL_HEIGHT || (long) skyFaces * 4 > (long) SKY_WIDTH * SKY_HEIGHT) {
+			// Bigger than the textures that hold them: the tracer bakes this one.
+			return false;
+		}
+		CompiledRenderPipeline sky = RenderSystem.getCompiledPipelineNullable(SKY_PASS);
 		CompiledRenderPipeline shadow = RenderSystem.getCompiledPipelineNullable(SHADOW);
 		CompiledRenderPipeline opaque = RenderSystem.getCompiledPipelineNullable(OPAQUE);
 		CompiledRenderPipeline tinted = RenderSystem.getCompiledPipelineNullable(TINTED);
 		CompiledRenderPipeline water = RenderSystem.getCompiledPipelineNullable(WATER);
 		CompiledRenderPipeline composite = RenderSystem.getCompiledPipelineNullable(COMPOSITE);
-		if (shadow == null || opaque == null || tinted == null || water == null || composite == null) {
+		if (sky == null || shadow == null || opaque == null || tinted == null || water == null || composite == null) {
 			return false;
 		}
 		GpuDevice device = RenderSystem.getDevice();
@@ -257,20 +292,39 @@ public final class GpuTileBaker {
 		int slot = (int) (timestampSlot++ % (Targets.TIMESTAMPS / 2)) * 2;
 		encoder.writeTimestamp(t.timestamps, slot);
 		encoder.writeToBuffer(t.ubo.slice(), job.uniforms);
+		if (job.voxels != null) {
+			encoder.writeToTexture(t.voxels, job.voxels, 0, 0, 0, 0, VOXEL_WIDTH, job.voxelRows);
+		}
 
 		GpuBuffer faceBuffer = null;
 		GpuBuffer casterBuffer = null;
-		GpuBuffer voxelBuffer = null;
 		try {
-			voxelBuffer = job.voxels == null ? null : device.createBuffer(() -> "Diorama bake voxels", GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER, job.voxels);
-			GpuBufferSlice voxels = (voxelBuffer != null ? voxelBuffer : t.noVoxels).slice();
 			faceBuffer = job.faceCount() == 0 ? null : device.createBuffer(() -> "Diorama bake faces", GpuBuffer.USAGE_VERTEX, job.faces);
 			casterBuffer = job.casterCount == 0 ? null : device.createBuffer(() -> "Diorama bake casters", GpuBuffer.USAGE_VERTEX, job.casters);
 			RenderSystem.AutoStorageIndexBuffer quads = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
 			GpuBuffer indices = quads.getBuffer(6);
 			IndexType indexType = quads.type();
 			GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+			long opaqueBytes = (long) job.opaqueCount * FACE_BYTES;
+			long tintedBytes = (long) job.tintedCount * FACE_BYTES;
+			long waterBytes = (long) job.waterCount * FACE_BYTES;
 
+			if (job.voxels != null && faceBuffer != null && skyFaces > 0) {
+				try (RenderPass pass = encoder.createRenderPass(() -> "Diorama bake sky", t.skyView, Optional.empty())) {
+					pass.setPipeline(sky);
+					pass.setUniform("DioramaBake", t.ubo);
+					pass.setUniform("Voxels", t.voxelsView, nearest);
+					pass.setVertexBuffer(0, t.corners.slice());
+					if (job.opaqueCount > 0) {
+						pass.setVertexBuffer(1, faceBuffer.slice(0, opaqueBytes));
+						pass.draw(4, job.opaqueCount, 0, 0);
+					}
+					if (job.waterCount > 0) {
+						pass.setVertexBuffer(1, faceBuffer.slice(opaqueBytes + tintedBytes, waterBytes));
+						pass.draw(4, job.waterCount, 0, 0);
+					}
+				}
+			}
 			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake shadow")
 				.withDepthAttachment(t.shadowView, OptionalDouble.of(0.0))
 				.build())) {
@@ -285,25 +339,35 @@ public final class GpuTileBaker {
 			}
 			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake scene")
 				.withColorAttachment(t.sceneColorView, Optional.of(VOID))
-				.withColorAttachment(t.sceneInfoView, Optional.of(CLEAR))
+				.withColorAttachment(t.sceneAuxView, Optional.of(CLEAR))
 				.withDepthAttachment(t.sceneDepthView, OptionalDouble.of(0.0))
 				.build())) {
-				if (faceBuffer != null && job.opaqueCount + job.tintedCount > 0) {
+				if (faceBuffer != null && job.opaqueCount > 0) {
 					pass.setPipeline(opaque);
 					pass.setUniform("DioramaBake", t.ubo);
 					pass.setUniform("ShadowMap", t.shadowView, nearest);
-				pass.setUniform("Voxels", voxels);
+					pass.setUniform("Sky", t.skyView, nearest);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
-					if (job.opaqueCount > 0) {
-						pass.setVertexBuffer(1, faceBuffer.slice(0, (long) job.opaqueCount * FACE_BYTES));
-						pass.drawIndexed(6, job.opaqueCount, 0, 0, 0);
-					}
-					if (job.tintedCount > 0) {
-						pass.setPipeline(tinted);
-						pass.setVertexBuffer(1, faceBuffer.slice((long) job.opaqueCount * FACE_BYTES, (long) job.tintedCount * FACE_BYTES));
-						pass.drawIndexed(6, job.tintedCount, 0, 0, 0);
-					}
+					pass.setVertexBuffer(1, faceBuffer.slice(0, opaqueBytes));
+					pass.drawIndexed(6, job.opaqueCount, 0, 0, 0);
+				}
+			}
+			// Plants and glass have their own pass: blending differently per target needs a
+			// Vulkan feature Minecraft doesn't turn on.
+			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake tint")
+				.withColorAttachment(t.tintView, Optional.of(NO_TINT))
+				.withDepthAttachment(t.sceneDepthView, OptionalDouble.empty())
+				.build())) {
+				if (faceBuffer != null && job.tintedCount > 0) {
+					pass.setPipeline(tinted);
+					pass.setUniform("DioramaBake", t.ubo);
+					pass.setUniform("ShadowMap", t.shadowView, nearest);
+					pass.setUniform("Sky", t.skyView, nearest);
+					pass.setVertexBuffer(0, t.corners.slice());
+					pass.setIndexBuffer(indices, indexType);
+					pass.setVertexBuffer(1, faceBuffer.slice(opaqueBytes, tintedBytes));
+					pass.drawIndexed(6, job.tintedCount, 0, 0, 0);
 				}
 			}
 			try (RenderPass pass = encoder.createRenderPass(
@@ -313,34 +377,35 @@ public final class GpuTileBaker {
 					pass.setPipeline(water);
 					pass.setUniform("DioramaBake", t.ubo);
 					pass.setUniform("ShadowMap", t.shadowView, nearest);
-				pass.setUniform("Voxels", voxels);
+					pass.setUniform("Sky", t.skyView, nearest);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
-					pass.setVertexBuffer(1, faceBuffer.slice((long) (job.opaqueCount + job.tintedCount) * FACE_BYTES, (long) job.waterCount * FACE_BYTES));
+					pass.setVertexBuffer(1, faceBuffer.slice(opaqueBytes + tintedBytes, waterBytes));
 					pass.drawIndexed(6, job.waterCount, 0, 0, 0);
 				}
 			}
 			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake composite")
-			.withColorAttachment(t.outputView, Optional.empty())
-			.withColorAttachment(t.outputInfoView, Optional.empty())
-			.build())) {
+				.withColorAttachment(t.outputView, Optional.empty())
+				.withColorAttachment(t.outputInfoView, Optional.empty())
+				.build())) {
 				pass.setPipeline(composite);
 				pass.setUniform("DioramaBake", t.ubo);
 				pass.setUniform("SceneColor", t.sceneColorView, nearest);
 				pass.setUniform("SceneDepth", t.sceneDepthView, nearest);
+				pass.setUniform("SceneAux", t.sceneAuxView, nearest);
+				pass.setUniform("Tint", t.tintView, nearest);
 				pass.setUniform("WaterColor", t.waterColorView, nearest);
 				pass.setUniform("WaterDepth", t.waterDepthView, nearest);
-			pass.setUniform("SceneInfo", t.sceneInfoView, nearest);
 				pass.draw(3, 1, 0, 0);
 			}
-			encoder.writeTimestamp(t.timestamps, slot + 1);
 
 			int size = Projection.TILE_PIXELS;
 			GpuBuffer readback = device.createBuffer(() -> "Diorama bake readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size * 4);
-		boolean wantsInfo = job.mesh.overlays != null;
-		GpuBuffer infoReadback = wantsInfo ? device.createBuffer(() -> "Diorama bake info readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size) : null;
-		// The colour finishes the job; the overlay bits, read back first, ride along.
-		byte[][] info = new byte[1][];
+			boolean wantsInfo = job.mesh.overlays != null;
+			GpuBuffer infoReadback = wantsInfo ? device.createBuffer(() -> "Diorama bake info readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size) : null;
+			// The colour finishes the job; the overlay bits, read back first, ride along. Both
+			// backends run these callbacks in the order the copies were recorded.
+			byte[][] info = new byte[1][];
 			GpuQueryPool timestamps = t.timestamps;
 			long[] recorded = new long[1];
 			PENDING.add(job);
@@ -359,6 +424,11 @@ public final class GpuTileBaker {
 			}
 			encoder.copyTextureToBuffer(t.output, readback, 0L, () -> {
 				try {
+					if (wantsInfo && info[0] == null) {
+						// Overlays were asked for and didn't come back: let the tracer bake it.
+						job.fail();
+						return;
+					}
 					int[] pixels = new int[size * size];
 					try (GpuBufferSlice.MappedView view = readback.map(true, false)) {
 						view.data().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
@@ -371,6 +441,8 @@ public final class GpuTileBaker {
 					readback.close();
 				}
 			}, 0);
+			// After the copies, so both clocks count them.
+			encoder.writeTimestamp(t.timestamps, slot + 1);
 			recorded[0] = System.nanoTime() - start;
 			renderCost = renderCost * 0.9 + recorded[0] * 0.1;
 		} finally {
@@ -379,9 +451,6 @@ public final class GpuTileBaker {
 			}
 			if (casterBuffer != null) {
 				casterBuffer.close();
-			}
-			if (voxelBuffer != null) {
-				voxelBuffer.close();
 			}
 			job.free();
 		}
@@ -399,6 +468,8 @@ public final class GpuTileBaker {
 	// What a ray that never meets a block shows: the tracer's near-black floor.
 	private static final Vector4f VOID = new Vector4f(0.01F, 0.01F, 0.015F, 1.0F);
 	private static final Vector4f CLEAR = new Vector4f(0, 0, 0, 0);
+	/** Nothing tinted yet: no colour added, everything let through. */
+	private static final Vector4f NO_TINT = new Vector4f(0, 0, 0, 1);
 
 	private static Targets targets() {
 		if (targets == null) {
@@ -414,47 +485,57 @@ public final class GpuTileBaker {
 		final GpuTextureView shadowView;
 		final GpuTexture sceneColor;
 		final GpuTextureView sceneColorView;
-		final GpuTexture sceneInfo;
-		final GpuTextureView sceneInfoView;
-		final GpuTexture outputInfo;
-		final GpuTextureView outputInfoView;
+		final GpuTexture sceneAux;
+		final GpuTextureView sceneAuxView;
+		final GpuTexture tint;
+		final GpuTextureView tintView;
 		final GpuTexture sceneDepth;
 		final GpuTextureView sceneDepthView;
 		final GpuTexture waterColor;
 		final GpuTextureView waterColorView;
 		final GpuTexture waterDepth;
 		final GpuTextureView waterDepthView;
+		final GpuTexture sky;
+		final GpuTextureView skyView;
+		final GpuTexture voxels;
+		final GpuTextureView voxelsView;
 		final GpuTexture output;
 		final GpuTextureView outputView;
+		final GpuTexture outputInfo;
+		final GpuTextureView outputInfoView;
 		final GpuBuffer corners;
 		final GpuBuffer ubo;
-		/** Bound in place of the voxels in views that don't use them: a table of one empty section. */
-		final GpuBuffer noVoxels;
 		final GpuQueryPool timestamps;
 
 		Targets() {
 			GpuDevice device = RenderSystem.getDevice();
 			int sampled = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST;
+			int read = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC;
+			int size = Projection.TILE_PIXELS;
 			this.shadow = device.createTexture("Diorama bake shadow", sampled, GpuFormat.D32_FLOAT, SHADOW_SIZE, SHADOW_SIZE, 1, 1);
 			this.shadowView = device.createTextureView(this.shadow);
 			this.sceneColor = device.createTexture("Diorama bake scene", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
 			this.sceneColorView = device.createTextureView(this.sceneColor);
-			this.sceneInfo = device.createTexture("Diorama bake scene overlays", sampled, GpuFormat.R8_UNORM, SCENE, SCENE, 1, 1);
-			this.sceneInfoView = device.createTextureView(this.sceneInfo);
-			this.outputInfo = device.createTexture(
-				"Diorama bake output overlays", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC, GpuFormat.R8_UNORM,
-				Projection.TILE_PIXELS, Projection.TILE_PIXELS, 1, 1
-			);
-			this.outputInfoView = device.createTextureView(this.outputInfo);
+			this.sceneAux = device.createTexture("Diorama bake scene aux", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
+			this.sceneAuxView = device.createTextureView(this.sceneAux);
+			this.tint = device.createTexture("Diorama bake tint", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
+			this.tintView = device.createTextureView(this.tint);
 			this.sceneDepth = device.createTexture("Diorama bake scene depth", sampled, GpuFormat.D32_FLOAT, SCENE, SCENE, 1, 1);
 			this.sceneDepthView = device.createTextureView(this.sceneDepth);
 			this.waterColor = device.createTexture("Diorama bake water", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
 			this.waterColorView = device.createTextureView(this.waterColor);
 			this.waterDepth = device.createTexture("Diorama bake water depth", sampled, GpuFormat.D32_FLOAT, SCENE, SCENE, 1, 1);
 			this.waterDepthView = device.createTextureView(this.waterDepth);
-			int size = Projection.TILE_PIXELS;
-			this.output = device.createTexture("Diorama bake output", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC, GpuFormat.RGBA8_UNORM, size, size, 1, 1);
+			this.sky = device.createTexture("Diorama bake sky", sampled, GpuFormat.R8_UNORM, SKY_WIDTH, SKY_HEIGHT, 1, 1);
+			this.skyView = device.createTextureView(this.sky);
+			this.voxels = device.createTexture(
+				"Diorama bake voxels", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R32_UINT, VOXEL_WIDTH, VOXEL_HEIGHT, 1, 1
+			);
+			this.voxelsView = device.createTextureView(this.voxels);
+			this.output = device.createTexture("Diorama bake output", read, GpuFormat.RGBA8_UNORM, size, size, 1, 1);
 			this.outputView = device.createTextureView(this.output);
+			this.outputInfo = device.createTexture("Diorama bake output overlays", read, GpuFormat.R8_UNORM, size, size, 1, 1);
+			this.outputInfoView = device.createTextureView(this.outputInfo);
 			ByteBuffer corners = MemoryUtil.memAlloc(16);
 			try {
 				// (0,0), (1,0), (1,1), (0,1): round the quad, as the shared quad indices expect.
@@ -468,13 +549,6 @@ public final class GpuTileBaker {
 				MemoryUtil.memFree(corners);
 			}
 			this.ubo = device.createBuffer(() -> "Diorama bake UBO", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
-			ByteBuffer none = MemoryUtil.memAlloc(16).order(ByteOrder.LITTLE_ENDIAN);
-			try {
-				none.putInt(GpuMesher.SECTION_EMPTY).putInt(0).putInt(0).putInt(0).flip();
-				this.noVoxels = device.createBuffer(() -> "Diorama bake no voxels", GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER, none);
-			} finally {
-				MemoryUtil.memFree(none);
-			}
 			this.timestamps = device.createTimestampQueryPool(TIMESTAMPS);
 		}
 	}
@@ -517,6 +591,8 @@ public final class GpuTileBaker {
 		final int tintedCount;
 		final int waterCount;
 		final int casterCount;
+		/** Rows of the voxel texture this bake fills. */
+		final int voxelRows;
 		@Nullable ByteBuffer faces;
 		@Nullable ByteBuffer casters;
 		@Nullable ByteBuffer uniforms;
@@ -532,10 +608,12 @@ public final class GpuTileBaker {
 			this.casterCount = mesh.casters.count;
 			int originX = mesh.originX;
 			int originZ = mesh.originZ;
+			// Sky slots: the opaque faces first, then the water; plants and glass don't use them.
+			boolean sky = mesh.voxels != null;
 			ByteBuffer faces = MemoryUtil.memAlloc(Math.max(1, this.faceCount() * FACE_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
-			putFaces(faces, mesh.opaque, originX, originZ);
-			putFaces(faces, mesh.tinted, originX, originZ);
-			putFaces(faces, mesh.water, originX, originZ);
+			putFaces(faces, mesh.opaque, originX, originZ, sky ? 0 : -1);
+			putFaces(faces, mesh.tinted, originX, originZ, -1);
+			putFaces(faces, mesh.water, originX, originZ, sky ? this.opaqueCount : -1);
 			faces.flip();
 			this.faces = faces;
 			ByteBuffer casters = MemoryUtil.memAlloc(Math.max(1, this.casterCount * CASTER_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
@@ -547,10 +625,14 @@ public final class GpuTileBaker {
 			casters.flip();
 			this.casters = casters;
 			this.uniforms = uniforms(mesh, originX, originZ);
-			if (mesh.voxels != null) {
-				ByteBuffer voxels = MemoryUtil.memAlloc(mesh.voxelCount * 4).order(ByteOrder.LITTLE_ENDIAN);
+			if (sky) {
+				// Whole rows, as the texture upload takes them.
+				this.voxelRows = (mesh.voxelCount + VOXEL_WIDTH - 1) / VOXEL_WIDTH;
+				ByteBuffer voxels = MemoryUtil.memCalloc(Math.max(1, this.voxelRows) * VOXEL_WIDTH * 4).order(ByteOrder.LITTLE_ENDIAN);
 				voxels.asIntBuffer().put(mesh.voxels, 0, mesh.voxelCount);
 				this.voxels = voxels;
+			} else {
+				this.voxelRows = 0;
 			}
 			this.packNanos = System.nanoTime() - start;
 		}
@@ -559,7 +641,8 @@ public final class GpuTileBaker {
 			return this.opaqueCount + this.tintedCount + this.waterCount;
 		}
 
-		private static void putFaces(ByteBuffer out, GpuMesher.Quads quads, int originX, int originZ) {
+		/** {@code firstSky} is the first face's sky slot, the rest following on; -1 for none. */
+		private static void putFaces(ByteBuffer out, GpuMesher.Quads quads, int originX, int originZ, int firstSky) {
 			int[] d = quads.data;
 			for (int q = 0; q < quads.count; q++) {
 				int i = q * 8;
@@ -568,8 +651,9 @@ public final class GpuTileBaker {
 				out.put((byte) (color >> 16)).put((byte) (color >> 8)).put((byte) color).put((byte) (color >>> 24));
 				int ao = d[i + 5];
 				out.put((byte) (ao >>> 24)).put((byte) (ao >> 16)).put((byte) (ao >> 8)).put((byte) ao);
-				int sky = d[i + 6];
-				out.put((byte) (sky >>> 24)).put((byte) (sky >> 16)).put((byte) (sky >> 8)).put((byte) sky);
+				int light = d[i + 6];
+				out.put((byte) (light >>> 24)).put((byte) (light >> 16)).put((byte) (light >> 8)).put((byte) light);
+				out.putInt(firstSky < 0 ? -1 : firstSky + q);
 			}
 		}
 

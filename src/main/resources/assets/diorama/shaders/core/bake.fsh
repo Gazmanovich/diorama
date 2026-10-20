@@ -5,7 +5,10 @@
 
 // The same lighting as TileBaker.shade, per fragment. One fragment of the double-size target is
 // one of the tracer's four samples per pixel.
-#ifndef SHADOW
+#ifdef SKY_PASS
+layout(location = 0) flat in float cornerSky;
+layout(location = 0) out vec4 fragColor;
+#elif !defined(SHADOW)
 uniform sampler2D ShadowMap;
 
 layout(location = 0) in vec3 localPos;
@@ -14,23 +17,23 @@ layout(location = 2) flat in vec4 faceColor;
 layout(location = 3) flat in vec4 faceOcclusion;
 layout(location = 4) flat in vec4 faceLight;
 layout(location = 5) flat in ivec2 faceInfo;
-layout(location = 6) in float vertexSky;
+layout(location = 6) flat in vec4 faceSky;
 layout(location = 7) flat in ivec3 faceCell;
 
 layout(location = 0) out vec4 fragColor;
 #if !defined(WATER) && !defined(TINTED)
-// The overlay bits of the block a sample shows, over 255; see Overlays.
-layout(location = 1) out vec4 fragInfo;
+// The sample's overlay bits over 255, its surface's albedo brightness, and 1 on a floor, where
+// rays that met nothing end: the composite needs these to tint and to mix water like the tracer.
+layout(location = 1) out vec4 fragAux;
 #endif
 
 const int FLAG_UNKNOWN = 1;
 const int FLAG_CUT = 4;
-const int FLAG_VOID = 8;
-const int FACE_FLOOR = 3;
 const int FLAG_OVERLAY = 16;
 const int FLAG_SLIME = 32;
 const int FLAG_SPAWN_AT_NIGHT = 64;
 const int FLAG_SPAWN_ANY_TIME = 128;
+const int FACE_FLOOR = 3;
 
 float bilinear(vec4 c, vec2 f) {
     float top = mix(c.x, c.y, f.x);
@@ -40,6 +43,10 @@ float bilinear(vec4 c, vec2 f) {
 
 vec3 to_linear(vec3 s) {
     return mix(s / 12.92, pow((s + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), s));
+}
+
+float luminance(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
 // How much closer to the sun the nearest caster over p is, in blocks.
@@ -107,7 +114,9 @@ vec3 lit_light(vec3 p, float ao) {
 #endif
 
 void main() {
-#ifndef SHADOW
+#ifdef SKY_PASS
+    fragColor = vec4(cornerSky, 0.0, 0.0, 1.0);
+#elif !defined(SHADOW)
     bool top = faceInfo.x == 0;
     vec3 albedo = to_linear(faceColor.rgb) * 2.0;
 #ifdef WATER
@@ -120,7 +129,7 @@ void main() {
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
         float ambient = Light.x;
         if (Light.z > 0.0) {
-            ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * vertexSky));
+            ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * bilinear(faceSky, faceUv)));
         }
         lit = ambient + sunlight(localPos + normal * 0.06, vec3(0.0)) * Light.y;
         if (Light.w != 0.0) {
@@ -129,46 +138,50 @@ void main() {
     }
     fragColor = vec4(albedo, lit);
 #elif defined(TINTED)
-    // Plants and glass: their own weight goes in alpha, and the blend keeps what's behind.
-    vec3 l = Mode.x > 0.5 ? lit_light(localPos, 1.0) : sun_light(localPos, top, 1.0, vertexSky);
-    fragColor = vec4(albedo * l, faceColor.a);
+    // Plants and glass, added up near to far as the tracer's ray meets them: their unlit colour
+    // by their weight, which the blend scales by what the ones in front let through. The
+    // composite lights the sum by the surface behind, as the tracer does.
+    float w = faceColor.a;
+    fragColor = vec4(albedo * w, w);
 #else
     int flags = faceInfo.y;
     // The tracer records overlay bits at its first sample, (0.375, 0.125) in the pixel; this
     // sample's centre is at (0.25, 0.25), a quarter of a sample to the left and below.
     vec3 firstSample = localPos + dFdx(localPos) * 0.25 - dFdy(localPos) * 0.25;
-    fragInfo = vec4(0.0);
+    float bits = 0.0;
     if ((flags & FLAG_OVERLAY) != 0) {
         // TileBaker.overlayBits. The origin is a multiple of 16, so local cells sit in chunks as world ones do.
         vec3 f = firstSample - vec3(faceCell);
-        int bits = 0;
+        int b = 0;
         if ((faceCell.x & 15) == 0 && f.x < 0.25) {
-            bits |= 1;
+            b |= 1;
         }
         if (top && (faceCell.z & 15) == 0 && f.z < 1.0 / (4.0 * Camera.x)) {
-            bits |= 2;
+            b |= 2;
         }
         if ((flags & FLAG_SLIME) != 0) {
-            bits |= 4;
+            b |= 4;
         }
         if (top && (flags & (FLAG_SPAWN_AT_NIGHT | FLAG_SPAWN_ANY_TIME)) != 0
             && f.x >= 0.3 && f.x < 0.7 && f.z >= 0.3 && f.z < 0.7) {
-            bits |= (flags & FLAG_SPAWN_ANY_TIME) != 0 ? 16 : 8;
+            b |= (flags & FLAG_SPAWN_ANY_TIME) != 0 ? 16 : 8;
         }
-        fragInfo = vec4(float(bits) / 255.0, 0.0, 0.0, 0.0);
+        bits = float(b) / 255.0;
     }
     if ((flags & FLAG_UNKNOWN) != 0) {
         // A chunk the map has no data for, or unseen under fog of war: the pixel stays unknown.
         fragColor = vec4(0.0);
+        fragAux = vec4(0.0);
         return;
     }
     if (faceInfo.x == FACE_FLOOR) {
         // Rays that reached the view's limit: the cut face if still in rock, else the void.
         fragColor = vec4((flags & FLAG_CUT) != 0 ? vec3(0.0065, 0.0068, 0.0085) : vec3(0.01, 0.01, 0.015), 1.0);
+        fragAux = vec4(0.0, 0.0, 1.0, 0.0);
         return;
     }
     float ao = bilinear(faceOcclusion, faceUv);
-    vec3 l = Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, vertexSky);
+    vec3 l = Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, bilinear(faceSky, faceUv));
     float emission = faceColor.a;
     if (emission > 0.0) {
         l = max(l, vec3(0.35 + emission * 0.85));
@@ -178,6 +191,7 @@ void main() {
         l *= 0.82;
     }
     fragColor = vec4(albedo * l, 1.0);
+    fragAux = vec4(bits, luminance(albedo), 0.0, 0.0);
 #endif
 #endif
 }

@@ -47,6 +47,12 @@ public final class GpuMesher {
 	public static final int SLIME = 32;
 	public static final int SPAWN_AT_NIGHT = 64;
 	public static final int SPAWN_ANY_TIME = 128;
+	/** A water surface: the sky pass reads its light over the top of the cell it entered. */
+	public static final int WATER_FACE = 256;
+
+	private static final byte NO_WATER = 0;
+	private static final byte SEEN_WATER = 1;
+	private static final byte UNSEEN_WATER = 2;
 
 	/** The section table's entries for sections without solid bits: a missing chunk, or nothing solid. */
 	public static final int SECTION_UNKNOWN = 0xFFFFFFFE;
@@ -206,10 +212,10 @@ public final class GpuMesher {
 		boolean[] hereRock = new boolean[zSpan];
 		boolean[] aboveWater = new boolean[zSpan];
 		boolean[] hereWater = new boolean[zSpan];
-		// Under fog of war: the ray went through water it entered at a cell the player has seen.
-		// The tracer shows such a ray even when it then meets nothing.
-		boolean[] aboveSeenWater = new boolean[zSpan];
-		boolean[] hereSeenWater = new boolean[zSpan];
+		// Under fog of war, the first water the ray entered: none yet, at a cell the player has
+		// seen, or not. The tracer shows a ray that then meets nothing only in the seen case.
+		byte[] aboveFirstWater = new byte[zSpan];
+		byte[] hereFirstWater = new byte[zSpan];
 		// The camera's faces' extent, for the sky occlusion region.
 		int fx0 = Integer.MAX_VALUE;
 		int fx1 = Integer.MIN_VALUE;
@@ -224,14 +230,14 @@ public final class GpuMesher {
 			java.util.Arrays.fill(aboveOpen, !lit);
 			java.util.Arrays.fill(aboveRock, lit);
 			java.util.Arrays.fill(aboveWater, false);
-			java.util.Arrays.fill(aboveSeenWater, false);
+			java.util.Arrays.fill(aboveFirstWater, NO_WATER);
 			for (int y = startY - 1; y >= limitY; y--) {
 				int lo = zLow(minV, y, sin, cos);
 				int hi = zHigh(maxV, y, sin, cos);
 				java.util.Arrays.fill(hereOpen, false);
 				java.util.Arrays.fill(hereRock, false);
 				java.util.Arrays.fill(hereWater, false);
-				java.util.Arrays.fill(hereSeenWater, false);
+				java.util.Arrays.fill(hereFirstWater, NO_WATER);
 				boolean any = false;
 				for (int z = hi; z >= lo; z--) {
 					int i = z - zBase;
@@ -281,14 +287,18 @@ public final class GpuMesher {
 						hereOpen[i] = true;
 						any = true;
 						if (fog) {
-							hereSeenWater[i] = (openAbove && aboveSeenWater[i]) || (openSouth && hereSeenWater[i + 1]);
+							// Rays from above and from the south are different rays through the same
+							// cell; where they disagree, the seen one wins.
+							byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+							byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+							hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
 						}
 						if (kind == BlockLooks.WATER) {
 							hereWater[i] = true;
 							boolean entersTop = fromAbove && !(openAbove && aboveWater[i]);
 							boolean entersSouth = fromSouth && !(openSouth && hereWater[i + 1]);
-							if (fog && (entersTop || entersSouth) && source.isSeen(x, y, z)) {
-								hereSeenWater[i] = true;
+							if (fog && hereFirstWater[i] == NO_WATER) {
+								hereFirstWater[i] = source.isSeen(x, y, z) ? SEEN_WATER : UNSEEN_WATER;
 							}
 							if (entersTop || entersSouth) {
 								helper.albedo(id, x, z, true);
@@ -296,10 +306,10 @@ public final class GpuMesher {
 								// Lit like the tracer: by the light just above the cell it entered.
 								int light = lit ? light(reader, x, y + 1, z) : 0;
 								if (entersTop) {
-									mesh.water.add(x, y, z, TOP, color, 0, light, 0);
+									mesh.water.add(x, y, z, TOP, color, 0, light, WATER_FACE);
 								}
 								if (entersSouth) {
-									mesh.water.add(x, y, z, SOUTH, color, 0, light, 0);
+									mesh.water.add(x, y, z, SOUTH, color, 0, light, WATER_FACE);
 								}
 							}
 						} else if (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) {
@@ -307,10 +317,10 @@ public final class GpuMesher {
 							int weight = kind == BlockLooks.PLANT ? 102 : 64;
 							int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, weight);
 							if (fromAbove) {
-								mesh.tinted.add(x, y, z, TOP, color, 0, lit ? light(reader, x, y + 1, z) : 0, 0);
+								mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0);
 							}
 							if (fromSouth) {
-								mesh.tinted.add(x, y, z, SOUTH, color, 0, lit ? light(reader, x, y, z + 1) : 0, 0);
+								mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0);
 							}
 						}
 					}
@@ -330,7 +340,7 @@ public final class GpuMesher {
 					for (int z = hi; z >= lo; z--) {
 						int i = z - zBase;
 						if (hereRock[i] || hereOpen[i]) {
-							int flags = hereRock[i] ? (fog ? UNKNOWN : CUT) : fog && !hereSeenWater[i] ? UNKNOWN : VOID;
+							int flags = hereRock[i] ? (fog ? UNKNOWN : CUT) : fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
 							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, flags);
 						}
 					}
@@ -344,9 +354,9 @@ public final class GpuMesher {
 				t = aboveWater;
 				aboveWater = hereWater;
 				hereWater = t;
-				t = aboveSeenWater;
-				aboveSeenWater = hereSeenWater;
-				hereSeenWater = t;
+				byte[] w = aboveFirstWater;
+				aboveFirstWater = hereFirstWater;
+				hereFirstWater = w;
 				if (!any) {
 					break;
 				}
@@ -371,7 +381,7 @@ public final class GpuMesher {
 			// The table was placed before the origin was known: make it relative now.
 			mesh.voxelOrigin[2] -= mesh.originZ >> 4;
 		}
-		sortFarToNear(mesh.tinted, sin, cos);
+		sortNearToFar(mesh.tinted, sin, cos);
 		mesh.buildNanos = System.nanoTime() - start;
 		return mesh;
 	}
@@ -527,8 +537,11 @@ public final class GpuMesher {
 		mesh.casterY1 = Math.max(highest, mesh.topY);
 	}
 
-	/** Sorts faces by camera depth, farthest first, so blending them in order matches the tracer. */
-	private static void sortFarToNear(Quads quads, double sin, double cos) {
+	/**
+	 * Sorts faces by camera depth, nearest first: plants and glass are added up in the order the
+	 * tracer's ray meets them, each weighted by how much light the ones in front let through.
+	 */
+	private static void sortNearToFar(Quads quads, double sin, double cos) {
 		int n = quads.count;
 		if (n < 2) {
 			return;
@@ -539,8 +552,7 @@ public final class GpuMesher {
 			double y = quads.data[i + 1] + (quads.data[i + 3] == TOP ? 1 : 0.5);
 			double z = quads.data[i + 2] + (quads.data[i + 3] == TOP ? 0.5 : 1);
 			double depth = -(sin * y + cos * z);
-			// Larger depth is farther: sort descending by flipping the sign.
-			long d = (long) (-depth * 1024);
+			long d = (long) (depth * 1024);
 			order[q] = (d << 24) | q;
 		}
 		java.util.Arrays.sort(order);

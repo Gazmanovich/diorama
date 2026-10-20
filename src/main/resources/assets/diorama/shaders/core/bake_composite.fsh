@@ -3,20 +3,26 @@
 
 #include <diorama:bake.glsl>
 
-// Turns the double-size bake into the tile's pixels the way TileBaker.bakePixels does: water mixed
-// over what is under it by depth, the four samples of a pixel averaged, outlines where a
-// neighbour is much nearer, then the style's grade and sRGB. Alpha is the share of known samples.
+// Turns the double-size bake into the tile's pixels the way TileBaker.bakePixels does: plants
+// and glass tinted over what is behind, water mixed over it by depth, the four samples of a pixel
+// averaged, outlines where a neighbour is much nearer, then the style's grade and sRGB. Alpha is
+// the share of known samples.
 uniform sampler2D SceneColor;
 uniform sampler2D SceneDepth;
+uniform sampler2D SceneAux;
+uniform sampler2D Tint;
 uniform sampler2D WaterColor;
 uniform sampler2D WaterDepth;
-uniform sampler2D SceneInfo;
 
 layout(location = 0) out vec4 fragColor;
 // The overlay bits of the pixel's first sample, as the tracer records them.
 layout(location = 1) out vec4 fragInfo;
 
 const float OUTLINE_DEPTH = 1.5;
+
+float luminance(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
 
 vec3 mix_water(vec3 under, vec4 water, float depth) {
     vec3 w = water.rgb;
@@ -51,10 +57,6 @@ bool nearer(float neighbour, float here) {
     return neighbour >= 0.0 && here - neighbour > OUTLINE_DEPTH;
 }
 
-float luminance(vec3 c) {
-    return dot(c, vec3(0.2126, 0.7152, 0.0722));
-}
-
 vec3 to_srgb(vec3 l) {
     l = clamp(l, 0.0, 1.0);
     return mix(l * 12.92, 1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), l));
@@ -62,7 +64,7 @@ vec3 to_srgb(vec3 l) {
 
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy) + ivec2(1);
-    fragInfo = vec4(texelFetch(SceneInfo, pixel * 2, 0).r, 0.0, 0.0, 0.0);
+    fragInfo = vec4(texelFetch(SceneAux, pixel * 2, 0).r, 0.0, 0.0, 0.0);
     vec3 sum = vec3(0.0);
     int known = 0;
     for (int i = 0; i < 4; i++) {
@@ -71,14 +73,25 @@ void main() {
         if (scene.a < 0.5) {
             continue;
         }
+        vec4 aux = texelFetch(SceneAux, s, 0);
+        // A floor: the ray met nothing before the view's limit.
+        bool nothing = aux.b > 0.5;
         float window = texelFetch(SceneDepth, s, 0).r;
         vec3 c = scene.rgb;
+        if (!nothing) {
+            vec4 tint = texelFetch(Tint, s, 0);
+            if (tint.a < 1.0) {
+                // The tracer lights the plants and glass it passed by the surface's own light.
+                float light = luminance(c) / max(0.05, aux.g);
+                c = c * tint.a + tint.rgb * light;
+            }
+        }
         float waterWindow = texelFetch(WaterDepth, s, 0).r;
         // Reversed depth: water in front of what was hit has the larger value.
         if (waterWindow > 0.0 && waterWindow >= window) {
             float surface = bake_depth(waterWindow);
             float depth;
-            if (window <= 0.0) {
+            if (nothing || window <= 0.0) {
                 // Water over nothing at all: the tracer gives it 64 blocks over black.
                 c = vec3(0.0);
                 depth = 64.0;

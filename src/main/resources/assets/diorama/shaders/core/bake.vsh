@@ -10,21 +10,28 @@ layout(location = 1) in ivec4 Cell;
 layout(location = 2) in vec4 Color;
 layout(location = 3) in vec4 Occlusion;
 layout(location = 4) in vec4 FaceLight;
+// Where the face's four corners are in the sky texture, a slot each, or -1 for none.
+layout(location = 5) in int SkyIndex;
+#endif
 
+const int FLAG_UNKNOWN = 1;
+const int FLAG_WATER = 256;
+const int SKY_WIDTH = 2048;
+const int SKY_HEIGHT = 1024;
+
+#ifdef SKY_PASS
 // The solid blocks around the tile: a section table, then 128 words of bits per section.
-uniform usamplerBuffer Voxels;
+uniform usampler2D Voxels;
 
-layout(location = 0) out vec3 localPos;
-layout(location = 1) out vec2 faceUv;
-layout(location = 2) flat out vec4 faceColor;
-layout(location = 3) flat out vec4 faceOcclusion;
-layout(location = 4) flat out vec4 faceLight;
-layout(location = 5) flat out ivec2 faceInfo;
-layout(location = 6) out float vertexSky;
-layout(location = 7) flat out ivec3 faceCell;
+layout(location = 0) flat out float cornerSky;
 
+const int VOXEL_WIDTH = 4096;
 const uint SECTION_UNKNOWN = 0xFFFFFFFEu;
 const uint SECTION_EMPTY = 0xFFFFFFFFu;
+
+uint voxel(int i) {
+    return texelFetch(Voxels, ivec2(i % VOXEL_WIDTH, i / VOXEL_WIDTH), 0).r;
+}
 
 // 1 if the block is solid, 0 if not, -1 in a chunk the map has no data for.
 int solid_at(ivec3 c) {
@@ -32,7 +39,7 @@ int solid_at(ivec3 c) {
     if (any(lessThan(s, ivec3(0))) || any(greaterThanEqual(s, VoxelSize.xyz))) {
         return 0;
     }
-    uint entry = texelFetch(Voxels, (s.y * VoxelSize.z + s.z) * VoxelSize.x + s.x).r;
+    uint entry = voxel((s.y * VoxelSize.z + s.z) * VoxelSize.x + s.x);
     if (entry == SECTION_EMPTY) {
         return 0;
     }
@@ -40,7 +47,7 @@ int solid_at(ivec3 c) {
         return -1;
     }
     int i = ((c.y & 15) << 8) | ((c.z & 15) << 4) | (c.x & 15);
-    uint word = texelFetch(Voxels, int(entry) + (i >> 5)).r;
+    uint word = voxel(int(entry) + (i >> 5));
     return int((word >> uint(i & 31)) & 1u);
 }
 
@@ -99,31 +106,62 @@ float sky_at(vec3 corner) {
     }
     return open / total;
 }
+#elif !defined(SHADOW)
+uniform sampler2D Sky;
+
+layout(location = 0) out vec3 localPos;
+layout(location = 1) out vec2 faceUv;
+layout(location = 2) flat out vec4 faceColor;
+layout(location = 3) flat out vec4 faceOcclusion;
+layout(location = 4) flat out vec4 faceLight;
+layout(location = 5) flat out ivec2 faceInfo;
+layout(location = 6) flat out vec4 faceSky;
+layout(location = 7) flat out ivec3 faceCell;
+
+float sky_slot(int slot) {
+    return texelFetch(Sky, ivec2(slot % SKY_WIDTH, slot / SKY_WIDTH), 0).r;
+}
 #endif
+
+// A face's corner c in tile-local blocks.
+vec3 corner_position(int face, vec3 base, vec2 c) {
+    if (face == 0) {
+        // Top: corners nw, ne, sw, se.
+        return base + vec3(c.x, 1.0, c.y);
+    } else if (face == 1) {
+        // South: top west, top east, bottom west, bottom east.
+        return base + vec3(c.x, 1.0 - c.y, 1.0);
+    } else if (face == 2) {
+        // West, for the shadow map only.
+        return base + vec3(0.0, c.x, c.y);
+    }
+    // Floor: the bottom of the cell.
+    return base + vec3(c.x, 0.0, c.y);
+}
 
 void main() {
     vec2 c = Corner.xy;
     int face = Cell.w & 15;
+    int flags = Cell.w >> 4;
     vec3 base = vec3(Cell.xyz);
-    vec3 p;
-    if (face == 0) {
-        // Top: corners nw, ne, sw, se.
-        p = base + vec3(c.x, 1.0, c.y);
-    } else if (face == 1) {
-        // South: top west, top east, bottom west, bottom east.
-        p = base + vec3(c.x, 1.0 - c.y, 1.0);
-    } else if (face == 2) {
-        // West, for the shadow map only.
-        p = base + vec3(0.0, c.x, c.y);
-    } else {
-        // Floor: the bottom of the cell.
-        p = base + vec3(c.x, 0.0, c.y);
-    }
+    vec3 p = corner_position(face, base, c);
 #ifdef SHADOW
     float su = dot(p, SunU.xyz) + SunU.w;
     float sv = dot(p, SunV.xyz) + SunV.w;
     float d = (dot(p, SunDir.xyz) - SunScale.z) / (SunScale.w - SunScale.z);
     gl_Position = vec4(su * SunScale.x - 1.0, sv * SunScale.y - 1.0, bake_ndc_depth(d), 1.0);
+#elif defined(SKY_PASS)
+    // One point per face corner, into its slot of the sky texture: the corner's sky occlusion,
+    // worked out once, which the face then blends between its corners like the tracer.
+    int slot = SkyIndex * 4 + gl_VertexIndex;
+    gl_Position = vec4((float(slot % SKY_WIDTH) + 0.5) / float(SKY_WIDTH) * 2.0 - 1.0, (float(slot / SKY_WIDTH) + 0.5) / float(SKY_HEIGHT) * 2.0 - 1.0, 0.0, 1.0);
+    gl_PointSize = 1.0;
+    cornerSky = 1.0;
+    if (face <= 1 && (flags & FLAG_UNKNOWN) == 0) {
+        // The tracer reads water's light over the top of the cell it entered.
+        vec3 corner = (flags & FLAG_WATER) != 0 && face == 1 ? base + vec3(c.x, 1.0, 1.0) : p;
+        cornerSky = sky_at(corner);
+    }
 #else
     float v = p.z * Camera.x - p.y * Camera.y + Camera.z;
     float t = -(p.y * Camera.x + p.z * Camera.y) + Camera.w;
@@ -136,18 +174,13 @@ void main() {
     faceColor = Color;
     faceOcclusion = Occlusion;
     faceLight = FaceLight;
-    faceInfo = ivec2(face, Cell.w >> 4);
+    faceInfo = ivec2(face, flags);
     faceCell = Cell.xyz;
-    vertexSky = 1.0;
-    if (Mode.x < 0.5 && Light.z > 0.0 && face <= 1 && ((Cell.w >> 4) & 1) == 0) {
-        // Sky occlusion at this corner, between corners like the tracer's per-corner values.
-#ifdef WATER
-        // The tracer reads water's light over the top of the cell it entered.
-        vec3 corner = face == 0 ? p : base + vec3(c.x, 1.0, 1.0);
-#else
-        vec3 corner = p;
-#endif
-        vertexSky = sky_at(corner);
+    faceSky = vec4(1.0);
+    if (SkyIndex >= 0) {
+        int slot = SkyIndex * 4;
+        // Slots follow the quad's vertex order (nw, ne, se, sw); faces blend nw, ne, sw, se.
+        faceSky = vec4(sky_slot(slot), sky_slot(slot + 1), sky_slot(slot + 3), sky_slot(slot + 2));
     }
 #endif
 }

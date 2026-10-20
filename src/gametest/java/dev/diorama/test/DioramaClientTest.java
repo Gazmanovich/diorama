@@ -798,7 +798,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			for (int i = 0; i < keys.size(); i++) {
 				var r = gpu.get(i);
 				if (r == null || r.info() == null || cpuInfo[i] == null || r.pixels() == null) {
-					continue;
+					throw new AssertionError(name + ": tile " + keys.get(i) + " came back without overlay bits");
 				}
 				for (int p = 0; p < cpuInfo[i].length; p++) {
 					if ((cpu[i][p] >>> 24) > 0 && (r.pixels()[p] >>> 24) > 0) {
@@ -809,7 +809,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 					}
 				}
 			}
-			report += String.format(java.util.Locale.ROOT, " | overlay bits differ on %.3f%% of known pixels", both == 0 ? 0 : differ * 100.0 / both);
+			if (both == 0) {
+				throw new AssertionError(name + ": overlays were asked for but no bits came back to compare");
+			}
+			double overlayOff = differ * 100.0 / both;
+			if (overlayOff > 1.5) {
+				throw new AssertionError(String.format(java.util.Locale.ROOT, "%s: overlay bits differ on %.3f%% of known pixels", name, overlayOff));
+			}
+			report += String.format(java.util.Locale.ROOT, " | overlay bits differ on %.3f%% of known pixels", overlayOff);
 		}
 		dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
 		return report;
@@ -903,6 +910,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		int n = keys.size();
 		int ok = Math.max(1, n - failed);
+		// Fail on a GPU bake that didn't come back, on a comparison of nothing, and on differences
+		// well past what the sample patterns explain (about twice what the bakes measured).
+		if (failed > 0) {
+			throw new AssertionError(name + ": " + failed + " GPU bakes failed");
+		}
+		if (both == 0) {
+			throw new AssertionError(name + ": no pixel known to both bakes, nothing was compared");
+		}
+		double mean = sumDiff / both;
+		double off = differ * 100.0 / both;
+		double mismatch = knownMismatch * 100.0 / ((long) n * size * size);
+		double alphaOff = alphaDiffer * 100.0 / both;
+		if (mean > 4 || off > 6 || mismatch > 1.5 || alphaOff > 8) {
+			throw new AssertionError(String.format(java.util.Locale.ROOT,
+				"%s: GPU tiles differ from traced ones: mean %.2f/255, %.2f%% off by >24, %.3f%% known/unknown, %.3f%% alpha", name, mean, off, mismatch, alphaOff));
+		}
 		return String.format(java.util.Locale.ROOT,
 			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f, pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
 				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch, %.3f%% known with a different alpha",
