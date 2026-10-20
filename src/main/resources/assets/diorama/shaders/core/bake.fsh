@@ -126,6 +126,12 @@ vec3 lit_light(vec3 p, float ao) {
 #endif
 
 void main() {
+#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(WATER) && !defined(TINTED)
+    // 26.2 on Vulkan numbers a shader's outputs in the order the shader first writes them,
+    // whatever their layout says, so write them in location order before anything else.
+    fragColor = vec4(0.0);
+    fragAux = vec4(0.0);
+#endif
 #ifdef SKY_PASS
     fragColor = vec4(cornerSky, 0.0, 0.0, 1.0);
 #elif !defined(SHADOW)

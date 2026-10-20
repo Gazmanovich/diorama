@@ -75,6 +75,10 @@ vec3 to_srgb(vec3 l) {
 }
 
 void main() {
+    // 26.2 on Vulkan numbers a shader's outputs in the order the shader first writes them,
+    // whatever their layout says, so write them in location order before anything else.
+    fragColor = vec4(0.0);
+    fragInfo = vec4(0.0);
     ivec2 pixel = ivec2(gl_FragCoord.xy) + ivec2(1);
     fragInfo = vec4(texelFetch(SceneAux, pixel * 2, 0).r, 0.0, 0.0, 0.0);
     vec3 sum = vec3(0.0);
