@@ -258,8 +258,16 @@ final class BlazeBakeBackend implements BakeBackend {
 		int slot = (int) (timestampSlot++ % (Targets.TIMESTAMPS / 2)) * 2;
 		encoder.writeTimestamp(t.timestamps, slot);
 		encoder.writeToBuffer(t.ubo.slice(), job.uniforms);
-		if (job.voxels != null) {
+		if (job.voxels != null && job.voxelRows > 0) {
+			//? if >=26.3 {
 			encoder.writeToTexture(t.voxels, job.voxels, 0, 0, 0, 0, VOXEL_WIDTH, job.voxelRows);
+			//?} else {
+			/*// 26.2's OpenGL writeToTexture sends every texture as bytes, which scrambles these 32-bit
+			// words; a copy from a buffer sends the texture's own type.
+			GpuBufferSlice upload = t.voxelUpload.slice(0, (long) job.voxelRows * VOXEL_WIDTH * 4);
+			encoder.writeToBuffer(upload, job.voxels);
+			encoder.copyBufferToTexture(upload, 0, 0, VOXEL_WIDTH, job.voxelRows, t.voxels, 0, 0, VOXEL_WIDTH, job.voxelRows, 0, 0);
+			*///?}
 		}
 
 		GpuBuffer faceBuffer = null;
@@ -471,6 +479,9 @@ final class BlazeBakeBackend implements BakeBackend {
 		final GpuTextureView skyView;
 		final GpuTexture voxels;
 		final GpuTextureView voxelsView;
+		//? if <26.3 {
+		/*final GpuBuffer voxelUpload;
+		*///?}
 		final GpuTexture output;
 		final GpuTextureView outputView;
 		final GpuTexture outputInfo;
@@ -508,6 +519,11 @@ final class BlazeBakeBackend implements BakeBackend {
 				"Diorama bake voxels", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R32_UINT, VOXEL_WIDTH, VOXEL_HEIGHT, 1, 1
 			);
 			this.voxelsView = device.createTextureView(this.voxels);
+			//? if <26.3 {
+			/*this.voxelUpload = device.createBuffer(
+				() -> "Diorama bake voxel upload", GpuBuffer.USAGE_COPY_SRC | GpuBuffer.USAGE_COPY_DST, (long) VOXEL_WIDTH * VOXEL_HEIGHT * 4
+			);
+			*///?}
 			this.output = device.createTexture("Diorama bake output", read, GpuFormat.RGBA8_UNORM, size, size, 1, 1);
 			this.outputView = device.createTextureView(this.output);
 			this.outputInfo = device.createTexture("Diorama bake output overlays", read, GpuFormat.R8_UNORM, size, size, 1, 1);
