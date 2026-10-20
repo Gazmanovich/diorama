@@ -21,6 +21,7 @@ layout(location = 3) flat out vec4 faceOcclusion;
 layout(location = 4) flat out vec4 faceLight;
 layout(location = 5) flat out ivec2 faceInfo;
 layout(location = 6) out float vertexSky;
+layout(location = 7) flat out ivec3 faceCell;
 
 const uint SECTION_UNKNOWN = 0xFFFFFFFEu;
 const uint SECTION_EMPTY = 0xFFFFFFFFu;
@@ -136,6 +137,7 @@ void main() {
     faceOcclusion = Occlusion;
     faceLight = FaceLight;
     faceInfo = ivec2(face, Cell.w >> 4);
+    faceCell = Cell.xyz;
     vertexSky = 1.0;
     if (Mode.x < 0.5 && Light.z > 0.0 && face <= 1 && ((Cell.w >> 4) & 1) == 0) {
         // Sky occlusion at this corner, between corners like the tracer's per-corner values.

@@ -693,15 +693,36 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 200);
 			// The sky view, then a cave slice a little below the ground, with and without fog of war.
 			int cut = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, mc.player.getBlockX(), mc.player.getBlockZ()) - 24);
-			summary.append(compareTiles(context, out, "spot" + spot, TileKey.SURFACE, false)).append('\n');
-			summary.append(compareTiles(context, out, "spot" + spot + "-cave", cut, false)).append('\n');
-			summary.append(compareTiles(context, out, "spot" + spot + "-cave-fog", cut, true)).append('\n');
+			summary.append(compareTiles(context, out, "spot" + spot, TileKey.SURFACE, false, null)).append('\n');
+			if (spot == 0) {
+				// The chunk grid, slime chunks and spawn spots, which the bakes record per pixel.
+				dev.diorama.bake.Overlays overlays = context.computeOnClient(mc -> new dev.diorama.bake.Overlays(MapSession.get().slimeSeed(), true));
+				summary.append(compareTiles(context, out, "spot0-overlays", TileKey.SURFACE, false, overlays)).append('\n');
+			}
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave", cut, false, null)).append('\n');
+			// Fog of war shows only what the player has seen: mark every other 16x16 square of
+			// columns as seen through the slice, so both seen and unseen ground get compared.
+			context.runOnClient(mc -> {
+				dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+				int px = mc.player.getBlockX();
+				int pz = mc.player.getBlockZ();
+				for (int x = px - 200; x < px + 200; x++) {
+					for (int z = pz - 300; z < pz + 300; z++) {
+						if ((((x >> 4) + (z >> 4)) & 1) == 0) {
+							for (int y = cut - dev.diorama.bake.TileBaker.CAVE_DEPTH - 1; y <= cut + 1; y++) {
+								seen.markSeen(x, y, z);
+							}
+						}
+					}
+				}
+			});
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave-fog", cut, true, null)).append('\n');
 		}
 		// The Nether's sky view starts under its roof.
 		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
 		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 300, 2400);
 		settle(context, 200);
-		summary.append(compareTiles(context, out, "nether", TileKey.SURFACE, false)).append('\n');
+		summary.append(compareTiles(context, out, "nether", TileKey.SURFACE, false, null)).append('\n');
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
 		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
 			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
@@ -720,7 +741,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * rounds each keeping the best (the first GPU round also compiles the shaders), and writes the
 	 * comparison. {@code layer} is {@link TileKey#SURFACE} or a cave slice's cut.
 	 */
-	private static String compareTiles(ClientGameTestContext context, java.nio.file.Path out, String name, int layer, boolean fog) {
+	private static String compareTiles(
+		ClientGameTestContext context, java.nio.file.Path out, String name, int layer, boolean fog, dev.diorama.bake.@org.jspecify.annotations.Nullable Overlays overlays
+	) {
 		int[] centre = context.computeOnClient(mc -> new int[] {
 			(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
 			(int) Math.floor(Projection.v(layer == TileKey.SURFACE ? mc.player.getY() : layer, mc.player.getZ()) / Projection.TILE_UNITS)
@@ -732,6 +755,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		int[][] cpu = new int[keys.size()][];
+		byte[][] cpuInfo = new byte[keys.size()][];
 		long[] cpuNanos = new long[keys.size()];
 		java.util.Arrays.fill(cpuNanos, Long.MAX_VALUE);
 		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu = new java.util.concurrent.ConcurrentHashMap<>();
@@ -739,16 +763,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> {
 				for (int i = 0; i < keys.size(); i++) {
 					long start = System.nanoTime();
-					dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, fog);
+					dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, fog, null, overlays);
 					cpuNanos[i] = Math.min(cpuNanos[i], System.nanoTime() - start);
 					cpu[i] = image.mips()[0];
+					cpuInfo[i] = image.info();
 				}
 			});
 			java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> results = new java.util.concurrent.ConcurrentHashMap<>();
 			context.runOnClient(mc -> {
 				for (int i = 0; i < keys.size(); i++) {
 					int index = i;
-					dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), fog);
+					dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), fog, overlays);
 					dev.diorama.render.gpu.GpuTileBaker.submit(mesh, r -> results.put(index, r));
 				}
 			});
@@ -766,6 +791,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		String report = writeGpuComparison(out, name, keys, cpu, cpuNanos, gpu);
+		if (overlays != null) {
+			// Overlay bits are compared where both bakes know the pixel.
+			long both = 0;
+			long differ = 0;
+			for (int i = 0; i < keys.size(); i++) {
+				var r = gpu.get(i);
+				if (r == null || r.info() == null || cpuInfo[i] == null || r.pixels() == null) {
+					continue;
+				}
+				for (int p = 0; p < cpuInfo[i].length; p++) {
+					if ((cpu[i][p] >>> 24) > 0 && (r.pixels()[p] >>> 24) > 0) {
+						both++;
+						if (cpuInfo[i][p] != r.info()[p]) {
+							differ++;
+						}
+					}
+				}
+			}
+			report += String.format(java.util.Locale.ROOT, " | overlay bits differ on %.3f%% of known pixels", both == 0 ? 0 : differ * 100.0 / both);
+		}
 		dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
 		return report;
 	}

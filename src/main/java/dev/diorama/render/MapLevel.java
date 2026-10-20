@@ -644,8 +644,8 @@ public final class MapLevel implements ChunkSource {
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
 		//? if >=26.3 {
-		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED && overlays == null) {
-			this.bakeOnGpu(key, looks, generation, fog, store);
+		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED) {
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store);
 			return;
 		}
 		//?}
@@ -668,16 +668,16 @@ public final class MapLevel implements ChunkSource {
 	 * the pixels come back here a frame or two later. Always the whole tile, which costs the GPU
 	 * little. Falls back to tracing if the GPU couldn't draw it.
 	 */
-	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable TileStore store) {
+	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
 		BAKERS.execute(() -> {
 			try {
 				int[] saved = store == null ? null : store.read(key);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog);
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image = result.pixels() != null
-							? TileBaker.gpuImage(key, result.pixels(), saved)
-							: TileBaker.bake(key, this, looks, null, fog, saved, null);
+							? TileBaker.gpuImage(key, result.pixels(), saved, result.info())
+							: TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						this.finished.add(image.withGeneration(generation));
 					} catch (Throwable t) {
 						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);

@@ -257,9 +257,10 @@ public final class TileBaker {
 	}
 
 	/** A tile drawn on the GPU, merged with what was saved the same way a traced bake is. */
-	public static TileImage gpuImage(TileKey key, int[] pixels, int @Nullable [] saved) {
+	public static TileImage gpuImage(TileKey key, int[] pixels, int @Nullable [] saved, byte @Nullable [] info) {
 		merge(pixels, saved, 0, 0, Projection.TILE_PIXELS);
-		return image(key, pixels);
+		int size = Projection.TILE_PIXELS;
+		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
 	}
 
 	/** A full tile image from level-0 pixels: mips and fog coverage. */

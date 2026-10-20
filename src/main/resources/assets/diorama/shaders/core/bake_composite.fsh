@@ -10,8 +10,11 @@ uniform sampler2D SceneColor;
 uniform sampler2D SceneDepth;
 uniform sampler2D WaterColor;
 uniform sampler2D WaterDepth;
+uniform sampler2D SceneInfo;
 
 layout(location = 0) out vec4 fragColor;
+// The overlay bits of the pixel's first sample, as the tracer records them.
+layout(location = 1) out vec4 fragInfo;
 
 const float OUTLINE_DEPTH = 1.5;
 
@@ -59,6 +62,7 @@ vec3 to_srgb(vec3 l) {
 
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy) + ivec2(1);
+    fragInfo = vec4(texelFetch(SceneInfo, pixel * 2, 0).r, 0.0, 0.0, 0.0);
     vec3 sum = vec3(0.0);
     int known = 0;
     for (int i = 0; i < 4; i++) {

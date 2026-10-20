@@ -15,13 +15,22 @@ layout(location = 3) flat in vec4 faceOcclusion;
 layout(location = 4) flat in vec4 faceLight;
 layout(location = 5) flat in ivec2 faceInfo;
 layout(location = 6) in float vertexSky;
+layout(location = 7) flat in ivec3 faceCell;
 
 layout(location = 0) out vec4 fragColor;
+#if !defined(WATER) && !defined(TINTED)
+// The overlay bits of the block a sample shows, over 255; see Overlays.
+layout(location = 1) out vec4 fragInfo;
+#endif
 
 const int FLAG_UNKNOWN = 1;
 const int FLAG_CUT = 4;
 const int FLAG_VOID = 8;
 const int FACE_FLOOR = 3;
+const int FLAG_OVERLAY = 16;
+const int FLAG_SLIME = 32;
+const int FLAG_SPAWN_AT_NIGHT = 64;
+const int FLAG_SPAWN_ANY_TIME = 128;
 
 float bilinear(vec4 c, vec2 f) {
     float top = mix(c.x, c.y, f.x);
@@ -125,6 +134,29 @@ void main() {
     fragColor = vec4(albedo * l, faceColor.a);
 #else
     int flags = faceInfo.y;
+    // The tracer records overlay bits at its first sample, (0.375, 0.125) in the pixel; this
+    // sample's centre is at (0.25, 0.25), a quarter of a sample to the left and below.
+    vec3 firstSample = localPos + dFdx(localPos) * 0.25 - dFdy(localPos) * 0.25;
+    fragInfo = vec4(0.0);
+    if ((flags & FLAG_OVERLAY) != 0) {
+        // TileBaker.overlayBits. The origin is a multiple of 16, so local cells sit in chunks as world ones do.
+        vec3 f = firstSample - vec3(faceCell);
+        int bits = 0;
+        if ((faceCell.x & 15) == 0 && f.x < 0.25) {
+            bits |= 1;
+        }
+        if (top && (faceCell.z & 15) == 0 && f.z < 1.0 / (4.0 * Camera.x)) {
+            bits |= 2;
+        }
+        if ((flags & FLAG_SLIME) != 0) {
+            bits |= 4;
+        }
+        if (top && (flags & (FLAG_SPAWN_AT_NIGHT | FLAG_SPAWN_ANY_TIME)) != 0
+            && f.x >= 0.3 && f.x < 0.7 && f.z >= 0.3 && f.z < 0.7) {
+            bits |= (flags & FLAG_SPAWN_ANY_TIME) != 0 ? 16 : 8;
+        }
+        fragInfo = vec4(float(bits) / 255.0, 0.0, 0.0, 0.0);
+    }
     if ((flags & FLAG_UNKNOWN) != 0) {
         // A chunk the map has no data for, or unseen under fog of war: the pixel stays unknown.
         fragColor = vec4(0.0);

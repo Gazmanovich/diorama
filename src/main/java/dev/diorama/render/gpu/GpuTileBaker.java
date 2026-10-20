@@ -96,9 +96,13 @@ public final class GpuTileBaker {
 		.withUniform("SceneDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 		.withUniform("WaterColor", UniformType.COMBINED_IMAGE_SAMPLER)
 		.withUniform("WaterDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+		.withUniform("SceneInfo", UniformType.COMBINED_IMAGE_SAMPLER)
 		.build();
 
 	private static final ColorTargetState HDR = new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL);
+	/** The overlay bits a sample shows; plants and glass leave them as they are. */
+	private static final ColorTargetState INFO = new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM, ColorTargetState.WRITE_ALL);
+	private static final ColorTargetState INFO_KEPT = new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM, ColorTargetState.WRITE_NONE);
 
 	// Not registered: compiled the first time they're used, so a broken shader only stops the experiment.
 	private static final RenderPipeline SHADOW = faces("bake_shadow", "SHADOW", CASTER)
@@ -107,14 +111,16 @@ public final class GpuTileBaker {
 	private static final RenderPipeline OPAQUE = faces("bake_opaque", null, FACE)
 		.withBindGroupLayout(SHADOW_MAP)
 		.withBindGroupLayout(VOXELS)
-		.withColorTargetState(HDR)
+		.withColorTargetState(0, HDR)
+		.withColorTargetState(1, INFO)
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
 	// Colour blends by the face's weight; alpha, which says the pixel is known, stays.
 	private static final RenderPipeline TINTED = faces("bake_tinted", "TINTED", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
 		.withBindGroupLayout(VOXELS)
-		.withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.ENTITY_OUTLINE_BLIT), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+		.withColorTargetState(0, new ColorTargetState(Optional.of(BlendFunction.ENTITY_OUTLINE_BLIT), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+		.withColorTargetState(1, INFO_KEPT)
 		.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
 		.build();
 	private static final RenderPipeline WATER = faces("bake_water", "WATER", FACE)
@@ -129,7 +135,8 @@ public final class GpuTileBaker {
 		.withFragmentShader(Diorama.id("core/bake_composite"))
 		.withBindGroupLayout(BAKE)
 		.withBindGroupLayout(SCENE_SAMPLERS)
-		.withColorTargetState(ColorTargetState.DEFAULT)
+		.withColorTargetState(0, ColorTargetState.DEFAULT)
+		.withColorTargetState(1, INFO)
 		.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
 		.build();
 
@@ -178,7 +185,8 @@ public final class GpuTileBaker {
 	public record Timing(long meshNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
 	}
 
-	public record Result(int @Nullable [] pixels, Timing timing) {
+	/** {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them. */
+	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing) {
 	}
 
 	/**
@@ -222,7 +230,7 @@ public final class GpuTileBaker {
 			try {
 				if (job.mesh.empty) {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
-					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 				} else if (!draw(job)) {
 					job.fail();
 				}
@@ -275,9 +283,11 @@ public final class GpuTileBaker {
 					pass.drawIndexed(6, job.casterCount, 0, 0, 0);
 				}
 			}
-			try (RenderPass pass = encoder.createRenderPass(
-				() -> "Diorama bake scene", t.sceneColorView, Optional.of(VOID), t.sceneDepthView, OptionalDouble.of(0.0)
-			)) {
+			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake scene")
+				.withColorAttachment(t.sceneColorView, Optional.of(VOID))
+				.withColorAttachment(t.sceneInfoView, Optional.of(CLEAR))
+				.withDepthAttachment(t.sceneDepthView, OptionalDouble.of(0.0))
+				.build())) {
 				if (faceBuffer != null && job.opaqueCount + job.tintedCount > 0) {
 					pass.setPipeline(opaque);
 					pass.setUniform("DioramaBake", t.ubo);
@@ -310,29 +320,50 @@ public final class GpuTileBaker {
 					pass.drawIndexed(6, job.waterCount, 0, 0, 0);
 				}
 			}
-			try (RenderPass pass = encoder.createRenderPass(() -> "Diorama bake composite", t.outputView, Optional.empty())) {
+			try (RenderPass pass = encoder.createRenderPass(RenderPassDescriptor.builder(() -> "Diorama bake composite")
+			.withColorAttachment(t.outputView, Optional.empty())
+			.withColorAttachment(t.outputInfoView, Optional.empty())
+			.build())) {
 				pass.setPipeline(composite);
 				pass.setUniform("DioramaBake", t.ubo);
 				pass.setUniform("SceneColor", t.sceneColorView, nearest);
 				pass.setUniform("SceneDepth", t.sceneDepthView, nearest);
 				pass.setUniform("WaterColor", t.waterColorView, nearest);
 				pass.setUniform("WaterDepth", t.waterDepthView, nearest);
+			pass.setUniform("SceneInfo", t.sceneInfoView, nearest);
 				pass.draw(3, 1, 0, 0);
 			}
 			encoder.writeTimestamp(t.timestamps, slot + 1);
 
 			int size = Projection.TILE_PIXELS;
 			GpuBuffer readback = device.createBuffer(() -> "Diorama bake readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size * 4);
+		boolean wantsInfo = job.mesh.overlays != null;
+		GpuBuffer infoReadback = wantsInfo ? device.createBuffer(() -> "Diorama bake info readback", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) size * size) : null;
+		// The colour finishes the job; the overlay bits, read back first, ride along.
+		byte[][] info = new byte[1][];
 			GpuQueryPool timestamps = t.timestamps;
 			long[] recorded = new long[1];
 			PENDING.add(job);
+			if (infoReadback != null) {
+				encoder.copyTextureToBuffer(t.outputInfo, infoReadback, 0L, () -> {
+					try (GpuBufferSlice.MappedView view = infoReadback.map(true, false)) {
+						byte[] bits = new byte[size * size];
+						view.data().get(bits);
+						info[0] = bits;
+					} catch (Throwable e) {
+						Diorama.LOGGER.error("Reading back GPU tile overlays {} failed", job.mesh.key, e);
+					} finally {
+						infoReadback.close();
+					}
+				}, 0);
+			}
 			encoder.copyTextureToBuffer(t.output, readback, 0L, () -> {
 				try {
 					int[] pixels = new int[size * size];
 					try (GpuBufferSlice.MappedView view = readback.map(true, false)) {
 						view.data().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
 					}
-					job.done(pixels, recorded[0], gpuNanos(timestamps, slot));
+					job.done(pixels, info[0], recorded[0], gpuNanos(timestamps, slot));
 				} catch (Throwable e) {
 					Diorama.LOGGER.error("Reading back GPU tile {} failed", job.mesh.key, e);
 					job.fail();
@@ -383,6 +414,10 @@ public final class GpuTileBaker {
 		final GpuTextureView shadowView;
 		final GpuTexture sceneColor;
 		final GpuTextureView sceneColorView;
+		final GpuTexture sceneInfo;
+		final GpuTextureView sceneInfoView;
+		final GpuTexture outputInfo;
+		final GpuTextureView outputInfoView;
 		final GpuTexture sceneDepth;
 		final GpuTextureView sceneDepthView;
 		final GpuTexture waterColor;
@@ -404,6 +439,13 @@ public final class GpuTileBaker {
 			this.shadowView = device.createTextureView(this.shadow);
 			this.sceneColor = device.createTexture("Diorama bake scene", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
 			this.sceneColorView = device.createTextureView(this.sceneColor);
+			this.sceneInfo = device.createTexture("Diorama bake scene overlays", sampled, GpuFormat.R8_UNORM, SCENE, SCENE, 1, 1);
+			this.sceneInfoView = device.createTextureView(this.sceneInfo);
+			this.outputInfo = device.createTexture(
+				"Diorama bake output overlays", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC, GpuFormat.R8_UNORM,
+				Projection.TILE_PIXELS, Projection.TILE_PIXELS, 1, 1
+			);
+			this.outputInfoView = device.createTextureView(this.outputInfo);
 			this.sceneDepth = device.createTexture("Diorama bake scene depth", sampled, GpuFormat.D32_FLOAT, SCENE, SCENE, 1, 1);
 			this.sceneDepthView = device.createTextureView(this.sceneDepth);
 			this.waterColor = device.createTexture("Diorama bake water", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
@@ -615,7 +657,7 @@ public final class GpuTileBaker {
 			range[1] = Math.max(range[1], value);
 		}
 
-		void done(int[] pixels, long recordNanos, long gpuNanos) {
+		void done(int[] pixels, byte @Nullable [] info, long recordNanos, long gpuNanos) {
 			PENDING.remove(this);
 			if (!this.completed.compareAndSet(false, true)) {
 				return;
@@ -628,7 +670,7 @@ public final class GpuTileBaker {
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
 			);
 			log(timing);
-			this.callback.accept(new Result(pixels, timing));
+			this.callback.accept(new Result(pixels, info, timing));
 		}
 
 		void fail() {
@@ -637,7 +679,7 @@ public final class GpuTileBaker {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
+			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
 		}
 
 		void free() {

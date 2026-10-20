@@ -3,6 +3,7 @@ package dev.diorama.bake;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.data.ChunkSnapshot;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Builds the block faces a tile shows, for drawing it on the GPU instead of tracing it.
@@ -40,6 +41,12 @@ public final class GpuMesher {
 	public static final int CUT = 4;
 	/** A floor where the ray was in open space: the tracer's near-black void. */
 	public static final int VOID = 8;
+	/** A solid face whose pixels record {@link Overlays} bits; the GPU adds the chunk lines. */
+	public static final int OVERLAY = 16;
+	/** {@link Overlays#SLIME}, {@link Overlays#SPAWN_AT_NIGHT} and {@link Overlays#SPAWN_ANY_TIME} for the face. */
+	public static final int SLIME = 32;
+	public static final int SPAWN_AT_NIGHT = 64;
+	public static final int SPAWN_ANY_TIME = 128;
 
 	/** The section table's entries for sections without solid bits: a missing chunk, or nothing solid. */
 	public static final int SECTION_UNKNOWN = 0xFFFFFFFE;
@@ -132,6 +139,9 @@ public final class GpuMesher {
 		public int rayTop;
 		/** Time spent building, for the experiment's numbers. */
 		public long buildNanos;
+		/** What to record for the overlays, or null for nothing. */
+		public @Nullable Overlays overlays;
+		private final java.util.Map<Long, Boolean> slimeChunks = new java.util.HashMap<>();
 
 		Mesh(TileKey key, int topY, int minY, double sin, double cos, boolean lit, boolean cave, boolean empty) {
 			Quads[] lists = LISTS.get();
@@ -163,8 +173,11 @@ public final class GpuMesher {
 		return (int) Math.floor((maxV + (y + 1) * cos) / sin) + 1;
 	}
 
-	/** {@code fogOfWar} as for {@link TileBaker#bake}: cave views may only show what the player has seen. */
-	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
+	/**
+	 * {@code fogOfWar} and {@code overlays} as for {@link TileBaker#bake}: cave views may only show
+	 * what the player has seen, and overlay bits are recorded when {@code overlays} isn't null.
+	 */
+	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		long start = System.nanoTime();
 		TileBaker helper = TileBaker.forMeshing(key, source, looks, fogOfWar);
 		VoxelReader reader = helper.reader;
@@ -176,6 +189,7 @@ public final class GpuMesher {
 		boolean lit = helper.lit;
 		boolean fog = helper.fogOfWar;
 		Mesh mesh = new Mesh(key, startY, limitY, sin, cos, lit, helper.cave, startY <= limitY);
+		mesh.overlays = overlays;
 		mesh.rayTop = helper.rayTop;
 
 		double minV = key.minV();
@@ -192,6 +206,10 @@ public final class GpuMesher {
 		boolean[] hereRock = new boolean[zSpan];
 		boolean[] aboveWater = new boolean[zSpan];
 		boolean[] hereWater = new boolean[zSpan];
+		// Under fog of war: the ray went through water it entered at a cell the player has seen.
+		// The tracer shows such a ray even when it then meets nothing.
+		boolean[] aboveSeenWater = new boolean[zSpan];
+		boolean[] hereSeenWater = new boolean[zSpan];
 		// The camera's faces' extent, for the sky occlusion region.
 		int fx0 = Integer.MAX_VALUE;
 		int fx1 = Integer.MIN_VALUE;
@@ -206,12 +224,14 @@ public final class GpuMesher {
 			java.util.Arrays.fill(aboveOpen, !lit);
 			java.util.Arrays.fill(aboveRock, lit);
 			java.util.Arrays.fill(aboveWater, false);
+			java.util.Arrays.fill(aboveSeenWater, false);
 			for (int y = startY - 1; y >= limitY; y--) {
 				int lo = zLow(minV, y, sin, cos);
 				int hi = zHigh(maxV, y, sin, cos);
 				java.util.Arrays.fill(hereOpen, false);
 				java.util.Arrays.fill(hereRock, false);
 				java.util.Arrays.fill(hereWater, false);
+				java.util.Arrays.fill(hereSeenWater, false);
 				boolean any = false;
 				for (int z = hi; z >= lo; z--) {
 					int i = z - zBase;
@@ -260,10 +280,16 @@ public final class GpuMesher {
 					} else {
 						hereOpen[i] = true;
 						any = true;
+						if (fog) {
+							hereSeenWater[i] = (openAbove && aboveSeenWater[i]) || (openSouth && hereSeenWater[i + 1]);
+						}
 						if (kind == BlockLooks.WATER) {
 							hereWater[i] = true;
 							boolean entersTop = fromAbove && !(openAbove && aboveWater[i]);
 							boolean entersSouth = fromSouth && !(openSouth && hereWater[i + 1]);
+							if (fog && (entersTop || entersSouth) && source.isSeen(x, y, z)) {
+								hereSeenWater[i] = true;
+							}
 							if (entersTop || entersSouth) {
 								helper.albedo(id, x, z, true);
 								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 255);
@@ -304,7 +330,7 @@ public final class GpuMesher {
 					for (int z = hi; z >= lo; z--) {
 						int i = z - zBase;
 						if (hereRock[i] || hereOpen[i]) {
-							int flags = fog ? UNKNOWN : hereRock[i] ? CUT : VOID;
+							int flags = hereRock[i] ? (fog ? UNKNOWN : CUT) : fog && !hereSeenWater[i] ? UNKNOWN : VOID;
 							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, flags);
 						}
 					}
@@ -318,6 +344,9 @@ public final class GpuMesher {
 				t = aboveWater;
 				aboveWater = hereWater;
 				hereWater = t;
+				t = aboveSeenWater;
+				aboveSeenWater = hereSeenWater;
+				hereSeenWater = t;
 				if (!any) {
 					break;
 				}
@@ -359,7 +388,35 @@ public final class GpuMesher {
 		int color = solidColor(helper, id, x, y, z, top, looks.emission[id], kind, style);
 		int ao = top ? aoTop(helper, x, y + 1, z) : aoSouth(helper, x, y, z + 1);
 		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1)) : 0;
-		mesh.opaque.add(x, y, z, face, color, ao, light, kind == BlockLooks.LAVA ? LAVA : 0);
+		int flags = kind == BlockLooks.LAVA ? LAVA : 0;
+		if (mesh.overlays != null && kind == BlockLooks.SOLID) {
+			flags |= overlayFlags(mesh, helper.reader, looks, id, x, y, z, top);
+		}
+		mesh.opaque.add(x, y, z, face, color, ao, light, flags);
+	}
+
+	/** TileBaker.overlayBits for a face, all but the chunk lines, which depend on where in the block a pixel is. */
+	private static int overlayFlags(Mesh mesh, VoxelReader reader, BlockLooks looks, int id, int x, int y, int z, boolean top) {
+		int flags = OVERLAY;
+		Overlays overlays = mesh.overlays;
+		Long seed = overlays.slimeSeed();
+		if (seed != null) {
+			int cx = x >> 4;
+			int cz = z >> 4;
+			if (mesh.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, cx, cz))) {
+				flags |= SLIME;
+			}
+		}
+		// A dot in the middle of each top face a monster could spawn on, by the tracer's rule.
+		if (overlays.spawnSpots() && top && looks.spawnOn[id]) {
+			int feet = reader.state(x, y + 1, z);
+			int head = reader.state(x, y + 2, z);
+			if (feet != VoxelReader.UNKNOWN && head != VoxelReader.UNKNOWN && looks.spawnIn[feet] && looks.spawnIn[head]
+				&& reader.blockLight(x, y + 1, z) == 0) {
+				flags |= reader.skyLight(x, y + 1, z) <= Overlays.DAYLIGHT_SPAWN_LIMIT ? SPAWN_ANY_TIME : SPAWN_AT_NIGHT;
+			}
+		}
+		return flags;
 	}
 
 	/** Sky light in the top byte, block light in the next: the open cell a face looks into. */
