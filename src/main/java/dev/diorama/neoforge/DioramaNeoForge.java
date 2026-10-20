@@ -14,6 +14,7 @@ import dev.diorama.render.DioramaPipelines;
 //?}
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
+import dev.diorama.waypoint.WaypointStore;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -79,6 +80,7 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(RegisterClientCommandsEvent.class, event -> WaypointShare.register(event.getDispatcher()));
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			ServerRules.onDisconnect();
+			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -86,6 +88,7 @@ public final class DioramaNeoForge {
 		// A network moving the player to another of its servers joins again without leaving.
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
 			ServerRules.onDisconnect();
+			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

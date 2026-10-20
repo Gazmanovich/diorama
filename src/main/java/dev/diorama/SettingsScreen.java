@@ -80,7 +80,6 @@ public final class SettingsScreen extends Screen {
 		y = this.toggle(right, y, "diorama.settings.deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 
 		y = this.header("diorama.settings.look", right, y + 4);
-		y = this.toggle(right, y, "diorama.settings.depth_shading", () -> s.depthShading, v -> s.depthShading = v);
 		y = this.toggle(right, y, "diorama.settings.outlines", () -> s.outlines, v -> s.outlines = v);
 		y = this.toggle(right, y, "diorama.settings.rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		y = this.toggle(right, y, "diorama.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);

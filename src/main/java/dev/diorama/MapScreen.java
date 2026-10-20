@@ -11,9 +11,11 @@ import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
+import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
 import dev.diorama.waypoint.Waypoints;
 import net.minecraft.core.BlockPos;
+import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -30,7 +32,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 
 /**
  * The fullscreen map: drag to pan, scroll to zoom, C for caves, PgUp/PgDn to move the slice,
- * right-click to add a waypoint, click a waypoint to edit it.
+ * click a waypoint to edit it, right-click for a menu of what can be done at a spot or waypoint.
  */
 public final class MapScreen extends Screen {
 	/** How far out the saved surface map zooms; overview tiles make it cheap. */
@@ -51,6 +53,12 @@ public final class MapScreen extends Screen {
 	private double pressX;
 	private double pressY;
 	private boolean dragged;
+	/** The right-click menu, while it's open. */
+	private @Nullable MapMenu menu;
+	/** Whether the current mouse press started on the menu. */
+	private boolean pressOnMenu;
+	/** The button of the latest press, until it's released. */
+	private int pressButton = -1;
 
 	public MapScreen() {
 		super(Component.translatable("diorama.screen.title"));
@@ -61,6 +69,8 @@ public final class MapScreen extends Screen {
 
 	@Override
 	protected void init() {
+		// Built for the old size, so a resize closes it.
+		this.menu = null;
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
 			this.minecraft.gui.setScreen(new SettingsScreen(this))).bounds(this.width - 64, 0, 64, 14).build());
 	}
@@ -106,13 +116,16 @@ public final class MapScreen extends Screen {
 		Radar.draw(graphics, view, this.blips, true, true);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
 		this.lastView = view;
-		// The tooltip is for whatever is drawn on top: a player, then a waypoint, then a mob.
-		if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
-			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
-		} else if (hoveredPin != null) {
-			graphics.setTooltipForNextFrame(this.font, WaypointOverlay.describe(hoveredPin.waypoint(), player), mouseX, mouseY);
-		} else if (hovered != null) {
-			graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+		// The tooltip is for whatever is drawn on top: a player, then a waypoint, then a mob. The
+		// menu covers them while it's open.
+		if (this.menu == null) {
+			if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
+				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+			} else if (hoveredPin != null) {
+				graphics.setTooltipForNextFrame(this.font, WaypointOverlay.describe(hoveredPin.waypoint(), player), mouseX, mouseY);
+			} else if (hovered != null) {
+				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+			}
 		}
 
 		String mode = this.layer != TileKey.SURFACE
@@ -125,7 +138,7 @@ public final class MapScreen extends Screen {
 		);
 		graphics.fill(0, 0, this.width, 14, 0x90000000);
 		graphics.text(this.font, status, 6, 3, 0xFFFFFFFF, false);
-		String help = "Drag pan · Scroll zoom · Right-click add waypoint · U waypoints · C caves · PgUp/PgDn slice · Space recenter";
+		String help = "Drag pan · Scroll zoom · Right-click options · U waypoints · C caves · PgUp/PgDn slice · Space recenter";
 		graphics.fill(0, this.height - 14, this.width, this.height, 0x90000000);
 		// Shrink the help line rather than cut it off on narrow screens.
 		float helpScale = Math.min(1, (this.width - 12) / (float) this.font.width(help));
@@ -136,6 +149,20 @@ public final class MapScreen extends Screen {
 		graphics.pose().popMatrix();
 		// Widgets (the settings button) draw over the map.
 		super.extractRenderState(graphics, mouseX, mouseY, a);
+		if (this.menu != null) {
+			// Over everything drawn so far, text included.
+			//? if >=1.21.6 {
+			graphics.nextStratum();
+			this.menu.draw(graphics, mouseX, mouseY);
+			//?} else {
+			/*graphics.flush();
+			var pose = graphics.pose();
+			pose.pushPose();
+			pose.translate(0, 0, 400);
+			this.menu.draw(graphics, mouseX, mouseY);
+			pose.popPose();
+			*///?}
+		}
 	}
 
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
@@ -143,7 +170,7 @@ public final class MapScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		return this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y());
+		return this.menuPressed(event.x(), event.y(), event.button()) || this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y(), event.button());
 	}
 
 	@Override
@@ -164,7 +191,7 @@ public final class MapScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean mouseClicked(double x, double y, int button) {
-		return this.clicked(super.mouseClicked(x, y, button), x, y);
+		return this.menuPressed(x, y, button) || this.clicked(super.mouseClicked(x, y, button), x, y, button);
 	}
 
 	@Override
@@ -184,8 +211,25 @@ public final class MapScreen extends Screen {
 	}
 	*///?}
 
+	/**
+	 * A press while the menu is open, which the widgets don't get: on the menu it's for the menu,
+	 * and anywhere else its release only closes the menu. False when the menu isn't open.
+	 */
+	private boolean menuPressed(double x, double y, int button) {
+		if (this.menu == null) {
+			return false;
+		}
+		this.pressOnMenu = this.menu.contains(x, y);
+		this.pressButton = button;
+		this.pressX = x;
+		this.pressY = y;
+		this.dragged = false;
+		return true;
+	}
+
 	/** A press; {@code widgetTook} if a widget (the settings button) took it. */
-	private boolean clicked(boolean widgetTook, double x, double y) {
+	private boolean clicked(boolean widgetTook, double x, double y, int button) {
+		this.pressButton = button;
 		if (widgetTook) {
 			this.dragged = true;
 			return true;
@@ -198,7 +242,29 @@ public final class MapScreen extends Screen {
 
 	/** A release; false leaves it to the screen's widgets. */
 	private boolean released(double x, double y, int button) {
-		if (this.dragged || Math.hypot(x - this.pressX, y - this.pressY) > 3) {
+		// Only the release of the latest press counts: letting go of a button held since before
+		// the menu opened mustn't close it.
+		if (button != this.pressButton) {
+			return true;
+		}
+		this.pressButton = -1;
+		boolean moved = this.dragged || Math.hypot(x - this.pressX, y - this.pressY) > 3;
+		if (this.pressOnMenu) {
+			this.pressOnMenu = false;
+			if (!moved && button == InputConstants.MOUSE_BUTTON_LEFT && this.menu != null && this.menu.click(x, y)) {
+				this.menu = null;
+			}
+			return true;
+		}
+		if (moved) {
+			return true;
+		}
+		if (this.menu != null) {
+			// A click off the menu only closes it; a right-click opens the next one.
+			this.menu = null;
+			if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
+				this.openMenu(x, y);
+			}
 			return true;
 		}
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
@@ -209,30 +275,110 @@ public final class MapScreen extends Screen {
 			return true;
 		}
 		if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
-			this.addWaypointAt(x, y);
+			this.openMenu(x, y);
 			return true;
 		}
 		return false;
 	}
 
-	/** Opens a new waypoint on the block shown under a screen point. */
-	public void addWaypointAt(double screenX, double screenY) {
+	/** Opens the menu for what's under a screen point: a waypoint's, or the spot's. */
+	private void openMenu(double screenX, double screenY) {
+		WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, screenX, screenY);
+		List<MapMenu.Item> items = pin != null ? this.waypointItems(pin.waypoint()) : this.spotItems(this.spotAt(screenX, screenY));
+		this.menu = new MapMenu(items, this.font, screenX, screenY, this.width, this.height);
+	}
+
+	/** Where a player would stand on the block shown under a screen point; null where the map has nothing. */
+	private @Nullable BlockPos spotAt(double screenX, double screenY) {
 		MapSession session = MapSession.get();
 		BlockLooks looks = BlockLooks.get();
 		MapViewport.View view = this.lastView;
 		if (session == null || looks == null || view == null) {
-			return;
+			return null;
 		}
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
 		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
-		BlockPos spot = MapPick.standingSpot(session.map(), looks, u, v, this.layer, session.map().fogOfWar());
+		return MapPick.standingSpot(session.map(), looks, u, v, this.layer, session.map().fogOfWar());
+	}
+
+	private List<MapMenu.Item> spotItems(@Nullable BlockPos spot) {
 		if (spot == null) {
-			return;
+			return List.of(MapMenu.Item.info(Component.translatable("diorama.menu.not_mapped")));
 		}
-		Waypoint waypoint = Waypoints.at(spot);
-		if (waypoint != null) {
-			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, true));
+		int x = spot.getX();
+		int y = spot.getY();
+		int z = spot.getZ();
+		return List.of(
+			MapMenu.Item.info(this.where(x, y, z)),
+			MapMenu.Item.action(Component.translatable("diorama.menu.teleport_here"), Waypoints.canTeleport(), () -> {
+				Waypoints.teleport(x, y, z);
+				this.minecraft.gui.setScreen(null);
+			}),
+			MapMenu.Item.action(Component.translatable("diorama.menu.add_waypoint"), true, () -> {
+				Waypoint waypoint = Waypoints.at(spot);
+				if (waypoint != null) {
+					this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, true));
+				}
+			}),
+			MapMenu.Item.action(Component.translatable("diorama.menu.add_temporary"), true, () -> Waypoints.addTemporary(spot)),
+			// Chat can't take it back, so sharing asks twice.
+			MapMenu.Item.confirmed(Component.translatable("diorama.menu.share_location"), Component.translatable("diorama.menu.share_confirm"), () -> {
+				String dimension = Waypoints.dimension();
+				Waypoint location = new Waypoint(Component.translatable("diorama.menu.shared_location").getString(), x, y, z,
+					dimension != null ? dimension : "minecraft:overworld", Waypoint.PALETTE[0]);
+				if (WaypointShare.send(location)) {
+					this.minecraft.gui.setScreen(null);
+				}
+			})
+		);
+	}
+
+	private List<MapMenu.Item> waypointItems(Waypoint waypoint) {
+		List<MapMenu.Item> items = new ArrayList<>();
+		items.add(MapMenu.Item.title(Component.literal(waypoint.name)));
+		items.add(MapMenu.Item.info(this.where(waypoint.x, waypoint.y, waypoint.z)));
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
+			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(), () -> {
+			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
+			this.minecraft.gui.setScreen(null);
+		}));
+		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
+			if (WaypointShare.send(waypoint)) {
+				this.minecraft.gui.setScreen(null);
+			}
+		}));
+		if (waypoint.kind == Waypoint.Kind.TEMPORARY) {
+			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.keep"), true, () -> {
+				waypoint.kind = Waypoint.Kind.MANUAL;
+				this.changed();
+			}));
 		}
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, () -> {
+			waypoint.visible = false;
+			this.changed();
+		}));
+		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), () -> {
+			WaypointStore store = WaypointStore.get();
+			if (store != null) {
+				store.remove(waypoint);
+			}
+		}));
+		return items;
+	}
+
+	private void changed() {
+		WaypointStore store = WaypointStore.get();
+		if (store != null) {
+			store.changed();
+		}
+	}
+
+	/** "120, 64, -340 · 212 m": a block position and how far the player is from it. */
+	private Component where(int x, int y, int z) {
+		LocalPlayer player = this.minecraft.player;
+		long distance = player == null ? 0 : Math.round(Math.sqrt(player.distanceToSqr(x + 0.5, y, z + 0.5)));
+		return Component.translatable("diorama.menu.where", x, y, z, distance);
 	}
 
 	/** A drag; false leaves it to the screen's widgets. */
@@ -240,7 +386,12 @@ public final class MapScreen extends Screen {
 		if (Math.hypot(x - this.pressX, y - this.pressY) > 3) {
 			this.dragged = true;
 		}
+		if (this.pressOnMenu) {
+			return true;
+		}
 		if (button == InputConstants.MOUSE_BUTTON_LEFT && this.dragged) {
+			// The menu stays where it opened, so it can't follow the map.
+			this.menu = null;
 			this.centerU -= dx / this.zoom;
 			this.centerV -= dy / this.zoom;
 			this.following = false;
@@ -251,6 +402,7 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+		this.menu = null;
 		double before = this.zoom;
 		double after = Math.max(this.minZoom(), Math.min(MAX_ZOOM, before * Math.pow(1.25, scrollY)));
 		if (after != before) {
@@ -278,21 +430,30 @@ public final class MapScreen extends Screen {
 			this.onClose();
 			return true;
 		}
+		if (key == InputConstants.KEY_ESCAPE && this.menu != null) {
+			this.menu = null;
+			return true;
+		}
 		LocalPlayer player = this.minecraft.player;
+		// Each of these changes the view, which an open menu belongs to, so they close it.
 		switch (key) {
 			case InputConstants.KEY_C -> {
+				this.menu = null;
 				this.layer = this.layer == TileKey.SURFACE && player != null ? MapSession.caveLayerFor(player.getY()) : TileKey.SURFACE;
 				return true;
 			}
 			case InputConstants.KEY_PAGEUP -> {
+				this.menu = null;
 				this.shiftSlice(4, player);
 				return true;
 			}
 			case InputConstants.KEY_PAGEDOWN -> {
+				this.menu = null;
 				this.shiftSlice(-4, player);
 				return true;
 			}
 			case InputConstants.KEY_SPACE -> {
+				this.menu = null;
 				this.following = true;
 				return true;
 			}
@@ -330,6 +491,11 @@ public final class MapScreen extends Screen {
 	/** For tests: the waypoint pins drawn last frame, in GUI coordinates. */
 	public List<WaypointOverlay.Pin> pins() {
 		return this.pins;
+	}
+
+	/** For tests: the right-click menu, if it's open. */
+	public @Nullable MapMenu menu() {
+		return this.menu;
 	}
 
 	/** For tests: the radar markers drawn last frame, in GUI coordinates. */

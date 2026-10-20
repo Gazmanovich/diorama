@@ -10,6 +10,7 @@ import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
+import dev.diorama.waypoint.WaypointStore;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -59,6 +60,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
 			ServerRules.onDisconnect();
+			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -66,6 +68,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
 			ServerRules.onDisconnect();
+			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

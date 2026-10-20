@@ -10,7 +10,9 @@ public final class Waypoint {
 	public enum Kind {
 		MANUAL,
 		/** Added automatically where the player died. */
-		DEATH
+		DEATH,
+		/** Set from the map's menu; never saved, so it's gone once the player leaves the world. */
+		TEMPORARY
 	}
 
 	/** Colours a waypoint can take, picked to stay readable on both grass and water. */
