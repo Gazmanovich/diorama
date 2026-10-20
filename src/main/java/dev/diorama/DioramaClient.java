@@ -56,7 +56,12 @@ public final class DioramaClient {
 		//? if >=1.21.6 {
 		DioramaPipelines.init();
 		//?}
+		//? if fabric {
+		// The settings file sits in the game directory. Fabric calls this from inside Minecraft's
+		// constructor; NeoForge constructs mods before Minecraft exists, so DioramaNeoForge loads them
+		// at client setup instead.
 		Settings.get();
+		//?}
 	}
 
 	/** Called at the end of every client tick. */
