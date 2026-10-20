@@ -96,10 +96,13 @@ final class BlazeBakeBackend implements BakeBackend {
 		*///?}
 	}
 
-	/** 26.2 gives every pipeline a colour target; a depth-only one marks its only slot unused, as its pass does. */
+	/**
+	 * 26.2 gives every pipeline and pass a colour target, and sizes a pass by its first one, so a
+	 * depth-only pass there draws into a stand-in target it never writes.
+	 */
 	private static RenderPipeline.Builder depthOnly(RenderPipeline.Builder builder) {
 		//? if <26.3 {
-		/*builder.withUnusedColorTargetState(0);
+		/*builder.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM, ColorTargetState.WRITE_NONE));
 		*///?}
 		return builder;
 	}
@@ -159,9 +162,6 @@ final class BlazeBakeBackend implements BakeBackend {
 			/*RenderPassDescriptor d = RenderPassDescriptor.create(this.label);
 			for (int i = 0; i < this.colors.size(); i++) {
 				d = d.withColorAttachment(this.colors.get(i), this.clears.get(i));
-			}
-			if (this.colors.isEmpty()) {
-				d = d.withUnusedColorAttachment();
 			}
 			if (this.depth != null) {
 				d = d.withDepthAttachment(this.depth, this.depthClear);
@@ -291,7 +291,11 @@ final class BlazeBakeBackend implements BakeBackend {
 					}
 				}
 			}
-			try (RenderPass pass = new Pass(() -> "Diorama bake shadow").depth(t.shadowView, OptionalDouble.of(0.0)).open(encoder, SHADOW_SIZE)) {
+			Pass shadowPass = new Pass(() -> "Diorama bake shadow").depth(t.shadowView, OptionalDouble.of(0.0));
+			//? if <26.3 {
+			/*shadowPass.color(t.shadowStandInView, Optional.empty());
+			*///?}
+			try (RenderPass pass = shadowPass.open(encoder, SHADOW_SIZE)) {
 				if (casterBuffer != null) {
 					use(pass, SHADOW);
 					pass.setUniform("DioramaBake", t.ubo);
@@ -447,6 +451,10 @@ final class BlazeBakeBackend implements BakeBackend {
 		static final int TIMESTAMPS = 128;
 		final GpuTexture shadow;
 		final GpuTextureView shadowView;
+		//? if <26.3 {
+		/*final GpuTexture shadowStandIn;
+		final GpuTextureView shadowStandInView;
+		*///?}
 		final GpuTexture sceneColor;
 		final GpuTextureView sceneColorView;
 		final GpuTexture sceneAux;
@@ -478,6 +486,10 @@ final class BlazeBakeBackend implements BakeBackend {
 			int size = Projection.TILE_PIXELS;
 			this.shadow = device.createTexture("Diorama bake shadow", sampled, GpuFormat.D32_FLOAT, SHADOW_SIZE, SHADOW_SIZE, 1, 1);
 			this.shadowView = device.createTextureView(this.shadow);
+			//? if <26.3 {
+			/*this.shadowStandIn = device.createTexture("Diorama bake shadow stand-in", GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R8_UNORM, SHADOW_SIZE, SHADOW_SIZE, 1, 1);
+			this.shadowStandInView = device.createTextureView(this.shadowStandIn);
+			*///?}
 			this.sceneColor = device.createTexture("Diorama bake scene", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
 			this.sceneColorView = device.createTextureView(this.sceneColor);
 			this.sceneAux = device.createTexture("Diorama bake scene aux", sampled, GpuFormat.RGBA16_FLOAT, SCENE, SCENE, 1, 1);
