@@ -6,6 +6,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,9 @@ import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.material.Fluid;
 
 /**
@@ -103,6 +107,16 @@ public final class BlockLooks {
 	 * no collision at all, since a slab at head height blocks a zombie too.
 	 */
 	public final boolean[] spawnIn;
+	/**
+	 * Index into {@link #shapes} of a solid block's outline, or 0 for a full cube: everything else,
+	 * and any block whose outline is empty, rays treat as a whole cube.
+	 */
+	public final int[] shape;
+	/**
+	 * Outlines of solid blocks smaller than a cube, such as slabs, stairs, fences and carpets: each
+	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused.
+	 */
+	public float[][] shapes;
 
 	private BlockLooks(int size) {
 		this.kind = new byte[size];
@@ -117,6 +131,7 @@ public final class BlockLooks {
 		this.constantTint = new int[size];
 		this.spawnOn = new boolean[size];
 		this.spawnIn = new boolean[size];
+		this.shape = new int[size];
 	}
 
 	public static BlockLooks get() {
@@ -140,7 +155,9 @@ public final class BlockLooks {
 			&& this.emission[a] == this.emission[b]
 			// Spawn spots show on the map too: a slab becoming a double slab changes them.
 			&& this.spawnOn[a] == this.spawnOn[b]
-			&& this.spawnIn[a] == this.spawnIn[b];
+			&& this.spawnIn[a] == this.spawnIn[b]
+			// Same index, same boxes: outlines are stored once each.
+			&& this.shape[a] == this.shape[b];
 	}
 
 	public static void invalidate() {
@@ -171,6 +188,10 @@ public final class BlockLooks {
 		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
 		RandomSource random = RandomSource.create(42L);
 		TintProbe probe = new TintProbe();
+		Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
+		Map<String, Integer> shapeByBoxes = new HashMap<>();
+		List<float[]> shapes = new ArrayList<>();
+		shapes.add(new float[0]);
 		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
 		//?} else if >=1.21.5 {
@@ -195,6 +216,9 @@ public final class BlockLooks {
 			}
 			byte kind = classify(state);
 			looks.kind[id] = kind;
+			if (kind == SOLID) {
+				looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
+			}
 			if (kind == AIR) {
 				continue;
 			}
@@ -292,6 +316,7 @@ public final class BlockLooks {
 			looks.tint[id] = look.tint().kind();
 			looks.constantTint[id] = look.tint().constant();
 		}
+		looks.shapes = shapes.toArray(new float[0][]);
 		current = looks;
 		//? if >=26.1 {
 		builtFrom = models;
@@ -314,6 +339,56 @@ public final class BlockLooks {
 	}
 
 	*///?}
+	/** A shape with more boxes than this counts as its bounding box. */
+	private static final int MAX_BOXES = 16;
+
+	/** Finds or adds the state's outline in {@code shapes}; 0 for a full cube. */
+	private static int shapeIndex(BlockState state, Map<VoxelShape, Integer> byVoxels, Map<String, Integer> byBoxes, List<float[]> shapes) {
+		VoxelShape outline;
+		try {
+			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+		} catch (RuntimeException e) {
+			return 0;
+		}
+		Integer known = byVoxels.get(outline);
+		if (known != null) {
+			return known;
+		}
+		int index = 0;
+		if (!outline.isEmpty() && outline != Shapes.block()) {
+			List<AABB> boxes = outline.toAabbs();
+			if (boxes.size() > MAX_BOXES) {
+				boxes = List.of(outline.bounds());
+			}
+			float[] flat = new float[boxes.size() * 6];
+			boolean full = false;
+			for (int i = 0; i < boxes.size(); i++) {
+				AABB box = boxes.get(i);
+				// Some mods' outlines reach into the next block; only the part in this one counts.
+				flat[i * 6] = clamp01(box.minX);
+				flat[i * 6 + 1] = clamp01(box.minY);
+				flat[i * 6 + 2] = clamp01(box.minZ);
+				flat[i * 6 + 3] = clamp01(box.maxX);
+				flat[i * 6 + 4] = clamp01(box.maxY);
+				flat[i * 6 + 5] = clamp01(box.maxZ);
+				full |= flat[i * 6] == 0 && flat[i * 6 + 1] == 0 && flat[i * 6 + 2] == 0
+					&& flat[i * 6 + 3] == 1 && flat[i * 6 + 4] == 1 && flat[i * 6 + 5] == 1;
+			}
+			if (!full) {
+				index = byBoxes.computeIfAbsent(java.util.Arrays.toString(flat), key -> {
+					shapes.add(flat);
+					return shapes.size() - 1;
+				});
+			}
+		}
+		byVoxels.put(outline, index);
+		return index;
+	}
+
+	private static float clamp01(double v) {
+		return (float) Math.max(0, Math.min(1, v));
+	}
+
 	private static byte classify(BlockState state) {
 		if (state.isAir() || state.getRenderShape() == RenderShape.INVISIBLE && state.getFluidState().isEmpty()) {
 			return AIR;

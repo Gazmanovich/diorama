@@ -444,6 +444,17 @@ public final class TileBaker {
 				return false;
 			}
 			byte kind = this.looks.kind[id];
+			int shape = this.looks.shape[id];
+			boolean partial = shape != 0;
+			if (partial) {
+				if (this.enterShape(this.looks.shapes[shape], fx, y0, z0, by, bz, t, Math.min(tMaxY, tMaxZ), enteredTop)) {
+					t = this.shapeT;
+					enteredTop = this.shapeTop;
+				} else {
+					// The ray passes beside the block's boxes, on into the next cell.
+					kind = BlockLooks.AIR;
+				}
+			}
 
 			switch (kind) {
 				case BlockLooks.SOLID, BlockLooks.LAVA -> {
@@ -462,7 +473,7 @@ public final class TileBaker {
 					this.hitFx = fx;
 					this.hitFz = hitZ - bz;
 					this.outDepth = (float) (-(sin * hitY + cos * hitZ) - this.depthOrigin);
-					this.shade(id, x, by, bz, fx, hitY, hitZ, enteredTop, sample);
+					this.shade(id, x, by, bz, fx, hitY, hitZ, enteredTop, partial, sample);
 					if (through < 1) {
 						// The overlay tints the albedo; approximate by mixing it in after lighting.
 						float light = luminance(this.outR, this.outG, this.outB) / Math.max(0.05F, luminance(this.albedoR, this.albedoG, this.albedoB));
@@ -568,7 +579,7 @@ public final class TileBaker {
 		};
 	}
 
-	private void shade(int id, int x, int by, int bz, double fx, double hitY, double hitZ, boolean top, int sample) {
+	private void shade(int id, int x, int by, int bz, double fx, double hitY, double hitZ, boolean top, boolean partial, int sample) {
 		this.albedo(id, x, bz, top);
 		float variation = this.style.blockVariation();
 		if (variation > 0) {
@@ -624,8 +635,9 @@ public final class TileBaker {
 			float direct = 0;
 			if (lambert > 0) {
 				double ox = x + fx;
-				double oy = top ? by + 1 + 1e-4 : hitY;
-				double oz = top ? hitZ : bz + 1 + 1e-4;
+				// A partial block's face can sit inside its cell; the shadow ray starts on the face.
+				double oy = top ? (partial ? hitY : by + 1) + 1e-4 : hitY;
+				double oz = top ? hitZ : (partial ? hitZ : bz + 1) + 1e-4;
 				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (this.style.sunStrength() * lambert);
 			}
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
@@ -766,7 +778,7 @@ public final class TileBaker {
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
-		if (cy < this.rayTop && this.occludes(cx, cy, cz)) {
+		if (cy < this.rayTop && this.occludes(cx, cy, cz) && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
 			return true;
 		}
 		int top = this.rayTop;
@@ -810,11 +822,80 @@ public final class TileBaker {
 			if (solid == VoxelReader.UNKNOWN) {
 				return false;
 			}
-			if (solid == 1) {
+			if (solid == 1 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether a ray from (ox, oy, oz) along (dx, dy, dz) meets the solid block in this cell: always
+	 * for a full cube, and for a smaller block only if it crosses one of its boxes.
+	 */
+	private boolean meetsShape(int cx, int cy, int cz, double ox, double oy, double oz, double dx, double dy, double dz) {
+		int id = this.reader.state(cx, cy, cz);
+		int shape = id < 0 ? 0 : this.looks.shape[id];
+		if (shape == 0) {
+			return true;
+		}
+		float[] boxes = this.looks.shapes[shape];
+		double px = ox - cx;
+		double py = oy - cy;
+		double pz = oz - cz;
+		for (int i = 0; i < boxes.length; i += 6) {
+			double near = 0;
+			double far = Double.MAX_VALUE;
+			for (int axis = 0; axis < 3 && near <= far; axis++) {
+				double p = axis == 0 ? px : axis == 1 ? py : pz;
+				double d = axis == 0 ? dx : axis == 1 ? dy : dz;
+				double min = boxes[i + axis];
+				double max = boxes[i + 3 + axis];
+				if (d == 0) {
+					if (p < min || p > max) {
+						far = -1;
+					}
+				} else {
+					double t0 = (min - p) / d;
+					double t1 = (max - p) / d;
+					near = Math.max(near, Math.min(t0, t1));
+					far = Math.min(far, Math.max(t0, t1));
+				}
+			}
+			if (near <= far) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Where the last enterShape call met the boxes: the ray distance, and whether through a top face.
+	private double shapeT;
+	private boolean shapeTop;
+
+	/**
+	 * Whether a camera ray crossing cell ({@code by}, {@code bz}) between {@code tIn} and
+	 * {@code tOut} meets one of a block's boxes, and where first. The ray runs {@code fx} across the
+	 * cell, heading down and north; {@code inTop} says whether it came into the cell from above.
+	 */
+	private boolean enterShape(float[] boxes, double fx, double y0, double z0, int by, int bz, double tIn, double tOut, boolean inTop) {
+		double best = Double.MAX_VALUE;
+		for (int i = 0; i < boxes.length; i += 6) {
+			if (fx < boxes[i] || fx >= boxes[i + 3]) {
+				continue;
+			}
+			double tTop = (y0 - by - boxes[i + 4]) / this.sin;
+			double tSouth = (z0 - bz - boxes[i + 5]) / this.cos;
+			double enter = Math.max(tIn, Math.max(tTop, tSouth));
+			double exit = Math.min(tOut, Math.min((y0 - by - boxes[i + 1]) / this.sin, (z0 - bz - boxes[i + 2]) / this.cos));
+			if (enter < exit && enter < best) {
+				best = enter;
+				// A box flush with the cell's side is met where the ray came into the cell.
+				this.shapeTop = enter == tIn ? inTop : tTop >= tSouth;
+			}
+		}
+		this.shapeT = best;
+		return best != Double.MAX_VALUE;
 	}
 
 	private boolean occludes(int x, int y, int z) {
