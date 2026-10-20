@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The waypoints of one world, saved as JSON in {@code .minecraft/diorama/<world>/waypoints.json}.
- * Client thread only.
+ * Temporary waypoints stay in memory only. Client thread only.
  */
 public final class WaypointStore {
 	/** How many death markers to keep; older ones are dropped as new deaths come in. */
@@ -57,17 +57,29 @@ public final class WaypointStore {
 		this.load();
 	}
 
-	/** The store for the world the client is in, loading it when the world changes. */
+	/**
+	 * The store for the world the client is in, loading it when the world changes. Null while the
+	 * world isn't known, which includes a dimension change waiting for the server to name its
+	 * level: the loaded store is kept through that, or its temporary waypoints would go.
+	 */
 	public static @Nullable WaypointStore get() {
 		String key = WorldKey.current();
 		if (key == null) {
-			current = null;
 			return null;
 		}
 		if (current == null || !current.worldKey.equals(key)) {
 			current = new WaypointStore(key);
 		}
 		return current;
+	}
+
+	/**
+	 * Called on leaving a world, and on joining one, since a network moves the player to another of
+	 * its servers by joining again without leaving. Everything but temporary waypoints is already
+	 * on disk, so dropping the loaded store is what makes those go: the next world reads its file.
+	 */
+	public static void onLeave() {
+		current = null;
 	}
 
 	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests and tools. */
@@ -192,7 +204,7 @@ public final class WaypointStore {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("waypoints.json.tmp");
 			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-				GSON.toJson(this.waypoints, writer);
+				GSON.toJson(this.waypoints.stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList(), writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException | RuntimeException e) {

@@ -64,8 +64,6 @@ public final class Settings {
 
 	public boolean outlines = true;
 	public boolean roundedFog = true;
-	/** The look with sky occlusion, deep shadows and a lower camera; off is the flatter look from before. */
-	public boolean depthShading = true;
 	public boolean alwaysFogOfWar = false;
 	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
@@ -108,8 +106,7 @@ public final class Settings {
 
 	/** The map look these settings ask for. */
 	public MapStyle style() {
-		MapStyle base = this.depthShading ? MapStyle.DEFAULT : MapStyle.FLAT;
-		return base.withName("Settings")
+		return MapStyle.DEFAULT.withName("Settings")
 			.withOutline(this.outlines ? MapStyle.DEFAULT.outline() : 0)
 			.withRoundedFog(this.roundedFog);
 	}
