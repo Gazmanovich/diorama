@@ -163,7 +163,11 @@ final class ShimContext implements ClientGameTestContext {
 			/*write(Screenshot.takeScreenshot(target), file, written);
 			*///?}
 		});
-		while (!written.isDone()) {
+		// A few frames normally; a lost callback fails the test instead of hanging it.
+		for (int frames = 0; !written.isDone(); frames++) {
+			if (frames == 600) {
+				throw new AssertionError("Timed out waiting for screenshot " + name);
+			}
 			ShimThreading.waitFrames(1);
 		}
 		try {
