@@ -8,6 +8,9 @@ import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+//? if >=1.21.6 {
+import dev.diorama.render.DioramaPipelines;
+//?}
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import net.minecraft.client.Minecraft;
@@ -23,6 +26,9 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+//? if >=1.21.6 {
+import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
+//?}
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -37,6 +43,9 @@ public final class DioramaNeoForge {
 	public DioramaNeoForge(IEventBus modBus) {
 		DioramaClient.init();
 		modBus.addListener(RegisterKeyMappingsEvent.class, event -> DioramaClient.KEY_MAPPINGS.forEach(event::register));
+		//? if >=1.21.6 {
+		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> event.registerPipeline(DioramaPipelines.FOG));
+		//?}
 		// Above the whole vanilla HUD, in the same order as on Fabric: waypoint labels, then the
 		// minimap over them. Each layer already sits 200 deeper than the one before, which the Fabric
 		// jars before 1.21.6 have to make up for themselves.
