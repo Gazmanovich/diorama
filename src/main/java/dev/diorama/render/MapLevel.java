@@ -147,7 +147,7 @@ public final class MapLevel implements ChunkSource {
 		return this.roof;
 	}
 
-	/** Whether the sky view is drawn from under a roof, lit like a cave. */
+	/** Whether the sky view is drawn from under a roof, lit as if the rock over the first open space were lifted off. */
 	public boolean roofless() {
 		return this.roof != NO_ROOF;
 	}
@@ -380,9 +380,10 @@ public final class MapLevel implements ChunkSource {
 			} else if (cave) {
 				top = Math.min(top, this.roof);
 			}
-			if (this.roofless()) {
-				// Opening or filling a pocket can move where a column's lifted rock ends, far below
-				// the edit, and with it the shadows that rock casts. Re-bake down to the floor.
+			if (this.roofless() && visibleFromSky && terrain && y0 < this.roof) {
+				// Opening or filling a pocket under the roof can move where a column's lifted rock
+				// ends, far below the edit, and with it the shadows that rock casts. Re-bake down to
+				// the floor. Light changes, newly seen blocks and edits above the roof can't.
 				bottom = layer != TileKey.SURFACE ? layer - TileBaker.CAVE_DEPTH - 1 : this.minY - 1;
 			}
 			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
