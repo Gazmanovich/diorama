@@ -22,6 +22,7 @@
 package net.fabricmc.fabric.api.client.gametest.v1;
 
 import net.minecraft.client.KeyMapping;
+import net.minecraft.core.BlockPos;
 
 /**
  * Simulated mouse and window input. The game ignores the real keyboard and mouse while the tests
@@ -42,6 +43,9 @@ public interface TestInput {
 
 	/** Types the characters, as the keyboard would send them to the focused text field. */
 	void typeChars(String chars);
+
+	/** Turns the player to look at the middle of a block. */
+	void lookAt(BlockPos pos);
 
 	/** Moves the cursor to a position in window pixels. */
 	void setCursorPos(double x, double y);

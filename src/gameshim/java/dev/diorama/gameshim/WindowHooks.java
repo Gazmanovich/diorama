@@ -13,5 +13,8 @@ public interface WindowHooks {
 	/** Back to the size the game started with. */
 	void diorama$resetSize();
 
+	/** The game believes its window has focus (from 26.1, where it asks the window). */
+	void diorama$focus();
+
 	void diorama$resize(int width, int height);
 }

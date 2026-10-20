@@ -30,9 +30,18 @@ public final class ShimMixinPlugin implements IMixinConfigPlugin {
 	public void acceptTargets(Set<String> myTargets, Set<String> otherTargets) {
 	}
 
+	/** Mixins for classes only some versions have (diorama-gameshim.mixins.json lists the rest). */
 	@Override
 	public List<String> getMixins() {
-		return null;
+		//? if >=26.3 {
+		return List.of("GlPresentMixin", "VulkanPresentMixin", "SDLEventHandlerMixin");
+		//?} else if >=26.2 {
+		/*return List.of("GlPresentMixin", "VulkanPresentMixin");
+		*///?} else if >=1.21.5 {
+		/*return List.of("GlPresentMixin");
+		*///?} else {
+		/*return null;
+		*///?}
 	}
 
 	@Override

@@ -37,7 +37,12 @@ final class ShimClientWorld implements TestClientWorldContext {
 		ChunkPos center = minecraft.player.chunkPosition();
 		for (int dz = -distance; dz <= distance; dz++) {
 			for (int dx = -distance; dx <= distance; dx++) {
-				if (!level.getChunkSource().hasChunk(center.x + dx, center.z + dz)) {
+				//? if >=26.1 {
+				boolean loaded = level.getChunkSource().hasChunk(center.x() + dx, center.z() + dz);
+				//?} else {
+				/*boolean loaded = level.getChunkSource().hasChunk(center.x + dx, center.z + dz);
+				*///?}
+				if (!loaded) {
 					return false;
 				}
 			}

@@ -8,9 +8,12 @@ import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldBuilder;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
-import net.minecraft.client.gui.screens.ReceivingLevelScreen;
+//? if <1.21.9 {
+/*import net.minecraft.client.gui.screens.ReceivingLevelScreen;
+*///?}
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
@@ -18,7 +21,11 @@ import net.minecraft.client.gui.screens.BackupConfirmScreen;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.GameRules;
+//? if >=1.21.11 {
+import net.minecraft.world.level.gamerules.GameRules;
+//?} else {
+/*import net.minecraft.world.level.GameRules;
+*///?}
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 
 /** Creates a world the way Fabric API's TestWorldBuilderImpl does: through the Create World screen. */
@@ -51,8 +58,13 @@ final class ShimWorldBuilder implements TestWorldBuilder {
 		ShimThreading.checkOnTestThread("create");
 		checkNoWorld(context, "create a world");
 		Path saveDirectory = context.computeOnClient(minecraft -> {
-			CreateWorldScreen.openFresh(minecraft, minecraft.screen);
-			if (!(minecraft.screen instanceof CreateWorldScreen screen)) {
+			Screen oldScreen = minecraft.gui.screen();
+			//? if >=1.21.9 {
+			CreateWorldScreen.openFresh(minecraft, () -> minecraft.gui.setScreen(oldScreen));
+			//?} else {
+			/*CreateWorldScreen.openFresh(minecraft, oldScreen);
+			*///?}
+			if (!(minecraft.gui.screen() instanceof CreateWorldScreen screen)) {
 				throw new AssertionError("CreateWorldScreen.openFresh did not open the Create World screen");
 			}
 			WorldCreationUiState settings = screen.getUiState();
@@ -77,9 +89,21 @@ final class ShimWorldBuilder implements TestWorldBuilder {
 			settings.getSettings().worldgenLoadContext().lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.FLAT)));
 		settings.setSeed("1");
 		settings.setGenerateStructures(false);
-		settings.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, null);
+		//? if >=26.1 {
+		settings.getGameRules().set(GameRules.ADVANCE_TIME, false, null);
+		settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
+		settings.getGameRules().set(GameRules.SPAWN_MOBS, false, null);
+		// Fabric's runner adds this one from 26.1.
+		settings.getGameRules().set(GameRules.RESPAWN_RADIUS, 0, null);
+		//?} else if >=1.21.11 {
+		/*settings.getGameRules().set(GameRules.ADVANCE_TIME, false, null);
+		settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
+		settings.getGameRules().set(GameRules.SPAWN_MOBS, false, null);
+		*///?} else {
+		/*settings.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, null);
 		settings.getGameRules().getRule(GameRules.RULE_WEATHER_CYCLE).set(false, null);
 		settings.getGameRules().getRule(GameRules.RULE_DOMOBSPAWNING).set(false, null);
+		*///?}
 	}
 
 	static void checkNoWorld(ShimContext context, String action) {
@@ -96,14 +120,13 @@ final class ShimWorldBuilder implements TestWorldBuilder {
 	 */
 	static ShimSingleplayer joinLoadedWorld(ShimContext context, ShimWorldSave save) {
 		for (int i = 0; ; i++) {
-			if (context.computeOnClient(minecraft -> isExperimentalWarning(minecraft.screen))) {
+			if (context.computeOnClient(minecraft -> isExperimentalWarning(minecraft.gui.screen()))) {
 				context.clickScreenButton("gui.yes");
 			}
-			if (context.computeOnClient(minecraft -> minecraft.screen instanceof BackupConfirmScreen)) {
+			if (context.computeOnClient(minecraft -> minecraft.gui.screen() instanceof BackupConfirmScreen)) {
 				context.clickScreenButton("selectWorld.backupJoinSkipButton");
 			}
-			if (context.computeOnClient(minecraft -> minecraft.level != null && minecraft.player != null
-				&& !(minecraft.screen instanceof LevelLoadingScreen) && !(minecraft.screen instanceof ReceivingLevelScreen))) {
+			if (context.computeOnClient(ShimWorldBuilder::isWorldLoaded)) {
 				break;
 			}
 			if (i >= WORLD_LOAD_TIMEOUT_TICKS) {
@@ -116,6 +139,17 @@ final class ShimWorldBuilder implements TestWorldBuilder {
 			throw new AssertionError("The world loaded without an integrated server");
 		}
 		return new ShimSingleplayer(context, save, server);
+	}
+
+	private static boolean isWorldLoaded(Minecraft minecraft) {
+		Screen screen = minecraft.gui.screen();
+		//? if >=1.21.9 {
+		// The loading screen also waits for the world to arrive from the server.
+		boolean loading = screen instanceof LevelLoadingScreen;
+		//?} else {
+		/*boolean loading = screen instanceof LevelLoadingScreen || screen instanceof ReceivingLevelScreen;
+		*///?}
+		return minecraft.level != null && minecraft.player != null && !loading;
 	}
 
 	private static boolean isExperimentalWarning(Screen screen) {
