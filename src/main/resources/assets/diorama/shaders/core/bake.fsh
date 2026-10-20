@@ -3,8 +3,8 @@
 
 #include <diorama:bake.glsl>
 
-// The same lighting as TileBaker.shade for the sky view, per fragment. One fragment of the
-// double-size target is one of the tracer's four samples per pixel.
+// The same lighting as TileBaker.shade, per fragment. One fragment of the double-size target is
+// one of the tracer's four samples per pixel.
 #ifndef SHADOW
 uniform sampler2D ShadowMap;
 
@@ -12,12 +12,16 @@ layout(location = 0) in vec3 localPos;
 layout(location = 1) in vec2 faceUv;
 layout(location = 2) flat in vec4 faceColor;
 layout(location = 3) flat in vec4 faceOcclusion;
-layout(location = 4) flat in vec4 faceSky;
+layout(location = 4) flat in vec4 faceLight;
 layout(location = 5) flat in ivec2 faceInfo;
+layout(location = 6) in float vertexSky;
 
 layout(location = 0) out vec4 fragColor;
 
 const int FLAG_UNKNOWN = 1;
+const int FLAG_CUT = 4;
+const int FLAG_VOID = 8;
+const int FACE_FLOOR = 3;
 
 float bilinear(vec4 c, vec2 f) {
     float top = mix(c.x, c.y, f.x);
@@ -53,8 +57,8 @@ float sunlight(vec3 p, vec3 jitter) {
     return nudged > Shadow.x && nudged < SunDir.w ? 0.0 : 1.0;
 }
 
-// The direct and ambient light on a face, before its colour.
-vec3 light(vec3 p, bool top, float ao, float sky) {
+// Sky view: the direct and ambient light on a face, before its colour.
+vec3 sun_light(vec3 p, bool top, float ao, float sky) {
     int sampleIndex = (int(gl_FragCoord.x) & 1) + 2 * (int(gl_FragCoord.y) & 1);
     vec3 jitter = Jitter[sampleIndex].xyz;
     vec3 sun = SunDir.xyz + jitter;
@@ -75,6 +79,22 @@ vec3 light(vec3 p, bool top, float ao, float sky) {
     }
     return l;
 }
+
+// Caves and under a roof: the game's block and sky light in the cell the face looks into.
+vec3 lit_light(vec3 p, float ao) {
+    float bl = faceLight.y * 255.0 / 15.0;
+    float sl = faceLight.x * 255.0 / 15.0 * 0.8;
+    float warm = pow(bl, 1.5);
+    float cool = pow(sl, 1.5);
+    // Unlit caves stay readable; torches, lava and daylight make them glow.
+    float base = 0.42;
+    vec3 l = (base * vec3(0.92, 0.96, 1.08) + warm * vec3(0.9, 0.75, 0.5) + cool * vec3(0.6, 0.65, 0.75)) * ao;
+    if (Mode.y > 0.5) {
+        // Deeper below the cut reads darker.
+        l *= 1.0 - min(0.5, (Mode.z - p.y) / 60.0);
+    }
+    return l;
+}
 #endif
 
 void main() {
@@ -83,28 +103,40 @@ void main() {
     vec3 albedo = to_linear(faceColor.rgb) * 2.0;
 #ifdef WATER
     // The water's colour and the light on its surface; the composite mixes it by depth.
-    vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
-    float ambient = Light.x;
-    if (Light.z > 0.0) {
-        ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * bilinear(faceSky, top ? faceUv : vec2(0.5))));
-    }
-    float lit = ambient + sunlight(localPos + normal * 0.06, vec3(0.0)) * Light.y;
-    if (Light.w != 0.0) {
-        lit *= 1.0 + Light.w * clamp((localPos.y - 64.0) / 64.0, -1.0, 1.0);
+    float lit;
+    if (Mode.x > 0.5) {
+        float levels = max(faceLight.y * 255.0, faceLight.x * 255.0 * 0.8);
+        lit = 0.42 + pow(levels / 15.0, 1.5) * 0.8;
+    } else {
+        vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+        float ambient = Light.x;
+        if (Light.z > 0.0) {
+            ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * vertexSky));
+        }
+        lit = ambient + sunlight(localPos + normal * 0.06, vec3(0.0)) * Light.y;
+        if (Light.w != 0.0) {
+            lit *= 1.0 + Light.w * clamp((localPos.y - 64.0) / 64.0, -1.0, 1.0);
+        }
     }
     fragColor = vec4(albedo, lit);
 #elif defined(TINTED)
     // Plants and glass: their own weight goes in alpha, and the blend keeps what's behind.
-    vec3 l = light(localPos, top, 1.0, bilinear(faceSky, faceUv));
+    vec3 l = Mode.x > 0.5 ? lit_light(localPos, 1.0) : sun_light(localPos, top, 1.0, vertexSky);
     fragColor = vec4(albedo * l, faceColor.a);
 #else
-    if ((faceInfo.y & FLAG_UNKNOWN) != 0) {
-        // A chunk the map has no data for: the tracer's ray stops here and leaves the pixel unknown.
+    int flags = faceInfo.y;
+    if ((flags & FLAG_UNKNOWN) != 0) {
+        // A chunk the map has no data for, or unseen under fog of war: the pixel stays unknown.
         fragColor = vec4(0.0);
         return;
     }
+    if (faceInfo.x == FACE_FLOOR) {
+        // Rays that reached the view's limit: the cut face if still in rock, else the void.
+        fragColor = vec4((flags & FLAG_CUT) != 0 ? vec3(0.0065, 0.0068, 0.0085) : vec3(0.01, 0.01, 0.015), 1.0);
+        return;
+    }
     float ao = bilinear(faceOcclusion, faceUv);
-    vec3 l = light(localPos, top, ao, bilinear(faceSky, faceUv));
+    vec3 l = Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, vertexSky);
     float emission = faceColor.a;
     if (emission > 0.0) {
         l = max(l, vec3(0.35 + emission * 0.85));

@@ -1,5 +1,5 @@
 // What every pass of a GPU tile bake shares. Positions are in tile-local blocks: x from the tile's
-// west edge, y as in the world, z from an origin north of the tile.
+// west edge, y as in the world, z from a section-aligned origin north of the tile.
 layout(std140) uniform DioramaBake {
     // sin and cos of the camera pitch; v - minV = z * sin - y * cos + Camera.z; depth t = -(y * sin + z * cos) + Camera.w
     vec4 Camera;
@@ -22,6 +22,14 @@ layout(std140) uniform DioramaBake {
     vec4 Shadow;
     // The tracer nudges the sun a little per sample, which softens shadow edges.
     vec4 Jitter[4];
+    // x: 1 when lit by block and sky light (caves, under a roof); y: 1 for a cave slice; z: the y rays start at
+    vec4 Mode;
+    // The voxel table's first section (x and z relative to the origin), and in w the top a sky ray can meet.
+    ivec4 VoxelOrigin;
+    // The voxel table's size in sections.
+    ivec4 VoxelSize;
+    // The tracer's sky occlusion rays: direction, and in w how much each counts.
+    vec4 SkyRays[13];
 };
 
 // Reversed depth like vanilla: near is 1, far is 0.

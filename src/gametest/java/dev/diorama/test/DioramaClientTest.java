@@ -674,8 +674,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/**
 	 * The GPU bake experiment: bakes the nine tiles around a few places with the tracer and on the
-	 * GPU, saves both and their difference as pictures in {@code gpu-bake/}, and logs what each
-	 * cost. Opt-in with {@code DIORAMA_TESTS=gpu-bake}; {@code DIORAMA_GPU_SPOTS="x y z;x y z"}
+	 * GPU, in the sky view, a cave slice with and without fog of war, and under the Nether's roof;
+	 * saves both and their difference as pictures in {@code gpu-bake/}, and logs what each cost. Opt-in with {@code DIORAMA_TESTS=gpu-bake}; {@code DIORAMA_GPU_SPOTS="x y z;x y z"}
 	 * picks the places.
 	 */
 	private static void gpuBake(ClientGameTestContext context, TestSingleplayerContext world) {
@@ -691,56 +691,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 			}
 			settle(context, 200);
-			int[] centre = context.computeOnClient(mc -> new int[] {
-				(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
-				(int) Math.floor(Projection.v(mc.player.getY(), mc.player.getZ()) / Projection.TILE_UNITS)
-			});
-			java.util.List<TileKey> keys = new java.util.ArrayList<>();
-			for (int dv = -1; dv <= 1; dv++) {
-				for (int du = -1; du <= 1; du++) {
-					keys.add(new TileKey(TileKey.SURFACE, centre[0] + du, centre[1] + dv));
-				}
-			}
-			int[][] cpu = new int[keys.size()][];
-			long[] cpuNanos = new long[keys.size()];
-			java.util.Arrays.fill(cpuNanos, Long.MAX_VALUE);
-			java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu = new java.util.concurrent.ConcurrentHashMap<>();
-			// Three rounds each, keeping the best: the first GPU round also compiles the shaders.
-			for (int round = 0; round < 3; round++) {
-				context.runOnClient(mc -> {
-					for (int i = 0; i < keys.size(); i++) {
-						long start = System.nanoTime();
-						dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, false);
-						cpuNanos[i] = Math.min(cpuNanos[i], System.nanoTime() - start);
-						cpu[i] = image.mips()[0];
-					}
-				});
-				java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> results = new java.util.concurrent.ConcurrentHashMap<>();
-				context.runOnClient(mc -> {
-					for (int i = 0; i < keys.size(); i++) {
-						int index = i;
-						dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get());
-						dev.diorama.render.gpu.GpuTileBaker.submit(mesh, r -> results.put(index, r));
-					}
-				});
-				context.waitFor(mc -> results.size() == keys.size(), 600);
-				if (round == 0) {
-					// The first round compiles the shaders: keep its pixels only if nothing better comes.
-					gpu.putAll(results);
-					continue;
-				}
-				for (var e : results.entrySet()) {
-					var old = gpu.get(e.getKey());
-					if (old == null || old.pixels() == null || e.getValue().timing().meshNanos() + e.getValue().timing().recordNanos()
-						< old.timing().meshNanos() + old.timing().recordNanos()) {
-						gpu.put(e.getKey(), e.getValue());
-					}
-				}
-			}
-			String report = writeGpuComparison(out, "spot" + spot, keys, cpu, cpuNanos, gpu);
-			dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
-			summary.append(report).append('\n');
+			// The sky view, then a cave slice a little below the ground, with and without fog of war.
+			int cut = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, mc.player.getBlockX(), mc.player.getBlockZ()) - 24);
+			summary.append(compareTiles(context, out, "spot" + spot, TileKey.SURFACE, false)).append('\n');
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave", cut, false)).append('\n');
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave-fog", cut, true)).append('\n');
 		}
+		// The Nether's sky view starts under its roof.
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 300, 2400);
+		settle(context, 200);
+		summary.append(compareTiles(context, out, "nether", TileKey.SURFACE, false)).append('\n');
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 		try {
 			java.nio.file.Files.createDirectories(out);
 			java.nio.file.Files.writeString(out.resolve("summary.txt"), summary.toString());
@@ -749,6 +713,63 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		//?}
 	}
+
+	//? if >=26.3 {
+	/**
+	 * Bakes the nine tiles of one layer around the player with the tracer and on the GPU, three
+	 * rounds each keeping the best (the first GPU round also compiles the shaders), and writes the
+	 * comparison. {@code layer} is {@link TileKey#SURFACE} or a cave slice's cut.
+	 */
+	private static String compareTiles(ClientGameTestContext context, java.nio.file.Path out, String name, int layer, boolean fog) {
+		int[] centre = context.computeOnClient(mc -> new int[] {
+			(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
+			(int) Math.floor(Projection.v(layer == TileKey.SURFACE ? mc.player.getY() : layer, mc.player.getZ()) / Projection.TILE_UNITS)
+		});
+		java.util.List<TileKey> keys = new java.util.ArrayList<>();
+		for (int dv = -1; dv <= 1; dv++) {
+			for (int du = -1; du <= 1; du++) {
+				keys.add(new TileKey(layer, centre[0] + du, centre[1] + dv));
+			}
+		}
+		int[][] cpu = new int[keys.size()][];
+		long[] cpuNanos = new long[keys.size()];
+		java.util.Arrays.fill(cpuNanos, Long.MAX_VALUE);
+		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu = new java.util.concurrent.ConcurrentHashMap<>();
+		for (int round = 0; round < 3; round++) {
+			context.runOnClient(mc -> {
+				for (int i = 0; i < keys.size(); i++) {
+					long start = System.nanoTime();
+					dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, fog);
+					cpuNanos[i] = Math.min(cpuNanos[i], System.nanoTime() - start);
+					cpu[i] = image.mips()[0];
+				}
+			});
+			java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> results = new java.util.concurrent.ConcurrentHashMap<>();
+			context.runOnClient(mc -> {
+				for (int i = 0; i < keys.size(); i++) {
+					int index = i;
+					dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), fog);
+					dev.diorama.render.gpu.GpuTileBaker.submit(mesh, r -> results.put(index, r));
+				}
+			});
+			context.waitFor(mc -> results.size() == keys.size(), 600);
+			if (round == 0) {
+				gpu.putAll(results);
+				continue;
+			}
+			for (var e : results.entrySet()) {
+				var old = gpu.get(e.getKey());
+				if (old == null || old.pixels() == null || e.getValue().timing().meshNanos() + e.getValue().timing().recordNanos()
+					< old.timing().meshNanos() + old.timing().recordNanos()) {
+					gpu.put(e.getKey(), e.getValue());
+				}
+			}
+		}
+		String report = writeGpuComparison(out, name, keys, cpu, cpuNanos, gpu);
+		dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
+		return report;
+	}
+	//?}
 
 	//? if >=26.3 {
 	/** Saves the traced and GPU tiles as 3x3 pictures with their difference, and sums up both. */
@@ -769,7 +790,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 		double sumDiff = 0;
 		double cpuMs = 0;
 		double mesh = 0;
-		double sky = 0;
 		double pack = 0;
 		double record = 0;
 		double gpuMs = 0;
@@ -787,7 +807,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 			} else {
 				var t = result.timing();
 				mesh += t.meshNanos() / 1e6;
-				sky += t.skyNanos() / 1e6;
 				pack += t.packNanos() / 1e6;
 				record += t.recordNanos() / 1e6;
 				gpuMs += t.gpuNanos() / 1e6;
@@ -840,9 +859,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		int n = keys.size();
 		int ok = Math.max(1, n - failed);
 		return String.format(java.util.Locale.ROOT,
-			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f (sky %.1f), pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
+			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f, pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
 				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch, %.3f%% known with a different alpha",
-			name, n, failed, cpuMs / n, mesh / ok, sky / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
+			name, n, failed, cpuMs / n, mesh / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
 			both == 0 ? 0 : sumDiff / both, both == 0 ? 0 : differ * 100.0 / both, knownMismatch * 100.0 / ((long) n * size * size),
 			both == 0 ? 0 : alphaDiffer * 100.0 / both
 		);

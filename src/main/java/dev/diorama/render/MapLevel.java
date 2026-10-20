@@ -644,7 +644,7 @@ public final class MapLevel implements ChunkSource {
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
 		//? if >=26.3 {
-		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED && !key.isCave() && !this.roofless() && overlays == null) {
+		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED && overlays == null) {
 			this.bakeOnGpu(key, looks, generation, fog, store);
 			return;
 		}
@@ -672,7 +672,7 @@ public final class MapLevel implements ChunkSource {
 		BAKERS.execute(() -> {
 			try {
 				int[] saved = store == null ? null : store.read(key);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks);
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog);
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image = result.pixels() != null

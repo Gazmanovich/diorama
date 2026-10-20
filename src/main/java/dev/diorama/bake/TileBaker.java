@@ -35,8 +35,8 @@ public final class TileBaker {
 	 * Directions for sky occlusion: two rings round the sky and one straight up, weighted by how
 	 * much light each part of the sky sends onto flat ground.
 	 */
-	private static final double[][] SKY_RAYS;
-	private static final double[] SKY_WEIGHTS;
+	public static final double[][] SKY_RAYS;
+	public static final double[] SKY_WEIGHTS;
 	/** How far sky occlusion looks for something overhead, in blocks. */
 	public static final int SKY_REACH = 12;
 
@@ -90,11 +90,11 @@ public final class TileBaker {
 	private final TileKey key;
 	private final BlockLooks looks;
 	final VoxelReader reader;
-	private final boolean cave;
+	final boolean cave;
 	/** The sky view of a dimension with a roof: it starts under the roof, skips rock and is lit like a cave. */
-	private final boolean roofless;
+	final boolean roofless;
 	/** Lit by block light and the sky light that reaches in, not the sun: caves, and under a roof. */
-	private final boolean lit;
+	final boolean lit;
 	final int startY;
 	final int limitY;
 	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
@@ -102,7 +102,7 @@ public final class TileBaker {
 	/** The same for shadow and sky rays, which reach further north. */
 	final int rayTop;
 	/** Cave slice that may only show blocks the player has seen. */
-	private final boolean fogOfWar;
+	final boolean fogOfWar;
 	/** What to record for the overlays, or null to record nothing. */
 	private final @Nullable Overlays overlays;
 	private final java.util.Map<Long, Boolean> slimeChunks = new java.util.HashMap<>();
@@ -166,8 +166,8 @@ public final class TileBaker {
 	}
 
 	/** A baker that only answers colour and occlusion questions, for {@link GpuMesher}. */
-	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks) {
-		return new TileBaker(key, source, looks, false, null);
+	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
+		return new TileBaker(key, source, looks, fogOfWar, null);
 	}
 
 	/**

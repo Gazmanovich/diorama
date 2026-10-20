@@ -150,6 +150,19 @@ final class VoxelReader {
 	}
 
 	/**
+	 * A section's {@link #solid} bits, indexed {@code (y << 8) | (z << 4) | x}: null when its chunk
+	 * is missing, {@link #NOTHING_SOLID} when nothing in it is solid. Don't write to it.
+	 */
+	long @Nullable [] solidSection(int sx, int sy, int sz) {
+		Decoded chunk = this.chunk(sx, sz);
+		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds);
+	}
+
+	static boolean nothingSolid(long[] mask) {
+		return mask == NOTHING_SOLID;
+	}
+
+	/**
 	 * One above the highest {@link BlockLooks#SOLID} block in these chunks, or
 	 * {@code Integer.MIN_VALUE} if they have none. Chunks missing from the source are left out:
 	 * every lookup there is {@link #UNKNOWN}. If this job hasn't asked for one of the chunks yet,

@@ -5,7 +5,7 @@ import dev.diorama.Projection;
 import dev.diorama.data.ChunkSnapshot;
 
 /**
- * Builds the block faces a surface tile shows, for drawing it on the GPU instead of tracing it.
+ * Builds the block faces a tile shows, for drawing it on the GPU instead of tracing it.
  *
  * <p>The camera looks north and down, so a camera ray only ever moves down and north: it can
  * enter a block through its top or its south face, never another. A cell is reached when the cell
@@ -14,9 +14,15 @@ import dev.diorama.data.ChunkSnapshot;
  * can hit, without looking at anything buried. Faces of chunks the map has no data for are kept
  * as "unknown", so their pixels stay unknown the way a traced ray that runs into one does.
  *
- * <p>Everything that belongs to a spot in the world rather than to the camera is worked out here,
- * once per face corner: colour with biome tint, corner ambient occlusion and sky occlusion. The
- * GPU adds the sun, its shadow, and the style's grade.
+ * <p>Cave slices and the sky view under a roof start inside rock, as the tracer's rays do: a ray
+ * passes through solid blocks from where it starts until it first finds open space, and a ray
+ * that never does shows the cut face. Those views are lit by the game's block and sky light,
+ * which is recorded per face; with fog of war, faces the player hasn't seen stay unknown.
+ *
+ * <p>What belongs to a spot in the world rather than to the camera is worked out here once per
+ * face: colour with biome tint, corner ambient occlusion, and in cave views the light. The GPU
+ * adds sky occlusion (from the solid blocks around the tile, which this also packs), the sun and
+ * its shadow, and the style's grade.
  */
 public final class GpuMesher {
 	/** Faces the camera can see. */
@@ -24,10 +30,20 @@ public final class GpuMesher {
 	public static final int SOUTH = 1;
 	/** Faces only the shadow map needs: they face the sun, which is in the west. */
 	public static final int WEST = 2;
+	/** The bottom of a cell in the lowest row a view reaches: where rays that met nothing end. */
+	public static final int FLOOR = 3;
 
-	/** {@link Quads#flags} bits. */
+	/** {@link Quads} flags. */
 	public static final int UNKNOWN = 1;
 	public static final int LAVA = 2;
+	/** A floor where the ray was still in rock: the tracer's cut face. */
+	public static final int CUT = 4;
+	/** A floor where the ray was in open space: the tracer's near-black void. */
+	public static final int VOID = 8;
+
+	/** The section table's entries for sections without solid bits: a missing chunk, or nothing solid. */
+	public static final int SECTION_UNKNOWN = 0xFFFFFFFE;
+	public static final int SECTION_EMPTY = 0xFFFFFFFF;
 
 	private GpuMesher() {
 	}
@@ -39,10 +55,11 @@ public final class GpuMesher {
 
 		/**
 		 * One face of block {@code (x, y, z)}. {@code color} is sRGB {@code 0xAARRGGBB} where alpha
-		 * carries the face's own weight (plants and glass) or emission; {@code ao} and {@code sky}
-		 * pack the four corners a byte each, in the order of {@link GpuMesher#corners}.
+		 * carries the face's own weight (plants and glass) or emission; {@code ao} packs the four
+		 * corners a byte each, in the order of {@link GpuMesher#aoTop}. {@code light} is the block
+		 * and sky light in cave views: sky in the top byte, block light in the next.
 		 */
-		void add(int x, int y, int z, int face, int color, int ao, int sky, int flags) {
+		void add(int x, int y, int z, int face, int color, int ao, int light, int flags) {
 			int i = this.count * 8;
 			if (i + 8 > this.data.length) {
 				this.data = java.util.Arrays.copyOf(this.data, this.data.length * 2);
@@ -53,7 +70,7 @@ public final class GpuMesher {
 			this.data[i + 3] = face;
 			this.data[i + 4] = color;
 			this.data[i + 5] = ao;
-			this.data[i + 6] = sky;
+			this.data[i + 6] = light;
 			this.data[i + 7] = flags;
 			this.count++;
 		}
@@ -69,13 +86,18 @@ public final class GpuMesher {
 	/** Everything one tile draws, plus the region its shadow casters cover. */
 	public static final class Mesh {
 		public final TileKey key;
-		/** One above the tallest block any camera ray of this tile meets; rays start here. */
+		/** Where camera rays start, one above the first row they walk. */
 		public final int topY;
-		/** Lowest block y in the dimension. */
+		/** The lowest row camera rays walk. */
 		public final int minY;
 		public final double sin;
 		public final double cos;
-		/** Solid and lava faces, and faces of unknown chunks. */
+		/** Lit by block and sky light rather than the sun: cave slices, and the view under a roof. */
+		public final boolean lit;
+		public final boolean cave;
+		/** Rays start below the view's limit, so the tracer bakes nothing: every pixel unknown. */
+		public final boolean empty;
+		/** Solid and lava faces, faces of unknown chunks, and floors. */
 		public final Quads opaque;
 		/** Water a ray enters, through its top or south face. */
 		public final Quads water;
@@ -83,8 +105,11 @@ public final class GpuMesher {
 		public final Quads tinted;
 		/** Sun-facing faces of solid blocks, for the shadow map. */
 		public final Quads casters;
-		/** Lowest y of a face the camera sees, or {@code Integer.MAX_VALUE} for none. */
+		/** Lowest y of a solid face the camera sees, or {@code Integer.MAX_VALUE} for none. */
 		public int lowestY = Integer.MAX_VALUE;
+		/** Positions on the GPU are relative to this: the tile's west edge, and a section-aligned z. */
+		public final int originX;
+		public int originZ;
 		// The caster region, in blocks.
 		public int casterX0;
 		public int casterX1;
@@ -92,11 +117,23 @@ public final class GpuMesher {
 		public int casterZ1;
 		public int casterY0;
 		public int casterY1;
+		/**
+		 * The solid blocks around the camera's faces, for sky occlusion on the GPU: a table of
+		 * {@code voxelSize[0] * [1] * [2]} sections (x fastest, then z, then y) holding each one's
+		 * offset into the same array or a {@code SECTION_*} value, then 128 words of solid bits
+		 * per section that has any. Null in lit views, which don't use sky occlusion.
+		 */
+		public int[] voxels;
+		public int voxelCount;
+		/** The table's first section, relative to the origin's sections, and its size in sections. */
+		public final int[] voxelOrigin = new int[3];
+		public final int[] voxelSize = new int[3];
+		/** One above the tallest block a sky ray can meet. */
+		public int rayTop;
 		/** Time spent building, for the experiment's numbers. */
 		public long buildNanos;
-		public long skyNanos;
 
-		Mesh(TileKey key, int topY, int minY, double sin, double cos) {
+		Mesh(TileKey key, int topY, int minY, double sin, double cos, boolean lit, boolean cave, boolean empty) {
 			Quads[] lists = LISTS.get();
 			for (Quads list : lists) {
 				list.count = 0;
@@ -110,6 +147,10 @@ public final class GpuMesher {
 			this.minY = minY;
 			this.sin = sin;
 			this.cos = cos;
+			this.lit = lit;
+			this.cave = cave;
+			this.empty = empty;
+			this.originX = (int) Math.floor(key.minU());
 		}
 	}
 
@@ -122,47 +163,64 @@ public final class GpuMesher {
 		return (int) Math.floor((maxV + (y + 1) * cos) / sin) + 1;
 	}
 
-	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks) {
+	/** {@code fogOfWar} as for {@link TileBaker#bake}: cave views may only show what the player has seen. */
+	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
 		long start = System.nanoTime();
-		TileBaker helper = TileBaker.forMeshing(key, source, looks);
+		TileBaker helper = TileBaker.forMeshing(key, source, looks, fogOfWar);
 		VoxelReader reader = helper.reader;
 		MapStyle style = MapStyle.get();
 		double sin = Projection.sin();
 		double cos = Projection.cos();
-		int topY = helper.topY;
-		int minY = source.minY();
-		Mesh mesh = new Mesh(key, topY, minY, sin, cos);
-		boolean skyOcclusion = style.skyOcclusion() > 0;
-		Sky sky = new Sky(helper, skyOcclusion);
+		int startY = helper.startY;
+		int limitY = helper.limitY;
+		boolean lit = helper.lit;
+		boolean fog = helper.fogOfWar;
+		Mesh mesh = new Mesh(key, startY, limitY, sin, cos, lit, helper.cave, startY <= limitY);
+		mesh.rayTop = helper.rayTop;
 
 		double minV = key.minV();
 		double maxV = minV + Projection.TILE_UNITS;
-		int x0 = (int) Math.floor(key.minU());
+		int x0 = mesh.originX;
 		int x1 = x0 + Projection.TILE_UNITS;
-		int zBase = zLow(minV, minY, sin, cos) - 2;
-		int zSpan = zHigh(maxV, topY, sin, cos) - zBase + 3;
-		boolean[] above = new boolean[zSpan];
-		boolean[] here = new boolean[zSpan];
-		// Whether the reached cell was water, so only the face a ray first enters water by is drawn.
+		int zBase = zLow(minV, limitY, sin, cos) - 2;
+		int zSpan = zHigh(maxV, startY, sin, cos) - zBase + 3;
+		// Per row: reached in open space, reached while still in the rock a cave view starts in,
+		// and whether the open cell was water, so only the face a ray first enters water by is drawn.
+		boolean[] aboveOpen = new boolean[zSpan];
+		boolean[] hereOpen = new boolean[zSpan];
+		boolean[] aboveRock = new boolean[zSpan];
+		boolean[] hereRock = new boolean[zSpan];
 		boolean[] aboveWater = new boolean[zSpan];
 		boolean[] hereWater = new boolean[zSpan];
-		int lowest = Integer.MAX_VALUE;
+		// The camera's faces' extent, for the sky occlusion region.
+		int fx0 = Integer.MAX_VALUE;
+		int fx1 = Integer.MIN_VALUE;
+		int fy0 = Integer.MAX_VALUE;
+		int fy1 = Integer.MIN_VALUE;
+		int fz0 = Integer.MAX_VALUE;
+		int fz1 = Integer.MIN_VALUE;
 
 		// One column more each side: the bake draws a pixel past the tile's edges for outlines.
-		for (int x = x0 - 1; x <= x1; x++) {
-			// Above the tallest block every cell is open: that is where the rays start.
-			java.util.Arrays.fill(above, true);
+		for (int x = x0 - 1; x <= x1 && !mesh.empty; x++) {
+			// Where the rays start: open air above the tallest block, or inside rock at a cut.
+			java.util.Arrays.fill(aboveOpen, !lit);
+			java.util.Arrays.fill(aboveRock, lit);
 			java.util.Arrays.fill(aboveWater, false);
-			for (int y = topY - 1; y >= minY; y--) {
+			for (int y = startY - 1; y >= limitY; y--) {
 				int lo = zLow(minV, y, sin, cos);
 				int hi = zHigh(maxV, y, sin, cos);
-				java.util.Arrays.fill(here, false);
+				java.util.Arrays.fill(hereOpen, false);
+				java.util.Arrays.fill(hereRock, false);
 				java.util.Arrays.fill(hereWater, false);
 				boolean any = false;
 				for (int z = hi; z >= lo; z--) {
 					int i = z - zBase;
-					boolean fromAbove = above[i];
-					boolean fromSouth = z < hi && here[i + 1];
+					boolean openAbove = aboveOpen[i];
+					boolean openSouth = z < hi && hereOpen[i + 1];
+					boolean rockAbove = aboveRock[i];
+					boolean rockSouth = z < hi && hereRock[i + 1];
+					boolean fromAbove = openAbove || rockAbove;
+					boolean fromSouth = openSouth || rockSouth;
 					if (!fromAbove && !fromSouth) {
 						continue;
 					}
@@ -177,59 +235,86 @@ public final class GpuMesher {
 						continue;
 					}
 					byte kind = looks.kind[id];
-					switch (kind) {
-						case BlockLooks.SOLID, BlockLooks.LAVA -> {
-							int flags = kind == BlockLooks.LAVA ? LAVA : 0;
-							int emission = looks.emission[id];
-							if (fromAbove) {
-								mesh.opaque.add(x, y, z, TOP, solidColor(helper, id, x, y, z, true, emission, kind, style), aoTop(helper, x, y + 1, z), sky.top(x, y + 1, z), flags);
-							}
-							if (fromSouth) {
-								mesh.opaque.add(x, y, z, SOUTH, solidColor(helper, id, x, y, z, false, emission, kind, style), aoSouth(helper, x, y, z + 1), sky.south(x, y, z + 1), flags);
-							}
-							lowest = Math.min(lowest, y);
-						}
-						case BlockLooks.WATER -> {
-							here[i] = true;
-							hereWater[i] = true;
+					if (kind == BlockLooks.SOLID) {
+						if (rockAbove || rockSouth) {
+							// Still in the rock below the cut.
+							hereRock[i] = true;
 							any = true;
-							boolean entersTop = fromAbove && !aboveWater[i];
-							boolean entersSouth = fromSouth && !hereWater[i + 1];
+						}
+						if (openAbove) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
+						}
+						if (openSouth) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
+						}
+						mesh.lowestY = Math.min(mesh.lowestY, y);
+					} else if (kind == BlockLooks.LAVA) {
+						// Lava stops a ray whether it came through open space or out of the rock.
+						if (fromAbove) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
+						}
+						if (fromSouth) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
+						}
+						mesh.lowestY = Math.min(mesh.lowestY, y);
+					} else {
+						hereOpen[i] = true;
+						any = true;
+						if (kind == BlockLooks.WATER) {
+							hereWater[i] = true;
+							boolean entersTop = fromAbove && !(openAbove && aboveWater[i]);
+							boolean entersSouth = fromSouth && !(openSouth && hereWater[i + 1]);
 							if (entersTop || entersSouth) {
 								helper.albedo(id, x, z, true);
 								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 255);
-								// Lit like the tracer: sky over the top of the cell it entered.
-								int s = sky.top(x, y + 1, z);
+								// Lit like the tracer: by the light just above the cell it entered.
+								int light = lit ? light(reader, x, y + 1, z) : 0;
 								if (entersTop) {
-									mesh.water.add(x, y, z, TOP, color, 0, s, 0);
+									mesh.water.add(x, y, z, TOP, color, 0, light, 0);
 								}
 								if (entersSouth) {
-									mesh.water.add(x, y, z, SOUTH, color, 0, s, 0);
+									mesh.water.add(x, y, z, SOUTH, color, 0, light, 0);
 								}
 							}
-						}
-						case BlockLooks.PLANT, BlockLooks.GLASS -> {
-							here[i] = true;
-							any = true;
+						} else if (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) {
 							helper.albedo(id, x, z, true);
 							int weight = kind == BlockLooks.PLANT ? 102 : 64;
 							int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, weight);
 							if (fromAbove) {
-								mesh.tinted.add(x, y, z, TOP, color, 0, sky.top(x, y + 1, z), 0);
+								mesh.tinted.add(x, y, z, TOP, color, 0, lit ? light(reader, x, y + 1, z) : 0, 0);
 							}
 							if (fromSouth) {
-								mesh.tinted.add(x, y, z, SOUTH, color, 0, sky.south(x, y, z + 1), 0);
+								mesh.tinted.add(x, y, z, SOUTH, color, 0, lit ? light(reader, x, y, z + 1) : 0, 0);
 							}
 						}
-						default -> {
-							here[i] = true;
-							any = true;
+					}
+					if (y < fy0) {
+						fy0 = y;
+					}
+					if (y + 1 > fy1) {
+						fy1 = y + 1;
+					}
+					fx0 = Math.min(fx0, x);
+					fx1 = Math.max(fx1, x);
+					fz0 = Math.min(fz0, z);
+					fz1 = Math.max(fz1, z);
+				}
+				if (y == limitY) {
+					// Rays still going: they end at the view's limit, on the cut face or the void.
+					for (int z = hi; z >= lo; z--) {
+						int i = z - zBase;
+						if (hereRock[i] || hereOpen[i]) {
+							int flags = fog ? UNKNOWN : hereRock[i] ? CUT : VOID;
+							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, flags);
 						}
 					}
 				}
-				boolean[] t = above;
-				above = here;
-				here = t;
+				boolean[] t = aboveOpen;
+				aboveOpen = hereOpen;
+				hereOpen = t;
+				t = aboveRock;
+				aboveRock = hereRock;
+				hereRock = t;
 				t = aboveWater;
 				aboveWater = hereWater;
 				hereWater = t;
@@ -238,19 +323,106 @@ public final class GpuMesher {
 				}
 			}
 		}
-		mesh.lowestY = lowest;
-		mesh.skyNanos = sky.nanos;
-		casters(mesh, reader, style, x0, x1, minV, maxV, minY);
+		if (!lit) {
+			casters(mesh, reader, style, x0, x1, minV, maxV, source.minY());
+			if (fx0 <= fx1) {
+				voxels(mesh, reader, fx0, fx1, fy0, fy1, fz0, fz1);
+			}
+		} else {
+			// No sun in these views, so no shadow map; its region just has to be sane.
+			mesh.casterX0 = x0 - 1;
+			mesh.casterX1 = x1 + 2;
+			mesh.casterZ0 = zBase;
+			mesh.casterZ1 = zBase + zSpan;
+			mesh.casterY0 = limitY;
+			mesh.casterY1 = startY;
+		}
+		mesh.originZ = Math.floorDiv(Math.min(zBase, mesh.casterZ0), 16) * 16;
+		if (mesh.voxels != null) {
+			// The table was placed before the origin was known: make it relative now.
+			mesh.voxelOrigin[2] -= mesh.originZ >> 4;
+		}
 		sortFarToNear(mesh.tinted, sin, cos);
 		mesh.buildNanos = System.nanoTime() - start;
 		return mesh;
 	}
 
+	/** A solid or lava face, or an unknown one when fog of war hides it. */
+	private static void solidFace(
+		Mesh mesh, TileBaker helper, ChunkSource source, BlockLooks looks, MapStyle style, int id, int x, int y, int z, boolean top, byte kind, boolean lit, boolean fog
+	) {
+		int face = top ? TOP : SOUTH;
+		if (fog && !source.isSeen(x, y, z) && !(top ? source.isSeen(x, y + 1, z) : source.isSeen(x, y, z + 1))) {
+			mesh.opaque.add(x, y, z, face, 0, 0, 0, UNKNOWN);
+			return;
+		}
+		int color = solidColor(helper, id, x, y, z, top, looks.emission[id], kind, style);
+		int ao = top ? aoTop(helper, x, y + 1, z) : aoSouth(helper, x, y, z + 1);
+		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1)) : 0;
+		mesh.opaque.add(x, y, z, face, color, ao, light, kind == BlockLooks.LAVA ? LAVA : 0);
+	}
+
+	/** Sky light in the top byte, block light in the next: the open cell a face looks into. */
+	private static int light(VoxelReader reader, int x, int y, int z) {
+		return reader.skyLight(x, y, z) << 24 | reader.blockLight(x, y, z) << 16;
+	}
+
+	/**
+	 * Copies the solid bits of every section a sky ray from the camera's faces can reach, as the
+	 * tracer reads them, for the GPU to cast the same rays.
+	 */
+	private static void voxels(Mesh mesh, VoxelReader reader, int fx0, int fx1, int fy0, int fy1, int fz0, int fz1) {
+		int reach = TileBaker.SKY_REACH + 1;
+		int sx0 = (fx0 - reach) >> 4;
+		int sx1 = (fx1 + reach) >> 4;
+		int sz0 = (fz0 - reach) >> 4;
+		int sz1 = (fz1 + reach) >> 4;
+		int sy0 = (fy0 - 2) >> 4;
+		int sy1 = (Math.min(fy1 + reach, mesh.rayTop) + 1) >> 4;
+		int nx = sx1 - sx0 + 1;
+		int ny = sy1 - sy0 + 1;
+		int nz = sz1 - sz0 + 1;
+		int tableSize = nx * ny * nz;
+		int[] out = new int[tableSize + 128 * 64];
+		int next = tableSize;
+		for (int sy = sy0; sy <= sy1; sy++) {
+			for (int sz = sz0; sz <= sz1; sz++) {
+				for (int sx = sx0; sx <= sx1; sx++) {
+					int index = ((sy - sy0) * nz + (sz - sz0)) * nx + (sx - sx0);
+					long[] mask = reader.solidSection(sx, sy, sz);
+					if (mask == null) {
+						out[index] = SECTION_UNKNOWN;
+						continue;
+					}
+					if (VoxelReader.nothingSolid(mask)) {
+						out[index] = SECTION_EMPTY;
+						continue;
+					}
+					if (next + 128 > out.length) {
+						out = java.util.Arrays.copyOf(out, out.length * 2);
+					}
+					out[index] = next;
+					for (int w = 0; w < 64; w++) {
+						out[next++] = (int) mask[w];
+						out[next++] = (int) (mask[w] >>> 32);
+					}
+				}
+			}
+		}
+		mesh.voxels = out;
+		mesh.voxelCount = next;
+		mesh.voxelOrigin[0] = sx0 - (mesh.originX >> 4);
+		mesh.voxelOrigin[1] = sy0;
+		mesh.voxelOrigin[2] = sz0;
+		mesh.voxelSize[0] = nx;
+		mesh.voxelSize[1] = ny;
+		mesh.voxelSize[2] = nz;
+	}
+
 	/**
 	 * Sun-facing faces of solid blocks that can shade this tile: west of it, since the sun is in
 	 * the west, and a little south. Each column is scanned from its top down to the lowest face
-	 * the camera sees; a block more than {@code SHADOW_DISTANCE} away along the sun can't shade
-	 * anything anyway.
+	 * the camera sees.
 	 */
 	private static void casters(Mesh mesh, VoxelReader reader, MapStyle style, int x0, int x1, double minV, double maxV, int minY) {
 		double elevation = Math.toRadians(style.sunElevation());
@@ -357,7 +529,7 @@ public final class GpuMesher {
 		return (int) Math.round(s * 255);
 	}
 
-	/** The four corners of a face, in the order every packed corner value uses: see {@link #pack}. */
+	/** The four corners of a face, a byte each from the top. */
 	private static int pack(float a, float b, float c, float d) {
 		return (byte4(a) << 24) | (byte4(b) << 16) | (byte4(c) << 8) | byte4(d);
 	}
@@ -392,39 +564,5 @@ public final class GpuMesher {
 			TileBaker.corner(w, down, h.occludes(x - 1, y - 1, z)),
 			TileBaker.corner(e, down, h.occludes(x + 1, y - 1, z))
 		);
-	}
-
-	/** Sky visibility at face corners, through the tracer's own per-corner rays and cache. */
-	private static final class Sky {
-		private final TileBaker helper;
-		private final boolean on;
-		long nanos;
-
-		Sky(TileBaker helper, boolean on) {
-			this.helper = helper;
-			this.on = on;
-		}
-
-		/** A top face at height {@code y}: nw, ne, sw, se. */
-		int top(int x, int y, int z) {
-			if (!this.on) {
-				return -1;
-			}
-			long start = System.nanoTime();
-			int packed = pack(this.helper.skyAt(x, y, z), this.helper.skyAt(x + 1, y, z), this.helper.skyAt(x, y, z + 1), this.helper.skyAt(x + 1, y, z + 1));
-			this.nanos += System.nanoTime() - start;
-			return packed;
-		}
-
-		/** A south face whose open layer is {@code z}: top west, top east, bottom west, bottom east. */
-		int south(int x, int y, int z) {
-			if (!this.on) {
-				return -1;
-			}
-			long start = System.nanoTime();
-			int packed = pack(this.helper.skyAt(x, y + 1, z), this.helper.skyAt(x + 1, y + 1, z), this.helper.skyAt(x, y, z), this.helper.skyAt(x + 1, y, z));
-			this.nanos += System.nanoTime() - start;
-			return packed;
-		}
 	}
 }

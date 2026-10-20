@@ -57,8 +57,12 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class GpuTileBaker {
 	public static final boolean ENABLED = "1".equals(System.getenv("DIORAMA_GPU_BAKE"));
-	/** Most tiles drawn in one frame, so a burst of bakes doesn't land on one frame. */
-	private static final int PER_FRAME = Math.max(1, Integer.getInteger("diorama.gpuBakesPerFrame", 2));
+	/**
+	 * The share of frame time bakes may take, on the render thread and on the GPU each. Bakes are
+	 * paid for out of a budget that grows by this share of every frame's length, at what bakes
+	 * have been measured to cost, so a backlog spreads over frames instead of landing on a few.
+	 */
+	private static final double SHARE = Math.max(0.01, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBakeShare", "0.1"))));
 	/** The tile plus a pixel all round, which outlines compare against, at two samples each way. */
 	private static final int SCENE = (Projection.TILE_PIXELS + 2) * 2;
 	private static final int SHADOW_SIZE = 2048;
@@ -72,7 +76,7 @@ public final class GpuTileBaker {
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
 		.addAttribute("Color", GpuFormat.RGBA8_UNORM)
 		.addAttribute("Occlusion", GpuFormat.RGBA8_UNORM)
-		.addAttribute("Sky", GpuFormat.RGBA8_UNORM)
+		.addAttribute("FaceLight", GpuFormat.RGBA8_UNORM)
 		.build();
 	private static final VertexFormat CASTER = VertexFormat.builder(1)
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
@@ -83,6 +87,9 @@ public final class GpuTileBaker {
 		.build();
 	private static final BindGroupLayout SHADOW_MAP = BindGroupLayout.builder()
 		.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+		.build();
+	private static final BindGroupLayout VOXELS = BindGroupLayout.builder()
+		.withUniform("Voxels", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
 		.build();
 	private static final BindGroupLayout SCENE_SAMPLERS = BindGroupLayout.builder()
 		.withUniform("SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -99,17 +106,20 @@ public final class GpuTileBaker {
 		.build();
 	private static final RenderPipeline OPAQUE = faces("bake_opaque", null, FACE)
 		.withBindGroupLayout(SHADOW_MAP)
+		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(HDR)
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
 	// Colour blends by the face's weight; alpha, which says the pixel is known, stays.
 	private static final RenderPipeline TINTED = faces("bake_tinted", "TINTED", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
+		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.ENTITY_OUTLINE_BLIT), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
 		.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
 		.build();
 	private static final RenderPipeline WATER = faces("bake_water", "WATER", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
+		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(HDR)
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
@@ -143,7 +153,8 @@ public final class GpuTileBaker {
 
 	private static int uboSize() {
 		Std140SizeCalculator size = new Std140SizeCalculator();
-		for (int i = 0; i < 11 + 4; i++) {
+		// See include/bake.glsl: eleven vec4s, the four jitters, the mode, two ivec4s, the 13 sky rays.
+		for (int i = 0; i < 11 + 4 + 1 + 2 + 13; i++) {
 			size.putVec4();
 		}
 		return size.get();
@@ -154,12 +165,17 @@ public final class GpuTileBaker {
 	private static final java.util.Set<Job> PENDING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private static @Nullable Targets targets;
 	private static long timestampSlot;
+	// The bake budget, in nanoseconds of frame time, and the measured cost of a bake.
+	private static long lastFrame;
+	private static double budget;
+	private static double renderCost = 1e6;
+	private static double gpuCost = 1e6;
 
 	private GpuTileBaker() {
 	}
 
 	/** What a bake cost, for the experiment's numbers. Times are nanoseconds, -1 where not known. */
-	public record Timing(long meshNanos, long skyNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
+	public record Timing(long meshNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
 	}
 
 	public record Result(int @Nullable [] pixels, Timing timing) {
@@ -190,13 +206,24 @@ public final class GpuTileBaker {
 
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
 	public static void frame() {
-		for (int i = 0; i < PER_FRAME; i++) {
+		long now = System.nanoTime();
+		double cost = Math.max(renderCost, gpuCost);
+		if (lastFrame != 0) {
+			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
+			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost);
+		}
+		lastFrame = now;
+		while (budget >= cost) {
 			Job job = QUEUE.poll();
 			if (job == null) {
 				return;
 			}
+			budget -= cost;
 			try {
-				if (!draw(job)) {
+				if (job.mesh.empty) {
+					// Rays start below the view's limit: the tracer leaves every pixel unknown.
+					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+				} else if (!draw(job)) {
 					job.fail();
 				}
 			} catch (Throwable t) {
@@ -225,7 +252,10 @@ public final class GpuTileBaker {
 
 		GpuBuffer faceBuffer = null;
 		GpuBuffer casterBuffer = null;
+		GpuBuffer voxelBuffer = null;
 		try {
+			voxelBuffer = job.voxels == null ? null : device.createBuffer(() -> "Diorama bake voxels", GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER, job.voxels);
+			GpuBufferSlice voxels = (voxelBuffer != null ? voxelBuffer : t.noVoxels).slice();
 			faceBuffer = job.faceCount() == 0 ? null : device.createBuffer(() -> "Diorama bake faces", GpuBuffer.USAGE_VERTEX, job.faces);
 			casterBuffer = job.casterCount == 0 ? null : device.createBuffer(() -> "Diorama bake casters", GpuBuffer.USAGE_VERTEX, job.casters);
 			RenderSystem.AutoStorageIndexBuffer quads = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
@@ -252,6 +282,7 @@ public final class GpuTileBaker {
 					pass.setPipeline(opaque);
 					pass.setUniform("DioramaBake", t.ubo);
 					pass.setUniform("ShadowMap", t.shadowView, nearest);
+				pass.setUniform("Voxels", voxels);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
 					if (job.opaqueCount > 0) {
@@ -272,6 +303,7 @@ public final class GpuTileBaker {
 					pass.setPipeline(water);
 					pass.setUniform("DioramaBake", t.ubo);
 					pass.setUniform("ShadowMap", t.shadowView, nearest);
+				pass.setUniform("Voxels", voxels);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
 					pass.setVertexBuffer(1, faceBuffer.slice((long) (job.opaqueCount + job.tintedCount) * FACE_BYTES, (long) job.waterCount * FACE_BYTES));
@@ -309,12 +341,16 @@ public final class GpuTileBaker {
 				}
 			}, 0);
 			recorded[0] = System.nanoTime() - start;
+			renderCost = renderCost * 0.9 + recorded[0] * 0.1;
 		} finally {
 			if (faceBuffer != null) {
 				faceBuffer.close();
 			}
 			if (casterBuffer != null) {
 				casterBuffer.close();
+			}
+			if (voxelBuffer != null) {
+				voxelBuffer.close();
 			}
 			job.free();
 		}
@@ -357,6 +393,8 @@ public final class GpuTileBaker {
 		final GpuTextureView outputView;
 		final GpuBuffer corners;
 		final GpuBuffer ubo;
+		/** Bound in place of the voxels in views that don't use them: a table of one empty section. */
+		final GpuBuffer noVoxels;
 		final GpuQueryPool timestamps;
 
 		Targets() {
@@ -388,13 +426,19 @@ public final class GpuTileBaker {
 				MemoryUtil.memFree(corners);
 			}
 			this.ubo = device.createBuffer(() -> "Diorama bake UBO", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
+			ByteBuffer none = MemoryUtil.memAlloc(16).order(ByteOrder.LITTLE_ENDIAN);
+			try {
+				none.putInt(GpuMesher.SECTION_EMPTY).putInt(0).putInt(0).putInt(0).flip();
+				this.noVoxels = device.createBuffer(() -> "Diorama bake no voxels", GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER, none);
+			} finally {
+				MemoryUtil.memFree(none);
+			}
 			this.timestamps = device.createTimestampQueryPool(TIMESTAMPS);
 		}
 	}
 
 	private static final AtomicLong STAT_COUNT = new AtomicLong();
 	private static final AtomicLong STAT_MESH = new AtomicLong();
-	private static final AtomicLong STAT_SKY = new AtomicLong();
 	private static final AtomicLong STAT_PACK = new AtomicLong();
 	private static final AtomicLong STAT_RECORD = new AtomicLong();
 	private static final AtomicLong STAT_GPU = new AtomicLong();
@@ -403,15 +447,14 @@ public final class GpuTileBaker {
 	private static void log(Timing timing) {
 		long n = STAT_COUNT.incrementAndGet();
 		STAT_MESH.addAndGet(timing.meshNanos());
-		STAT_SKY.addAndGet(timing.skyNanos());
 		STAT_PACK.addAndGet(timing.packNanos());
 		STAT_RECORD.addAndGet(timing.recordNanos());
 		STAT_GPU.addAndGet(Math.max(0, timing.gpuNanos()));
 		STAT_LATENCY.addAndGet(timing.latencyNanos());
 		if (n % 25 == 0) {
 			Diorama.LOGGER.info(
-				"GPU baked {} tiles; average ms: mesh {} (sky {}), pack {}, render thread {}, GPU {}, submit to pixels {}",
-				n, ms(STAT_MESH, n), ms(STAT_SKY, n), ms(STAT_PACK, n), ms(STAT_RECORD, n), ms(STAT_GPU, n), ms(STAT_LATENCY, n)
+				"GPU baked {} tiles; average ms: mesh {}, pack {}, render thread {}, GPU {}, submit to pixels {}",
+				n, ms(STAT_MESH, n), ms(STAT_PACK, n), ms(STAT_RECORD, n), ms(STAT_GPU, n), ms(STAT_LATENCY, n)
 			);
 		}
 	}
@@ -435,6 +478,7 @@ public final class GpuTileBaker {
 		@Nullable ByteBuffer faces;
 		@Nullable ByteBuffer casters;
 		@Nullable ByteBuffer uniforms;
+		@Nullable ByteBuffer voxels;
 
 		Job(GpuMesher.Mesh mesh, Consumer<Result> callback) {
 			this.mesh = mesh;
@@ -444,8 +488,8 @@ public final class GpuTileBaker {
 			this.tintedCount = mesh.tinted.count;
 			this.waterCount = mesh.water.count;
 			this.casterCount = mesh.casters.count;
-			int originX = (int) Math.floor(mesh.key.minU());
-			int originZ = mesh.casterZ0;
+			int originX = mesh.originX;
+			int originZ = mesh.originZ;
 			ByteBuffer faces = MemoryUtil.memAlloc(Math.max(1, this.faceCount() * FACE_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
 			putFaces(faces, mesh.opaque, originX, originZ);
 			putFaces(faces, mesh.tinted, originX, originZ);
@@ -461,6 +505,11 @@ public final class GpuTileBaker {
 			casters.flip();
 			this.casters = casters;
 			this.uniforms = uniforms(mesh, originX, originZ);
+			if (mesh.voxels != null) {
+				ByteBuffer voxels = MemoryUtil.memAlloc(mesh.voxelCount * 4).order(ByteOrder.LITTLE_ENDIAN);
+				voxels.asIntBuffer().put(mesh.voxels, 0, mesh.voxelCount);
+				this.voxels = voxels;
+			}
 			this.packNanos = System.nanoTime() - start;
 		}
 
@@ -549,6 +598,13 @@ public final class GpuTileBaker {
 			for (double[] j : TileBaker.SUN_JITTER) {
 				b.putVec4((float) j[0], (float) j[1], (float) j[2], 0);
 			}
+			b.putVec4(mesh.lit ? 1 : 0, mesh.cave ? 1 : 0, mesh.topY, 0);
+			b.putIVec4(mesh.voxelOrigin[0], mesh.voxelOrigin[1], mesh.voxelOrigin[2], mesh.rayTop);
+			b.putIVec4(mesh.voxelSize[0], mesh.voxelSize[1], mesh.voxelSize[2], 0);
+			for (int r = 0; r < TileBaker.SKY_RAYS.length; r++) {
+				double[] d = TileBaker.SKY_RAYS[r];
+				b.putVec4((float) d[0], (float) d[1], (float) d[2], (float) TileBaker.SKY_WEIGHTS[r]);
+			}
 			out.position(0);
 			out.limit(UBO_SIZE);
 			return out;
@@ -564,8 +620,11 @@ public final class GpuTileBaker {
 			if (!this.completed.compareAndSet(false, true)) {
 				return;
 			}
+			if (gpuNanos > 0) {
+				gpuCost = gpuCost * 0.9 + gpuNanos * 0.1;
+			}
 			Timing timing = new Timing(
-				this.mesh.buildNanos, this.mesh.skyNanos, this.packNanos, recordNanos, gpuNanos, System.nanoTime() - this.submitted,
+				this.mesh.buildNanos, this.packNanos, recordNanos, gpuNanos, System.nanoTime() - this.submitted,
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
 			);
 			log(timing);
@@ -578,7 +637,7 @@ public final class GpuTileBaker {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, new Timing(this.mesh.buildNanos, this.mesh.skyNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
+			this.callback.accept(new Result(null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
 		}
 
 		void free() {
@@ -593,6 +652,10 @@ public final class GpuTileBaker {
 			if (this.uniforms != null) {
 				MemoryUtil.memFree(this.uniforms);
 				this.uniforms = null;
+			}
+			if (this.voxels != null) {
+				MemoryUtil.memFree(this.voxels);
+				this.voxels = null;
 			}
 		}
 	}
