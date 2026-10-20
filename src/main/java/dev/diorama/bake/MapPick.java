@@ -17,7 +17,8 @@ public final class MapPick {
 	 * {@code (u, v)} reaches, or null where the map has no data.
 	 */
 	public static @Nullable BlockPos standingSpot(ChunkSource source, BlockLooks looks, double u, double v, int layer, boolean fogOfWar) {
-		VoxelReader reader = new VoxelReader(source);
+		VoxelReader reader = new VoxelReader(source, looks.kind);
+		boolean underRoof = source.roof() != ChunkSource.NO_ROOF;
 		boolean cave = layer != TileKey.SURFACE;
 		boolean roofless = !cave && source.roof() != ChunkSource.NO_ROOF;
 		double sin = Projection.sin();
@@ -39,7 +40,7 @@ public final class MapPick {
 				return null;
 			}
 			byte kind = looks.kind[id];
-			if (skippingRock && kind != BlockLooks.SOLID) {
+			if (skippingRock && kind != BlockLooks.SOLID && !(underRoof && reader.pocket(x, by, bz))) {
 				skippingRock = false;
 			}
 			if (!skippingRock && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {

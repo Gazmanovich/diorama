@@ -134,6 +134,16 @@ final class VoxelReader {
 		return (int) (mask[i >> 6] >>> i) & 1;
 	}
 
+	/**
+	 * Whether an open cell is a pocket one block tall, with solid blocks right above and below it:
+	 * a lone air bubble, a buried lava spring or a crawlspace. Under a roof, rays skipping rock
+	 * skip these too, so they don't speckle solid rock with dots; the baker, its lifted rock and
+	 * picking on the map must agree on them.
+	 */
+	boolean pocket(int x, int y, int z) {
+		return this.solid(x, y + 1, z) == 1 && this.solid(x, y - 1, z) == 1;
+	}
+
 	private void enterSolidSection(int sx, int sy, int sz) {
 		Decoded chunk = this.chunk(sx, sz);
 		if (chunk == null) {

@@ -380,6 +380,11 @@ public final class MapLevel implements ChunkSource {
 			} else if (cave) {
 				top = Math.min(top, this.roof);
 			}
+			if (this.roofless()) {
+				// Opening or filling a pocket can move where a column's lifted rock ends, far below
+				// the edit, and with it the shadows that rock casts. Re-bake down to the floor.
+				bottom = layer != TileKey.SURFACE ? layer - TileBaker.CAVE_DEPTH - 1 : this.minY - 1;
+			}
 			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
 			int around = cave ? LIGHT_REACH : TileBaker.SKY_REACH;
 			if (!cave) {

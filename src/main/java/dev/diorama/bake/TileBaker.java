@@ -194,30 +194,20 @@ public final class TileBaker {
 
 	/**
 	 * The lowest y of the rock lifted off this column: the solid blocks from the cut down to the
-	 * first open space, the same rock a camera ray skips. Light rays treat it as open.
+	 * first open space that isn't a {@link VoxelReader#pocket}. Light rays treat it as open.
 	 */
 	private int lid(int x, int z) {
 		long key = ((long) x << 32) | (z & 0xFFFFFFFFL);
 		int lid = this.lidAt.get(key);
 		if (lid == Integer.MIN_VALUE) {
 			int y = this.startY - 1;
-			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.lifted && this.reader.solid(x, y - 1, z) == 1)) {
+			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.reader.pocket(x, y, z))) {
 				y--;
 			}
 			lid = y + 1;
 			this.lidAt.put(key, lid);
 		}
 		return lid;
-	}
-
-	/**
-	 * Whether an open cell the camera ray meets inside the rock is only a sealed pocket: a lone air
-	 * bubble or buried lava spring, with rock again in the next cell along the ray. Nobody can see
-	 * those, and drawn they speckle the solid rock with dots.
-	 */
-	private boolean sealed(int x, int by, int bz, boolean nextIsBelow) {
-		int next = nextIsBelow ? this.reader.solid(x, by - 1, bz) : this.reader.solid(x, by, bz - 1);
-		return next == 1;
 	}
 
 	private float hazeR;
@@ -540,7 +530,7 @@ public final class TileBaker {
 				if (solid == VoxelReader.UNKNOWN) {
 					return false;
 				}
-				if (solid == 1 || this.lifted && this.sealed(x, by, bz, tMaxY < tMaxZ)) {
+				if (solid == 1 || this.lifted && this.reader.pocket(x, by, bz)) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
