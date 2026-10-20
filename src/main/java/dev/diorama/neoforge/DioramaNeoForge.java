@@ -42,7 +42,12 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 public final class DioramaNeoForge {
 	public DioramaNeoForge(IEventBus modBus) {
 		DioramaClient.init();
-		modBus.addListener(RegisterKeyMappingsEvent.class, event -> DioramaClient.KEY_MAPPINGS.forEach(event::register));
+		modBus.addListener(RegisterKeyMappingsEvent.class, event -> {
+			//? if >=1.21.9 {
+			event.registerCategory(DioramaClient.CATEGORY);
+			//?}
+			DioramaClient.KEY_MAPPINGS.forEach(event::register);
+		});
 		//? if >=1.21.6 {
 		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> event.registerPipeline(DioramaPipelines.FOG));
 		//?}

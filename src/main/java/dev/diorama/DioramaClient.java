@@ -19,9 +19,13 @@ import net.minecraft.client.Minecraft;
  * dev.diorama.neoforge.DioramaNeoForge} on NeoForge.
  */
 public final class DioramaClient {
-	//? if >=1.21.9 {
+	//? if >=1.21.9 && fabric {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Diorama.id("map"));
-	//?} else {
+	//?} else if >=1.21.9 {
+	/*// NeoForge constructs mods in parallel and vanilla's category list isn't thread-safe, so there
+	// DioramaNeoForge registers it through RegisterKeyMappingsEvent instead.
+	public static final KeyMapping.Category CATEGORY = new KeyMapping.Category(Diorama.id("map"));
+	*///?} else {
 	/*// Key categories were bare translation keys; this is the one Category.register makes.
 	public static final String CATEGORY = "key.category.diorama.map";
 	*///?}
