@@ -1,7 +1,11 @@
 #version 330
+//? if >=26.3 {
 #extension GL_ARB_separate_shader_objects : require
 
 #include <diorama:bake.glsl>
+//?} else {
+/*#moj_import <diorama:bake.glsl>
+*///?}
 
 // Turns the double-size bake into the tile's pixels the way TileBaker.bakePixels does: plants
 // and glass tinted over what is behind, water mixed over it by depth, the four samples of a pixel

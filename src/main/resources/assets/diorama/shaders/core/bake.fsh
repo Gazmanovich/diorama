@@ -1,24 +1,28 @@
 #version 330
+//? if >=26.3 {
 #extension GL_ARB_separate_shader_objects : require
 
 #include <diorama:bake.glsl>
+//?} else {
+/*#moj_import <diorama:bake.glsl>
+*///?}
 
 // The same lighting as TileBaker.shade, per fragment. One fragment of the double-size target is
 // one of the tracer's four samples per pixel.
 #ifdef SKY_PASS
-layout(location = 0) flat in float cornerSky;
+LOC(0) flat in float cornerSky;
 layout(location = 0) out vec4 fragColor;
 #elif !defined(SHADOW)
 uniform sampler2D ShadowMap;
 
-layout(location = 0) in vec3 localPos;
-layout(location = 1) in vec2 faceUv;
-layout(location = 2) flat in vec4 faceColor;
-layout(location = 3) flat in vec4 faceOcclusion;
-layout(location = 4) flat in vec4 faceLight;
-layout(location = 5) flat in ivec2 faceInfo;
-layout(location = 6) flat in vec4 faceSky;
-layout(location = 7) flat in ivec3 faceCell;
+LOC(0) in vec3 localPos;
+LOC(1) in vec2 faceUv;
+LOC(2) flat in vec4 faceColor;
+LOC(3) flat in vec4 faceOcclusion;
+LOC(4) flat in vec4 faceLight;
+LOC(5) flat in ivec2 faceInfo;
+LOC(6) flat in vec4 faceSky;
+LOC(7) flat in ivec3 faceCell;
 
 layout(location = 0) out vec4 fragColor;
 #if !defined(WATER) && !defined(TINTED)

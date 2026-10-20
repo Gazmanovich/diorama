@@ -1,3 +1,14 @@
+// The two shader dialects the bake is compiled in. 26.3 compiles through SPIR-V and matches the
+// values passed between stages by location; 26.2's OpenGL compiles this text as it is and binds
+// vertex inputs by name, and the raw OpenGL backend before it binds inputs and outputs by name.
+//? if >=26.3 {
+#define LOC(n) layout(location = n)
+#define VERTEX_INDEX gl_VertexIndex
+//?} else {
+/*#define LOC(n)
+#define VERTEX_INDEX gl_VertexID
+*///?}
+
 // What every pass of a GPU tile bake shares. Positions are in tile-local blocks: x from the tile's
 // west edge, y as in the world, z from a section-aligned origin north of the tile.
 layout(std140) uniform DioramaBake {
@@ -34,7 +45,7 @@ layout(std140) uniform DioramaBake {
 
 // Reversed depth like vanilla: near is 1, far is 0.
 float bake_ndc_depth(float window) {
-#ifdef RENDERPEARL_DEPTH_IS_ZERO_TO_ONE
+#if defined(RENDERPEARL_DEPTH_IS_ZERO_TO_ONE) || defined(DIORAMA_DEPTH_ZERO_TO_ONE)
     return window;
 #else
     return window * 2.0 - 1.0;

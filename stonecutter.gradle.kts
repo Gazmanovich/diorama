@@ -58,6 +58,14 @@ stonecutter parameters {
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.GpuFormat\\b" to "com.mojang.blaze3d.GpuFormat",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.device\\.GpuDevice\\b" to "com.mojang.blaze3d.systems.GpuDevice",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.PrimitiveTopology\\b" to "com.mojang.blaze3d.PrimitiveTopology",
+		// The GPU tile baker's names that didn't stay together; these come before the general rules.
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.IndexType\\b" to "com.mojang.blaze3d.IndexType",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.CompareOp\\b" to "com.mojang.blaze3d.platform.CompareOp",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.BlendFactor\\b" to "com.mojang.blaze3d.platform.BlendFactor",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.UniformType\\b" to "com.mojang.blaze3d.shaders.UniformType",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.commands\\." to "com.mojang.blaze3d.systems.",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.buffers\\." to "com.mojang.blaze3d.buffers.",
+		"\\bcom\\.mojang\\.renderpearl\\.api\\.vertex\\." to "com.mojang.blaze3d.vertex.",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\." to "com.mojang.blaze3d.pipeline.",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.textures\\." to "com.mojang.blaze3d.textures.",
 	)

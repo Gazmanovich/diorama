@@ -1,17 +1,21 @@
 #version 330
+//? if >=26.3 {
 #extension GL_ARB_separate_shader_objects : require
 
 #include <diorama:bake.glsl>
+//?} else {
+/*#moj_import <diorama:bake.glsl>
+*///?}
 
 // One instance per block face: the cell, the face (low four bits of w) and its flags.
-layout(location = 0) in vec4 Corner;
-layout(location = 1) in ivec4 Cell;
+LOC(0) in vec4 Corner;
+LOC(1) in ivec4 Cell;
 #ifndef SHADOW
-layout(location = 2) in vec4 Color;
-layout(location = 3) in vec4 Occlusion;
-layout(location = 4) in vec4 FaceLight;
+LOC(2) in vec4 Color;
+LOC(3) in vec4 Occlusion;
+LOC(4) in vec4 FaceLight;
 // Where the face's four corners are in the sky texture, a slot each, or -1 for none.
-layout(location = 5) in int SkyIndex;
+LOC(5) in int SkyIndex;
 #endif
 
 const int FLAG_UNKNOWN = 1;
@@ -23,7 +27,7 @@ const int SKY_HEIGHT = 1024;
 // The solid blocks around the tile: a section table, then 128 words of bits per section.
 uniform usampler2D Voxels;
 
-layout(location = 0) flat out float cornerSky;
+LOC(0) flat out float cornerSky;
 
 const int VOXEL_WIDTH = 4096;
 const uint SECTION_UNKNOWN = 0xFFFFFFFEu;
@@ -109,14 +113,14 @@ float sky_at(vec3 corner) {
 #elif !defined(SHADOW)
 uniform sampler2D Sky;
 
-layout(location = 0) out vec3 localPos;
-layout(location = 1) out vec2 faceUv;
-layout(location = 2) flat out vec4 faceColor;
-layout(location = 3) flat out vec4 faceOcclusion;
-layout(location = 4) flat out vec4 faceLight;
-layout(location = 5) flat out ivec2 faceInfo;
-layout(location = 6) flat out vec4 faceSky;
-layout(location = 7) flat out ivec3 faceCell;
+LOC(0) out vec3 localPos;
+LOC(1) out vec2 faceUv;
+LOC(2) flat out vec4 faceColor;
+LOC(3) flat out vec4 faceOcclusion;
+LOC(4) flat out vec4 faceLight;
+LOC(5) flat out ivec2 faceInfo;
+LOC(6) flat out vec4 faceSky;
+LOC(7) flat out ivec3 faceCell;
 
 float sky_slot(int slot) {
     return texelFetch(Sky, ivec2(slot % SKY_WIDTH, slot / SKY_WIDTH), 0).r;
@@ -153,7 +157,7 @@ void main() {
 #elif defined(SKY_PASS)
     // One point per face corner, into its slot of the sky texture: the corner's sky occlusion,
     // worked out once, which the face then blends between its corners like the tracer.
-    int slot = SkyIndex * 4 + gl_VertexIndex;
+    int slot = SkyIndex * 4 + VERTEX_INDEX;
     gl_Position = vec4((float(slot % SKY_WIDTH) + 0.5) / float(SKY_WIDTH) * 2.0 - 1.0, (float(slot / SKY_WIDTH) + 0.5) / float(SKY_HEIGHT) * 2.0 - 1.0, 0.0, 1.0);
     gl_PointSize = 1.0;
     cornerSky = 1.0;

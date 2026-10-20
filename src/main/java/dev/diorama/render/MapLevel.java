@@ -643,12 +643,10 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
-		//? if >=26.3 {
 		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED) {
 			this.bakeOnGpu(key, looks, generation, fog, overlays, store);
 			return;
 		}
-		//?}
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
@@ -662,7 +660,6 @@ public final class MapLevel implements ChunkSource {
 		});
 	}
 
-	//? if >=26.3 {
 	/**
 	 * The experiment's path: the mesh is built on a baker thread, drawn on the render thread, and
 	 * the pixels come back here a frame or two later. Always the whole tile, which costs the GPU
@@ -690,7 +687,6 @@ public final class MapLevel implements ChunkSource {
 			}
 		});
 	}
-	//?}
 
 	private void loadOverview(TileKey key, TileStore store) {
 		this.inFlight.add(key);
@@ -814,10 +810,8 @@ public final class MapLevel implements ChunkSource {
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
-		//? if >=26.3 {
 		// GPU bakes need frames this wait holds up: trace those tiles instead.
 		dev.diorama.render.gpu.GpuTileBaker.cancelAll();
-		//?}
 		long deadline = System.currentTimeMillis() + 3000;
 		while (true) {
 			TileImage image;

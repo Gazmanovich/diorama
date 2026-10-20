@@ -679,7 +679,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * picks the places.
 	 */
 	private static void gpuBake(ClientGameTestContext context, TestSingleplayerContext world) {
-		//? if >=26.3 {
 		String env = System.getenv("DIORAMA_GPU_SPOTS");
 		String[] spots = env != null && !env.isBlank() ? env.split(";") : new String[] {"", "600 140 -300", "-800 140 900"};
 		java.nio.file.Path out = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("gpu-bake"));
@@ -732,10 +731,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		} catch (java.io.IOException e) {
 			throw new java.io.UncheckedIOException(e);
 		}
-		//?}
 	}
 
-	//? if >=26.3 {
 	/**
 	 * Bakes the nine tiles of one layer around the player with the tracer and on the GPU, three
 	 * rounds each keeping the best (the first GPU round also compiles the shaders), and writes the
@@ -821,9 +818,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
 		return report;
 	}
-	//?}
 
-	//? if >=26.3 {
 	/** Saves the traced and GPU tiles as 3x3 pictures with their difference, and sums up both. */
 	private static String writeGpuComparison(
 		java.nio.file.Path out, String name, java.util.List<TileKey> keys, int[][] cpu, long[] cpuNanos,
@@ -939,7 +934,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static int argb(int abgr) {
 		return (abgr & 0xFF00FF00) | ((abgr & 0xFF) << 16) | ((abgr >> 16) & 0xFF);
 	}
-	//?}
 
 	/**
 	 * Builds {@link ShowcaseScene}'s castle beside the nearest village and photographs it for the
