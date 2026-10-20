@@ -30,8 +30,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 /**
  * Diorama's entrypoint on NeoForge: what {@code dev.diorama.fabric.DioramaFabric} does on Fabric,
- * through NeoForge's events. Only the NeoForge jar contains this package. It is written for
- * NeoForge on 1.21.1, the only version built for NeoForge so far.
+ * through NeoForge's events. Only the NeoForge jars contain this package.
  */
 @Mod(value = Diorama.MOD_ID, dist = Dist.CLIENT)
 public final class DioramaNeoForge {
@@ -42,8 +41,10 @@ public final class DioramaNeoForge {
 		// minimap over them. Each layer already sits 200 deeper than the one before, which the Fabric
 		// jars before 1.21.6 have to make up for themselves.
 		modBus.addListener(RegisterGuiLayersEvent.class, event -> {
-			event.registerAboveAll(Diorama.id("waypoints"), new WaypointHud()::render);
-			event.registerAboveAll(Diorama.id("minimap"), new MinimapHud()::render);
+			WaypointHud waypoints = new WaypointHud();
+			MinimapHud minimap = new MinimapHud();
+			event.registerAboveAll(Diorama.id("waypoints"), (graphics, deltaTracker) -> waypoints.extractRenderState(graphics, deltaTracker));
+			event.registerAboveAll(Diorama.id("minimap"), (graphics, deltaTracker) -> minimap.extractRenderState(graphics, deltaTracker));
 		});
 
 		// Fired for the integrated server's chunks too, on its own thread.
