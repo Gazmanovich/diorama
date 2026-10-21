@@ -2598,12 +2598,50 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("settings-02-screen");
+		// Real clicks: a checkbox changes its setting and the preview with it, a tab shows its
+		// settings, and the Size slider sets the size from where it's clicked.
+		click(context, "Compass");
+		if (context.computeOnClient(mc -> Settings.get().compass)) {
+			throw new AssertionError("Clicking Compass didn't switch it off");
+		}
+		context.takeScreenshot("settings-02-compass-off");
+		click(context, "Compass");
+		if (!context.computeOnClient(mc -> Settings.get().compass)) {
+			throw new AssertionError("Clicking Compass again didn't switch it on");
+		}
+		clickAt(context, "Size: ", 1.0);
+		int clickedSize = context.computeOnClient(mc -> Settings.get().minimapSize);
+		if (clickedSize != Settings.MAX_SIZE) {
+			throw new AssertionError("Clicking the right end of the Size slider set " + clickedSize + ", not " + Settings.MAX_SIZE);
+		}
+		// The biggest minimap, switched off: the dimmed preview stops at the settings' edge.
+		click(context, "Minimap", 0.05);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-size-224-off");
+		click(context, "Minimap", 0.05);
+		clickAt(context, "Size: ", 0.3);
+		context.takeScreenshot("settings-02-size-" + context.computeOnClient(mc -> Settings.get().minimapSize));
+		context.runOnClient(mc -> {
+			Settings.get().minimapSize = 128;
+			Settings.get().save();
+		});
+		String[] tabs = {"Radar", "Overlays", "Waypoints", "Look"};
+		String[] shows = {"Height range: 32 m", "Spawn spots: Off", "Death markers", "Quality: Fancy"};
+		for (int i = 0; i < tabs.length; i++) {
+			click(context, tabs[i]);
+			String wanted = shows[i];
+			if (!context.computeOnClient(mc -> widget(mc, wanted) != null)) {
+				throw new AssertionError("The " + tabs[i] + " tab doesn't show " + wanted);
+			}
+			context.takeScreenshot("settings-02-tab-" + tabs[i].toLowerCase(java.util.Locale.ROOT));
+		}
 		context.setScreen(() -> null);
 
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
-			s.minimapSize = Settings.Size.LARGE;
+			s.minimapSize = 176;
 			s.minimapZoom = 1;
 			s.save();
 		});
@@ -2616,14 +2654,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("config.json is missing", e);
 			}
 		});
-		if (!saved.contains("\"BOTTOM_LEFT\"") || !saved.contains("\"LARGE\"")) {
+		if (!saved.contains("\"BOTTOM_LEFT\"") || !saved.contains("\"minimapSize\": 176")) {
 			throw new AssertionError("config.json doesn't have the new settings:\n" + saved);
 		}
 
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = Settings.Size.MEDIUM;
+			s.minimapSize = 128;
 			s.minimapZoom = 3;
 			s.save();
 		});
@@ -2649,6 +2687,29 @@ public class DioramaClientTest implements FabricClientGameTest {
 			s.radarRange = 32;
 			s.save();
 		});
+		// Settings saved before Size was a slider keep their size, and odd sizes snap to the slider's steps.
+		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "128"}};
+		for (String[] size : sizes) {
+			context.runOnClient(mc -> {
+				java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
+				try {
+					java.nio.file.Files.writeString(file, "{\"minimapSize\": " + size[0] + ", \"minimapCorner\": \"BOTTOM_LEFT\", \"compass\": false}");
+				} catch (java.io.IOException e) {
+					throw new AssertionError(e);
+				}
+				Settings s = Settings.reload();
+				if (s.minimapSize != Integer.parseInt(size[1]) || s.minimapCorner != Settings.Corner.BOTTOM_LEFT || s.compass) {
+					throw new AssertionError("A saved size of " + size[0] + " loaded as " + s.minimapSize + " (corner " + s.minimapCorner + ", compass " + s.compass + ")");
+				}
+			});
+		}
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			s.minimapSize = 128;
+			s.minimapCorner = Settings.Corner.TOP_RIGHT;
+			s.compass = true;
+			s.save();
+		});
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(3);
 		context.setScreen(() -> null);
@@ -2660,31 +2721,38 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("settings-05-small-screen");
-		context.runOnClient(mc -> {
-			java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
-			for (var child : mc.gui.screen().children()) {
-				if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
-					widgets.add(widget);
-				}
-			}
-			int width = mc.gui.screen().width;
-			int height = mc.gui.screen().height;
-			for (var a : widgets) {
-				if (a.getX() < 0 || a.getY() < 0 || a.getRight() > width || a.getBottom() > height) {
-					throw new AssertionError(a.getMessage().getString() + " runs off the screen");
-				}
-				for (var b : widgets) {
-					if (a != b && a.getX() < b.getRight() && b.getX() < a.getRight() && a.getY() < b.getBottom() && b.getY() < a.getBottom()) {
-						throw new AssertionError(a.getMessage().getString() + " overlaps " + b.getMessage().getString());
+		// Every tab: no setting may overlap another or reach under the minimap preview.
+		for (int tab = 0; tab < 5; tab++) {
+			int index = tab;
+			context.runOnClient(mc -> {
+				((SettingsScreen) mc.gui.screen()).selectTab(index);
+				java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+				collectWidgets(mc.gui.screen(), widgets);
+				int width = mc.gui.screen().width;
+				int height = mc.gui.screen().height;
+				// The preview's frame, at the default size in the top right.
+				int preview = width - 6 - 128 - 2;
+				for (var a : widgets) {
+					if (a.getX() < 0 || a.getY() < 0 || a.getRight() > width || a.getBottom() > height) {
+						throw new AssertionError(a.getMessage().getString() + " runs off the screen");
+					}
+					if (a.getRight() > preview && a.getY() < 6 + 128 + 2) {
+						throw new AssertionError(a.getMessage().getString() + " reaches under the minimap preview");
+					}
+					for (var b : widgets) {
+						if (a != b && a.getX() < b.getRight() && b.getX() < a.getRight() && a.getY() < b.getBottom() && b.getY() < a.getBottom()) {
+							throw new AssertionError(a.getMessage().getString() + " overlaps " + b.getMessage().getString());
+						}
 					}
 				}
-			}
-		});
+			});
+		}
+		context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(0));
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
-			s.minimapSize = Settings.Size.LARGE;
+			s.minimapSize = 176;
 			s.save();
 		});
 		context.waitTicks(10);
@@ -2692,7 +2760,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = Settings.Size.MEDIUM;
+			s.minimapSize = 128;
 			s.save();
 		});
 		context.getInput().resizeWindow(1600, 900);
@@ -2815,6 +2883,70 @@ public class DioramaClientTest implements FabricClientGameTest {
 				screen.lookAt(player.getX(), Projection.v(player.getY(), player.getZ()), zoom, layer);
 			}
 		});
+	}
+
+	/** Every widget on a screen, inside containers like the tab bar too. */
+	private static void collectWidgets(net.minecraft.client.gui.components.events.ContainerEventHandler parent, java.util.List<net.minecraft.client.gui.components.AbstractWidget> out) {
+		for (var child : parent.children()) {
+			if (child instanceof net.minecraft.client.gui.components.events.ContainerEventHandler container) {
+				collectWidgets(container, out);
+			} else if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
+				out.add(widget);
+			}
+		}
+	}
+
+	/** The open screen's widget whose label starts with this text. */
+	private static net.minecraft.client.gui.components.@Nullable AbstractWidget widget(Minecraft mc, String label) {
+		java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+		collectWidgets(mc.gui.screen(), widgets);
+		for (var widget : widgets) {
+			if (widget.getMessage().getString().startsWith(label)) {
+				return widget;
+			}
+		}
+		return null;
+	}
+
+	/** Clicks the middle of the widget with this label, as a player would. */
+	private static void click(ClientGameTestContext context, String label) {
+		clickAt(context, label, 0.5);
+	}
+
+	/** Clicks the checkbox with this label this far along it (a tab may have the same label). */
+	private static void click(ClientGameTestContext context, String label, double along) {
+		double[] at = context.computeOnClient(mc -> {
+			java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+			collectWidgets(mc.gui.screen(), widgets);
+			for (var widget : widgets) {
+				if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(label)) {
+					double scale = mc.getWindow().getGuiScale();
+					return new double[] {(widget.getX() + along * widget.getWidth()) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+				}
+			}
+			throw new AssertionError("No checkbox labelled " + label);
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(5);
+	}
+
+	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
+	private static void clickAt(ClientGameTestContext context, String label, double along) {
+		double[] at = context.computeOnClient(mc -> {
+			var widget = widget(mc, label);
+			if (widget == null) {
+				throw new AssertionError("No widget labelled " + label);
+			}
+			double scale = mc.getWindow().getGuiScale();
+			double x = widget.getX() + 1 + along * (widget.getWidth() - 2);
+			return new double[] {x * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(5);
 	}
 
 	/** Waits until no tile has been baking for a while. */
