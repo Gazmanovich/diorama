@@ -556,7 +556,7 @@ public final class TileBaker {
 
 			switch (kind) {
 				case BlockLooks.SOLID, BlockLooks.LAVA -> {
-					if (this.lifted && kind == BlockLooks.SOLID && this.reader.ceilingUnderside(x, by, bz, this.lid(x, bz))) {
+					if (this.lifted && kind == BlockLooks.SOLID && this.reader.ceilingUnderside(x, by, bz, this.lid(x, bz), this.limitY)) {
 						// A ray that left the rock near a step in a stepped ceiling would clip the
 						// step below it and draw a piece of ceiling floating over the floor.
 						break;

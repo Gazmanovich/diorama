@@ -163,11 +163,12 @@ final class VoxelReader {
 
 	/**
 	 * Whether this block is in the bottom {@link #CEILING_UNDERSIDE} blocks of the rock lifted off
-	 * its column ({@code lid}), with open space right below: the underside of a ceiling. Walls and
-	 * pillars have rock below them, so they stay.
+	 * its column ({@code lid}), with open space right below: the underside of a ceiling, or a block
+	 * hanging from it. Walls and pillars have rock below them, so they stay; so does a column that
+	 * is rock all the way down to {@code limitY}, where the lid ends without any open space.
 	 */
-	boolean ceilingUnderside(int x, int y, int z, int lid) {
-		return y >= lid && y < lid + CEILING_UNDERSIDE;
+	boolean ceilingUnderside(int x, int y, int z, int lid, int limitY) {
+		return y >= lid && y < lid + CEILING_UNDERSIDE && lid > limitY && this.solid(x, lid - 1, z) == 0;
 	}
 
 	private void enterSolidSection(int sx, int sy, int sz) {

@@ -44,7 +44,7 @@ public final class MapPick {
 				skippingRock = false;
 			}
 			boolean underside = !skippingRock && underRoof && (cave || roofless) && kind == BlockLooks.SOLID
-				&& reader.ceilingUnderside(x, by, bz, reader.lid(x, bz, startY, limitY));
+				&& reader.ceilingUnderside(x, by, bz, reader.lid(x, bz, startY, limitY), limitY);
 			// The baker passes through the underside of a ceiling once the ray has left the rock.
 			if (!skippingRock && !underside && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
 				// Fog of war: a cave the player hasn't seen can't be picked, or its floor would leak.
