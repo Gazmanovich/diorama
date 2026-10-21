@@ -1412,6 +1412,43 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-05-list");
+
+		// Typing in the search keeps the rows whose name has the text in it, in any case.
+		typeInto(context, 0, "LONG");
+		List<Waypoint> found = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).shown());
+		if (found.size() != 1 || !found.get(0).name.startsWith("Long waypoint name")) {
+			throw new AssertionError("Searching LONG shows " + found.stream().map(w -> w.name).toList());
+		}
+		// Delete asks again in place: the first click turns the row's buttons into Click again to
+		// delete, a click anywhere else puts them back, and only the second click deletes.
+		Waypoint longName = found.get(0);
+		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(longName));
+		clickAtGui(context, row[0], row[1]);
+		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selected()) != longName) {
+			throw new AssertionError("Clicking a row didn't select it");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		context.takeScreenshot("waypoints-05b-list-deleting");
+		// Off the row, on the list's empty space. Enter then mustn't reach a button that's gone.
+		clickAtGui(context, row[0], row[1] + 60);
+		context.runOnClient(mc -> {
+			//? if >=1.21.9 {
+			mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_RETURN, 0, 0));
+			//?} else {
+			/*mc.gui.screen().keyPressed(InputConstants.KEY_RETURN, 0, 0);
+			*///?}
+		});
+		context.waitTicks(2);
+		boolean disarmed = context.computeOnClient(mc ->
+			!buttonLabelled(mc.gui.screen(), "Click again to delete").visible && buttonLabelled(mc.gui.screen(), "Delete").visible);
+		if (!disarmed || !context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Clicking elsewhere didn't put Delete back, or something else deleted the waypoint");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		clickButton(context, "diorama.menu.delete_confirm");
+		if (context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Click again to delete didn't delete");
+		}
 		context.setScreen(() -> null);
 
 		// Dying leaves a death marker.
@@ -2311,6 +2348,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 		});
 		context.getInput().setCursorPos(at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
+	/** Clicks the left mouse button at a point given in GUI pixels. */
+	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		context.getInput().setCursorPos(x * scale, y * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(2);
 	}
