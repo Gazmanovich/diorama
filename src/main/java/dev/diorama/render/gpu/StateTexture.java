@@ -97,6 +97,7 @@ final class StateTexture implements MapTexture {
 				AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, sampling.crisp() ? FilterMode.NEAREST : FilterMode.LINEAR, true
 			);
 			case CLAMP_LINEAR -> RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+			case CLAMP_CRISP -> RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 			case REPEAT_LINEAR -> RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR);
 		};
 	}

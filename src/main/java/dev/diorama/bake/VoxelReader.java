@@ -18,16 +18,16 @@ import org.jspecify.annotations.Nullable;
  * in a small table indexed by their coordinates, so moving between neighbouring chunks (shadow
  * and sky rays do, all the time) doesn't hash.
  */
-final class VoxelReader {
-	static final int UNKNOWN = -1;
+public final class VoxelReader {
+	public static final int UNKNOWN = -1;
 	static final int AIR_ID = Block.BLOCK_STATE_REGISTRY.getId(Blocks.AIR.defaultBlockState());
 	/** The ids of a section with nothing in it. Shared and never written. */
-	private static final char[] AIR_SECTION = new char[4096];
+	private static final int[] AIR_SECTION = new int[4096];
 	/** The solid mask of a section with nothing solid in it. Shared and never written. */
 	private static final long[] NOTHING_SOLID = new long[64];
 
 	static {
-		Arrays.fill(AIR_SECTION, (char) AIR_ID);
+		Arrays.fill(AIR_SECTION, AIR_ID);
 	}
 
 	/**
@@ -41,6 +41,8 @@ final class VoxelReader {
 	private final ChunkSource source;
 	/** {@link BlockLooks#kind}, for {@link #solid}; null when only {@link #state} is used. */
 	private final byte @Nullable [] kinds;
+	/** {@link BlockLooks#shape}, so {@link #solid} can tell blocks smaller than a cube; may be null. */
+	private final int @Nullable [] shapes;
 	private final int minY;
 	private final int maxY;
 	/**
@@ -56,21 +58,27 @@ final class VoxelReader {
 	private int sectionX = Integer.MIN_VALUE;
 	private int sectionY = Integer.MIN_VALUE;
 	private int sectionZ = Integer.MIN_VALUE;
-	private char @Nullable [] sectionIds;
+	private int @Nullable [] sectionIds;
 	// The same for the last solid lookup, with its own section: shadow and sky rays interleave
 	// with camera rays. The mask is null when the chunk is missing.
 	private int solidX = Integer.MIN_VALUE;
 	private int solidY = Integer.MIN_VALUE;
 	private int solidZ = Integer.MIN_VALUE;
 	private long @Nullable [] solidMask;
+	private long @Nullable [] partialMask;
 
 	VoxelReader(ChunkSource source) {
 		this(source, null);
 	}
 
-	VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
+	public VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
+		this(source, kinds, null);
+	}
+
+	VoxelReader(ChunkSource source, byte @Nullable [] kinds, int @Nullable [] shapes) {
 		this.source = source;
 		this.kinds = kinds;
+		this.shapes = shapes;
 		this.minY = source.minY();
 		this.maxY = source.maxY();
 		// No chunk has this x, so every slot starts empty.
@@ -81,7 +89,7 @@ final class VoxelReader {
 	final java.util.Set<Long> missing = DEBUG ? new java.util.HashSet<>() : null;
 
 	/** Block state id at the position, {@link #AIR_ID} outside the world, or {@link #UNKNOWN}. */
-	int state(int x, int y, int z) {
+	public int state(int x, int y, int z) {
 		if (y < this.minY || y >= this.maxY) {
 			return AIR_ID;
 		}
@@ -91,7 +99,7 @@ final class VoxelReader {
 		if (sx != this.sectionX || sy != this.sectionY || sz != this.sectionZ) {
 			this.enterSection(sx, sy, sz);
 		}
-		char[] ids = this.sectionIds;
+		int[] ids = this.sectionIds;
 		return ids == null ? UNKNOWN : ids[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)];
 	}
 
@@ -103,7 +111,7 @@ final class VoxelReader {
 			}
 			this.sectionIds = null;
 		} else {
-			char[] ids = chunk.section(sy - chunk.snapshot.minSectionY);
+			int[] ids = chunk.section(sy - chunk.snapshot.minSectionY);
 			this.sectionIds = ids == null ? AIR_SECTION : ids;
 		}
 		this.sectionX = sx;
@@ -113,10 +121,11 @@ final class VoxelReader {
 
 	/**
 	 * 1 if the block is {@link BlockLooks#SOLID}, the kind that stops shadow and sky rays and
-	 * casts ambient occlusion, 0 if not, or {@link #UNKNOWN}. Reads a bit per block, built once per
+	 * casts ambient occlusion, 2 if it is solid but smaller than a cube (rays then need its
+	 * shape), 0 if not, or {@link #UNKNOWN}. Reads a bit per block, built once per
 	 * section, which keeps far more of the world in the CPU's caches than the ids do.
 	 */
-	int solid(int x, int y, int z) {
+	public int solid(int x, int y, int z) {
 		if (y < this.minY || y >= this.maxY) {
 			return 0;
 		}
@@ -131,7 +140,10 @@ final class VoxelReader {
 			return UNKNOWN;
 		}
 		int i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-		return (int) (mask[i >> 6] >>> i) & 1;
+		if ((mask[i >> 6] >>> i & 1) == 0) {
+			return 0;
+		}
+		return 1 + ((int) (this.partialMask[i >> 6] >>> i) & 1);
 	}
 
 	private void enterSolidSection(int sx, int sy, int sz) {
@@ -142,7 +154,9 @@ final class VoxelReader {
 			}
 			this.solidMask = null;
 		} else {
-			this.solidMask = chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds);
+			int index = sy - chunk.snapshot.minSectionY;
+			this.solidMask = chunk.solid(index, this.kinds, this.shapes);
+			this.partialMask = chunk.partial(index);
 		}
 		this.solidX = sx;
 		this.solidY = sy;
@@ -155,7 +169,7 @@ final class VoxelReader {
 	 */
 	long @Nullable [] solidSection(int sx, int sy, int sz) {
 		Decoded chunk = this.chunk(sx, sz);
-		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds);
+		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds, this.shapes);
 	}
 
 	static boolean nothingSolid(long[] mask) {
@@ -185,7 +199,7 @@ final class VoxelReader {
 					chunk = this.cache.get(key);
 				}
 				if (chunk != null) {
-					top = Math.max(top, chunk.solidTop(this.kinds));
+					top = Math.max(top, chunk.solidTop(this.kinds, this.shapes));
 				}
 			}
 		}
@@ -243,28 +257,32 @@ final class VoxelReader {
 
 	private static final class Decoded {
 		final ChunkSnapshot snapshot;
-		final char[][] sections;
+		final int[][] sections;
 		final boolean[] decoded;
 		/** Per section, one bit per block, set where it is {@link BlockLooks#SOLID}; built when first read. */
 		final long[][] solid;
+		/** The same, set where a solid block is smaller than a cube. */
+		final long[][] partial;
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
 		Decoded(ChunkSnapshot snapshot) {
 			this.snapshot = snapshot;
-			this.sections = new char[snapshot.sectionCount()][];
+			this.sections = new int[snapshot.sectionCount()][];
 			this.decoded = new boolean[snapshot.sectionCount()];
 			this.solid = new long[snapshot.sectionCount()][];
+			this.partial = new long[snapshot.sectionCount()][];
 		}
 
 		/** The section's solid mask, indexed as its ids. */
-		long[] solid(int index, byte[] kinds) {
+		long[] solid(int index, byte[] kinds, int @Nullable [] shapes) {
 			if (index < 0 || index >= this.solid.length) {
 				return NOTHING_SOLID;
 			}
 			long[] mask = this.solid[index];
 			if (mask == null) {
-				char[] ids = this.section(index);
+				int[] ids = this.section(index);
+				long[] partial = NOTHING_SOLID;
 				if (ids == null) {
 					mask = NOTHING_SOLID;
 				} else {
@@ -272,19 +290,31 @@ final class VoxelReader {
 					for (int i = 0; i < 4096; i++) {
 						if (kinds[ids[i]] == BlockLooks.SOLID) {
 							mask[i >> 6] |= 1L << i;
+							if (shapes != null && shapes[ids[i]] != 0) {
+								if (partial == NOTHING_SOLID) {
+									partial = new long[64];
+								}
+								partial[i >> 6] |= 1L << i;
+							}
 						}
 					}
 				}
+				this.partial[index] = partial;
 				this.solid[index] = mask;
 			}
 			return mask;
 		}
 
-		int solidTop(byte[] kinds) {
+		/** The section's mask of solid blocks smaller than a cube; read after {@link #solid}. */
+		long[] partial(int index) {
+			return index < 0 || index >= this.partial.length || this.partial[index] == null ? NOTHING_SOLID : this.partial[index];
+		}
+
+		int solidTop(byte[] kinds, int @Nullable [] shapes) {
 			if (this.solidTop == Integer.MAX_VALUE) {
 				int top = Integer.MIN_VALUE;
 				for (int index = this.sections.length - 1; index >= 0 && top == Integer.MIN_VALUE; index--) {
-					long[] mask = this.solid(index, kinds);
+					long[] mask = this.solid(index, kinds, shapes);
 					for (int word = 63; word >= 0; word--) {
 						if (mask[word] != 0) {
 							// Bits run x, then z, then y: 64 bits are a quarter of one y layer.
@@ -299,7 +329,7 @@ final class VoxelReader {
 			return this.solidTop;
 		}
 
-		char @Nullable [] section(int index) {
+		int @Nullable [] section(int index) {
 			if (index < 0 || index >= this.sections.length) {
 				return null;
 			}
@@ -308,20 +338,20 @@ final class VoxelReader {
 				PalettedContainer<BlockState> states = this.snapshot.section(index);
 				BlockState uniform = this.snapshot.uniformSection(index);
 				if (uniform != null) {
-					char[] ids = new char[4096];
-					java.util.Arrays.fill(ids, (char) Block.BLOCK_STATE_REGISTRY.getId(uniform));
+					int[] ids = new int[4096];
+					java.util.Arrays.fill(ids, Block.BLOCK_STATE_REGISTRY.getId(uniform));
 					this.sections[index] = ids;
 				} else if (states != null) {
-					char[] ids = new char[4096];
+					int[] ids = new int[4096];
 					BlockState lastState = null;
-					char lastId = 0;
+					int lastId = 0;
 					for (int y = 0; y < 16; y++) {
 						for (int z = 0; z < 16; z++) {
 							for (int x = 0; x < 16; x++) {
 								BlockState state = states.get(x, y, z);
 								if (state != lastState) {
 									lastState = state;
-									lastId = (char) Block.BLOCK_STATE_REGISTRY.getId(state);
+									lastId = Block.BLOCK_STATE_REGISTRY.getId(state);
 								}
 								ids[(y << 8) | (z << 4) | x] = lastId;
 							}

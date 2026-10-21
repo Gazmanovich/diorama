@@ -6,10 +6,11 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.IntSupplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColors;
 //? if >=26.1 {
@@ -27,8 +28,17 @@ import net.minecraft.client.resources.model.BakedModel;
 import org.jspecify.annotations.Nullable;
 *///?}
 //? if <26.1 && fabric {
-/*import net.fabricmc.loader.api.FabricLoader;
+/*import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
+import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry;
+import net.fabricmc.loader.api.FabricLoader;
+*///?} else if <26.1 && >=1.21.9 {
+/*import net.minecraft.data.AtlasIds;
+import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
+*///?} else if <26.1 {
+/*import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?}
+import net.minecraft.client.renderer.texture.MissingTextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 //? if >=26.1 {
@@ -43,11 +53,14 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.material.Fluid;
 
 /**
  * What each block state looks like on the map: how rays treat it, and its average top and
@@ -69,24 +82,6 @@ public final class BlockLooks {
 	public static final byte TINT_FOLIAGE = 2;
 	public static final byte TINT_DRY_FOLIAGE = 3;
 	public static final byte TINT_WATER = 4;
-
-	//? if >=1.21.5 {
-	private static final Set<Block> GRASS_TINTED = Set.of(
-		Blocks.GRASS_BLOCK, Blocks.SHORT_GRASS, Blocks.TALL_GRASS, Blocks.FERN, Blocks.LARGE_FERN,
-		Blocks.BUSH, Blocks.POTTED_FERN, Blocks.SUGAR_CANE, Blocks.PINK_PETALS, Blocks.WILDFLOWERS
-	);
-	//?} else {
-	/*// Bushes and wildflowers came in 1.21.5.
-	private static final Set<Block> GRASS_TINTED = Set.of(
-		Blocks.GRASS_BLOCK, Blocks.SHORT_GRASS, Blocks.TALL_GRASS, Blocks.FERN, Blocks.LARGE_FERN,
-		Blocks.POTTED_FERN, Blocks.SUGAR_CANE, Blocks.PINK_PETALS
-	);
-	*///?}
-	private static final Set<Block> FOLIAGE_TINTED = Set.of(
-		Blocks.OAK_LEAVES, Blocks.JUNGLE_LEAVES, Blocks.ACACIA_LEAVES, Blocks.DARK_OAK_LEAVES,
-		Blocks.VINE, Blocks.MANGROVE_LEAVES
-	);
-	private static final Set<Block> WATER_TINTED = Set.of(Blocks.WATER, Blocks.BUBBLE_COLUMN, Blocks.WATER_CAULDRON);
 
 	private static volatile BlockLooks current;
 	/** The models the current table was built from; a resource reload replaces them. */
@@ -112,6 +107,21 @@ public final class BlockLooks {
 	 * no collision at all, since a slab at head height blocks a zombie too.
 	 */
 	public final boolean[] spawnIn;
+	/**
+	 * Index into {@link #shapes} of a solid block's outline, or 0 for a full cube: everything else,
+	 * and any block whose outline is empty, rays treat as a whole cube.
+	 */
+	public final int[] shape;
+	/**
+	 * Outlines of solid blocks smaller than a cube, such as slabs, stairs, fences and carpets: each
+	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused.
+	 */
+	public float[][] shapes;
+	/**
+	 * For a waterlogged block smaller than a cube, the state id of the fluid around it: rays that
+	 * pass beside the block, or reach it from above, go through that fluid.
+	 */
+	public final it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap wetShapes = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
 
 	private BlockLooks(int size) {
 		this.kind = new byte[size];
@@ -126,6 +136,7 @@ public final class BlockLooks {
 		this.constantTint = new int[size];
 		this.spawnOn = new boolean[size];
 		this.spawnIn = new boolean[size];
+		this.shape = new int[size];
 	}
 
 	public static BlockLooks get() {
@@ -149,7 +160,11 @@ public final class BlockLooks {
 			&& this.emission[a] == this.emission[b]
 			// Spawn spots show on the map too: a slab becoming a double slab changes them.
 			&& this.spawnOn[a] == this.spawnOn[b]
-			&& this.spawnIn[a] == this.spawnIn[b];
+			&& this.spawnIn[a] == this.spawnIn[b]
+			// Same index, same boxes: outlines are stored once each.
+			&& this.shape[a] == this.shape[b]
+			// Filling or draining a waterlogged slab changes nothing else.
+			&& this.wetShapes.get(a) == this.wetShapes.get(b);
 	}
 
 	public static void invalidate() {
@@ -179,6 +194,11 @@ public final class BlockLooks {
 		BlockLooks looks = new BlockLooks(size);
 		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
 		RandomSource random = RandomSource.create(42L);
+		TintProbe probe = new TintProbe();
+		Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
+		Map<String, Integer> shapeByBoxes = new HashMap<>();
+		List<float[]> shapes = new ArrayList<>();
+		shapes.add(new float[0]);
 		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
 		//?} else if >=1.21.5 {
@@ -203,6 +223,9 @@ public final class BlockLooks {
 			}
 			byte kind = classify(state);
 			looks.kind[id] = kind;
+			if (kind == SOLID) {
+				looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
+			}
 			if (kind == AIR) {
 				continue;
 			}
@@ -248,8 +271,8 @@ public final class BlockLooks {
 				//?} else {
 				/*float[] avg = spriteAverage(model.particleIcon(), spriteCache);
 				*///?}
-				topFace.add(avg, false);
-				sideFace.add(avg, false);
+				topFace.add(avg, -1);
+				sideFace.add(avg, -1);
 			}
 			if (topFace.isEmpty()) {
 				topFace = sideFace;
@@ -268,66 +291,47 @@ public final class BlockLooks {
 				looks.kind[id] = GLASS;
 			}
 
-			Block block = state.getBlock();
-			if (GRASS_TINTED.contains(block)) {
-				looks.tint[id] = TINT_GRASS;
-			} else if (FOLIAGE_TINTED.contains(block)) {
-				looks.tint[id] = TINT_FOLIAGE;
-			//? if >=1.21.5 {
-			} else if (block == Blocks.LEAF_LITTER) {
-				looks.tint[id] = TINT_DRY_FOLIAGE;
-			//?}
-			} else if (WATER_TINTED.contains(block) || kind == WATER) {
-				looks.tint[id] = TINT_WATER;
-			} else if (block == Blocks.LILY_PAD) {
-				//? if >=1.21.4 {
-				looks.constantTint[id] = BlockColors.LILY_PAD_IN_WORLD & 0xFFFFFF;
-				//?} else {
-				/*// The constant came in 1.21.4, with this value.
-				looks.constantTint[id] = -14647248 & 0xFFFFFF;
-				*///?}
-			} else {
-				//? if >=26.1 {
-				BlockTintSource source = colors.getTintSource(state, 0);
-				if (source == null) {
-					source = colors.getTintSource(state, 1);
-				}
-				if (source != null) {
-					looks.constantTint[id] = source.color(state) & 0xFFFFFF;
-				}
-				//?} else {
-				/*// One colour function per block covers all its tint layers. Without a world or
-				// position it gives the block's colour out of the world, as BlockTintSource.color
-				// does from 26.1; -1 means no function is registered. A mod's function may not
-				// expect the missing world, so a failure counts as no tint.
-				try {
-					int color = colors.getColor(state, null, null, 0);
-					if (color != -1) {
-						looks.constantTint[id] = color & 0xFFFFFF;
-					}
-				} catch (RuntimeException e) {
-					looks.constantTint[id] = -1;
-				}
-				*///?}
+			// The tint layer the model's quads use, asked of the block's own tint code.
+			int tintIndex = topFace.tintIndex() >= 0 ? topFace.tintIndex() : sideFace.tintIndex();
+			if (tintIndex >= 0) {
+				Tint tint = blockTint(colors, state, tintIndex, probe);
+				looks.tint[id] = tint.kind();
+				looks.constantTint[id] = tint.constant();
 			}
 		}
-		// Fluids have no block model, so their particle texture is the untinted grey water. Every
-		// water cell (including kelp and seagrass, which sit in water) draws as tinted water.
-		int water = Block.BLOCK_STATE_REGISTRY.getId(Blocks.WATER.defaultBlockState());
-		looks.topTinted[water] = looks.top[water];
-		looks.topTintWeight[water] = 1;
-		looks.sideTinted[water] = looks.side[water];
-		looks.sideTintWeight[water] = 1;
-		looks.tint[water] = TINT_WATER;
-		for (int id = 0; id < size; id++) {
-			if (looks.kind[id] == WATER && id != water) {
-				looks.top[id] = looks.top[water];
-				looks.topTinted[id] = looks.topTinted[water];
-				looks.topTintWeight[id] = 1;
-				looks.side[id] = looks.side[water];
-				looks.sideTinted[id] = looks.sideTinted[water];
-				looks.sideTintWeight[id] = 1;
-				looks.tint[id] = TINT_WATER;
+		// A fluid's block has no model of its own, so every cell holding a fluid and nothing solid
+		// (kelp and seagrass stand in water) draws as the fluid's still texture, tinted the way the
+		// fluid's own tint code asks: water by the biome.
+		Map<Fluid, FluidLook> fluidLooks = new IdentityHashMap<>();
+		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
+			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+			if (id < 0 || id >= size || looks.kind[id] != WATER) {
+				continue;
+			}
+			FluidState fluid = state.getFluidState();
+			FluidLook look = fluidLooks.computeIfAbsent(fluid.getType(), type -> fluidLook(fluid, spriteCache, probe));
+			if (look.color() < 0) {
+				// No texture to be found: keep the colour of the block's particle texture.
+				continue;
+			}
+			looks.top[id] = look.color();
+			looks.topTinted[id] = look.color();
+			looks.topTintWeight[id] = 1;
+			looks.side[id] = look.color();
+			looks.sideTinted[id] = look.color();
+			looks.sideTintWeight[id] = 1;
+			looks.tint[id] = look.tint().kind();
+			looks.constantTint[id] = look.tint().constant();
+		}
+		looks.shapes = shapes.toArray(new float[0][]);
+		looks.wetShapes.defaultReturnValue(-1);
+		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
+			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+			if (id >= 0 && id < size && looks.shape[id] != 0 && !state.getFluidState().isEmpty()) {
+				int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
+				if (fluid >= 0 && fluid < size && looks.kind[fluid] == WATER) {
+					looks.wetShapes.put(id, fluid);
+				}
 			}
 		}
 		current = looks;
@@ -352,6 +356,57 @@ public final class BlockLooks {
 	}
 
 	*///?}
+	/** A shape with more boxes than this counts as its bounding box. */
+	private static final int MAX_BOXES = 16;
+
+	/** Finds or adds the state's outline in {@code shapes}; 0 for a full cube. */
+	private static int shapeIndex(BlockState state, Map<VoxelShape, Integer> byVoxels, Map<String, Integer> byBoxes, List<float[]> shapes) {
+		VoxelShape outline;
+		try {
+			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+		} catch (RuntimeException e) {
+			return 0;
+		}
+		Integer known = byVoxels.get(outline);
+		if (known != null) {
+			return known;
+		}
+		int index = 0;
+		if (!outline.isEmpty() && outline != Shapes.block()) {
+			List<AABB> boxes = outline.toAabbs();
+			if (boxes.size() > MAX_BOXES) {
+				boxes = List.of(outline.bounds());
+			}
+			float[] flat = new float[boxes.size() * 6];
+			int n = 0;
+			boolean full = false;
+			for (AABB box : boxes) {
+				// Some mods' outlines reach into the next block; only the part in this one counts,
+				// and a box wholly outside it is dropped.
+				float[] b = {clamp01(box.minX), clamp01(box.minY), clamp01(box.minZ), clamp01(box.maxX), clamp01(box.maxY), clamp01(box.maxZ)};
+				if (b[0] >= b[3] || b[1] >= b[4] || b[2] >= b[5]) {
+					continue;
+				}
+				System.arraycopy(b, 0, flat, n, 6);
+				n += 6;
+				full |= b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1 && b[4] == 1 && b[5] == 1;
+			}
+			float[] kept = java.util.Arrays.copyOf(flat, n);
+			if (!full && n > 0) {
+				index = byBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
+					shapes.add(kept);
+					return shapes.size() - 1;
+				});
+			}
+		}
+		byVoxels.put(outline, index);
+		return index;
+	}
+
+	private static float clamp01(double v) {
+		return (float) Math.max(0, Math.min(1, v));
+	}
+
 	private static byte classify(BlockState state) {
 		if (state.isAir() || state.getRenderShape() == RenderShape.INVISIBLE && state.getFluidState().isEmpty()) {
 			return AIR;
@@ -367,12 +422,107 @@ public final class BlockLooks {
 		return SOLID;
 	}
 
+	/** A fluid's colour as 0xRRGGBB, or -1 if its texture can't be found, and its tint. */
+	private record FluidLook(int color, Tint tint) {
+	}
+
+	/** Looks up the still texture and the tint the game draws a fluid with. */
+	private static FluidLook fluidLook(FluidState fluid, Map<TextureAtlasSprite, float[]> cache, TintProbe probe) {
+		TextureAtlasSprite sprite;
+		try {
+			//? if >=26.1 {
+			sprite = Minecraft.getInstance().getModelManager().getFluidStateModelSet().get(fluid).stillMaterial().sprite();
+			//?} else if fabric {
+			/*FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getType());
+			sprite = handler == null ? null : handler.getFluidSprites(null, null, fluid)[0];
+			*///?} else if >=1.21.9 {
+			/*sprite = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS)
+				.getSprite(IClientFluidTypeExtensions.of(fluid).getStillTexture());
+			*///?} else {
+			/*sprite = Minecraft.getInstance().getTextureAtlas(TextureAtlas.LOCATION_BLOCKS)
+				.apply(IClientFluidTypeExtensions.of(fluid).getStillTexture());
+			*///?}
+		} catch (RuntimeException e) {
+			sprite = null;
+		}
+		if (sprite != null && sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation())) {
+			// An unregistered fluid or a missing texture: better the block's particle colour than purple.
+			sprite = null;
+		}
+		float[] avg = sprite == null ? null : spriteAverage(sprite, cache);
+		int color = avg == null || avg[3] <= 0 ? -1 : FaceColor.pack(avg[0], avg[1], avg[2]);
+		return new FluidLook(color, fluidTint(fluid, probe));
+	}
+
+	/** How a block or fluid is tinted: by a biome colour ({@code TINT_*}) or a fixed colour, -1 for none. */
+	private record Tint(byte kind, int constant) {
+		static final Tint NONE = new Tint(TINT_NONE, -1);
+
+		/**
+		 * Asks tint code for its colour in the probe's world. For a biome colour the map doesn't
+		 * blend itself (a mod's own), or code that fails in the stand-in world, it takes the code's
+		 * colour out of the world instead, as the map did before it asked in a world at all.
+		 */
+		static Tint ask(TintProbe probe, IntSupplier inWorld, IntSupplier outOfWorld) {
+			probe.reset();
+			int color;
+			try {
+				color = inWorld.getAsInt();
+			} catch (RuntimeException e) {
+				color = -1;
+			}
+			byte kind = probe.kind();
+			if (kind != TINT_NONE) {
+				return new Tint(kind, -1);
+			}
+			if (probe.askedForBiome() || color == -1) {
+				try {
+					color = outOfWorld.getAsInt();
+				} catch (RuntimeException e) {
+					return NONE;
+				}
+			}
+			// -1 (no tint code) and white both leave the texture as it is.
+			return (color & 0xFFFFFF) == 0xFFFFFF ? NONE : new Tint(TINT_NONE, color & 0xFFFFFF);
+		}
+	}
+
+	/** Asks a block's tint code how one tint layer is coloured. */
+	private static Tint blockTint(BlockColors colors, BlockState state, int index, TintProbe probe) {
+		//? if >=26.1 {
+		BlockTintSource source = colors.getTintSource(state, index);
+		return source == null ? Tint.NONE : Tint.ask(probe, () -> source.colorInWorld(state, probe, BlockPos.ZERO), () -> source.color(state));
+		//?} else {
+		/*return Tint.ask(probe, () -> colors.getColor(state, probe, BlockPos.ZERO, index), () -> colors.getColor(state, null, null, index));
+		*///?}
+	}
+
+	/** The same for a fluid's tint code. */
+	private static Tint fluidTint(FluidState fluid, TintProbe probe) {
+		try {
+			//? if >=26.1 {
+			BlockTintSource source = Minecraft.getInstance().getModelManager().getFluidStateModelSet().get(fluid).tintSource();
+			BlockState block = fluid.createLegacyBlock();
+			return source == null ? Tint.NONE : Tint.ask(probe, () -> source.colorInWorld(block, probe, BlockPos.ZERO), () -> source.color(block));
+			//?} else if fabric {
+			/*FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getType());
+			return handler == null ? Tint.NONE
+				: Tint.ask(probe, () -> handler.getFluidColor(probe, BlockPos.ZERO, fluid), () -> handler.getFluidColor(null, null, fluid));
+			*///?} else {
+			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
+			return Tint.ask(probe, () -> extensions.getTintColor(fluid, probe, BlockPos.ZERO), extensions::getTintColor);
+			*///?}
+		} catch (RuntimeException e) {
+			return Tint.NONE;
+		}
+	}
+
 	private static void accumulate(FaceColor face, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
-			face.add(spriteAverage(quad.materialInfo().sprite(), cache), quad.materialInfo().tintIndex() >= 0);
+			face.add(spriteAverage(quad.materialInfo().sprite(), cache), quad.materialInfo().tintIndex());
 			//?} else {
-			/*face.add(spriteAverage(quad.sprite(), cache), quad.tintIndex() >= 0);
+			/*face.add(spriteAverage(quad.sprite(), cache), quad.tintIndex());
 			*///?}
 		}
 	}
@@ -381,16 +531,16 @@ public final class BlockLooks {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
 			float[] avg = spriteAverage(quad.materialInfo().sprite(), cache);
-			boolean tinted = quad.materialInfo().tintIndex() >= 0;
+			int tintIndex = quad.materialInfo().tintIndex();
 			//?} else {
 			/*float[] avg = spriteAverage(quad.sprite(), cache);
-			boolean tinted = quad.tintIndex() >= 0;
+			int tintIndex = quad.tintIndex();
 			*///?}
 			if (quad.direction() == Direction.UP || quad.direction() == Direction.DOWN) {
-				top.add(avg, tinted);
+				top.add(avg, tintIndex);
 			} else {
-				top.add(avg, tinted);
-				side.add(avg, tinted);
+				top.add(avg, tintIndex);
+				side.add(avg, tintIndex);
 			}
 		}
 	}
@@ -482,13 +632,18 @@ public final class BlockLooks {
 		private float tr, tg, tb, tw;
 		private float coverage;
 		private int count;
+		/** The first tint layer a quad asked for, or -1. */
+		private int tintIndex = -1;
 
-		void add(float[] avg, boolean tinted) {
+		void add(float[] avg, int tintIndex) {
 			float w = avg[3];
 			if (w <= 0) {
 				return;
 			}
-			if (tinted) {
+			if (tintIndex >= 0) {
+				if (this.tintIndex < 0) {
+					this.tintIndex = tintIndex;
+				}
 				this.tr += avg[0] * w;
 				this.tg += avg[1] * w;
 				this.tb += avg[2] * w;
@@ -509,6 +664,10 @@ public final class BlockLooks {
 
 		float coverage() {
 			return this.coverage;
+		}
+
+		int tintIndex() {
+			return this.tintIndex;
 		}
 
 		int untinted() {
