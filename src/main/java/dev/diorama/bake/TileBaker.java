@@ -453,7 +453,7 @@ public final class TileBaker {
 				int wet = this.looks.wetShapes.get(id);
 				// Waterlogged: the ray is in water from where it came into the cell, unless it met
 				// the block right there, as on a fence top level with the water.
-				if (wet >= 0 && waterId < 0 && (!hit || this.shapeT - tIn > 0.25)) {
+				if (wet >= 0 && waterId < 0 && (!hit || this.shapeT > tIn)) {
 					waterId = wet;
 					waterT = tIn;
 					waterBy = by;

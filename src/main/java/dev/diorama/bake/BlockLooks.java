@@ -162,7 +162,9 @@ public final class BlockLooks {
 			&& this.spawnOn[a] == this.spawnOn[b]
 			&& this.spawnIn[a] == this.spawnIn[b]
 			// Same index, same boxes: outlines are stored once each.
-			&& this.shape[a] == this.shape[b];
+			&& this.shape[a] == this.shape[b]
+			// Filling or draining a waterlogged slab changes nothing else.
+			&& this.wetShapes.get(a) == this.wetShapes.get(b);
 	}
 
 	public static void invalidate() {
