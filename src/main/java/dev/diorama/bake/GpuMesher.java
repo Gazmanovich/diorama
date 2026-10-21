@@ -285,7 +285,7 @@ public final class GpuMesher {
 						int wet = looks.wetShapes.get(id);
 						boolean passes = false;
 						boolean reached;
-						boolean asCube = false;
+						boolean traced = false;
 						if (kind == BlockLooks.SOLID) {
 							boolean rock = rockAbove || rockSouth;
 							if (rock) {
@@ -296,12 +296,26 @@ public final class GpuMesher {
 							reached = openAbove || openSouth;
 							if (reached) {
 								mesh.lowestY = Math.min(mesh.lowestY, y);
-								if (rock) {
-									// Rays still in the rock skip this cell, open ones meet its boxes, and
-									// faces inside it would stop both: the GPU can't draw that. The tracer
-									// bakes the tile instead.
-									asCube = true;
+								if (rock && (openAbove && rockAbove || openSouth && rockSouth || wet >= 0)) {
+									// Rays from the rock and open ones come in on the same side, or it's
+									// waterlogged: the GPU can't draw that as the tracer does, which bakes
+									// the tile instead.
+									traced = true;
 									mesh.traceInstead = true;
+								} else if (rock) {
+									// Rays from the rock skip the cell, so only what the open side's rays
+									// meet. Rays of both kinds miss its boxes and go on: a solid block they
+									// reach next can't be drawn for both, so it traces the tile.
+									int[][] side = sh.bySide(sin, cos);
+									int[] tops = openAbove ? side[0] : side[1];
+									int[] souths = openAbove ? side[2] : side[3];
+									for (int b = 0; b < tops.length; b += 2) {
+										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, tops[b], tops[b + 1]);
+									}
+									for (int b = 0; b < souths.length; b += 2) {
+										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, souths[b], souths[b + 1]);
+									}
+									passes = true;
 								} else {
 									// A piece on the cell's top or south side is met only by rays coming in
 									// that way; one inside the cell by rays from either.
@@ -349,9 +363,14 @@ public final class GpuMesher {
 								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
 								byte c = openSouth ? hereFirstWater[i + 1] : NO_WATER;
 								hereFirstWater[i] = a == SEEN_WATER || c == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || c == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+								if (hereRock[i] && hereFirstWater[i] != NO_WATER) {
+									// The rays from the rock it lets through haven't been in water: one
+									// state for both doesn't hold.
+									mesh.traceInstead = true;
+								}
 							}
 						}
-						if (reached && !asCube && wet >= 0) {
+						if (reached && !traced && wet >= 0) {
 							// Waterlogged: in water from where the ray came into the cell, but dry
 							// where it meets the block right there.
 							waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
@@ -364,6 +383,11 @@ public final class GpuMesher {
 							}
 						}
 					} else if (kind == BlockLooks.SOLID) {
+						if (openAbove && rockAbove || openSouth && rockSouth) {
+							// Rays from the rock and open ones on the same side, out of a smaller block
+							// both reach: these are rock to one and a face to the other. Trace the tile.
+							mesh.traceInstead = true;
+						}
 						if (rockAbove || rockSouth) {
 							// Still in the rock below the cut.
 							hereRock[i] = true;
@@ -425,6 +449,10 @@ public final class GpuMesher {
 					// Rays still going: they end at the view's limit, on the cut face or the void.
 					for (int z = hi; z >= lo; z--) {
 						int i = z - zBase;
+						if (hereRock[i] && hereOpen[i]) {
+							// Out of a smaller block both reach: the cut face to some rays, the void to others.
+							mesh.traceInstead = true;
+						}
 						if (hereRock[i] || hereOpen[i]) {
 							int flags = hereRock[i] ? (fog ? UNKNOWN : CUT) : fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
 							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, flags);

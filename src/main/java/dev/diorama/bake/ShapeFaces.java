@@ -49,6 +49,58 @@ final class ShapeFaces {
 	private final int[][] boxBounds;
 	/** {@link #seen} per camera pitch, as the bits of its sine. */
 	private final Map<Long, int[][]> seen = new ConcurrentHashMap<>();
+	/** {@link #bySide} per camera pitch, as the bits of its sine. */
+	private final Map<Long, int[][]> bySide = new ConcurrentHashMap<>();
+
+	/**
+	 * The top and south pieces split by the side of the cell the camera rays that meet them come
+	 * in through: top pieces met from above, top pieces met from the south, then the same for
+	 * south pieces. Rays run in a plane of constant x, so each point of a piece has one ray and
+	 * one side.
+	 */
+	int[][] bySide(double sin, double cos) {
+		return this.bySide.computeIfAbsent(Double.doubleToLongBits(sin), k -> {
+			int[][] top = split(this.top, true, sin, cos);
+			int[][] south = split(this.south, false, sin, cos);
+			return new int[][] {top[0], top[1], south[0], south[1]};
+		});
+	}
+
+	private static int[][] split(int[] pieces, boolean top, double sin, double cos) {
+		List<int[]> above = new ArrayList<>();
+		List<int[]> south = new ArrayList<>();
+		for (int p = 0; p < pieces.length; p += 2) {
+			int lo = pieces[p];
+			int hi = pieces[p + 1];
+			// Back toward the camera a ray goes up by sin and south by cos. From a top piece at height
+			// h it leaves through the top where z < UNIT - (UNIT - h) cos / sin; from a south piece
+			// at h, where y > UNIT - (UNIT - h) sin / cos.
+			if (top) {
+				int h = hi >> 8 & 255;
+				int z0 = lo >> 16 & 255;
+				int z1 = hi >> 16 & 255;
+				int s = Math.max(z0, Math.min(z1, (int) Math.round(UNIT - (UNIT - h) * cos / sin)));
+				if (s > z0) {
+					above.add(new int[] {lo, hi & ~(255 << 16) | s << 16});
+				}
+				if (s < z1) {
+					south.add(new int[] {lo & ~(255 << 16) | s << 16, hi});
+				}
+			} else {
+				int h = hi >> 16 & 255;
+				int y0 = lo >> 8 & 255;
+				int y1 = hi >> 8 & 255;
+				int s = Math.max(y0, Math.min(y1, (int) Math.round(UNIT - (UNIT - h) * sin / cos)));
+				if (s < y1) {
+					above.add(new int[] {lo & ~(255 << 8) | s << 8, hi});
+				}
+				if (s > y0) {
+					south.add(new int[] {lo, hi & ~(255 << 8) | s << 8});
+				}
+			}
+		}
+		return new int[][] {flatten(above), flatten(south)};
+	}
 
 	/**
 	 * The parts of the top and south pieces a camera ray meets first, at this pitch: what nearer
