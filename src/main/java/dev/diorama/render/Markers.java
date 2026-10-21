@@ -19,6 +19,8 @@ import org.jspecify.annotations.Nullable;
 public final class Markers {
 	/** Headings the arrow is drawn at, around the full turn: one every 5 degrees. */
 	private static final int HEADINGS = 72;
+	/** Arrow textures uploaded per frame besides the one on screen. */
+	private static final int UPLOADS_PER_FRAME = 4;
 	private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(r -> {
 		Thread thread = new Thread(r, "Diorama arrow");
 		thread.setDaemon(true);
@@ -66,19 +68,35 @@ public final class Markers {
 				}, WORKER));
 			}
 		}
+		// The heading on screen first, then a few more a frame, so a backlog never lands in one frame.
+		long wanted = style * HEADINGS + heading;
+		upload(wanted);
+		int budget = UPLOADS_PER_FRAME;
 		Iterator<Map.Entry<Long, CompletableFuture<int[]>>> pending = DRAWING.entrySet().iterator();
-		while (pending.hasNext()) {
+		while (pending.hasNext() && budget > 0) {
 			Map.Entry<Long, CompletableFuture<int[]>> entry = pending.next();
 			if (entry.getValue().isDone()) {
-				int[] pixels = entry.getValue().join();
-				int edge = ArrowArt.GUI_SIZE * ArrowArt.SCALE;
-				MapTexture texture = MapTexture.create("diorama arrow", edge, 1);
-				texture.write(0, 0, 0, edge, pixels);
-				ARROWS.put(entry.getKey(), texture);
+				ARROWS.put(entry.getKey(), texture(entry.getValue().join()));
 				pending.remove();
+				budget--;
 			}
 		}
 		return ARROWS.get(style * HEADINGS + heading);
+	}
+
+	private static void upload(long key) {
+		CompletableFuture<int[]> drawing = DRAWING.get(key);
+		if (drawing != null && drawing.isDone()) {
+			ARROWS.put(key, texture(drawing.join()));
+			DRAWING.remove(key);
+		}
+	}
+
+	private static MapTexture texture(int[] pixels) {
+		int edge = ArrowArt.GUI_SIZE * ArrowArt.SCALE;
+		MapTexture texture = MapTexture.create("diorama arrow", edge, 1);
+		texture.write(0, 0, 0, edge, pixels);
+		return texture;
 	}
 
 	/** The flat arrow, drawn while the voxel one isn't ready. North-south distances look shorter under the tilted camera. */
