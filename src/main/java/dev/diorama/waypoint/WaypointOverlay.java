@@ -48,11 +48,12 @@ public final class WaypointOverlay {
 			float y = view.screenY(Projection.v(waypoint.y, waypoint.z + 0.5));
 			float dx = x - cx;
 			float dy = y - cy;
-			float reach = Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH);
-			if (reach > 1) {
-				pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
-			} else {
+			if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
+			} else {
+				// Too near the edge for the whole pin to show: a badge at the edge, pointing the way.
+				float reach = Math.max(1, Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH));
+				pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
 			}
 		}
 		return pins;

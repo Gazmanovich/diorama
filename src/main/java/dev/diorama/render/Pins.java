@@ -63,6 +63,14 @@ public final class Pins {
 		return (head == SMALL ? 5 : 6) + head / 2.0F;
 	}
 
+	/** Whether a standing pin marking (x, y) shows whole inside the box x0..x1, y0..y1: its head above, its shadow below. */
+	public static boolean fitsStanding(int size, float x, float y, float x0, float y0, float x1, float y1) {
+		int head = PinArt.standingHead(size);
+		float above = head + (head == SMALL ? 5 : 6);
+		float side = (head + 4) / 2.0F;
+		return x - side >= x0 && x + side <= x1 && y - above >= y0 && y + 3 <= y1;
+	}
+
 	/** How far a badge with a caret reaches from its centre, so a view can keep it inside. */
 	public static float edgeReach(int head) {
 		return head / 2.0F + 6;
@@ -93,7 +101,9 @@ public final class Pins {
 		int w = art.image().width;
 		int h = art.image().height;
 		float edge = sprite.edge();
-		MapCanvas.of(graphics).rect(sprite.texture(), Sampling.CLAMP_CRISP, left, top, left + w, top + h, 0, 0, w / edge, h / edge, 0xFFFFFFFF);
+		// A colour saved with no alpha at all is meant opaque; otherwise the pin keeps the colour's alpha.
+		int alpha = waypoint.color >>> 24 == 0 ? 0xFF : waypoint.color >>> 24;
+		MapCanvas.of(graphics).rect(sprite.texture(), Sampling.CLAMP_CRISP, left, top, left + w, top + h, 0, 0, w / edge, h / edge, alpha << 24 | 0xFFFFFF);
 		if (waypoint.kind != Waypoint.Kind.DEATH) {
 			label(graphics, waypoint, left + art.labelX0(), top + art.labelY0(), left + art.labelX1(), top + art.labelY1());
 		}
