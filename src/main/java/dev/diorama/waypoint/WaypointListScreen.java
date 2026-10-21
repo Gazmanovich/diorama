@@ -1,7 +1,7 @@
 package dev.diorama.waypoint;
 
 import dev.diorama.DioramaClient;
-import dev.diorama.render.MapIcons;
+import dev.diorama.render.Pins;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -138,14 +138,7 @@ public final class WaypointListScreen extends Screen {
 			graphics.fill(left - 4, y, left + LIST_WIDTH + 4, y + ROW - 1, i % 2 == 0 ? 0x30FFFFFF : 0x18FFFFFF);
 			float cx = left + 9;
 			float cy = y + ROW / 2.0F;
-			MapIcons.dot(graphics, cx, cy, 16, 0xFF101418);
-			MapIcons.dot(graphics, cx, cy, 14, waypoint.color);
-			String label = waypoint.kind == Waypoint.Kind.DEATH ? "✝" : waypoint.label();
-			graphics.pose().pushMatrix();
-			graphics.pose().translate(cx, cy - 3);
-			graphics.pose().scale(0.75F);
-			graphics.centeredText(this.font, label, 0, 0, WaypointOverlay.textColour(waypoint.color));
-			graphics.pose().popMatrix();
+			Pins.badge(graphics, waypoint, cx, cy, Pins.LARGE);
 			int nameColor = waypoint.visible ? 0xFFFFFFFF : 0xFF808080;
 			String name = this.fit(waypoint.name, textWidth);
 			graphics.text(this.font, name, left + TEXT_LEFT, y + 4, nameColor, true);
