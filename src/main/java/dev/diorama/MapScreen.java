@@ -533,6 +533,10 @@ public final class MapScreen extends Screen {
 
 	/** A drag; false leaves it to the screen's widgets. */
 	private boolean dragged(double x, double y, int button, double dx, double dy) {
+		if (this.pressButton == -1) {
+			// No press of this screen's: it was reset (a resize rebuilt the screen mid-drag).
+			return false;
+		}
 		if (Math.hypot(x - this.pressX, y - this.pressY) > 3) {
 			this.dragged = true;
 		}
@@ -746,11 +750,16 @@ public final class MapScreen extends Screen {
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
 		for (AbstractWidget widget : new AbstractWidget[] {this.waypointsButton, this.settingsButton, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown}) {
-			if (widget.visible && x >= widget.getX() && x < widget.getX() + widget.getWidth() && y >= widget.getY() && y < widget.getY() + widget.getHeight()) {
+			if (on(widget, x, y)) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/** Whether a point is on a widget that's shown; unlike isMouseOver, also when it's inactive. */
+	private static boolean on(AbstractWidget widget, double x, double y) {
+		return widget.visible && x >= widget.getX() && x < widget.getX() + widget.getWidth() && y >= widget.getY() && y < widget.getY() + widget.getHeight();
 	}
 
 	/** A control's tooltip and where the control is. */
@@ -763,22 +772,22 @@ public final class MapScreen extends Screen {
 		if (tab >= 0) {
 			return new Tip(lines(TAB_NAMES[tab], key(keyName(InputConstants.KEY_C))), new ScreenRectangle(this.tabX[tab], 0, this.tabWidth[tab], BAR));
 		}
-		if (this.waypointsButton.isMouseOver(x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
+		if (on(this.waypointsButton, x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
 			return tip(this.waypointsButton, this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
 		}
-		if (this.zoomIn.isMouseOver(x, y)) {
+		if (on(this.zoomIn, x, y)) {
 			return tip(this.zoomIn, Component.translatable("diorama.map.zoom_in"), Component.translatable("diorama.map.scroll_up"));
 		}
-		if (this.zoomOut.isMouseOver(x, y)) {
+		if (on(this.zoomOut, x, y)) {
 			return tip(this.zoomOut, Component.translatable("diorama.map.zoom_out"), Component.translatable("diorama.map.scroll_down"));
 		}
-		if (this.recenter.isMouseOver(x, y)) {
+		if (on(this.recenter, x, y)) {
 			return tip(this.recenter, Component.translatable("diorama.map.recenter"), key(keyName(InputConstants.KEY_SPACE)));
 		}
-		if (this.sliceUp.isMouseOver(x, y)) {
+		if (on(this.sliceUp, x, y)) {
 			return tip(this.sliceUp, Component.translatable("diorama.map.slice_up"), key(keyName(InputConstants.KEY_PAGEUP)));
 		}
-		if (this.sliceDown.isMouseOver(x, y)) {
+		if (on(this.sliceDown, x, y)) {
 			return tip(this.sliceDown, Component.translatable("diorama.map.slice_down"), key(keyName(InputConstants.KEY_PAGEDOWN)));
 		}
 		return null;
