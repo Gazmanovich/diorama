@@ -111,6 +111,8 @@ public final class TileBaker {
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
 	private final double sin;
 	private final double cos;
+	private final double invSin;
+	private final double invCos;
 	// Direction toward the sun for this style.
 	private final double sunX;
 	private final double sunY;
@@ -157,6 +159,8 @@ public final class TileBaker {
 		this.sunZ = Math.cos(elevation) * SUN_AZIMUTH_Z;
 		this.sin = Projection.sin();
 		this.cos = Projection.cos();
+		this.invSin = 1 / this.sin;
+		this.invCos = 1 / this.cos;
 		this.topY = localTop(key, source, 0);
 		this.rayTop = localTop(key, source, SKY_REACH);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.roofless ? Math.min(source.roof(), source.maxY()) : this.topY;
@@ -751,7 +755,7 @@ public final class TileBaker {
 
 	/** Walks from a point toward the sun; true if a solid block is in the way. */
 	private boolean inShadow(double ox, double oy, double oz, double dx, double dy, double dz) {
-		return this.blocked(ox, oy, oz, dx, dy, dz, SHADOW_DISTANCE, SHADOW_STEPS);
+		return this.blocked(ox, oy, oz, dx, dy, dz, SHADOW_DISTANCE, SHADOW_STEPS, true);
 	}
 
 	/** Sky visibility on a top face at {@code y}, blended from its four corners. */
@@ -776,7 +780,8 @@ public final class TileBaker {
 		for (int i = 0; i < SKY_RAYS.length; i++) {
 			double[] d = SKY_RAYS[i];
 			// Start a hair along the ray, so it begins in the block it heads into, not on a boundary.
-			if (!this.blocked(x + d[0] * 1e-3, y + d[1] * 1e-3, z + d[2] * 1e-3, d[0], d[1], d[2], SKY_REACH, SKY_REACH * 3)) {
+			// Sky light is soft and sampled at cube corners anyway: a smaller block blocks it like a cube.
+			if (!this.blocked(x + d[0] * 1e-3, y + d[1] * 1e-3, z + d[2] * 1e-3, d[0], d[1], d[2], SKY_REACH, SKY_REACH * 3, false)) {
 				open += SKY_WEIGHTS[i];
 			}
 			total += SKY_WEIGHTS[i];
@@ -786,13 +791,19 @@ public final class TileBaker {
 		return sky;
 	}
 
-	/** Walks from a point along a direction for up to {@code distance} blocks; true if a solid block is in the way. */
-	private boolean blocked(double ox, double oy, double oz, double dx, double dy, double dz, double distance, int steps) {
+	/**
+	 * Walks from a point along a direction for up to {@code distance} blocks; true if a solid block
+	 * is in the way. Without {@code shapes}, a block smaller than a cube blocks the way like a cube.
+	 */
+	private boolean blocked(double ox, double oy, double oz, double dx, double dy, double dz, double distance, int steps, boolean shapes) {
+		double ix = 1 / dx;
+		double iy = 1 / dy;
+		double iz = 1 / dz;
 		int cx = (int) Math.floor(ox);
 		int cy = (int) Math.floor(oy);
 		int cz = (int) Math.floor(oz);
 		int start = cy < this.rayTop ? this.reader.solid(cx, cy, cz) : 0;
-		if (start == 1 || start == 2 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
+		if (start == 1 || start == 2 && (!shapes || this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz, ix, iy, iz))) {
 			return true;
 		}
 		int top = this.rayTop;
@@ -809,9 +820,9 @@ public final class TileBaker {
 		int stepX = dx > 0 ? 1 : -1;
 		int stepY = dy > 0 ? 1 : -1;
 		int stepZ = dz > 0 ? 1 : -1;
-		double tDeltaX = dx == 0 ? Double.MAX_VALUE : Math.abs(1 / dx);
-		double tDeltaY = dy == 0 ? Double.MAX_VALUE : Math.abs(1 / dy);
-		double tDeltaZ = dz == 0 ? Double.MAX_VALUE : Math.abs(1 / dz);
+		double tDeltaX = dx == 0 ? Double.MAX_VALUE : Math.abs(ix);
+		double tDeltaY = dy == 0 ? Double.MAX_VALUE : Math.abs(iy);
+		double tDeltaZ = dz == 0 ? Double.MAX_VALUE : Math.abs(iz);
 		double tMaxX = dx == 0 ? Double.MAX_VALUE : (dx > 0 ? cx + 1 - ox : ox - cx) * tDeltaX;
 		double tMaxY = dy == 0 ? Double.MAX_VALUE : (dy > 0 ? cy + 1 - oy : oy - cy) * tDeltaY;
 		double tMaxZ = dz == 0 ? Double.MAX_VALUE : (dz > 0 ? cz + 1 - oz : oz - cz) * tDeltaZ;
@@ -836,7 +847,7 @@ public final class TileBaker {
 			if (solid == VoxelReader.UNKNOWN) {
 				return false;
 			}
-			if (solid == 1 || solid == 2 && this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz)) {
+			if (solid == 1 || solid == 2 && (!shapes || this.meetsShape(cx, cy, cz, ox, oy, oz, dx, dy, dz, ix, iy, iz))) {
 				return true;
 			}
 		}
@@ -847,7 +858,7 @@ public final class TileBaker {
 	 * Whether a ray from (ox, oy, oz) along (dx, dy, dz) meets the solid block in this cell: always
 	 * for a full cube, and for a smaller block only if it crosses one of its boxes.
 	 */
-	private boolean meetsShape(int cx, int cy, int cz, double ox, double oy, double oz, double dx, double dy, double dz) {
+	private boolean meetsShape(int cx, int cy, int cz, double ox, double oy, double oz, double dx, double dy, double dz, double ix, double iy, double iz) {
 		int id = this.reader.state(cx, cy, cz);
 		int shape = id < 0 ? 0 : this.looks.shape[id];
 		if (shape == 0) {
@@ -863,6 +874,7 @@ public final class TileBaker {
 			for (int axis = 0; axis < 3 && near <= far; axis++) {
 				double p = axis == 0 ? px : axis == 1 ? py : pz;
 				double d = axis == 0 ? dx : axis == 1 ? dy : dz;
+				double inv = axis == 0 ? ix : axis == 1 ? iy : iz;
 				double min = boxes[i + axis];
 				double max = boxes[i + 3 + axis];
 				if (d == 0) {
@@ -870,8 +882,8 @@ public final class TileBaker {
 						far = -1;
 					}
 				} else {
-					double t0 = (min - p) / d;
-					double t1 = (max - p) / d;
+					double t0 = (min - p) * inv;
+					double t1 = (max - p) * inv;
 					near = Math.max(near, Math.min(t0, t1));
 					far = Math.min(far, Math.max(t0, t1));
 				}
@@ -898,10 +910,10 @@ public final class TileBaker {
 			if (fx < boxes[i] || fx >= boxes[i + 3]) {
 				continue;
 			}
-			double tTop = (y0 - by - boxes[i + 4]) / this.sin;
-			double tSouth = (z0 - bz - boxes[i + 5]) / this.cos;
+			double tTop = (y0 - by - boxes[i + 4]) * this.invSin;
+			double tSouth = (z0 - bz - boxes[i + 5]) * this.invCos;
 			double enter = Math.max(tIn, Math.max(tTop, tSouth));
-			double exit = Math.min(tOut, Math.min((y0 - by - boxes[i + 1]) / this.sin, (z0 - bz - boxes[i + 2]) / this.cos));
+			double exit = Math.min(tOut, Math.min((y0 - by - boxes[i + 1]) * this.invSin, (z0 - bz - boxes[i + 2]) * this.invCos));
 			if (enter < exit && enter < best) {
 				best = enter;
 				// A box flush with the cell's side is met where the ray came into the cell.
