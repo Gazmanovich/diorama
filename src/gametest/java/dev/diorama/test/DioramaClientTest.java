@@ -2547,6 +2547,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (clickedSize != Settings.MAX_SIZE) {
 			throw new AssertionError("Clicking the right end of the Size slider set " + clickedSize + ", not " + Settings.MAX_SIZE);
 		}
+		// The biggest minimap, switched off: the dimmed preview stops at the settings' edge.
+		click(context, "Minimap", 0.05);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-size-224-off");
+		click(context, "Minimap", 0.05);
 		clickAt(context, "Size: ", 0.3);
 		context.takeScreenshot("settings-02-size-" + context.computeOnClient(mc -> Settings.get().minimapSize));
 		context.runOnClient(mc -> {
@@ -2838,6 +2844,25 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/** Clicks the middle of the widget with this label, as a player would. */
 	private static void click(ClientGameTestContext context, String label) {
 		clickAt(context, label, 0.5);
+	}
+
+	/** Clicks the checkbox with this label this far along it (a tab may have the same label). */
+	private static void click(ClientGameTestContext context, String label, double along) {
+		double[] at = context.computeOnClient(mc -> {
+			java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+			collectWidgets(mc.gui.screen(), widgets);
+			for (var widget : widgets) {
+				if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(label)) {
+					double scale = mc.getWindow().getGuiScale();
+					return new double[] {(widget.getX() + along * widget.getWidth()) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+				}
+			}
+			throw new AssertionError("No checkbox labelled " + label);
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(5);
 	}
 
 	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
