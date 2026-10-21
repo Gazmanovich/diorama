@@ -2,28 +2,60 @@ package dev.diorama;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.Locale;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntFunction;
+import java.util.function.IntSupplier;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.tabs.GridLayoutTab;
+//? if >=26.2 {
+import net.minecraft.client.gui.components.tabs.MenuTabBar;
+//?}
+import net.minecraft.client.gui.components.tabs.Tab;
+import net.minecraft.client.gui.components.tabs.TabManager;
+import net.minecraft.client.gui.components.tabs.TabNavigationBar;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
+import net.minecraft.client.input.KeyEvent;
+//?}
+//? if >=1.21.6 {
+import net.minecraft.client.renderer.RenderPipelines;
+//?}
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
-/** Every setting as a button that cycles its value, in three columns: Minimap, Radar, and Waypoints with Look. */
+/**
+ * The settings in vanilla tabs, one group at a time: a checkbox for each on/off setting, two to a
+ * row, then a button for each choice and a slider for each number. The minimap stays sharp on the
+ * right as a live preview, so a change shows on it straight away.
+ */
 public final class SettingsScreen extends Screen {
-	private static final int MAX_BUTTON_WIDTH = 158;
-
-	/** Sized in init() to fit the screen: at 427x240 the full-size layout would run off it. */
-	private int buttonWidth = MAX_BUTTON_WIDTH;
-	private int row = 22;
-	private int buttonHeight = 20;
+	/** Right edge of the settings side on a wide screen. */
+	private static final int SIDE = 340;
+	/** What the preview needs on the right at the default size: a 128 minimap, its frame and margin. */
+	private static final int PREVIEW_ROOM = 140;
+	/** The settings' width; two checkbox columns with a gap between them. */
+	private static final int CONTENT = 280;
+	private static final int COLUMN_GAP = 8;
+	private static final int TAB_BAR_HEIGHT = 24;
+	private static final Identifier LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/inworld_menu_list_background.png");
 
 	private final @Nullable Screen parent;
-	private final List<Header> headers = new ArrayList<>();
-
-	private record Header(Component text, int x, int y) {
-	}
+	private final TabManager tabManager = new TabManager(this::addRenderableWidget, this::removeWidget);
+	private final MinimapHud preview = new MinimapHud();
+	private @Nullable TabNavigationBar tabBar;
+	private List<SettingsTab> tabs = List.of();
+	/** Right edge of the settings side: left of the preview where there's room, else the whole screen. */
+	private int side = SIDE;
 
 	public SettingsScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.settings.title"));
@@ -32,85 +64,192 @@ public final class SettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		this.headers.clear();
 		Settings s = Settings.get();
-		int gap = 6;
-		this.buttonWidth = Math.min(MAX_BUTTON_WIDTH, (this.width - 2 * gap - 16) / 3);
-		// The tallest columns have two headers and eight rows, which must clear Done.
-		boolean compact = 30 + 2 * 16 + 4 + 8 * 22 > this.height - 30;
-		this.row = compact ? 19 : 22;
-		this.buttonHeight = compact ? 18 : 20;
-		int left = this.width / 2 - this.buttonWidth * 3 / 2 - gap;
-		int middle = left + this.buttonWidth + gap;
-		int right = middle + this.buttonWidth + gap;
-		int top = compact ? 22 : 30;
+		// Resizing the window runs this again: stay on the same tab.
+		Tab current = this.tabManager.getCurrentTab();
+		int selected = current == null ? 0 : Math.max(0, this.tabs.indexOf(current));
+		this.side = Math.max(Math.min(SIDE, this.width - PREVIEW_ROOM), Math.min(this.width, CONTENT + 10));
 
-		int y = this.header("diorama.settings.minimap", left, top);
-		y = this.toggle(left, y, "diorama.settings.minimap_shown", () -> s.minimap, v -> s.minimap = v);
-		y = this.cycle(left, y, "diorama.settings.size", () -> s.minimapSize.ordinal(), Settings.Size.values().length,
-			i -> s.minimapSize = Settings.Size.values()[i], i -> Component.translatable("diorama.settings.size." + Settings.Size.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
-		y = this.cycle(left, y, "diorama.settings.corner", () -> s.minimapCorner.ordinal(), Settings.Corner.values().length,
-			i -> s.minimapCorner = Settings.Corner.values()[i], i -> Component.translatable("diorama.settings.corner." + Settings.Corner.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
-		y = this.cycle(left, y, "diorama.settings.zoom", () -> s.minimapZoom, Settings.ZOOMS.length,
-			i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
-		y = this.toggle(left, y, "diorama.settings.compass", () -> s.compass, v -> s.compass = v);
-		y = this.toggle(left, y, "diorama.settings.coordinates", () -> s.coordinates, v -> s.coordinates = v);
-		y = this.toggle(left, y, "diorama.settings.biome", () -> s.biome, v -> s.biome = v);
-		this.toggle(left, y, "diorama.settings.auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
+		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
+		minimap.toggle("minimap_shown", () -> s.minimap, v -> s.minimap = v);
+		minimap.toggle("compass", () -> s.compass, v -> s.compass = v);
+		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
+		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
+		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
+		Settings.Corner[] corners = Settings.Corner.values();
+		minimap.cycle("corner", () -> s.minimapCorner.ordinal(), corners.length, i -> s.minimapCorner = corners[i],
+			i -> Component.translatable("diorama.settings.corner." + corners[i].name().toLowerCase(Locale.ROOT)));
+		int sizes = (Settings.MAX_SIZE - Settings.MIN_SIZE) / Settings.SIZE_STEP + 1;
+		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
+			i -> s.minimapSize = Settings.MIN_SIZE + i * Settings.SIZE_STEP, i -> Component.literal(Integer.toString(Settings.MIN_SIZE + i * Settings.SIZE_STEP)));
+		minimap.slider("zoom", s.minimapZoom, Settings.ZOOMS.length, i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
 
-		y = this.header("diorama.settings.radar", middle, top);
-		y = this.toggle(middle, y, "diorama.settings.players", () -> s.radarPlayers, v -> s.radarPlayers = v);
-		y = this.toggle(middle, y, "diorama.settings.hostile", () -> s.radarHostile, v -> s.radarHostile = v);
-		y = this.toggle(middle, y, "diorama.settings.neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
-		y = this.toggle(middle, y, "diorama.settings.passive", () -> s.radarPassive, v -> s.radarPassive = v);
+		SettingsTab radar = new SettingsTab("diorama.settings.radar");
+		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
+		radar.toggle("hostile", () -> s.radarHostile, v -> s.radarHostile = v);
+		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
+		radar.toggle("passive", () -> s.radarPassive, v -> s.radarPassive = v);
 		int[] ranges = Settings.RANGES;
-		y = this.cycle(middle, y, "diorama.settings.range", () -> indexOf(ranges, s.radarRange), ranges.length,
-			i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
+		radar.slider("range", indexOf(ranges, s.radarRange), ranges.length, i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
 
-		y = this.header("diorama.settings.overlays", middle, y + 4);
-		y = this.toggle(middle, y, "diorama.settings.chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
-		y = this.toggle(middle, y, "diorama.settings.slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
-		this.cycle(middle, y, "diorama.settings.spawn_spots", () -> s.spawnSpots.ordinal(), Settings.SpawnSpots.values().length,
-			i -> s.spawnSpots = Settings.SpawnSpots.values()[i],
-			i -> Component.translatable("diorama.settings.spawn_spots." + Settings.SpawnSpots.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
+		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
+		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
+		overlays.toggle("slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
+		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
+		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
+			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));
 
-		y = this.header("diorama.settings.waypoints", right, top);
-		y = this.toggle(right, y, "diorama.settings.waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
-		y = this.toggle(right, y, "diorama.settings.waypoints_world", () -> s.waypointsInWorld, v -> s.waypointsInWorld = v);
-		y = this.toggle(right, y, "diorama.settings.deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
+		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
+		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
+		waypoints.toggle("waypoints_world", () -> s.waypointsInWorld, v -> s.waypointsInWorld = v);
+		waypoints.toggle("deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 
-		y = this.header("diorama.settings.look", right, y + 4);
-		y = this.toggle(right, y, "diorama.settings.outlines", () -> s.outlines, v -> s.outlines = v);
-		y = this.toggle(right, y, "diorama.settings.rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
-		y = this.toggle(right, y, "diorama.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
-		this.cycle(right, y, "diorama.settings.quality", () -> s.quality.ordinal(), Settings.Quality.values().length,
-			i -> s.quality = Settings.Quality.values()[i],
-			i -> Component.translatable("diorama.settings.quality." + Settings.Quality.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
+		SettingsTab look = new SettingsTab("diorama.settings.look");
+		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
+		look.toggle("rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
+		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
+		Settings.Quality[] qualities = Settings.Quality.values();
+		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
+			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));
 
+		// Vanilla's tab bar, over the settings side instead of the whole screen. It's drawn by hand
+		// (extractRenderState), clipped to the side: its separator line runs on past the last tab.
+		//? if >=26.2 {
+		MenuTabBar bar = MenuTabBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		bar.arrangeElements(this.side);
+		//?} else if >=26.1 {
+		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		bar.updateWidth(this.side);
+		*///?} else {
+		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		bar.setWidth(this.side);
+		bar.arrangeElements();
+		*///?}
+		this.tabs = List.of(minimap, radar, overlays, waypoints, look);
+		this.tabBar = this.addWidget(bar);
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
-			.bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
+			.bounds(this.side / 2 - 100, this.height - 26, 200, 20).build());
+		this.tabManager.setTabArea(new ScreenRectangle(0, TAB_BAR_HEIGHT, this.side, this.listBottom() - TAB_BAR_HEIGHT));
+		bar.selectTab(selected, false);
 	}
 
-	private int header(String key, int x, int y) {
-		this.headers.add(new Header(Component.translatable(key), x, y + 5));
-		return y + 16;
+	private int listBottom() {
+		return this.height - 33;
 	}
 
-	private int toggle(int x, int y, String key, Supplier<Boolean> get, java.util.function.Consumer<Boolean> set) {
-		return this.cycle(x, y, key, () -> get.get() ? 1 : 0, 2, i -> set.accept(i == 1),
-			i -> Component.translatable(i == 1 ? "options.on" : "options.off"));
+	/** Shows the tab with this index, as clicking it does. For tests. */
+	public void selectTab(int index) {
+		if (this.tabBar != null) {
+			this.tabBar.selectTab(index, false);
+		}
 	}
 
-	private int cycle(int x, int y, String key, Supplier<Integer> get, int count, java.util.function.IntConsumer set, Function<Integer, Component> name) {
-		Component label = Component.translatable(key);
-		Button button = Button.builder(label(label, name.apply(get.get())), b -> {
-			int next = (get.get() + 1) % count;
-			set.accept(next);
-			Settings.get().save();
-			b.setMessage(label(label, name.apply(next)));
-		}).bounds(x, y, this.buttonWidth, this.buttonHeight).build();
-		this.addRenderableWidget(button);
-		return y + this.row;
+	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width. */
+	private final class SettingsTab extends GridLayoutTab {
+		private final List<AbstractWidget> checkboxes = new ArrayList<>();
+		private final List<AbstractWidget> wide = new ArrayList<>();
+
+		SettingsTab(String key) {
+			super(Component.translatable(key));
+		}
+
+		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set) {
+			int column = (CONTENT - COLUMN_GAP) / 2;
+			Checkbox checkbox = Checkbox.builder(Component.translatable("diorama.settings." + key), SettingsScreen.this.font)
+				.selected(get.getAsBoolean())
+				.maxWidth(column)
+				.onValueChange((box, value) -> {
+					set.accept(value);
+					Settings.get().save();
+				})
+				.build();
+			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
+			checkbox.setTooltip(tooltip(key));
+			this.checkboxes.add(checkbox);
+		}
+
+		void cycle(String key, IntSupplier get, int count, IntConsumer set, IntFunction<Component> name) {
+			Component label = Component.translatable("diorama.settings." + key);
+			Button button = Button.builder(label(label, name.apply(get.getAsInt())), b -> {
+				int next = (get.getAsInt() + 1) % count;
+				set.accept(next);
+				Settings.get().save();
+				b.setMessage(label(label, name.apply(next)));
+			}).size(CONTENT, 20).tooltip(tooltip(key)).build();
+			this.wide.add(button);
+		}
+
+		void slider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {
+			StepSlider slider = new StepSlider(Component.translatable("diorama.settings." + key), index, count, set, name);
+			slider.setTooltip(tooltip(key));
+			this.wide.add(slider);
+		}
+
+		@Override
+		public void visitChildren(Consumer<AbstractWidget> consumer) {
+			this.checkboxes.forEach(consumer);
+			this.wide.forEach(consumer);
+		}
+
+		@Override
+		public void doLayout(ScreenRectangle area) {
+			int content = Math.min(CONTENT, area.width() - 10);
+			int column = (content - COLUMN_GAP) / 2;
+			int left = area.left() + (area.width() - content) / 2;
+			int y = area.top() + 12;
+			for (int i = 0; i < this.checkboxes.size(); i++) {
+				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * 22);
+			}
+			if (!this.checkboxes.isEmpty()) {
+				y += (this.checkboxes.size() + 1) / 2 * 22 + 10;
+			}
+			for (AbstractWidget widget : this.wide) {
+				widget.setPosition(left, y);
+				widget.setWidth(content);
+				y += 24;
+			}
+		}
+	}
+
+	/**
+	 * A slider over a list of values, one equal stretch of the track each, the way vanilla's
+	 * option sliders pick a whole number. Saves when the value it points at changes.
+	 */
+	private static final class StepSlider extends AbstractSliderButton {
+		private final Component name;
+		private final int count;
+		private final IntConsumer set;
+		private final IntFunction<Component> valueName;
+		private int index;
+
+		StepSlider(Component name, int index, int count, IntConsumer set, IntFunction<Component> valueName) {
+			super(0, 0, CONTENT, 20, Component.empty(), index <= 0 ? 0 : index >= count - 1 ? 1 : (index + 0.5) / count);
+			this.name = name;
+			this.count = count;
+			this.set = set;
+			this.valueName = valueName;
+			this.index = Math.max(0, Math.min(count - 1, index));
+			this.updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			this.setMessage(label(this.name, this.valueName.apply(this.index)));
+		}
+
+		@Override
+		protected void applyValue() {
+			int picked = Math.min(this.count - 1, (int) Math.floor(this.value * this.count));
+			if (picked != this.index) {
+				this.index = picked;
+				this.set.accept(picked);
+				Settings.get().save();
+			}
+		}
+	}
+
+	private static Tooltip tooltip(String key) {
+		return Tooltip.create(Component.translatable("diorama.settings." + key + ".tooltip"));
 	}
 
 	private static Component label(Component name, Component value) {
@@ -127,12 +266,60 @@ public final class SettingsScreen extends Screen {
 	}
 
 	@Override
+	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		super.extractBackground(graphics, mouseX, mouseY, a);
+		// After the blur, so the preview stays sharp. A big minimap would reach under the settings:
+		// it's cut off at their edge, which also keeps its depth (before 1.21.6) clear of them.
+		graphics.enableScissor(this.side, 0, this.width, this.height);
+		//? if >=1.21.2 {
+		this.preview.preview(graphics, this.minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(true));
+		//?} else {
+		/*this.preview.preview(graphics, this.minecraft.getTimer().getGameTimeDeltaPartialTick(true));
+		*///?}
+		graphics.disableScissor();
+		// The settings side, as vanilla draws a list in a world.
+		//? if >=1.21.6 {
+		graphics.nextStratum();
+		graphics.blit(RenderPipelines.GUI_TEXTURED, LIST_BACKGROUND, 0, TAB_BAR_HEIGHT, 0, 0, this.side, this.listBottom() - TAB_BAR_HEIGHT, 32, 32);
+		graphics.blit(RenderPipelines.GUI_TEXTURED, Screen.INWORLD_FOOTER_SEPARATOR, 0, this.listBottom(), 0, 0, this.side, 2, 32, 2);
+		//?} else if >=1.21.2 {
+		/*graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, LIST_BACKGROUND, 0, TAB_BAR_HEIGHT, 0, 0, this.side, this.listBottom() - TAB_BAR_HEIGHT, 32, 32);
+		graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, Screen.INWORLD_FOOTER_SEPARATOR, 0, this.listBottom(), 0, 0, this.side, 2, 32, 2);
+		*///?} else {
+		/*com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+		graphics.blit(LIST_BACKGROUND, 0, TAB_BAR_HEIGHT, 0, 0, this.side, this.listBottom() - TAB_BAR_HEIGHT, 32, 32);
+		graphics.blit(Screen.INWORLD_FOOTER_SEPARATOR, 0, this.listBottom(), 0, 0, this.side, 2, 32, 2);
+		com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+		*///?}
+	}
+
+	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		// Before 1.21.6 this draws the background too, so the tab bar goes after it.
 		super.extractRenderState(graphics, mouseX, mouseY, a);
-		graphics.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
-		for (Header header : this.headers) {
-			graphics.text(this.font, header.text(), header.x(), header.y(), 0xFFFFD870, true);
+		if (this.tabBar != null) {
+			graphics.enableScissor(0, 0, this.side, TAB_BAR_HEIGHT);
+			this.tabBar.extractRenderState(graphics, mouseX, mouseY, a);
+			graphics.disableScissor();
 		}
+	}
+
+	// Ctrl+Tab and Ctrl+1 to 5 switch tabs, as in vanilla's tabbed screens, whatever has focus.
+	//? if >=1.21.9 {
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		return this.tabBar != null && this.tabBar.keyPressed(event) || super.keyPressed(event);
+	}
+	//?} else {
+	/*@Override
+	public boolean keyPressed(int key, int scanCode, int modifiers) {
+		return this.tabBar != null && this.tabBar.keyPressed(key) || super.keyPressed(key, scanCode, modifiers);
+	}
+	*///?}
+
+	@Override
+	public void removed() {
+		this.preview.close();
 	}
 
 	@Override

@@ -2,7 +2,13 @@ package dev.diorama;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.TypeAdapter;
+import com.google.gson.annotations.JsonAdapter;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
 import dev.diorama.bake.TileBaker;
+import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -23,28 +29,22 @@ public final class Settings {
 		BOTTOM_LEFT
 	}
 
-	public enum Size {
-		SMALL(96),
-		MEDIUM(128),
-		LARGE(176);
-
-		public final int pixels;
-
-		Size(int pixels) {
-			this.pixels = pixels;
-		}
-	}
-
 	/** Minimap zoom steps, in GUI pixels per block. */
 	public static final double[] ZOOMS = {0.75, 1, 1.5, 2, 3, 4};
 	/** Radar height ranges, in blocks. */
 	public static final int[] RANGES = {16, 32, 64, 128};
+	/** Minimap sizes, in GUI pixels: {@link #MIN_SIZE} to {@link #MAX_SIZE} in steps of {@link #SIZE_STEP}. */
+	public static final int MIN_SIZE = 64;
+	public static final int MAX_SIZE = 224;
+	public static final int SIZE_STEP = 8;
 
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static Settings current;
 
 	public boolean minimap = true;
-	public Size minimapSize = Size.MEDIUM;
+	/** In GUI pixels. Saved as a number; files from before it was a slider say SMALL, MEDIUM or LARGE. */
+	@JsonAdapter(SizeAdapter.class)
+	public int minimapSize = 128;
 	public Corner minimapCorner = Corner.TOP_RIGHT;
 	public int minimapZoom = 3;
 	public boolean compass = true;
@@ -155,9 +155,6 @@ public final class Settings {
 		if (settings == null) {
 			settings = new Settings();
 		}
-		if (settings.minimapSize == null) {
-			settings.minimapSize = Size.MEDIUM;
-		}
 		if (settings.spawnSpots == null) {
 			settings.spawnSpots = SpawnSpots.OFF;
 		}
@@ -169,6 +166,7 @@ public final class Settings {
 		}
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
+		settings.minimapSize = snapSize(settings.minimapSize);
 		int nearest = RANGES[0];
 		for (int range : RANGES) {
 			if (Math.abs(range - settings.radarRange) < Math.abs(nearest - settings.radarRange)) {
@@ -178,6 +176,33 @@ public final class Settings {
 		settings.radarRange = nearest;
 		settings.apply();
 		return settings;
+	}
+
+	/** The nearest size the settings screen can show. */
+	public static int snapSize(int size) {
+		int clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
+		return MIN_SIZE + Math.round((clamped - MIN_SIZE) / (float) SIZE_STEP) * SIZE_STEP;
+	}
+
+	/** Reads the minimap size as a number, or as the Small, Medium and Large it was before. */
+	public static final class SizeAdapter extends TypeAdapter<Integer> {
+		@Override
+		public void write(JsonWriter out, Integer value) throws IOException {
+			out.value(value);
+		}
+
+		@Override
+		public Integer read(JsonReader in) throws IOException {
+			if (in.peek() == JsonToken.NUMBER) {
+				return in.nextInt();
+			}
+			String name = in.nextString();
+			return switch (name) {
+				case "SMALL" -> 96;
+				case "LARGE" -> 176;
+				default -> 128;
+			};
+		}
 	}
 
 	private static Path file() {
