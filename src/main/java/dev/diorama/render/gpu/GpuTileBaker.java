@@ -36,7 +36,6 @@ import org.lwjgl.system.MemoryUtil;
  * {@link BakeBackend} does the drawing.
  */
 public final class GpuTileBaker {
-	public static final boolean ENABLED = "1".equals(System.getenv("DIORAMA_GPU_BAKE"));
 	/**
 	 * The share of frame time bakes may take, on the render thread and on the GPU each. Bakes are
 	 * paid for out of a budget that grows by this share of every frame's length, at what bakes
@@ -58,14 +57,20 @@ public final class GpuTileBaker {
 	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays. */
 	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13) * 16;
 
-	//? if >=26.2 {
-	// Raw OpenGL can be picked here too, on the OpenGL backend, to try it where the game is quick to run.
-	private static final BakeBackend BACKEND = "gl".equals(System.getProperty("diorama.gpuBakeBackend", System.getenv("DIORAMA_GPU_BAKE_BACKEND")))
-		? new GlBakeBackend()
-		: new BlazeBakeBackend();
-	//?} else {
-	/*private static final BakeBackend BACKEND = new GlBakeBackend();
-	*///?}
+	/** Set when the first tile is queued: until then frames don't touch the GPU code at all. */
+	private static volatile boolean used;
+
+	/** Made on the first frame after a tile is queued, so a session without GPU baking never sets one up. */
+	private static final class Backend {
+		//? if >=26.2 {
+		// Raw OpenGL can be picked here too, on the OpenGL backend, to try it where the game is quick to run.
+		static final BakeBackend INSTANCE = "gl".equals(System.getProperty("diorama.gpuBakeBackend", System.getenv("DIORAMA_GPU_BAKE_BACKEND")))
+			? new GlBakeBackend()
+			: new BlazeBakeBackend();
+		//?} else {
+		/*static final BakeBackend INSTANCE = new GlBakeBackend();
+		*///?}
+	}
 
 	private static final ConcurrentLinkedQueue<Job> QUEUE = new ConcurrentLinkedQueue<>();
 	/** Jobs drawn and waiting for their pixels to come back. */
@@ -83,8 +88,12 @@ public final class GpuTileBaker {
 	public record Timing(long meshNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
 	}
 
-	/** {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them. */
-	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing) {
+	/**
+	 * {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them. Null
+	 * pixels mean the GPU didn't draw it: it couldn't, or, when {@code cancelled}, leaving the
+	 * world handed the job back first.
+	 */
+	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean cancelled) {
 	}
 
 	/**
@@ -93,6 +102,7 @@ public final class GpuTileBaker {
 	 */
 	public static void submit(GpuMesher.Mesh mesh, Consumer<Result> done) {
 		QUEUE.add(new Job(mesh, done));
+		used = true;
 	}
 
 	/**
@@ -103,16 +113,25 @@ public final class GpuTileBaker {
 	public static void cancelAll() {
 		Job job;
 		while ((job = QUEUE.poll()) != null) {
-			job.fail();
+			job.cancel();
 		}
 		for (Job pending : PENDING) {
-			pending.fail();
+			pending.cancel();
 		}
+	}
+
+	/** The graphics card and driver the bakes run on, for the log. */
+	public static String device() {
+		String device = used ? Backend.INSTANCE.device() : null;
+		return device == null ? "a GPU not set up yet" : device;
 	}
 
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
 	public static void frame() {
-		BACKEND.poll();
+		if (!used) {
+			return;
+		}
+		Backend.INSTANCE.poll();
 		long now = System.nanoTime();
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
@@ -129,7 +148,7 @@ public final class GpuTileBaker {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
 					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 					job.free();
-				} else if (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT || !BACKEND.draw(job)) {
+				} else if (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT || !Backend.INSTANCE.draw(job)) {
 					// Bigger than the textures that hold its sky occlusion, or this GPU can't: trace it.
 					job.fail();
 				} else {
@@ -362,16 +381,25 @@ public final class GpuTileBaker {
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
 			);
 			log(timing);
-			this.callback.accept(new Result(pixels, info, timing));
+			this.callback.accept(new Result(pixels, info, timing, false));
 		}
 
 		void fail() {
+			this.giveBack(false);
+		}
+
+		/** Hands the job back undrawn because the world is closing, not because the GPU failed. */
+		void cancel() {
+			this.giveBack(true);
+		}
+
+		private void giveBack(boolean cancelled) {
 			PENDING.remove(this);
 			if (!this.completed.compareAndSet(false, true)) {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0)));
+			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), cancelled));
 		}
 
 		void free() {

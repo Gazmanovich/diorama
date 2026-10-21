@@ -83,9 +83,13 @@ public final class SettingsScreen extends Screen {
 		y = this.toggle(right, y, "diorama.settings.outlines", () -> s.outlines, v -> s.outlines = v);
 		y = this.toggle(right, y, "diorama.settings.rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		y = this.toggle(right, y, "diorama.settings.fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
-		this.cycle(right, y, "diorama.settings.quality", () -> s.quality.ordinal(), Settings.Quality.values().length,
+		y = this.cycle(right, y, "diorama.settings.quality", () -> s.quality.ordinal(), Settings.Quality.values().length,
 			i -> s.quality = Settings.Quality.values()[i],
 			i -> Component.translatable("diorama.settings.quality." + Settings.Quality.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
+		// On, but turned off this session because the graphics card's tiles didn't match: say so.
+		this.cycleButton(right, y, "diorama.settings.gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1,
+			i -> Component.translatable(i == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on"))
+			.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.settings.gpu_baking.tooltip")));
 
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
 			.bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
@@ -102,6 +106,11 @@ public final class SettingsScreen extends Screen {
 	}
 
 	private int cycle(int x, int y, String key, Supplier<Integer> get, int count, java.util.function.IntConsumer set, Function<Integer, Component> name) {
+		this.cycleButton(x, y, key, get, count, set, name);
+		return y + this.row;
+	}
+
+	private Button cycleButton(int x, int y, String key, Supplier<Integer> get, int count, java.util.function.IntConsumer set, Function<Integer, Component> name) {
 		Component label = Component.translatable(key);
 		Button button = Button.builder(label(label, name.apply(get.get())), b -> {
 			int next = (get.get() + 1) % count;
@@ -110,7 +119,7 @@ public final class SettingsScreen extends Screen {
 			b.setMessage(label(label, name.apply(next)));
 		}).bounds(x, y, this.buttonWidth, this.buttonHeight).build();
 		this.addRenderableWidget(button);
-		return y + this.row;
+		return button;
 	}
 
 	private static Component label(Component name, Component value) {

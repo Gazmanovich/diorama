@@ -246,8 +246,21 @@ final class BlazeBakeBackend implements BakeBackend {
 		return builder;
 	}
 
+	/** Read on the render thread at the first bake; the check reads it from a baker thread. */
+	private volatile @Nullable String device;
+
+	@Override
+	public @Nullable String device() {
+		return this.device;
+	}
+
 	@Override
 	public boolean draw(GpuTileBaker.Job job) {
+		if (this.device == null) {
+			var info = RenderSystem.getDevice().getDeviceInfo();
+			this.device = info.name() + " (" + info.vendorName() + ", " + info.backendName() + " " + info.driverInfo() + ")";
+			Diorama.LOGGER.info("GPU baking on {}", this.device);
+		}
 		long start = System.nanoTime();
 		int skyFaces = job.opaqueCount + job.waterCount;
 		if (!ready(SKY_PASS) || !ready(SHADOW) || !ready(OPAQUE) || !ready(TINTED) || !ready(WATER) || !ready(COMPOSITE)) {

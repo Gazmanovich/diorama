@@ -140,6 +140,9 @@ public final class TileBaker {
 	 */
 	private final double depthOrigin;
 
+	/** Four samples per pixel even when the Quality setting asks for one: see {@link #reference}. */
+	private boolean fourSamples;
+
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
 		this.overlays = overlays;
@@ -256,6 +259,20 @@ public final class TileBaker {
 		return TileImage.partial(key, patches);
 	}
 
+	/**
+	 * The whole tile traced the way the GPU bakes it, four samples per pixel whatever the Quality
+	 * setting, and not merged with anything saved: what a GPU bake of it should look like.
+	 * {@code info} gets the overlay bits when {@code overlays} asks for them.
+	 */
+	public static int[] reference(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, byte @Nullable [] info) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
+		baker.fourSamples = true;
+		int size = Projection.TILE_PIXELS;
+		int[] pixels = new int[size * size];
+		baker.bakePixels(0, 0, size, size, pixels, info);
+		return pixels;
+	}
+
 	/** A tile drawn on the GPU, merged with what was saved the same way a traced bake is. */
 	public static TileImage gpuImage(TileKey key, int[] pixels, int @Nullable [] saved, byte @Nullable [] info) {
 		merge(pixels, saved, 0, 0, Projection.TILE_PIXELS);
@@ -299,7 +316,7 @@ public final class TileBaker {
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
-		double[][] samples = fast ? FAST_SAMPLES : SAMPLES;
+		double[][] samples = fast && !this.fourSamples ? FAST_SAMPLES : SAMPLES;
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				float r = 0;

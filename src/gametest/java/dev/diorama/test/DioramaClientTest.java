@@ -737,6 +737,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		} catch (java.io.IOException e) {
 			throw new java.io.UncheckedIOException(e);
 		}
+		// The map baked its own tiles on the GPU all along, after checking its first ones against
+		// the tracer. These tiles matched, so that check must have too.
+		if (dev.diorama.render.gpu.GpuBakeCheck.failed()) {
+			throw new AssertionError("The map's GPU baking check failed while these tiles matched: see the log");
+		}
 	}
 
 	/**

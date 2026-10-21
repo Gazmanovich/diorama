@@ -643,8 +643,9 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
-		if (dev.diorama.render.gpu.GpuTileBaker.ENABLED) {
-			this.bakeOnGpu(key, looks, generation, fog, overlays, store);
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode();
+		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK);
 			return;
 		}
 		BAKERS.execute(() -> {
@@ -661,27 +662,52 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * The experiment's path: the mesh is built on a baker thread, drawn on the render thread, and
-	 * the pixels come back here a frame or two later. Always the whole tile, which costs the GPU
-	 * little. Falls back to tracing if the GPU couldn't draw it.
+	 * GPU baking: the mesh is built on a baker thread, drawn on the render thread, and the pixels
+	 * come back here a frame or two later. Always the whole tile, which costs the GPU little.
+	 * Falls back to tracing if the GPU didn't draw it. A {@code check} tile is traced too, and the
+	 * map gets the traced one: GPU tiles show only once the check says they match.
 	 */
-	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
+	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, boolean check) {
 		BAKERS.execute(() -> {
+			boolean answered = !check;
 			try {
 				int[] saved = store == null ? null : store.read(key);
 				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
-						TileImage image = result.pixels() != null
-							? TileBaker.gpuImage(key, result.pixels(), saved, result.info())
-							: TileBaker.bake(key, this, looks, null, fog, saved, overlays);
+						TileImage image;
+						if (result.pixels() == null) {
+							if (check) {
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(result.cancelled());
+							}
+							image = TileBaker.bake(key, this, looks, null, fog, saved, overlays);
+						} else if (check) {
+							byte[] info = overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS];
+							int[] traced;
+							try {
+								traced = TileBaker.reference(key, this, looks, fog, overlays, info);
+							} catch (Throwable t) {
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(true);
+								throw t;
+							}
+							dev.diorama.render.gpu.GpuBakeCheck.compare(result.pixels(), traced);
+							image = TileBaker.gpuImage(key, traced, saved, info);
+						} else {
+							image = TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+						}
 						this.finished.add(image.withGeneration(generation));
 					} catch (Throwable t) {
 						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 					}
 				}));
+				// From here the callback answers the check.
+				answered = true;
 			} catch (Throwable t) {
+				if (!answered) {
+					// The check tile never reached the GPU: hand its turn back.
+					dev.diorama.render.gpu.GpuBakeCheck.undrawn(true);
+				}
 				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 			}
