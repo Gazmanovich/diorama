@@ -924,10 +924,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 		long casters = 0;
 		long bytes = 0;
 		int failed = 0;
+		int declined = 0;
 		for (int i = 0; i < keys.size(); i++) {
 			cpuMs += cpuNanos[i] / 1e6;
 			var result = gpu.get(i);
 			int[] g = result == null ? null : result.pixels();
+			if (result != null && result.declined()) {
+				// Handed to the tracer on purpose (something the GPU doesn't draw as it does): nothing to compare.
+				declined++;
+				continue;
+			}
 			if (g == null) {
 				failed++;
 			} else {
@@ -996,6 +1002,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (failed > 0) {
 			throw new AssertionError(name + ": " + failed + " GPU bakes failed");
+		}
+		if (declined == n) {
+			throw new AssertionError(name + ": the GPU declined every tile, nothing was compared");
 		}
 		if (both == 0) {
 			throw new AssertionError(name + ": no pixel known to both bakes, nothing was compared");

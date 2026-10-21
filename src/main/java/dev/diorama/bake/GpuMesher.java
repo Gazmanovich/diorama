@@ -124,6 +124,8 @@ public final class GpuMesher {
 		public final boolean cave;
 		/** Rays start below the view's limit, so the tracer bakes nothing: every pixel unknown. */
 		public final boolean empty;
+		/** Something in view the GPU can't draw as the tracer does: trace the tile instead. */
+		public boolean traceInstead;
 		/** Solid and lava faces, faces of unknown chunks, and floors. */
 		public final Quads opaque;
 		/** Water a ray enters, through its top or south face. */
@@ -295,15 +297,11 @@ public final class GpuMesher {
 							if (reached) {
 								mesh.lowestY = Math.min(mesh.lowestY, y);
 								if (rock) {
-									// Rays still in the rock skip this cell; faces inside it would stop
-									// them too. So where rock and open space both reach it, it's a cube.
+									// Rays still in the rock skip this cell, open ones meet its boxes, and
+									// faces inside it would stop both: the GPU can't draw that. The tracer
+									// bakes the tile instead.
 									asCube = true;
-									if (openAbove) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
-									}
-									if (openSouth) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
-									}
+									mesh.traceInstead = true;
 								} else {
 									// A piece on the cell's top or south side is met only by rays coming in
 									// that way; one inside the cell by rays from either.
@@ -325,17 +323,19 @@ public final class GpuMesher {
 						} else {
 							reached = fromAbove || fromSouth;
 							if (reached) {
-								// Only its outer faces: the tracer tints a ray once for the block it meets.
+								// Only what a ray meets first in the cell: the tracer tints a ray once for
+								// the block it meets.
 								helper.albedo(id, x, z, true);
 								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 64);
-								for (int b = 0; b < sh.top.length; b += 2) {
-									if (fromAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
-										mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, sh.top[b], sh.top[b + 1]);
+								int[][] seen = sh.seen(sin, cos);
+								for (int b = 0; b < seen[0].length; b += 2) {
+									if (fromAbove || ShapeFaces.inset(seen[0][b + 1], true)) {
+										mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, seen[0][b], seen[0][b + 1]);
 									}
 								}
-								for (int b = 0; b < sh.south.length; b += 2) {
-									if (fromSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
-										mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, sh.south[b], sh.south[b + 1]);
+								for (int b = 0; b < seen[1].length; b += 2) {
+									if (fromSouth || ShapeFaces.inset(seen[1][b + 1], false)) {
+										mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, seen[1][b], seen[1][b + 1]);
 									}
 								}
 								passes = true;

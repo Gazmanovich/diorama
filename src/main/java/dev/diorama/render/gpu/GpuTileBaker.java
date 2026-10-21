@@ -150,8 +150,10 @@ public final class GpuTileBaker {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
 					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 					job.free();
-				} else if (job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
-					// More than the textures that hold its sky occlusion take: trace it. Not the GPU's fault.
+				} else if (job.mesh.traceInstead
+					|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
+					// Something the GPU doesn't draw as the tracer does, or more than the textures that
+					// hold its sky occlusion take: trace it. Not the GPU's fault.
 					job.cancel();
 				} else if (!Backend.INSTANCE.draw(job)) {
 					// This GPU can't draw it: trace it.

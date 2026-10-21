@@ -1,8 +1,10 @@
 package dev.diorama.bake;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -17,7 +19,8 @@ final class ShapeFaces {
 	static final int FULL_LO = 0;
 	static final int FULL_HI = pack(UNIT, UNIT, UNIT);
 
-	private static final Map<float[], ShapeFaces> CACHE = new ConcurrentHashMap<>();
+	/** Weak keys: a resource reload builds new shape arrays, and the old ones may go. */
+	private static final Map<float[], ShapeFaces> CACHE = Collections.synchronizedMap(new WeakHashMap<>());
 
 	/** The top and south faces a camera ray can meet, inner ones (inside another box) cut away: lo, hi pairs. */
 	final int[] top;
@@ -43,6 +46,56 @@ final class ShapeFaces {
 		return CACHE.computeIfAbsent(boxes, ShapeFaces::new);
 	}
 
+	private final int[][] boxBounds;
+	/** {@link #seen} per camera pitch, as the bits of its sine. */
+	private final Map<Long, int[][]> seen = new ConcurrentHashMap<>();
+
+	/**
+	 * The parts of the top and south pieces a camera ray meets first, at this pitch: what nearer
+	 * boxes in the cell hide from the camera taken away. A ray then crosses one piece in the cell,
+	 * as the tracer meets one box and tints once for see-through blocks.
+	 */
+	int[][] seen(double sin, double cos) {
+		return this.seen.computeIfAbsent(Double.doubleToLongBits(sin), k -> new int[][] {this.unhidden(this.top, true, sin, cos), this.unhidden(this.south, false, sin, cos)});
+	}
+
+	private int[] unhidden(int[] pieces, boolean top, double sin, double cos) {
+		List<int[]> out = new ArrayList<>();
+		for (int p = 0; p < pieces.length; p += 2) {
+			int lo = pieces[p];
+			int hi = pieces[p + 1];
+			// The piece as a rectangle in its plane: x by z for a top piece, x by y for a south one.
+			int plane = top ? hi >> 8 & 255 : hi >> 16 & 255;
+			List<int[]> left = new ArrayList<>(List.of(top
+				? new int[] {lo & 255, hi & 255, lo >> 16 & 255, hi >> 16 & 255}
+				: new int[] {lo & 255, hi & 255, lo >> 8 & 255, hi >> 8 & 255}));
+			for (int[] b : this.boxBounds) {
+				// Back toward the camera a ray goes up and south: b hides what it crosses there.
+				if (top) {
+					if (b[4] <= plane) {
+						continue;
+					}
+					double t0 = Math.max(0, (b[1] - plane) / sin);
+					double t1 = (b[4] - plane) / sin;
+					subtract(left, b[0], b[3], (int) Math.floor(b[2] - t1 * cos), (int) Math.ceil(b[5] - t0 * cos));
+				} else {
+					if (b[5] <= plane) {
+						continue;
+					}
+					double t0 = Math.max(0, (b[2] - plane) / cos);
+					double t1 = (b[5] - plane) / cos;
+					subtract(left, b[0], b[3], (int) Math.floor(b[1] - t1 * sin), (int) Math.ceil(b[4] - t0 * sin));
+				}
+			}
+			for (int[] r : left) {
+				out.add(top
+					? new int[] {pack(r[0], plane, r[2]), pack(r[1], plane, r[3])}
+					: new int[] {pack(r[0], r[2], plane), pack(r[1], r[3], plane)});
+			}
+		}
+		return flatten(out);
+	}
+
 	private ShapeFaces(float[] shape) {
 		int n = shape.length / 6;
 		int[][] b = new int[n][6];
@@ -52,6 +105,7 @@ final class ShapeFaces {
 			}
 		}
 		this.boxes = new int[n * 2];
+		this.boxBounds = b;
 		List<int[]> top = new ArrayList<>();
 		List<int[]> south = new ArrayList<>();
 		for (int i = 0; i < n; i++) {
