@@ -47,8 +47,18 @@ def events(output):
             pass
 
 
+def remove_vm(vm, keep=False):
+    """Deletes the VM (or stops it, to keep), retrying; says loudly when that fails."""
+    for _ in range(3):
+        if boat('stop' if keep else 'delete', vm, *([] if keep else ['--yes'])).returncode == 0:
+            return
+        time.sleep(10)
+    print(f'!! could not {"stop" if keep else "delete"} VM {vm}; it stops on its own after 2 hours. '
+          f'Run: boat delete {vm} --yes')
+
+
 def create_vm():
-    """A new VM, from the warmed snapshot if it exists. Waits up to 20 min for a free slot."""
+    """A new VM, from the warmed snapshot if it exists. Waits up to 15 min for a free slot."""
     use_snapshot = True
     waited = 0
     while True:
@@ -61,12 +71,14 @@ def create_vm():
         error = next((e for e in found if e.get('event') == 'error' or 'error' in e), {})
         created = next((e['id'] for e in found if e.get('event') == 'created'), None)
         if created:
-            boat('delete', created, '--yes')
+            remove_vm(created)
         if error.get('code') == 'snapshot_not_found' and use_snapshot:
             print(f'no snapshot named {SNAPSHOT}: setting up a fresh VM (about 5 min more)')
             use_snapshot = False
             continue
-        if (error.get('status') == 429 or 'limit' in str(error.get('code', ''))) and waited < 1200:
+        code = str(error.get('code', ''))
+        # Both VMs busy or too many starts: wait. Out of compute hours (trial_compute_limit_reached): Dara's call.
+        if (error.get('status') == 429 or 'limit' in code) and 'compute' not in code and waited < 900:
             if not waited:
                 print(f'boat.dev has no free VM ({error.get("error")}); waiting for one')
             time.sleep(60)
@@ -88,14 +100,17 @@ def main():
                                cwd=HERE, check=True).stdout.strip())
     if not (repo / 'versions' / args.node).is_dir():
         sys.exit(f'no node versions/{args.node}')
-    out = repo / 'build' / 'boat-runs' / f'{time.strftime("%Y%m%d-%H%M%S")}-{args.node}'
+    out = repo / 'build' / 'boat-runs' / f'{time.strftime("%Y%m%d-%H%M%S")}-{os.getpid()}-{args.node}'
     out.mkdir(parents=True)
 
     start = time.time()
     vm = create_vm()
     print(f'VM {vm} ready after {time.time() - start:.0f} s')
     try:
-        boat('exec', vm, '--', 'rm', '-rf', '/home/user/src')  # the snapshot's copy; push only adds files
+        # The snapshot's copy and results: push only adds files, and an old result.tgz could pass for this run's.
+        cleared = boat('exec', vm, '--', 'rm', '-rf', '/home/user/src', '/home/user/result', '/home/user/result.tgz')
+        if cleared.returncode:
+            sys.exit(f'could not clear the VM: {(cleared.stdout + cleared.stderr).strip()[-2000:]}')
         pushed = boat('push', vm, str(repo), '--to', '/home/user/src')
         if pushed.returncode:
             sys.exit(f'boat push failed: {(pushed.stdout + pushed.stderr).strip()[-2000:]}')
@@ -103,9 +118,11 @@ def main():
         boat('exec', vm, '--', 'sed', '-i', r's/\r$//', '/home/user/src/.claude/skills/boat-game-test/sandbox.sh')
         print(f'pushed {repo.name}; running {args.tests} on {args.node}')
         with open(out / 'vm.log', 'w', encoding='utf-8') as log:
-            subprocess.run([BOAT, '--no-update', 'exec', vm, '--timeout', '0', '--', 'bash',
+            ran = subprocess.run([BOAT, '--no-update', 'exec', vm, '--timeout', '0', '--', 'bash',
                             '/home/user/src/.claude/skills/boat-game-test/sandbox.sh', args.node, args.tests, *args.env],
                            stdout=log, stderr=subprocess.STDOUT)
+        if ran.returncode:
+            sys.exit(f'the VM script failed before the tests finished; see {out / "vm.log"}')
         fetched = boat('scp', f'{vm}:/home/user/result.tgz', 'result.tgz', cwd=out)
         if fetched.returncode or not (out / 'result.tgz').exists():
             sys.exit(f'no results came back; see {out / "vm.log"}')
@@ -114,7 +131,7 @@ def main():
         (out / 'result.tgz').unlink()
         usage = next(events(boat('usage', vm, '--json').stdout), {})
     finally:
-        boat('stop' if args.keep else 'delete', vm, *([] if args.keep else ['--yes']))
+        remove_vm(vm, keep=args.keep)
 
     result = json.loads((out / 'result.json').read_text())
     shots = sorted((out / 'screenshots').glob('*.png')) if (out / 'screenshots').exists() else []

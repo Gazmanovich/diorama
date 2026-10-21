@@ -22,8 +22,8 @@ if [ ! -x ~/jdk25/bin/java ]; then
 fi
 
 mkdir -p ~/diorama
-rsync -a --delete --exclude .git --exclude .gradle --exclude build --exclude run --exclude logs ~/src/ ~/diorama/
-cd ~/diorama
+rsync -a --delete --exclude .git --exclude .gradle --exclude build --exclude run --exclude logs ~/src/ ~/diorama/ || exit 1
+cd ~/diorama || exit 1
 
 export JAVA_HOME=~/jdk25 GRADLE_OPTS=-Dorg.gradle.daemon=false
 # Gradle's own heap is set in gradle.properties; this caps the game at 40% of the VM's memory.
@@ -43,7 +43,8 @@ run=versions/$node/build/run/clientGameTest
 rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz
 start=$(date +%s)
 echo "running :$node:runClientGameTest (tests: $tests)"
-timeout 6600 xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
+# 90 min, inside the VM's 2 hours with time to set up and send results back.
+timeout 5400 xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
 code=$?
 minutes=$(( ($(date +%s) - start) / 60 ))
 
