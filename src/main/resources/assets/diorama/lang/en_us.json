@@ -114,5 +114,6 @@
 	"diorama.map.scroll_down": "Scroll down",
 	"diorama.map.spot": "%s, %s, %s",
 	"diorama.map.spot_detail": "%s · %s m",
-	"diorama.map.distance": "%s m"
+	"diorama.map.distance": "%s m",
+	"diorama.map.you": "You"
 }

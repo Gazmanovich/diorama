@@ -114,5 +114,6 @@
 	"diorama.map.scroll_down": "向下滚动",
 	"diorama.map.spot": "%s, %s, %s",
 	"diorama.map.spot_detail": "%s · %s 米",
-	"diorama.map.distance": "%s 米"
+	"diorama.map.distance": "%s 米",
+	"diorama.map.you": "你"
 }

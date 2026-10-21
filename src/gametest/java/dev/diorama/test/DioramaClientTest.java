@@ -1636,7 +1636,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void mapControls(ClientGameTestContext context) {
 		openMapOnPlayer(context);
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
-		int cavesTab = context.computeOnClient(mc -> 2 + mc.font.width("Surface") + 13 + mc.font.width("Caves") / 2 + 6);
+		int cavesTab = context.computeOnClient(mc -> 2 + mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.surface").getString()) + 13
+			+ (mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.caves").getString()) + 13) / 2);
 		moveCursor(context, cavesTab * scale, 8 * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(3);

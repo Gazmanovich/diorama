@@ -21,7 +21,9 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.tooltip.MenuTooltipPositioner;
 import net.minecraft.client.multiplayer.ClientLevel;
 //? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines;
@@ -115,9 +117,13 @@ public final class MapScreen extends Screen {
 
 	@Override
 	protected void init() {
-		// Built for the old size, so a resize closes it.
+		// Built for the old size, so a resize closes it. A press that opened another screen was
+		// released there, so none is held on coming back.
 		this.menu = null;
 		this.gauge.cancel();
+		this.pressButton = -1;
+		this.pressOnMenu = false;
+		this.pressOnControl = false;
 		this.waypointsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.waypoints"), b ->
 			this.minecraft.gui.setScreen(new WaypointListScreen(this))).bounds(this.width - 130, 0, 64, BAR).build());
 		this.settingsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
@@ -208,7 +214,15 @@ public final class MapScreen extends Screen {
 			this.sliceUp.setPosition(this.gauge.upButtonX(), this.gauge.upButtonY());
 			this.sliceDown.setPosition(this.gauge.upButtonX(), this.gauge.downButtonY());
 			// Its labels slide left of the zoom buttons rather than under them.
-			this.gauge.draw(graphics, this.font, pos.y, this.layer, this.zoomIn.getX() - 3, this.zoomIn.getY() - 2, this.recenter.getY() + this.recenter.getHeight() + 2);
+			int avoidX = this.zoomIn.getX() - 3;
+			int avoidTop = this.zoomIn.getY() - 2;
+			int avoidBottom = this.recenter.getY() + this.recenter.getHeight() + 2;
+			//? if >=1.21.2 {
+			this.gauge.draw(graphics, this.font, pos.y, this.layer, avoidX, avoidTop, avoidBottom);
+			//?} else {
+			/*// Each fill would be its own draw call otherwise.
+			graphics.drawManaged(() -> this.gauge.draw(graphics, this.font, pos.y, this.layer, avoidX, avoidTop, avoidBottom));
+			*///?}
 		} else {
 			this.gauge.cancel();
 		}
@@ -216,9 +230,14 @@ public final class MapScreen extends Screen {
 		// then a waypoint, then a mob, then the spot itself. The menu covers them while it's open.
 		if (this.menu == null) {
 			if (this.overControls(mouseX, mouseY)) {
-				List<FormattedCharSequence> lines = this.controlTooltip(mouseX, mouseY);
-				if (lines != null) {
-					graphics.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
+				Tip tip = this.controlTooltip(mouseX, mouseY);
+				if (tip != null) {
+					// Placed like a button's own tooltip: below the control, or above where there's no room.
+					//? if >=1.21.6 {
+					graphics.setTooltipForNextFrame(this.font, tip.lines(), new MenuTooltipPositioner(tip.control()), mouseX, mouseY, false);
+					//?} else {
+					/*this.setTooltipForNextRenderPass(tip.lines(), new MenuTooltipPositioner(tip.control()), false);
+					*///?}
 				}
 			} else if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
 				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
@@ -348,6 +367,10 @@ public final class MapScreen extends Screen {
 				this.gauge.grab(this.minecraft.level, y);
 				widgetTook = true;
 			}
+		}
+		if (!widgetTook && this.onButton(x, y)) {
+			// A button that can't go further (zoom at its limit) still isn't the map.
+			widgetTook = true;
 		}
 		if (widgetTook) {
 			this.pressOnControl = true;
@@ -717,39 +740,52 @@ public final class MapScreen extends Screen {
 		if (y < BAR || y >= this.height - BOTTOM_BAR) {
 			return true;
 		}
-		for (AbstractWidget widget : new AbstractWidget[] {this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown}) {
+		return this.onButton(x, y) || this.layer != TileKey.SURFACE && this.gauge.contains(x, y);
+	}
+
+	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
+	private boolean onButton(double x, double y) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.waypointsButton, this.settingsButton, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown}) {
 			if (widget.visible && x >= widget.getX() && x < widget.getX() + widget.getWidth() && y >= widget.getY() && y < widget.getY() + widget.getHeight()) {
 				return true;
 			}
 		}
-		return this.layer != TileKey.SURFACE && this.gauge.contains(x, y);
+		return false;
+	}
+
+	/** A control's tooltip and where the control is. */
+	private record Tip(List<FormattedCharSequence> lines, ScreenRectangle control) {
 	}
 
 	/** What a control does and its key: the player's binding where there is one. */
-	private @Nullable List<FormattedCharSequence> controlTooltip(double x, double y) {
+	private @Nullable Tip controlTooltip(double x, double y) {
 		int tab = this.tabAt(x, y);
 		if (tab >= 0) {
-			return lines(TAB_NAMES[tab], key(keyName(InputConstants.KEY_C)));
+			return new Tip(lines(TAB_NAMES[tab], key(keyName(InputConstants.KEY_C))), new ScreenRectangle(this.tabX[tab], 0, this.tabWidth[tab], BAR));
 		}
 		if (this.waypointsButton.isMouseOver(x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
-			return lines(this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
+			return tip(this.waypointsButton, this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
 		}
 		if (this.zoomIn.isMouseOver(x, y)) {
-			return lines(Component.translatable("diorama.map.zoom_in"), Component.translatable("diorama.map.scroll_up"));
+			return tip(this.zoomIn, Component.translatable("diorama.map.zoom_in"), Component.translatable("diorama.map.scroll_up"));
 		}
 		if (this.zoomOut.isMouseOver(x, y)) {
-			return lines(Component.translatable("diorama.map.zoom_out"), Component.translatable("diorama.map.scroll_down"));
+			return tip(this.zoomOut, Component.translatable("diorama.map.zoom_out"), Component.translatable("diorama.map.scroll_down"));
 		}
 		if (this.recenter.isMouseOver(x, y)) {
-			return lines(Component.translatable("diorama.map.recenter"), key(keyName(InputConstants.KEY_SPACE)));
+			return tip(this.recenter, Component.translatable("diorama.map.recenter"), key(keyName(InputConstants.KEY_SPACE)));
 		}
 		if (this.sliceUp.isMouseOver(x, y)) {
-			return lines(Component.translatable("diorama.map.slice_up"), key(keyName(InputConstants.KEY_PAGEUP)));
+			return tip(this.sliceUp, Component.translatable("diorama.map.slice_up"), key(keyName(InputConstants.KEY_PAGEUP)));
 		}
 		if (this.sliceDown.isMouseOver(x, y)) {
-			return lines(Component.translatable("diorama.map.slice_down"), key(keyName(InputConstants.KEY_PAGEDOWN)));
+			return tip(this.sliceDown, Component.translatable("diorama.map.slice_down"), key(keyName(InputConstants.KEY_PAGEDOWN)));
 		}
 		return null;
+	}
+
+	private static Tip tip(AbstractWidget control, Component name, Component second) {
+		return new Tip(lines(name, second), new ScreenRectangle(control.getX(), control.getY(), control.getWidth(), control.getHeight()));
 	}
 
 	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map. */

@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -179,7 +180,7 @@ final class DepthGauge {
 		graphics.fill(this.x0 - 4, py - 1, this.x0 - 3, py + 2, 0xFFFFFFFF);
 		graphics.fill(this.x0 - 3, py, this.x0 - 2, py + 1, 0xFFFFFFFF);
 		int ly = Math.abs(py - mid) >= 11 ? py : py <= mid ? mid - 11 : mid + 11;
-		label(graphics, font, "You", ly, this.x0 - 6, 0xFFE0E0E0, avoidX, avoidTop, avoidBottom);
+		label(graphics, font, Component.translatable("diorama.map.you").getString(), ly, this.x0 - 6, 0xFFE0E0E0, avoidX, avoidTop, avoidBottom);
 	}
 
 	/** A label on a dark plate, centred on height {@code y}, its plate ending at {@code right}. */
