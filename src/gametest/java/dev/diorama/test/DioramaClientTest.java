@@ -1403,6 +1403,23 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
 		}
+		// Unticking Show on maps and in the world and saving hides it; ticking it again shows it.
+		for (boolean shown : new boolean[] {false, true}) {
+			context.setScreen(() -> new WaypointEditScreen(null, picked, false));
+			context.waitTicks(3);
+			clickAt(context, context.computeOnClient(mc -> {
+				for (var child : mc.gui.screen().children()) {
+					if (child instanceof net.minecraft.client.gui.components.Checkbox box) {
+						return box;
+					}
+				}
+				throw new AssertionError("The editor has no visibility checkbox");
+			}));
+			clickButton(context, "diorama.waypoint.save");
+			if (context.computeOnClient(mc -> picked.visible) != shown) {
+				throw new AssertionError("Saving with the box " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
+			}
+		}
 		context.setScreen(() -> null);
 
 		// A name as long as the editor allows, and coordinates near the world border, stop before
