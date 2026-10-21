@@ -981,10 +981,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		int n = keys.size();
-		int ok = Math.max(1, n - failed);
+		int compared = n - declined;
+		int ok = Math.max(1, compared - failed);
 		double mean = both == 0 ? 0 : sumDiff / both;
 		double off = both == 0 ? 0 : differ * 100.0 / both;
-		double mismatch = knownMismatch * 100.0 / ((long) n * size * size);
+		double mismatch = knownMismatch * 100.0 / ((long) Math.max(1, compared) * size * size);
 		double alphaOff = both == 0 ? 0 : alphaDiffer * 100.0 / both;
 		// Fail on a GPU bake that didn't come back, on a comparison of nothing, and on differences
 		// well past what the sample patterns explain (about twice what the bakes measured).
@@ -1014,11 +1015,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				"%s: GPU tiles differ from traced ones: mean %.2f/255, %.2f%% off by >24, %.3f%% known/unknown, %.3f%% alpha", name, mean, off, mismatch, alphaOff));
 		}
 		return String.format(java.util.Locale.ROOT,
-			"%s tiles=%d failed=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f, pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
+			"%s tiles=%d failed=%d declined=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f, pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
 				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch, %.3f%% known with a different alpha",
-			name, n, failed, cpuMs / n, mesh / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
-			both == 0 ? 0 : sumDiff / both, both == 0 ? 0 : differ * 100.0 / both, knownMismatch * 100.0 / ((long) n * size * size),
-			both == 0 ? 0 : alphaDiffer * 100.0 / both
+			name, n, failed, declined, cpuMs / n, mesh / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
+			mean, off, mismatch, alphaOff
 		);
 	}
 
