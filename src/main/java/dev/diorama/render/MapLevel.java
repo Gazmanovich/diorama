@@ -647,7 +647,7 @@ public final class MapLevel implements ChunkSource {
 		// Lit as TileBaker decides: a cave slice, or a level under a roof.
 		boolean lit = key.isCave() || this.roofless();
 		// Fog of war only changes lit views.
-		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog);
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog, overlays != null);
 		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
 			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK, lit);
 			return;
@@ -690,7 +690,7 @@ public final class MapLevel implements ChunkSource {
 						TileImage image;
 						if (result.pixels() == null) {
 							if (check) {
-								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, !result.cancelled());
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, !result.cancelled());
 							}
 							image = traced != null ? TileBaker.gpuImage(key, traced, saved, info) : TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						} else if (traced != null) {
@@ -698,9 +698,12 @@ public final class MapLevel implements ChunkSource {
 								dev.diorama.render.gpu.GpuBakeCheck.compare(lit, result.pixels(), traced, result.info(), info);
 							} else {
 								// The map's look changed while it was out: the two may have baked different looks.
-								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, false);
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, false);
 							}
 							image = TileBaker.gpuImage(key, traced, saved, info);
+						} else if (dev.diorama.render.gpu.GpuBakeCheck.failed()) {
+							// Drawn before another kind of bake failed the check: don't trust it either.
+							image = TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						} else {
 							image = TileBaker.gpuImage(key, result.pixels(), saved, result.info());
 						}
@@ -715,7 +718,7 @@ public final class MapLevel implements ChunkSource {
 			} catch (Throwable t) {
 				if (!answered) {
 					// The check tile never reached the GPU: hand its turn back.
-					dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, false);
+					dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, false);
 				}
 				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));

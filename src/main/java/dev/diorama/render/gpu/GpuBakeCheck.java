@@ -14,10 +14,11 @@ import net.minecraft.network.chat.Component;
  * turns GPU baking off for the rest of the session, so it can't spoil a map.
  *
  * <p>Both bakes of a check tile read the same chunks (a {@code PinnedSource}), so any difference
- * past what the two sample patterns explain is the GPU's. Sky views and lit views (cave slices,
- * the Nether under its roof) are checked apart: only sky views draw sun shadows and sky
- * occlusion, so matching caves say nothing about them. Fog-of-war bakes are never check tiles,
- * since what the player has seen keeps changing under them.
+ * past what the two sample patterns explain is the GPU's. Four kinds of bake are checked apart:
+ * sky views and lit views (cave slices, the Nether under its roof), each with overlays and
+ * without. Only sky views draw sun shadows and sky occlusion, and only overlay bakes write the
+ * overlay bits, so a pass on one kind says nothing about another. Fog-of-war bakes are never
+ * check tiles, since what the player has seen keeps changing under them.
  */
 public final class GpuBakeCheck {
 	/** How a bake runs. */
@@ -61,8 +62,10 @@ public final class GpuBakeCheck {
 
 	private static final Object LOCK = new Object();
 	private static volatile boolean failed;
-	private static final Check SKY = new Check("sky view");
-	private static final Check LIT = new Check("lit view");
+	/** By kind: sky view, lit view, each without overlays and with. */
+	private static final Check[] CHECKS = {
+		new Check("sky view"), new Check("lit view"), new Check("sky view with overlays"), new Check("lit view with overlays")
+	};
 
 	private GpuBakeCheck() {
 	}
@@ -98,16 +101,20 @@ public final class GpuBakeCheck {
 		return failed;
 	}
 
+	private static Check check(boolean lit, boolean overlays) {
+		return CHECKS[(lit ? 1 : 0) + (overlays ? 2 : 0)];
+	}
+
 	/**
-	 * How the next bake of a sky view or a {@code lit} one runs, with fog of war or not. A
-	 * {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn}, exactly once,
-	 * with the same {@code lit}, and its two bakes must read the same chunks.
+	 * How the next bake of a sky view or a {@code lit} one runs, with fog of war and overlays or
+	 * not. A {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn},
+	 * exactly once, with the same kind, and its two bakes must read the same chunks.
 	 */
-	public static Mode mode(boolean lit, boolean fogOfWar) {
+	public static Mode mode(boolean lit, boolean fogOfWar, boolean overlays) {
 		if (!wanted() || failed) {
 			return Mode.TRACE;
 		}
-		Check check = lit ? LIT : SKY;
+		Check check = check(lit, overlays);
 		if (check.passed) {
 			return Mode.GPU;
 		}
@@ -129,7 +136,7 @@ public final class GpuBakeCheck {
 	 * with their overlay bits when the bake asked for them.
 	 */
 	public static void compare(boolean lit, int[] gpu, int[] traced, byte @Nullable [] gpuInfo, byte @Nullable [] tracedInfo) {
-		boolean overlays = gpuInfo != null && tracedInfo != null;
+		boolean overlays = tracedInfo != null;
 		long both = 0;
 		long mismatched = 0;
 		long alphaDiffers = 0;
@@ -147,7 +154,7 @@ public final class GpuBakeCheck {
 				if ((c >>> 24) != (g >>> 24)) {
 					alphaDiffers++;
 				}
-				if (overlays && gpuInfo[i] != tracedInfo[i]) {
+				if (overlays && (gpuInfo == null || gpuInfo[i] != tracedInfo[i])) {
 					overlayDiffers++;
 				}
 				int dr = (g & 0xFF) - (c & 0xFF);
@@ -157,7 +164,7 @@ public final class GpuBakeCheck {
 				bias += (dr + dg + db) / 3.0;
 			}
 		}
-		Check check = lit ? LIT : SKY;
+		Check check = check(lit, overlays);
 		synchronized (LOCK) {
 			check.out--;
 			if (failed || check.passed) {
@@ -201,8 +208,8 @@ public final class GpuBakeCheck {
 	 * Only one the GPU couldn't draw counts against it, not one handed back because the world
 	 * closed or the map's look changed meanwhile.
 	 */
-	public static void undrawn(boolean lit, boolean cannotDraw) {
-		Check check = lit ? LIT : SKY;
+	public static void undrawn(boolean lit, boolean overlays, boolean cannotDraw) {
+		Check check = check(lit, overlays);
 		synchronized (LOCK) {
 			check.out--;
 			if (cannotDraw && !failed && !check.passed && ++check.failures >= FAILURES) {
