@@ -48,6 +48,14 @@ final class MapPiece {
 	private static final double SUN_AZIMUTH_Z = 0.479;
 	/** How much of the sky an open south face sees. */
 	private static final float FACE_SKY = 0.5F;
+	/**
+	 * Brightness spread between neighbouring blocks on the face. The top shows each block's
+	 * texture through the map's own detail; the face is one colour per block, so without this a
+	 * layer of stone reads as a flat band.
+	 */
+	private static final float FACE_VARIATION = 0.12F;
+	/** How often the face is read from the world again, for chunks arriving and blocks changing. */
+	private static final long FACE_REFRESH_MS = 1000;
 
 	private static final float[] SRGB_TO_LINEAR = new float[256];
 
@@ -64,8 +72,9 @@ final class MapPiece {
 	private final MapViewport viewport = new MapViewport();
 	private final int[] facePixels = new int[FACE_TEXTURE * FACE_TEXTURE];
 	private @Nullable MapTexture face;
-	/** What the face texture was last built from. */
-	private @Nullable Object faceKey;
+	/** What the face texture was last built from, and when. */
+	private @Nullable FaceKey faceKey;
+	private long faceBuilt;
 
 	private record FaceKey(ClientLevel level, int x0, int columns, long edge, MapStyle style, @Nullable BlockLooks looks) {
 	}
@@ -145,10 +154,12 @@ final class MapPiece {
 			this.face = MapTexture.create("diorama map piece", FACE_TEXTURE, 1);
 		}
 		FaceKey key = new FaceKey(level, x0, columns, Math.round(edge * 8), style, looks);
-		if (key.equals(this.faceKey)) {
+		long now = System.currentTimeMillis();
+		if (key.equals(this.faceKey) && now - this.faceBuilt < FACE_REFRESH_MS) {
 			return this.face;
 		}
 		this.faceKey = key;
+		this.faceBuilt = now;
 		java.util.Arrays.fill(this.facePixels, 0);
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		for (int c = 0; c < columns; c++) {
@@ -185,7 +196,7 @@ final class MapPiece {
 		boolean grass = looks.tint[id] == BlockLooks.TINT_GRASS;
 		boolean topEdge = row == 0 && t < (grass ? 2 : 1);
 		float[] rgb = albedo(looks, level, id, pos, topEdge, row == 0 && grass && !topEdge);
-		float nudge = 1 + style.blockVariation() * blockNoise(pos.getX(), pos.getY(), pos.getZ());
+		float nudge = 1 + Math.max(style.blockVariation(), FACE_VARIATION) * blockNoise(pos.getX(), pos.getY(), pos.getZ());
 		float[] light = faceLight(style, pos.getY());
 		// The last GUI row closes the cut, like the map's outlines.
 		float close = row == this.side - 1 ? 0.75F : 1;
@@ -328,7 +339,7 @@ final class MapPiece {
 		return abgr(abgr);
 	}
 
-	/** -1..1, fixed per block position: the baker's per-block brightness nudge. */
+	/** -1..1, fixed per block position: the noise the baker nudges block brightness by. */
 	private static float blockNoise(int x, int y, int z) {
 		int h = x * 73_856_093 ^ y * 19_349_663 ^ z * 83_492_791;
 		h ^= h >>> 13;

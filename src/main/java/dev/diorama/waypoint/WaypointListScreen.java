@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -57,7 +56,12 @@ public final class WaypointListScreen extends Screen {
 	private final List<Waypoint> all = new ArrayList<>();
 	/** The ones the search lets through, still nearest first. */
 	private final List<Waypoint> rows = new ArrayList<>();
-	private final List<AbstractWidget> rowButtons = new ArrayList<>();
+	/**
+	 * The selected row's buttons. They're made with the screen and only moved, shown or hidden, and
+	 * they act on whatever is selected when pressed: a button that has gone from view can keep the
+	 * keyboard focus, and must not act on a row it no longer sits on.
+	 */
+	private final List<Button> actions = new ArrayList<>();
 	private final MapPiece piece = new MapPiece(88, 56, 12);
 	/** The sample pin on the empty list's piece of map. */
 	private final Waypoint sample = new Waypoint("Home", 0, 0, 0, "", Waypoint.PALETTE[2]);
@@ -65,7 +69,8 @@ public final class WaypointListScreen extends Screen {
 	private @Nullable Waypoint selected;
 	/** The selected row's Delete was clicked once: its buttons are one Click again to delete. */
 	private boolean armed;
-	private @Nullable Button armedButton;
+	private @Nullable Button visibility;
+	private @Nullable Button confirm;
 	private int scroll;
 	private int listBottom;
 	private int visibleRows;
@@ -136,6 +141,9 @@ public final class WaypointListScreen extends Screen {
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 				.bounds(cx - 75, newY + this.emptyTop, 150, 20).build());
 			this.search = null;
+			this.actions.clear();
+			this.visibility = null;
+			this.confirm = null;
 			return;
 		}
 
@@ -149,6 +157,22 @@ public final class WaypointListScreen extends Screen {
 		this.search = this.addRenderableWidget(box);
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 			.bounds(left + LIST_WIDTH - NEW_WIDTH, 22, NEW_WIDTH, 20).build());
+		this.actions.clear();
+		this.actions.add(this.action(Component.translatable("diorama.waypoints.edit"), () -> this.edit(this.selected)));
+		this.visibility = this.action(Component.translatable("diorama.waypoints.hide"), () -> this.toggleVisible(this.selected));
+		this.actions.add(this.visibility);
+		if (this.canTeleport) {
+			this.actions.add(this.action(Component.translatable("diorama.waypoint.teleport"), () -> this.teleport(this.selected)));
+		}
+		this.actions.add(this.action(Component.translatable("diorama.waypoint.delete").withStyle(ChatFormatting.RED), () -> {
+			this.armed = true;
+			this.placeRowButtons();
+		}));
+		this.confirm = this.addRenderableWidget(Button.builder(Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED), b -> {
+			if (this.armed) {
+				this.delete(this.selected);
+			}
+		}).size(20, 20).build());
 		this.visibleRows = Math.max(1, (this.listBottom - LIST_TOP - 2) / PITCH);
 		this.filter();
 		this.setInitialFocus(box);
@@ -189,63 +213,52 @@ public final class WaypointListScreen extends Screen {
 	 * Delete in red. Once Delete is clicked they become one red Click again to delete across them.
 	 */
 	private void placeRowButtons() {
-		for (AbstractWidget widget : this.rowButtons) {
-			this.removeWidget(widget);
-		}
-		this.rowButtons.clear();
-		this.armedButton = null;
 		int index = this.selected == null ? -1 : this.rows.indexOf(this.selected) - this.scroll;
-		if (index < 0 || index >= this.visibleRows) {
-			return;
+		boolean shown = index >= 0 && index < this.visibleRows;
+		Button visibility = this.visibility;
+		if (shown && visibility != null) {
+			Component label = Component.translatable(this.selected.visible ? "diorama.waypoints.hide" : "diorama.waypoints.show");
+			visibility.setMessage(label);
+			visibility.setWidth(width(this.font.width(label)));
 		}
-		Waypoint waypoint = this.selected;
-		int right = this.width / 2 + LIST_WIDTH / 2 - 2;
-		int y = this.rowY(index) + 2;
-		List<Button> actions = new ArrayList<>();
-		actions.add(this.action(Component.translatable("diorama.waypoints.edit"), b -> this.edit(waypoint)));
-		actions.add(this.action(Component.translatable(waypoint.visible ? "diorama.waypoints.hide" : "diorama.waypoints.show"), b -> {
-			waypoint.visible = !waypoint.visible;
-			WaypointStore store = WaypointStore.get();
-			if (store != null) {
-				store.changed();
-			}
-			this.placeRowButtons();
-		}));
-		if (this.canTeleport) {
-			actions.add(this.action(Component.translatable("diorama.waypoint.teleport"), b -> this.teleport(waypoint)));
-		}
-		actions.add(this.action(Component.translatable("diorama.waypoint.delete").withStyle(ChatFormatting.RED), b -> {
-			this.armed = true;
-			this.placeRowButtons();
-		}));
 		int span = -ACTION_GAP;
-		for (Button button : actions) {
+		for (Button button : this.actions) {
 			span += button.getWidth() + ACTION_GAP;
 		}
-		if (this.armed) {
-			this.armedButton = Button.builder(Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED), b -> this.delete(waypoint))
-				.bounds(right - span, y, span, 20).build();
-			this.rowButtons.add(this.addRenderableWidget(this.armedButton));
-			return;
-		}
+		int right = this.width / 2 + LIST_WIDTH / 2 - 2;
+		int y = shown ? this.rowY(index) + 2 : 0;
 		int x = right - span;
-		for (Button button : actions) {
+		for (Button button : this.actions) {
+			show(button, shown && !this.armed);
 			button.setPosition(x, y);
 			x += button.getWidth() + ACTION_GAP;
-			this.rowButtons.add(this.addRenderableWidget(button));
 		}
+		Button confirm = this.confirm;
+		if (confirm != null) {
+			show(confirm, shown && this.armed);
+			confirm.setRectangle(span, 20, right - span, y);
+		}
+	}
+
+	private static void show(Button button, boolean shown) {
+		button.visible = shown;
+		button.active = shown;
 	}
 
 	/** A row button just wide enough for its label, and never narrower than vanilla's small ones. */
-	private Button action(Component label, Button.OnPress onPress) {
-		return Button.builder(label, onPress).size(Math.max(32, this.font.width(label) + 10), 20).build();
+	private Button action(Component label, Runnable onPress) {
+		return this.addRenderableWidget(Button.builder(label, b -> onPress.run()).size(width(this.font.width(label)), 20).build());
 	}
 
-	/** How wide the selected row's buttons are together. */
+	private static int width(int label) {
+		return Math.max(32, label + 10);
+	}
+
+	/** How wide the selected row's buttons are together, with the gap before them. */
 	private int actionsWidth() {
 		int span = 0;
-		for (AbstractWidget widget : this.rowButtons) {
-			span += widget.getWidth() + ACTION_GAP;
+		for (Button button : this.actions) {
+			span += button.getWidth() + ACTION_GAP;
 		}
 		return span;
 	}
@@ -510,9 +523,13 @@ public final class WaypointListScreen extends Screen {
 
 	/** A click anywhere but on Click again to delete puts the row's buttons back. */
 	private void disarmUnless(double x, double y) {
-		Button button = this.armedButton;
+		Button button = this.confirm;
 		if (this.armed && (button == null || !button.isMouseOver(x, y))) {
 			this.armed = false;
+			// Delete had the focus from its click and shows again now: Enter mustn't ask again.
+			if (this.getFocused() == button || this.actions.contains(this.getFocused())) {
+				this.setFocused(null);
+			}
 			this.placeRowButtons();
 		}
 	}
@@ -543,6 +560,7 @@ public final class WaypointListScreen extends Screen {
 		boolean twice = waypoint == this.lastClicked && now - this.lastClick < DOUBLE_CLICK_MS;
 		this.lastClicked = waypoint;
 		this.lastClick = now;
+		this.setFocused(null);
 		if (twice) {
 			this.edit(waypoint);
 		} else if (waypoint != this.selected) {
@@ -578,13 +596,27 @@ public final class WaypointListScreen extends Screen {
 		}
 	}
 
-	private void edit(Waypoint waypoint) {
-		this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false));
+	private void edit(@Nullable Waypoint waypoint) {
+		if (waypoint != null) {
+			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false));
+		}
 	}
 
-	private void delete(Waypoint waypoint) {
+	private void toggleVisible(@Nullable Waypoint waypoint) {
+		if (waypoint == null) {
+			return;
+		}
+		waypoint.visible = !waypoint.visible;
 		WaypointStore store = WaypointStore.get();
 		if (store != null) {
+			store.changed();
+		}
+		this.placeRowButtons();
+	}
+
+	private void delete(@Nullable Waypoint waypoint) {
+		WaypointStore store = WaypointStore.get();
+		if (store != null && waypoint != null) {
 			store.remove(waypoint);
 		}
 		this.selected = null;
@@ -592,9 +624,9 @@ public final class WaypointListScreen extends Screen {
 		this.rebuildWidgets();
 	}
 
-	private void teleport(Waypoint waypoint) {
+	private void teleport(@Nullable Waypoint waypoint) {
 		LocalPlayer player = this.minecraft.player;
-		if (player != null) {
+		if (player != null && waypoint != null) {
 			player.connection.sendCommand("tp @s " + waypoint.x + " " + waypoint.y + " " + waypoint.z);
 		}
 		this.minecraft.gui.setScreen(null);

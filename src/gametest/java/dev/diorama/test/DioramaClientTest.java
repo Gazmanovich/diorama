@@ -1429,11 +1429,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		clickButton(context, "diorama.waypoint.delete");
 		context.takeScreenshot("waypoints-05b-list-deleting");
-		clickAt(context, context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(0)));
-		boolean disarmed = context.computeOnClient(mc -> mc.gui.screen().children().stream().noneMatch(c ->
-			c instanceof net.minecraft.client.gui.components.Button b && b.getMessage().getString().equals("Click again to delete")));
+		// Off the row, on the list's empty space. Enter then mustn't reach a button that's gone.
+		clickAtGui(context, row[0], row[1] + 60);
+		context.runOnClient(mc -> {
+			//? if >=1.21.9 {
+			mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_RETURN, 0, 0));
+			//?} else {
+			/*mc.gui.screen().keyPressed(InputConstants.KEY_RETURN, 0, 0);
+			*///?}
+		});
+		context.waitTicks(2);
+		boolean disarmed = context.computeOnClient(mc ->
+			!buttonLabelled(mc.gui.screen(), "Click again to delete").visible && buttonLabelled(mc.gui.screen(), "Delete").visible);
 		if (!disarmed || !context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
-			throw new AssertionError("Clicking elsewhere didn't put Delete back, or the first click deleted");
+			throw new AssertionError("Clicking elsewhere didn't put Delete back, or something else deleted the waypoint");
 		}
 		clickButton(context, "diorama.waypoint.delete");
 		clickButton(context, "diorama.menu.delete_confirm");
