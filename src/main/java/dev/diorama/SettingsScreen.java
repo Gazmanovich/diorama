@@ -155,12 +155,13 @@ public final class SettingsScreen extends Screen {
 			Checkbox checkbox = Checkbox.builder(Component.translatable("diorama.settings." + key), SettingsScreen.this.font)
 				.selected(get.getAsBoolean())
 				.maxWidth(column)
-				.tooltip(tooltip(key))
 				.onValueChange((box, value) -> {
 					set.accept(value);
 					Settings.get().save();
 				})
 				.build();
+			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
+			checkbox.setTooltip(tooltip(key));
 			this.checkboxes.add(checkbox);
 		}
 
