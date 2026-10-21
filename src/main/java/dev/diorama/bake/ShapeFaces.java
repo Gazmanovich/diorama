@@ -24,11 +24,6 @@ final class ShapeFaces {
 	final int[] south;
 	/** Every box, for the shadow map: lo, hi pairs. */
 	final int[] boxes;
-	/**
-	 * A box fills the cell's floor (a bottom slab, snow, a path): a ray heading down and north
-	 * can't leave the cell without meeting it, so the cell stops rays as a cube does.
-	 */
-	final boolean fillsFloor;
 	/** Water's top and south faces in a waterlogged cell, less where the block's face is level with them. */
 	final int[] wetTop;
 	final int[] wetSouth;
@@ -57,14 +52,12 @@ final class ShapeFaces {
 			}
 		}
 		this.boxes = new int[n * 2];
-		boolean floor = false;
 		List<int[]> top = new ArrayList<>();
 		List<int[]> south = new ArrayList<>();
 		for (int i = 0; i < n; i++) {
 			int[] a = b[i];
 			this.boxes[i * 2] = pack(a[0], a[1], a[2]);
 			this.boxes[i * 2 + 1] = pack(a[3], a[4], a[5]);
-			floor |= a[0] == 0 && a[3] == UNIT && a[2] == 0 && a[5] == UNIT && a[1] == 0;
 			// The top face, less what other boxes cover from above it.
 			List<int[]> pieces = new ArrayList<>(List.of(new int[] {a[0], a[3], a[2], a[5]}));
 			for (int j = 0; j < n; j++) {
@@ -86,7 +79,6 @@ final class ShapeFaces {
 				south.add(new int[] {pack(r[0], r[2], a[5]), pack(r[1], r[3], a[5])});
 			}
 		}
-		this.fillsFloor = floor;
 		this.top = flatten(top);
 		this.south = flatten(south);
 		// The tracer keeps a ray dry where it meets the block right as it comes into the cell:

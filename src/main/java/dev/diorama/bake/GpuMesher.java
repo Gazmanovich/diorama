@@ -317,8 +317,9 @@ public final class GpuMesher {
 											solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1]);
 										}
 									}
-									// One filling the cell's floor stops every ray coming in, as a cube does.
-									passes = !sh.fillsFloor;
+									// Rays that miss its boxes go on, even past one filling the floor: a ray
+									// coming in near the north side leaves before it gets down to the box.
+									passes = true;
 								}
 							}
 						} else {
