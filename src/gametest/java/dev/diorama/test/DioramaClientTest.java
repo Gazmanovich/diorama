@@ -731,6 +731,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			});
 			summary.append(compareTiles(context, out, "spot" + spot + "-cave-fog", cut, true, null)).append('\n');
 		}
+		// Blocks smaller than a cube, which both bakers draw by their shapes.
+		shapesScene(context, world);
+		summary.append(compareTiles(context, out, "shapes", TileKey.SURFACE, false, null)).append('\n');
 		// The Nether's sky view starts under its roof.
 		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
 		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 300, 2400);
@@ -750,6 +753,60 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (dev.diorama.render.gpu.GpuBakeCheck.failed()) {
 			throw new AssertionError("The map's GPU baking check failed while these tiles matched: see the log");
 		}
+	}
+
+	/**
+	 * A flat field of blocks smaller than a cube, a 3x3 patch each: slabs, stairs every way, fences,
+	 * walls, panes, snow of every height, small things that stand on the ground, and some of them
+	 * waterlogged in a pool. The player stands in the middle of it.
+	 */
+	private static void shapesScene(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("tp @a 1600 140 1600");
+		context.waitTicks(40);
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		int y = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, 1600, 1600));
+		int x0 = 1560;
+		int z0 = 1560;
+		// Cleared in strips: a fill may change only so many blocks at once.
+		for (int x = x0; x < x0 + 80; x += 16) {
+			world.getServer().runCommand("fill " + x + " " + y + " " + z0 + " " + (x + 15) + " " + (y + 24) + " " + (z0 + 79) + " air");
+		}
+		world.getServer().runCommand("fill " + x0 + " " + (y - 1) + " " + z0 + " " + (x0 + 79) + " " + (y - 1) + " " + (z0 + 79) + " grass_block");
+		String[] blocks = {
+			"oak_slab", "oak_slab[type=top]", "stone_slab", "smooth_stone_slab[type=top]",
+			"stone_brick_stairs[facing=north]", "stone_brick_stairs[facing=south]", "stone_brick_stairs[facing=east]", "stone_brick_stairs[facing=west]",
+			"oak_stairs[half=top,facing=north]", "oak_stairs[half=top,facing=south]", "brick_stairs[facing=north,shape=outer_left]", "brick_stairs[facing=south,shape=inner_right]",
+			"oak_fence", "cobblestone_wall", "glass_pane", "iron_bars",
+			"snow[layers=1]", "snow[layers=2]", "snow[layers=3]", "snow[layers=4]",
+			"snow[layers=5]", "snow[layers=6]", "snow[layers=7]", "dirt_path",
+			"farmland", "soul_sand", "chest", "lantern",
+			"oak_trapdoor", "oak_trapdoor[half=top,open=false]", "cauldron", "hopper",
+			"anvil", "stonecutter", "enchanting_table", "daylight_detector",
+			"lectern", "campfire[lit=false]", "composter", "end_rod",
+		};
+		for (int b = 0; b < blocks.length; b++) {
+			int bx = x0 + 2 + (b % 8) * 5;
+			int bz = z0 + 2 + (b / 8) * 5;
+			world.getServer().runCommand("fill " + bx + " " + y + " " + bz + " " + (bx + 2) + " " + y + " " + (bz + 2) + " " + blocks[b]);
+		}
+		// Slabs on slabs, a fence on a wall: shapes stacked.
+		world.getServer().runCommand("fill " + (x0 + 2) + " " + (y + 1) + " " + (z0 + 2) + " " + (x0 + 4) + " " + (y + 1) + " " + (z0 + 4) + " oak_slab");
+		world.getServer().runCommand("fill " + (x0 + 17) + " " + (y + 1) + " " + (z0 + 17) + " " + (x0 + 19) + " " + (y + 1) + " " + (z0 + 19) + " oak_fence");
+		// A pool to the east, with waterlogged blocks in it, some level with the water's top.
+		int px = x0 + 45;
+		world.getServer().runCommand("fill " + px + " " + (y - 3) + " " + z0 + " " + (px + 30) + " " + (y - 1) + " " + (z0 + 30) + " water");
+		String[] wet = {
+			"oak_slab[waterlogged=true]", "oak_slab[type=top,waterlogged=true]", "stone_brick_stairs[facing=north,waterlogged=true]", "stone_brick_stairs[facing=south,waterlogged=true]",
+			"oak_fence[waterlogged=true]", "glass_pane[waterlogged=true]", "lantern[waterlogged=true]", "chest[waterlogged=true]",
+		};
+		for (int b = 0; b < wet.length; b++) {
+			int bx = px + 2 + (b % 4) * 7;
+			int bz = z0 + 2 + (b / 4) * 7;
+			world.getServer().runCommand("fill " + bx + " " + (y - 1) + " " + bz + " " + (bx + 2) + " " + (y - 1) + " " + (bz + 2) + " " + wet[b]);
+			world.getServer().runCommand("fill " + bx + " " + (y - 3) + " " + (bz + 4) + " " + (bx + 2) + " " + (y - 3) + " " + (bz + 4) + " " + wet[b]);
+		}
+		world.getServer().runCommand("tp @a 1600 " + (y + 1) + " 1600");
+		settle(context, 200);
 	}
 
 	/**
