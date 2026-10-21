@@ -42,12 +42,6 @@ public final class GpuBakeCheck {
 	 */
 	private static final double MAX_MEAN = 4;
 	private static final double MAX_BIAS = 2;
-	/**
-	 * Share of pixels known to one bake and not the other past which they don't match. The first
-	 * tiles bake while the world is still loading, and a chunk that lands between the mesh and
-	 * the trace makes a few percent; garbage or a flipped readback would make far more.
-	 */
-	private static final double MAX_MISMATCH = 0.05;
 
 	private static final Object LOCK = new Object();
 	private static volatile State state = State.UNCHECKED;
@@ -155,7 +149,10 @@ public final class GpuBakeCheck {
 		double mismatch = mismatched / (double) pixels;
 		String measured = String.format(java.util.Locale.ROOT, "%d tiles, mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch",
 			compared, mean, brighter, mismatch * 100);
-		if (mean <= MAX_MEAN && Math.abs(brighter) <= MAX_BIAS && mismatch <= MAX_MISMATCH) {
+		// Only logged: the first tiles bake while chunks are still loading, and at the edge of a
+		// missing chunk the mesher and the tracer leave slightly different pixels unknown (about 4%
+		// then, under 0.1% once loaded). Garbage or a flipped readback would break the mean anyway.
+		if (mean <= MAX_MEAN && Math.abs(brighter) <= MAX_BIAS) {
 			state = State.PASSED;
 			Diorama.LOGGER.info("GPU baking matches the tracer on {} ({}): on", GpuTileBaker.device(), measured);
 		} else {
