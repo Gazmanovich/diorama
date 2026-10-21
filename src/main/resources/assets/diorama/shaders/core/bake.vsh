@@ -158,8 +158,8 @@ vec3 corner_position(int face, vec3 base, vec2 c, vec3 lo, vec3 hi) {
         // West, for the shadow map only.
         return base + vec3(lo.x, mix(lo.y, hi.y, c.x), mix(lo.z, hi.z, c.y));
     }
-    // Floor: the bottom of the cell.
-    return base + vec3(c.x, 0.0, c.y);
+    // Floor: the bottom of the cell, or part of it.
+    return base + vec3(mix(lo.x, hi.x, c.x), 0.0, mix(lo.z, hi.z, c.y));
 }
 
 void main() {

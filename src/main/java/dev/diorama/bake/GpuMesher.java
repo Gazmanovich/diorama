@@ -226,6 +226,14 @@ public final class GpuMesher {
 		boolean[] hereOpen = new boolean[zSpan];
 		boolean[] aboveRock = new boolean[zSpan];
 		boolean[] hereRock = new boolean[zSpan];
+		// Which of the rays still in the rock: see RockRays. Up to MAX ranges a cell, or ALL.
+		double cot = cos / sin;
+		double[][] aboveRockU = new double[zSpan][RockRays.MAX * 2];
+		double[][] hereRockU = new double[zSpan][RockRays.MAX * 2];
+		int[] aboveRockN = new int[zSpan];
+		int[] hereRockN = new int[zSpan];
+		double[] rockIn = new double[RockRays.MAX * 2];
+		int[] pieces = new int[RockRays.MAX_PIECES * 2];
 		boolean[] aboveWater = new boolean[zSpan];
 		boolean[] hereWater = new boolean[zSpan];
 		// Under fog of war, the first water the ray entered: none yet, at a cell the player has
@@ -245,6 +253,7 @@ public final class GpuMesher {
 			// Where the rays start: open air above the tallest block, or inside rock at a cut.
 			java.util.Arrays.fill(aboveOpen, !lit);
 			java.util.Arrays.fill(aboveRock, lit);
+			java.util.Arrays.fill(aboveRockN, RockRays.ALL);
 			java.util.Arrays.fill(aboveWater, false);
 			java.util.Arrays.fill(aboveFirstWater, NO_WATER);
 			for (int y = startY - 1; y >= limitY; y--) {
@@ -252,6 +261,7 @@ public final class GpuMesher {
 				int hi = zHigh(maxV, y, sin, cos);
 				java.util.Arrays.fill(hereOpen, false);
 				java.util.Arrays.fill(hereRock, false);
+				java.util.Arrays.fill(hereRockN, 0);
 				java.util.Arrays.fill(hereWater, false);
 				java.util.Arrays.fill(hereFirstWater, NO_WATER);
 				boolean any = false;
@@ -265,6 +275,15 @@ public final class GpuMesher {
 					boolean fromSouth = openSouth || rockSouth;
 					if (!fromAbove && !fromSouth) {
 						continue;
+					}
+					int rockN = 0;
+					if (rockAbove || rockSouth) {
+						rockN = RockRays.enter(rockIn, aboveRockU[i], rockAbove ? aboveRockN[i] : 0, rockSouth ? hereRockU[i + 1] : null, rockSouth ? hereRockN[i + 1] : 0, y, z, cot);
+						if (rockN > RockRays.MAX) {
+							// More ranges than a cell keeps: rare enough to trace.
+							mesh.traceInstead = true;
+							rockN = RockRays.ALL;
+						}
 					}
 					int id = reader.state(x, y, z);
 					if (id == VoxelReader.UNKNOWN) {
@@ -287,51 +306,34 @@ public final class GpuMesher {
 						boolean reached;
 						boolean traced = false;
 						if (kind == BlockLooks.SOLID) {
-							boolean rock = rockAbove || rockSouth;
-							if (rock) {
+							if (rockN != 0) {
 								// Inside the rock below a cut, any solid block is rock.
-								hereRock[i] = true;
+								keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
 								any = true;
 							}
 							reached = openAbove || openSouth;
 							if (reached) {
 								mesh.lowestY = Math.min(mesh.lowestY, y);
-								if (rock && (openAbove && rockAbove || openSouth && rockSouth || wet >= 0)) {
-									// Rays from the rock and open ones come in on the same side, or it's
-									// waterlogged: the GPU can't draw that as the tracer does, which bakes
-									// the tile instead.
+								// A piece on the cell's top or south side is met only by rays coming in that way, one
+								// inside the cell by rays from either, and none by rays still in the rock.
+								for (int b = 0; b < sh.top.length; b += 2) {
+									if (openAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
+										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1], rockIn, rockN, cot, pieces);
+									}
+								}
+								for (int b = 0; b < sh.south.length; b += 2) {
+									if (openSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
+										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1], rockIn, rockN, cot, pieces);
+									}
+								}
+								// Rays that miss its boxes go on, even past one filling the floor: a ray coming in near
+								// the north side leaves before it gets down to the box.
+								passes = true;
+								if (wet >= 0 && rockN != 0 && (wet(reader, looks, x, y - 1, z) || wet(reader, looks, x, y, z - 1))) {
+									// Rays from the rock leave it dry, into water whose surface the next cell won't draw
+									// for them, as it's drawn here for the others.
 									traced = true;
 									mesh.traceInstead = true;
-								} else if (rock) {
-									// Rays from the rock skip the cell, so only what the open side's rays
-									// meet. Rays of both kinds miss its boxes and go on: a solid block they
-									// reach next can't be drawn for both, so it traces the tile.
-									int[][] side = sh.bySide(sin, cos);
-									int[] tops = openAbove ? side[0] : side[1];
-									int[] souths = openAbove ? side[2] : side[3];
-									for (int b = 0; b < tops.length; b += 2) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, tops[b], tops[b + 1]);
-									}
-									for (int b = 0; b < souths.length; b += 2) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, souths[b], souths[b + 1]);
-									}
-									passes = true;
-								} else {
-									// A piece on the cell's top or south side is met only by rays coming in
-									// that way; one inside the cell by rays from either.
-									for (int b = 0; b < sh.top.length; b += 2) {
-										if (openAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
-											solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1]);
-										}
-									}
-									for (int b = 0; b < sh.south.length; b += 2) {
-										if (openSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
-											solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1]);
-										}
-									}
-									// Rays that miss its boxes go on, even past one filling the floor: a ray
-									// coming in near the north side leaves before it gets down to the box.
-									passes = true;
 								}
 							}
 						} else {
@@ -371,10 +373,16 @@ public final class GpuMesher {
 							}
 						}
 						if (reached && !traced && wet >= 0) {
+							int[] wetTop = sh.wetTop;
+							int[] wetSouth = sh.wetSouth;
+							if (kind == BlockLooks.SOLID && rockN != 0) {
+								wetTop = outsideRock(sh.wetTop, true, rockIn, rockN, y, z, cot, pieces);
+								wetSouth = outsideRock(sh.wetSouth, false, rockIn, rockN, y, z, cot, pieces);
+							}
 							// Waterlogged: in water from where the ray came into the cell, but dry
 							// where it meets the block right there.
 							waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
-								aboveWater, hereWater, hereFirstWater, lit, fog, sh.wetTop, sh.wetSouth);
+								aboveWater, hereWater, hereFirstWater, lit, fog, wetTop, wetSouth);
 							if (sh.wetCut) {
 								// Rays that came in dry where the block is level with the water are in
 								// water again in the next cell, so that one draws its own surface; where
@@ -383,21 +391,16 @@ public final class GpuMesher {
 							}
 						}
 					} else if (kind == BlockLooks.SOLID) {
-						if (openAbove && rockAbove || openSouth && rockSouth) {
-							// Rays from the rock and open ones on the same side, out of a smaller block
-							// both reach: these are rock to one and a face to the other. Trace the tile.
-							mesh.traceInstead = true;
-						}
-						if (rockAbove || rockSouth) {
+						if (rockN != 0) {
 							// Still in the rock below the cut.
-							hereRock[i] = true;
+							keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
 							any = true;
 						}
 						if (openAbove) {
-							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
 						}
 						if (openSouth) {
-							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
 						}
 						mesh.lowestY = Math.min(mesh.lowestY, y);
 					} else if (kind == BlockLooks.LAVA) {
@@ -449,13 +452,22 @@ public final class GpuMesher {
 					// Rays still going: they end at the view's limit, on the cut face or the void.
 					for (int z = hi; z >= lo; z--) {
 						int i = z - zBase;
-						if (hereRock[i] && hereOpen[i]) {
-							// Out of a smaller block both reach: the cut face to some rays, the void to others.
-							mesh.traceInstead = true;
-						}
 						if (hereRock[i] || hereOpen[i]) {
-							int flags = hereRock[i] ? (fog ? UNKNOWN : CUT) : fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
-							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, flags);
+							int open = fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
+							if (hereRock[i] && hereOpen[i] && hereRockN[i] != RockRays.ALL) {
+								// Out of a smaller block both reach: the cut face for rays still in the rock, the void
+								// for the others.
+								int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
+								for (int b = 0; b < n; b += 2) {
+									mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
+								}
+								n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, false);
+								for (int b = 0; b < n; b += 2) {
+									mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, open, pieces[b], pieces[b + 1]);
+								}
+							} else {
+								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, hereRock[i] ? (fog ? UNKNOWN : CUT) : open);
+							}
 						}
 					}
 				}
@@ -465,6 +477,12 @@ public final class GpuMesher {
 				t = aboveRock;
 				aboveRock = hereRock;
 				hereRock = t;
+				double[][] ru = aboveRockU;
+				aboveRockU = hereRockU;
+				hereRockU = ru;
+				int[] rn = aboveRockN;
+				aboveRockN = hereRockN;
+				hereRockN = rn;
 				t = aboveWater;
 				aboveWater = hereWater;
 				hereWater = t;
@@ -542,6 +560,52 @@ public final class GpuMesher {
 		}
 		for (int b = 0; b < pieces.length; b += 2) {
 			water.add(x, y, z, face, color, 0, light, WATER_FACE, pieces[b], pieces[b + 1]);
+		}
+	}
+
+	/** A cell's floor, as a top piece at height 0: see {@link RockRays#pieces}. */
+	private static final int FLOOR_LO = ShapeFaces.pack(0, 0, 0);
+	private static final int FLOOR_HI = ShapeFaces.pack(ShapeFaces.UNIT, 0, ShapeFaces.UNIT);
+
+	/** Notes the rays still in the rock that cell i passes on. */
+	private static void keepRock(boolean[] rock, double[][] u, int[] n, int i, double[] in, int count) {
+		rock[i] = true;
+		n[i] = count;
+		if (count > 0) {
+			System.arraycopy(in, 0, u[i], 0, count * 2);
+		}
+	}
+
+	/** Whether the cell holds water, as water or waterlogged. */
+	private static boolean wet(VoxelReader reader, BlockLooks looks, int x, int y, int z) {
+		int id = reader.state(x, y, z);
+		return id != VoxelReader.UNKNOWN && (looks.kind[id] == BlockLooks.WATER || looks.wetShapes.get(id) >= 0);
+	}
+
+	/** {@code faces}' parts the rays that aren't in the rock meet, as lo, hi pairs. */
+	private static int[] outsideRock(int[] faces, boolean top, double[] rock, int rockN, int y, int z, double cot, int[] pieces) {
+		int[] out = new int[faces.length * RockRays.MAX_PIECES];
+		int n = 0;
+		for (int b = 0; b < faces.length; b += 2) {
+			int end = RockRays.pieces(pieces, 0, top, faces[b], faces[b + 1], rock, rockN, y, z, cot, false);
+			System.arraycopy(pieces, 0, out, n, end);
+			n += end;
+		}
+		return java.util.Arrays.copyOf(out, n);
+	}
+
+	/** A face piece, less where rays still in the rock meet it: they go on through. */
+	private static void solidFace(
+		Mesh mesh, TileBaker helper, ChunkSource source, BlockLooks looks, MapStyle style, int id, int x, int y, int z, boolean top, byte kind, boolean lit, boolean fog,
+		int lo, int hi, double[] rock, int rockN, double cot, int[] pieces
+	) {
+		if (rockN == 0) {
+			solidFace(mesh, helper, source, looks, style, id, x, y, z, top, kind, lit, fog, lo, hi);
+			return;
+		}
+		int n = RockRays.pieces(pieces, 0, top, lo, hi, rock, rockN, y, z, cot, false);
+		for (int b = 0; b < n; b += 2) {
+			solidFace(mesh, helper, source, looks, style, id, x, y, z, top, kind, lit, fog, pieces[b], pieces[b + 1]);
 		}
 	}
 
