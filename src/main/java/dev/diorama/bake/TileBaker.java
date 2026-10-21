@@ -394,10 +394,7 @@ public final class TileBaker {
 			return;
 		}
 		// Outlines compare each pixel with its neighbours, so bake a one-pixel border around the area.
-		// Under a roof there are none: the light and fog already set levels apart, and the edges a
-		// cut through rock leaves (a sliver of a stepped ceiling, a lip of rock) would be ringed.
-		float outline = this.lifted ? 0 : this.style.outline();
-		int border = outline > 0 ? 1 : 0;
+		int border = this.style.outline() > 0 ? 1 : 0;
 		int w = width + 2 * border;
 		int h = height + 2 * border;
 		int[] pixels = border == 0 ? out : new int[w * h];
@@ -442,7 +439,7 @@ public final class TileBaker {
 		if (border == 0) {
 			return;
 		}
-		float keep = 1 - outline;
+		float keep = 1 - this.style.outline();
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				int i = (y + 1) * w + x + 1;
