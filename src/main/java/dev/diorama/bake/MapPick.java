@@ -40,7 +40,7 @@ public final class MapPick {
 				return null;
 			}
 			byte kind = looks.kind[id];
-			if (skippingRock && kind != BlockLooks.SOLID && !(underRoof && reader.pocket(x, by, bz))) {
+			if (skippingRock && kind != BlockLooks.SOLID && !(underRoof && by + 1 < startY && reader.pocket(x, by, bz))) {
 				skippingRock = false;
 			}
 			if (!skippingRock && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {

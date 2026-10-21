@@ -206,7 +206,9 @@ public final class TileBaker {
 		int lid = this.lidAt.get(key);
 		if (lid == Integer.MIN_VALUE) {
 			int y = this.startY - 1;
-			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || this.reader.pocket(x, y, z))) {
+			// A pocket right under the cut would depend on the block above it, past the cut; edits
+			// there don't re-bake below, so the open cell just under the cut always ends the lid.
+			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || y + 1 < this.startY && this.reader.pocket(x, y, z))) {
 				y--;
 			}
 			lid = y + 1;
@@ -538,7 +540,7 @@ public final class TileBaker {
 				if (solid == VoxelReader.UNKNOWN) {
 					return false;
 				}
-				if (solid == 1 || this.lifted && this.reader.pocket(x, by, bz)) {
+				if (solid == 1 || this.lifted && by + 1 < this.startY && this.reader.pocket(x, by, bz)) {
 					// Still inside the rock above the first open space below the cut.
 					if (tMaxY < tMaxZ) {
 						by--;
