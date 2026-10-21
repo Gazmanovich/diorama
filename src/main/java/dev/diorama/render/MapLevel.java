@@ -646,7 +646,7 @@ public final class MapLevel implements ChunkSource {
 		TileStore store = key.isCave() ? null : this.store;
 		// Lit as TileBaker decides: a cave slice, or a level under a roof.
 		boolean lit = key.isCave() || this.roofless();
-		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit);
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, fog);
 		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
 			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK, lit);
 			return;
@@ -675,11 +675,12 @@ public final class MapLevel implements ChunkSource {
 			boolean answered = !check;
 			try {
 				int[] saved = store == null ? null : store.read(key);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
-				// Traced straight after the mesh, so both read the same chunks: while the world is
-				// still loading, a trace made when the GPU's pixels come back would know more.
+				// A check tile's two bakes read the same chunks, even while more are arriving, so
+				// only the GPU can make them differ.
+				dev.diorama.bake.ChunkSource source = check ? new dev.diorama.bake.PinnedSource(this) : this;
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
 				byte[] info = check && overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
-				int[] traced = check ? TileBaker.reference(key, this, looks, fog, overlays, info) : null;
+				int[] traced = check ? TileBaker.reference(key, source, looks, fog, overlays, info) : null;
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image;
