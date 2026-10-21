@@ -8,6 +8,8 @@ public enum Sampling {
 	TILE_CRISP,
 	/** Clamped at the edges, linear, no mipmaps: the fog mask and icons. */
 	CLAMP_LINEAR,
+	/** Clamped, no mipmaps, magnified pixels kept square: pixel art drawn on the GUI grid. */
+	CLAMP_CRISP,
 	/** Repeating, linear, no mipmaps: the fog noise. */
 	REPEAT_LINEAR;
 
@@ -16,7 +18,7 @@ public enum Sampling {
 	}
 
 	public boolean crisp() {
-		return this == TILE_CRISP;
+		return this == TILE_CRISP || this == CLAMP_CRISP;
 	}
 
 	public boolean repeats() {
