@@ -148,7 +148,7 @@ public final class MapLevel implements ChunkSource {
 		return this.roof;
 	}
 
-	/** Whether the sky view is drawn from under a roof, lit like a cave. */
+	/** Whether the sky view is drawn from under a roof, lit as if the rock over the first open space were lifted off. */
 	public boolean roofless() {
 		return this.roof != NO_ROOF;
 	}
@@ -360,14 +360,16 @@ public final class MapLevel implements ChunkSource {
 		}
 		long now = System.currentTimeMillis();
 		for (int layer : layers) {
-			// Under a roof the sky view is lit like a cave, so light reaches it the same way.
+			// Under a roof the sky view is lit by block light like a cave, so light reaches it the same way.
 			boolean cave = layer != TileKey.SURFACE || this.roofless();
 			if (!cave && !visibleFromSky) {
 				continue;
 			}
-			int reachX = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_X;
-			int reachZ = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Z;
-			int reachY = cave ? LIGHT_REACH : TileBaker.SHADOW_REACH_Y;
+			// Under a roof light also falls from above, so shadows reach as far as on the surface.
+			boolean shadows = !cave || this.roofless();
+			int reachX = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_X : 0);
+			int reachZ = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Z : 0);
+			int reachY = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Y : 0);
 			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {
@@ -378,6 +380,12 @@ public final class MapLevel implements ChunkSource {
 				}
 			} else if (cave) {
 				top = Math.min(top, this.roof);
+			}
+			if (this.roofless() && visibleFromSky && terrain && y0 < this.roof) {
+				// Opening or filling a pocket under the roof can move where a column's lifted rock
+				// ends, far below the edit, and with it the shadows that rock casts. Re-bake down to
+				// the floor. Light changes, newly seen blocks and edits above the roof can't.
+				bottom = layer != TileKey.SURFACE ? layer - TileBaker.CAVE_DEPTH - 1 : this.minY - 1;
 			}
 			// The sky view's sky occlusion looks this far round every block, so a change reaches back.
 			int around = cave ? LIGHT_REACH : TileBaker.SKY_REACH;
@@ -646,8 +654,11 @@ public final class MapLevel implements ChunkSource {
 		TileStore store = key.isCave() ? null : this.store;
 		// Lit as TileBaker decides: a cave slice, or a level under a roof.
 		boolean lit = key.isCave() || this.roofless();
-		// Fog of war only changes lit views.
-		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog, overlays != null);
+		// Under a roof (the Nether) the tracer lights every view as if the roof were lifted off,
+		// which the GPU baker doesn't draw yet: those stay on the CPU. Fog of war only changes lit views.
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = this.roof() != dev.diorama.bake.ChunkSource.NO_ROOF
+			? dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE
+			: dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog, overlays != null);
 		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
 			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK, lit);
 			return;

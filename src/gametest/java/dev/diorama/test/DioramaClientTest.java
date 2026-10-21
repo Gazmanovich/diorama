@@ -734,14 +734,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Blocks smaller than a cube, which both bakers draw by their shapes.
 		shapesScene(context, world);
 		summary.append(compareTiles(context, out, "shapes", TileKey.SURFACE, false, null)).append('\n');
-		// The Nether's sky view starts under its roof.
-		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
-		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 300, 2400);
-		settle(context, 200);
-		summary.append(compareTiles(context, out, "nether", TileKey.SURFACE, false, null)).append('\n');
-		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
-		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
-			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		// No Nether: its views, lit as if the roof were lifted off, stay on the tracer for now.
+		world.getServer().runCommand("tp @a 0 100 0");
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 		try {
 			java.nio.file.Files.createDirectories(out);
 			java.nio.file.Files.writeString(out.resolve("summary.txt"), summary.toString());

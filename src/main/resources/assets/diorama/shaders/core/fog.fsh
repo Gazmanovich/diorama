@@ -80,8 +80,8 @@ layout(location = 0) in vec2 maskUv;
 /*in vec2 maskUv;
 *///?}
 // rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
-// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7) and the fast
-// quality flag (4).
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the fast
+// quality flag (4) and the smoke flag (1).
 //? if >=26.3 {
 layout(location = 1) in vec4 params;
 
@@ -209,6 +209,7 @@ void main() {
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
     fast = mod(alphaCode, 16.0) >= 2.0;
+    bool smoke = mod(alphaCode, 2.0) >= 1.0;
     float fogCode = floor(params.b * 255.0 + 0.5);
     bool cave = fogCode >= 128.0;
     fogCode = mod(fogCode, 128.0);
@@ -226,6 +227,11 @@ void main() {
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
+    if (smoke && !cave) {
+        // Under a roof the banks are smoke, faintly warm from the lava below.
+        lit = vec3(0.26, 0.22, 0.21);
+        shade = vec3(0.07, 0.055, 0.055);
+    }
     vec2 toSun = vec2(-1.0, -0.4) * (9.0 * fogScale / unitsPerUv);
 
     vec3 color = vec3(0.0);
