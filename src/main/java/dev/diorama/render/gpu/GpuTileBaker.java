@@ -52,10 +52,10 @@ public final class GpuTileBaker {
 	static final int VOXEL_WIDTH = 4096;
 	static final int VOXEL_HEIGHT = 512;
 	/** Per face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot (an int). */
-	/** A face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot, box (ints). */
-	static final int FACE_BYTES = 28;
-	/** A shadow caster: cell and face (4 shorts), box (int). */
-	static final int CASTER_BYTES = 12;
+	/** A face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot, box (2 ints). */
+	static final int FACE_BYTES = 32;
+	/** A shadow caster: cell and face (4 shorts), box (2 ints). */
+	static final int CASTER_BYTES = 16;
 	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays. */
 	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13) * 16;
 
@@ -92,10 +92,10 @@ public final class GpuTileBaker {
 
 	/**
 	 * {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them. Null
-	 * pixels mean the GPU didn't draw it: it couldn't, or, when {@code cancelled}, leaving the
-	 * world handed the job back first.
+	 * pixels mean the GPU didn't draw it: it couldn't, or, when {@code declined}, it never tried,
+	 * because the world was closing or the tile has more faces than its textures hold.
 	 */
-	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean cancelled, MapStyle look) {
+	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean declined, MapStyle look) {
 	}
 
 	/**
@@ -150,8 +150,11 @@ public final class GpuTileBaker {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
 					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 					job.free();
-				} else if (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT || !Backend.INSTANCE.draw(job)) {
-					// Bigger than the textures that hold its sky occlusion, or this GPU can't: trace it.
+				} else if (job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
+					// More than the textures that hold its sky occlusion take: trace it. Not the GPU's fault.
+					job.cancel();
+				} else if (!Backend.INSTANCE.draw(job)) {
+					// This GPU can't draw it: trace it.
 					job.fail();
 				} else {
 					// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
@@ -245,7 +248,7 @@ public final class GpuTileBaker {
 			for (int q = 0; q < this.casterCount; q++) {
 				int i = q * GpuMesher.STRIDE;
 				casters.putShort((short) (d[i] - originX)).putShort((short) d[i + 1]).putShort((short) (d[i + 2] - originZ)).putShort((short) d[i + 3]);
-				casters.putInt(d[i + 8]);
+				casters.putInt(d[i + 8]).putInt(d[i + 9]);
 			}
 			casters.flip();
 			this.casters = casters;
@@ -280,7 +283,7 @@ public final class GpuTileBaker {
 				int light = d[i + 6];
 				out.put((byte) (light >>> 24)).put((byte) (light >> 16)).put((byte) (light >> 8)).put((byte) light);
 				out.putInt(firstSky < 0 ? -1 : firstSky + q);
-				out.putInt(d[i + 8]);
+				out.putInt(d[i + 8]).putInt(d[i + 9]);
 			}
 		}
 
@@ -394,18 +397,18 @@ public final class GpuTileBaker {
 			this.giveBack(false);
 		}
 
-		/** Hands the job back undrawn because the world is closing, not because the GPU failed. */
+		/** Hands the job back undrawn because the world is closing or it's too big, not because the GPU failed. */
 		void cancel() {
 			this.giveBack(true);
 		}
 
-		private void giveBack(boolean cancelled) {
+		private void giveBack(boolean declined) {
 			PENDING.remove(this);
 			if (!this.completed.compareAndSet(false, true)) {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), cancelled, this.look));
+			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), declined, this.look));
 		}
 
 		void free() {

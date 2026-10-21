@@ -778,6 +778,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			"oak_trapdoor", "oak_trapdoor[half=top,open=false]", "cauldron", "hopper",
 			"anvil", "stonecutter", "enchanting_table", "daylight_detector",
 			"lectern", "campfire[lit=false]", "composter", "end_rod",
+			// Panes joined to their neighbours: a strip and a cross, whose boxes overlap.
+			"glass_pane[east=true,west=true]", "glass_pane[north=true,south=true,east=true,west=true]",
+			// Off the sixteenths grid (the chain is iron_chain from 1.21.9; the other name fails).
+			"chain", "iron_chain",
 		};
 		for (int b = 0; b < blocks.length; b++) {
 			int bx = x0 + 2 + (b % 8) * 5;
@@ -793,6 +797,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String[] wet = {
 			"oak_slab[waterlogged=true]", "oak_slab[type=top,waterlogged=true]", "stone_brick_stairs[facing=north,waterlogged=true]", "stone_brick_stairs[facing=south,waterlogged=true]",
 			"oak_fence[waterlogged=true]", "glass_pane[waterlogged=true]", "lantern[waterlogged=true]", "chest[waterlogged=true]",
+			"glass_pane[north=true,south=true,waterlogged=true]", "glass_pane[north=true,south=true,east=true,west=true,waterlogged=true]",
 		};
 		for (int b = 0; b < wet.length; b++) {
 			int bx = px + 2 + (b % 4) * 7;

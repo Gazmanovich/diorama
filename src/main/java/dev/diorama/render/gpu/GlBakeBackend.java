@@ -329,7 +329,7 @@ final class GlBakeBackend implements BakeBackend {
 		glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, true, FACE_BYTES, offset + 12);
 		glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, true, FACE_BYTES, offset + 16);
 		glVertexAttribIPointer(5, 1, GL_INT, FACE_BYTES, offset + 20);
-		glVertexAttribIPointer(6, 1, GL_INT, FACE_BYTES, offset + 24);
+		glVertexAttribIPointer(6, 2, GL_INT, FACE_BYTES, offset + 24);
 	}
 
 	private void target(int fbo, int width, int height) {
@@ -464,7 +464,7 @@ final class GlBakeBackend implements BakeBackend {
 		glVertexAttribIPointer(1, 4, GL_SHORT, CASTER_BYTES, 0);
 		glEnableVertexAttribArray(6);
 		divisor(6, 1);
-		glVertexAttribIPointer(6, 1, GL_INT, CASTER_BYTES, 8);
+		glVertexAttribIPointer(6, 2, GL_INT, CASTER_BYTES, 8);
 		this.emptyVao = glGenVertexArrays();
 		GlState.forgetBuffers();
 		int error = glGetError();

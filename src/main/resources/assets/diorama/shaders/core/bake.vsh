@@ -24,11 +24,11 @@ LOC(3) in vec4 Occlusion;
 LOC(4) in vec4 FaceLight;
 // Where the face's four corners are in the sky texture, a slot each, or -1 for none.
 LOC(5) in int SkyIndex;
-// The box in the cell the face belongs to, in sixteenths: x0, y0, z0, x1, y1, z1, five bits each.
-// The whole cell for a cube; one box of a smaller block, as GpuMesher.box packs it.
-LOC(6) in int Box;
+// The piece of the cell the face covers, in 128ths: x0, y0, z0 a byte each in x, x1, y1, z1 in y.
+// The whole cell for a cube; part of a box of a smaller block, as ShapeFaces packs it.
+LOC(6) in ivec2 Box;
 #else
-LOC(2) in int Box;
+LOC(2) in ivec2 Box;
 #endif
 
 const int FLAG_UNKNOWN = 1;
@@ -140,10 +140,10 @@ float sky_slot(int slot) {
 }
 #endif
 
-// The face's box, low corner then high, in blocks within the cell.
-void box_bounds(int box, out vec3 lo, out vec3 hi) {
-    lo = vec3(float(box & 31), float((box >> 5) & 31), float((box >> 10) & 31)) / 16.0;
-    hi = vec3(float((box >> 15) & 31), float((box >> 20) & 31), float((box >> 25) & 31)) / 16.0;
+// The face's piece, low corner then high, in blocks within the cell.
+void box_bounds(ivec2 box, out vec3 lo, out vec3 hi) {
+    lo = vec3(float(box.x & 255), float((box.x >> 8) & 255), float((box.x >> 16) & 255)) / 128.0;
+    hi = vec3(float(box.y & 255), float((box.y >> 8) & 255), float((box.y >> 16) & 255)) / 128.0;
 }
 
 // A face's corner c in tile-local blocks: on its box's face, the cell's face for a cube.
