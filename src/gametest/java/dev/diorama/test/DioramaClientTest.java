@@ -1626,6 +1626,73 @@ public class DioramaClientTest implements FabricClientGameTest {
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
 		mapMenu(context);
+		mapControls(context);
+	}
+
+	/**
+	 * The map's controls, used with the mouse: the tabs switch what C switches, a zoom button
+	 * zooms, and dragging the depth gauge's band moves the slice only when it's let go.
+	 */
+	private static void mapControls(ClientGameTestContext context) {
+		openMapOnPlayer(context);
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		int cavesTab = context.computeOnClient(mc -> 2 + mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.surface").getString()) + 13
+			+ (mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.caves").getString()) + 13) / 2);
+		moveCursor(context, cavesTab * scale, 8 * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int expected = context.computeOnClient(mc -> MapSession.caveLayerFor(mc.player.getY()));
+		int slice = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (slice != expected) {
+			throw new AssertionError("The Caves tab showed layer " + slice + ", not the slice at the player's feet, " + expected);
+		}
+		context.takeScreenshot("map-controls-01-caves");
+
+		// Dragging the band down shows the height it's at; the map keeps its slice until let go.
+		float[] band = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).sliceBand());
+		moveCursor(context, band[0] * scale, band[1] * scale);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		for (int i = 1; i <= 4; i++) {
+			context.getInput().setCursorPos(band[0] * scale, (band[1] + i * 10) * scale);
+			context.waitTick();
+		}
+		context.waitTicks(2);
+		context.takeScreenshot("map-controls-02-gauge-drag");
+		int during = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (during != slice) {
+			throw new AssertionError("Dragging the gauge moved the slice before it was let go: " + slice + " to " + during);
+		}
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int after = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (after >= slice || after % 4 != 0) {
+			throw new AssertionError("Letting go of the gauge's band 40 px lower left the slice at " + after + " (from " + slice + ")");
+		}
+		context.takeScreenshot("map-controls-03-gauge-dropped");
+
+		// The zoom in button zooms.
+		double zoom = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().zoom());
+		int[] plus = context.computeOnClient(mc -> {
+			net.minecraft.client.gui.components.Button button = buttonLabelled(mc.gui.screen(), "+");
+			return new int[] {button.getX() + button.getWidth() / 2, button.getY() + button.getHeight() / 2};
+		});
+		moveCursor(context, plus[0] * scale, plus[1] * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		double zoomed = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().zoom());
+		if (zoomed <= zoom) {
+			throw new AssertionError("The zoom in button left the zoom at " + zoomed + " (from " + zoom + ")");
+		}
+
+		// The Surface tab goes back.
+		moveCursor(context, (2 + 10) * scale, 8 * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int surface = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (surface != TileKey.SURFACE) {
+			throw new AssertionError("The Surface tab left the map on layer " + surface);
+		}
+		context.setScreen(() -> null);
 	}
 
 	/** The temporary waypoint kept from the menu, and one left temporary, for after rejoining. */
