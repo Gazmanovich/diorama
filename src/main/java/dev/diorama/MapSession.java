@@ -101,7 +101,7 @@ public final class MapSession {
 			if (rebake) {
 				session.map.colorsChanged();
 			}
-		} else if (BlockLooks.isStale() && mc.getOverlay() == null) {
+		} else if (BlockLooks.isStale() && mc.gui.overlay() == null) {
 			// Not while the reload is still going: the models change a step before Fabric hands its
 			// fluid handlers the new sprites, and the old ones' images are freed by then.
 			BlockLooks.build();
