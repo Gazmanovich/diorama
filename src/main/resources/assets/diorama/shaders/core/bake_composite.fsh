@@ -114,7 +114,11 @@ void main() {
             } else {
                 depth = max(0.0, bake_depth(window) - surface);
             }
-            c = mix_water(c, texelFetch(WaterColor, s, 0), depth);
+            // A waterlogged block's face level with the water's: the ray meets the block right
+            // where it comes into the cell, so the tracer leaves it dry.
+            if (nothing || window <= 0.0 || depth >= 0.02) {
+                c = mix_water(c, texelFetch(WaterColor, s, 0), depth);
+            }
         }
         sum += c;
         known++;
