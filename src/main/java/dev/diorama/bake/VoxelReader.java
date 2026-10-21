@@ -146,6 +146,43 @@ public final class VoxelReader {
 		return 1 + ((int) (this.partialMask[i >> 6] >>> i) & 1);
 	}
 
+	/**
+	 * Whether an open cell is a pocket one block tall, with solid blocks right above and below it:
+	 * a lone air bubble, a buried lava spring or a crawlspace. Under a roof, rays skipping rock
+	 * skip these too, so they don't speckle solid rock with dots; the baker, its lifted rock and
+	 * picking on the map must agree on them.
+	 */
+	boolean pocket(int x, int y, int z) {
+		return this.solid(x, y + 1, z) > 0 && this.solid(x, y - 1, z) > 0;
+	}
+
+	/**
+	 * Under a roof, the lowest y of the rock lifted off this column: the solid blocks from the cut
+	 * at {@code startY} down to the first open space that isn't a {@link #pocket}. Light rays treat
+	 * it as open. A pocket right under the cut would depend on the block above it, past the cut,
+	 * where edits don't re-bake below, so the open cell just under the cut always ends it.
+	 */
+	int lid(int x, int z, int startY, int limitY) {
+		int y = startY - 1;
+		while (y >= limitY && (this.solid(x, y, z) > 0 || y + 1 < startY && this.pocket(x, y, z))) {
+			y--;
+		}
+		return y + 1;
+	}
+
+	/** How much of a ceiling's underside a ray that has left the rock passes through. */
+	static final int CEILING_UNDERSIDE = 2;
+
+	/**
+	 * Whether this block is in the bottom {@link #CEILING_UNDERSIDE} blocks of the rock lifted off
+	 * its column ({@code lid}), with open space right below: the underside of a ceiling, or a block
+	 * hanging from it. Walls and pillars have rock below them, so they stay; so does a column that
+	 * is rock all the way down to {@code limitY}, where the lid ends without any open space.
+	 */
+	boolean ceilingUnderside(int x, int y, int z, int lid, int limitY) {
+		return y >= lid && y < lid + CEILING_UNDERSIDE && lid > limitY && this.solid(x, lid - 1, z) == 0;
+	}
+
 	private void enterSolidSection(int sx, int sy, int sz) {
 		Decoded chunk = this.chunk(sx, sz);
 		if (chunk == null) {

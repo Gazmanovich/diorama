@@ -17,7 +17,8 @@ public final class MapPick {
 	 * {@code (u, v)} reaches, or null where the map has no data.
 	 */
 	public static @Nullable BlockPos standingSpot(ChunkSource source, BlockLooks looks, double u, double v, int layer, boolean fogOfWar) {
-		VoxelReader reader = new VoxelReader(source);
+		VoxelReader reader = new VoxelReader(source, looks.kind);
+		boolean underRoof = source.roof() != ChunkSource.NO_ROOF;
 		boolean cave = layer != TileKey.SURFACE;
 		boolean roofless = !cave && source.roof() != ChunkSource.NO_ROOF;
 		double sin = Projection.sin();
@@ -39,10 +40,13 @@ public final class MapPick {
 				return null;
 			}
 			byte kind = looks.kind[id];
-			if (skippingRock && kind != BlockLooks.SOLID) {
+			if (skippingRock && kind != BlockLooks.SOLID && !(underRoof && by + 1 < startY && reader.pocket(x, by, bz))) {
 				skippingRock = false;
 			}
-			if (!skippingRock && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
+			boolean underside = !skippingRock && underRoof && (cave || roofless) && kind == BlockLooks.SOLID
+				&& reader.ceilingUnderside(x, by, bz, reader.lid(x, bz, startY, limitY), limitY);
+			// The baker passes through the underside of a ceiling once the ray has left the rock.
+			if (!skippingRock && !underside && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
 				// Fog of war: a cave the player hasn't seen can't be picked, or its floor would leak.
 				if ((cave || roofless) && fogOfWar && !source.isSeen(x, by, bz) && !source.isSeen(x, by + 1, bz)) {
 					return null;
