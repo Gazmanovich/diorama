@@ -88,7 +88,11 @@ public final class WaypointOverlay {
 		Pin best = null;
 		double bestDistance = Double.MAX_VALUE;
 		for (Pin pin : pins) {
+			// A standing pin answers at its head and at the spot its point touches.
 			double d = Math.hypot(pin.x() - mouseX, pin.headY() - mouseY);
+			if (!pin.clamped()) {
+				d = Math.min(d, Math.hypot(pin.x() - mouseX, pin.y() - mouseY));
+			}
 			if (d <= pin.size() / 2 + 2 && d < bestDistance) {
 				best = pin;
 				bestDistance = d;
