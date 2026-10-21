@@ -100,5 +100,19 @@
 	"diorama.settings.spawn_spots": "Spawn spots",
 	"diorama.settings.spawn_spots.off": "Off",
 	"diorama.settings.spawn_spots.always_dark": "Always dark",
-	"diorama.settings.spawn_spots.at_night_too": "Also at night"
+	"diorama.settings.spawn_spots.at_night_too": "Also at night",
+	"diorama.map.surface": "Surface",
+	"diorama.map.caves": "Caves",
+	"diorama.map.waypoints": "Waypoints",
+	"diorama.map.zoom_in": "Zoom in",
+	"diorama.map.zoom_out": "Zoom out",
+	"diorama.map.recenter": "Recenter",
+	"diorama.map.slice_up": "Slice up",
+	"diorama.map.slice_down": "Slice down",
+	"diorama.map.key": "Key: %s",
+	"diorama.map.scroll_up": "Scroll up",
+	"diorama.map.scroll_down": "Scroll down",
+	"diorama.map.spot": "%s, %s, %s",
+	"diorama.map.spot_detail": "%s · %s m",
+	"diorama.map.distance": "%s m"
 }
