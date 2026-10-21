@@ -2812,7 +2812,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	/** Waits until no tile has been baking for a while. */
 	/** Every widget on a screen, inside containers like the tab bar too. */
 	private static void collectWidgets(net.minecraft.client.gui.components.events.ContainerEventHandler parent, java.util.List<net.minecraft.client.gui.components.AbstractWidget> out) {
 		for (var child : parent.children()) {
@@ -2858,6 +2857,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(5);
 	}
 
+	/** Waits until no tile has been baking for a while. */
 	private static void settle(ClientGameTestContext context, int minTicks) {
 		context.waitTicks(minTicks);
 		int quiet = 0;

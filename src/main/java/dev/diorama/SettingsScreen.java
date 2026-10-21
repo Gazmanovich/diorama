@@ -23,6 +23,9 @@ import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
+//? if >=1.21.9 {
+import net.minecraft.client.input.KeyEvent;
+//?}
 //? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines;
 //?}
@@ -296,6 +299,24 @@ public final class SettingsScreen extends Screen {
 			this.tabBar.extractRenderState(graphics, mouseX, mouseY, a);
 			graphics.disableScissor();
 		}
+	}
+
+	// Ctrl+Tab and Ctrl+1 to 5 switch tabs, as in vanilla's tabbed screens, whatever has focus.
+	//? if >=1.21.9 {
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		return this.tabBar != null && this.tabBar.keyPressed(event) || super.keyPressed(event);
+	}
+	//?} else {
+	/*@Override
+	public boolean keyPressed(int key, int scanCode, int modifiers) {
+		return this.tabBar != null && this.tabBar.keyPressed(key) || super.keyPressed(key, scanCode, modifiers);
+	}
+	*///?}
+
+	@Override
+	public void removed() {
+		this.preview.close();
 	}
 
 	@Override

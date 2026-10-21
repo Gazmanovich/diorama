@@ -81,8 +81,22 @@ public final class MinimapHud implements HudElement {
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
 		int[] bounds = this.draw(graphics, partialTick, true, top, 0);
 		if (!settings.minimap) {
+			//? if >=1.21.6 {
 			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
+			//?} else {
+			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
+			var pose = graphics.pose();
+			pose.pushPose();
+			pose.translate(0, 0, 1);
+			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
+			pose.popPose();
+			*///?}
 		}
+	}
+
+	/** Frees the GPU texture the minimap's fog uses. For a copy that's done drawing, like the settings preview. */
+	public void close() {
+		this.viewport.close();
 	}
 
 	private boolean canDraw(Minecraft mc) {
