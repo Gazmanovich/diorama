@@ -19,6 +19,10 @@ import net.minecraft.network.chat.Component;
  * without. Only sky views draw sun shadows and sky occlusion, and only overlay bakes write the
  * overlay bits, so a pass on one kind says nothing about another. Fog-of-war bakes are never
  * check tiles, since what the player has seen keeps changing under them.
+ *
+ * <p>A kind that passed is trusted: its own tiles showed this GPU draws it right. A later
+ * failure of another kind stops GPU baking from then on, but doesn't reach back into tiles the
+ * passed kinds already drew.
  */
 public final class GpuBakeCheck {
 	/** How a bake runs. */
@@ -46,6 +50,12 @@ public final class GpuBakeCheck {
 	 */
 	private static final double MAX_MEAN = 6;
 	private static final double MAX_BIAS = 2.2;
+	/**
+	 * How far any one colour channel may run brighter or darker on average: colours that are
+	 * wrong but cancel out in brightness (red and blue swapped, say) show here. Matching drivers
+	 * measured up to 1.8 per tile; the sky-occlusion bug from 4.5.
+	 */
+	private static final double MAX_CHANNEL_BIAS = 3;
 	/**
 	 * Share of the tile's pixels known to one bake and not the other, and of pixels both know
 	 * with a different alpha (how many of the four samples hit something). Along the edge of the
@@ -86,6 +96,7 @@ public final class GpuBakeCheck {
 		double worstMismatch;
 		double worstAlpha;
 		double worstOverlay;
+		double worstChannel;
 
 		Check(String name) {
 			this.name = name;
@@ -147,6 +158,9 @@ public final class GpuBakeCheck {
 		long overlayDiffers = 0;
 		double sum = 0;
 		double bias = 0;
+		double redBias = 0;
+		double greenBias = 0;
+		double blueBias = 0;
 		for (int i = 0; i < traced.length; i++) {
 			int c = traced[i];
 			int g = gpu[i];
@@ -166,6 +180,9 @@ public final class GpuBakeCheck {
 				int db = ((g >> 16) & 0xFF) - ((c >> 16) & 0xFF);
 				sum += (Math.abs(dr) + Math.abs(dg) + Math.abs(db)) / 3.0;
 				bias += (dr + dg + db) / 3.0;
+				redBias += dr;
+				greenBias += dg;
+				blueBias += db;
 			}
 		}
 		Check check = check(lit, overlays);
@@ -179,13 +196,14 @@ public final class GpuBakeCheck {
 			boolean judged = both >= JUDGE_PIXELS;
 			double mean = judged ? sum / both : 0;
 			double brighter = judged ? bias / both : 0;
+			double channel = judged ? Math.max(Math.abs(redBias), Math.max(Math.abs(greenBias), Math.abs(blueBias))) / both : 0;
 			double alpha = judged ? alphaDiffers / (double) both : 0;
 			double overlay = judged && overlays ? overlayDiffers / (double) both : 0;
 			// Every tile must match on its own: the two read the same chunks, so nothing but the
 			// GPU makes them differ, and matching tiles mustn't hide one that doesn't.
-			if (mean > MAX_MEAN || Math.abs(brighter) > MAX_BIAS || mismatch > MAX_MISMATCH || alpha > MAX_ALPHA || overlay > MAX_OVERLAY) {
-				fail(String.format(java.util.Locale.ROOT, "a %s tile doesn't match the tracer's (mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits)",
-					check.name, mean, brighter, mismatch * 100, alpha * 100, overlay * 100));
+			if (mean > MAX_MEAN || Math.abs(brighter) > MAX_BIAS || channel > MAX_CHANNEL_BIAS || mismatch > MAX_MISMATCH || alpha > MAX_ALPHA || overlay > MAX_OVERLAY) {
+				fail(String.format(java.util.Locale.ROOT, "a %s tile doesn't match the tracer's (mean difference %.2f/255, %+.2f brighter, one channel off by %.2f, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits)",
+					check.name, mean, brighter, channel, mismatch * 100, alpha * 100, overlay * 100));
 				return;
 			}
 			if (both < PASS_PIXELS) {
@@ -198,11 +216,12 @@ public final class GpuBakeCheck {
 			check.worstMismatch = Math.max(check.worstMismatch, mismatch);
 			check.worstAlpha = Math.max(check.worstAlpha, alpha);
 			check.worstOverlay = Math.max(check.worstOverlay, overlay);
+			check.worstChannel = Math.max(check.worstChannel, channel);
 			if (check.compared >= TILES) {
 				check.passed = true;
 				Diorama.LOGGER.info("GPU baking matches the tracer on {} ({}): on", GpuTileBaker.device(), String.format(java.util.Locale.ROOT,
-					"%s, %d tiles, worst: mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits",
-					check.name, check.compared, check.worstMean, check.worstBias, check.worstMismatch * 100, check.worstAlpha * 100, check.worstOverlay * 100));
+					"%s, %d tiles, worst: mean difference %.2f/255, %+.2f brighter, one channel off by %.2f, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits",
+					check.name, check.compared, check.worstMean, check.worstBias, check.worstChannel, check.worstMismatch * 100, check.worstAlpha * 100, check.worstOverlay * 100));
 			}
 		}
 	}
@@ -227,11 +246,6 @@ public final class GpuBakeCheck {
 		Diorama.LOGGER.warn("GPU baking turned off for this session on {}: {}. Tiles are traced on the CPU instead.", GpuTileBaker.device(), why);
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> {
-			// Whatever the map shows may have come from the GPU: bake it again with the tracer.
-			dev.diorama.MapSession session = dev.diorama.MapSession.get();
-			if (session != null) {
-				session.map().colorsChanged();
-			}
 			Component message = Component.translatable("diorama.gpu_baking.failed");
 			//? if >=26.1 {
 			mc.gui.hud.getChat().addClientSystemMessage(message);
