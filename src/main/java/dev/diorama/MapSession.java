@@ -101,7 +101,9 @@ public final class MapSession {
 			if (rebake) {
 				session.map.colorsChanged();
 			}
-		} else if (BlockLooks.isStale()) {
+		} else if (BlockLooks.isStale() && mc.getOverlay() == null) {
+			// Not while the reload is still going: the models change a step before Fabric hands its
+			// fluid handlers the new sprites, and the old ones' images are freed by then.
 			BlockLooks.build();
 			session.map.colorsChanged();
 			// Snapshots hold biome tints from the old colormaps. Retake every loaded chunk;
