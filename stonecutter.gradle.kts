@@ -41,9 +41,10 @@ stonecutter parameters {
 	)
 	// Renamed in 26.2.
 	val before262 = listOf(
-		// The open screen and the chat lived on Minecraft and Gui directly.
+		// The open screen, the loading overlay and the chat lived on Minecraft and Gui directly.
 		"\\.gui\\.setScreen\\(" to ".setScreen(",
 		"\\.gui\\.screen\\(\\)" to ".screen",
+		"\\.gui\\.overlay\\(\\)" to ".getOverlay()",
 		"\\.gui\\.hud\\." to ".gui.",
 		// Entity type constants lived on EntityType.
 		"\\bEntityTypes\\.([A-Z][A-Z0-9_]*)" to "EntityType.$1",
