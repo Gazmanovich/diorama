@@ -7,3 +7,6 @@
 # These are Windows script files and should use crlf
 *.bat           text eol=crlf
 
+
+# Shell scripts that run on Linux, like the boat.dev game test VM
+*.sh            text eol=lf
