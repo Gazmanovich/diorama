@@ -1,6 +1,7 @@
 package dev.diorama.test;
 
 import dev.diorama.DioramaClient;
+import dev.diorama.MapMenu;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -92,6 +93,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 			settle(context, 100);
+			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
+				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
 			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
@@ -141,9 +144,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if (spawnCell != null && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
-				savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+				if (tests.contains("waypoints")) {
+					temporaryGone(context);
+				}
+				if (spawnCell != null) {
+					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+				}
 			}
 		}
 		if (tests.contains("multiplayer")) {
@@ -277,9 +285,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 */
 	//? if fabric {
 	private static void trackedPlayers(ClientGameTestContext context) {
-		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
-		properties.setProperty("gamemode", "creative");
+		java.util.Properties properties = serverProperties();
 		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
 		// Bob is higher up than the radar's default height range reaches, which hides players as it does mobs.
 		int range = context.computeOnClient(mc -> Settings.get().radarRange);
@@ -405,9 +411,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static String playOnServer(ClientGameTestContext context, String seed, String name, @Nullable String beforeJoin,
 		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown, byte @Nullable [] levelId) {
 		levelIdOnJoin = levelId;
-		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
-		properties.setProperty("gamemode", "creative");
+		java.util.Properties properties = serverProperties();
 		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> s.setSeed(seed))
@@ -571,6 +575,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
+	}
+
+	private static java.util.Properties serverProperties() {
+		java.util.Properties properties = new java.util.Properties();
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
+		properties.setProperty("gamemode", "creative");
+		// No watchdog: on a slow machine (software rendering on a boat.dev VM) the server can wait
+		// over its 60 s limit for the client's turn, and the watchdog takes that for a hang.
+		properties.setProperty("max-tick-time", "-1");
+		return properties;
 	}
 
 	private static int freePort() {
@@ -1221,6 +1235,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("tellraw @a \"§n§o§m§i§n§i§m§a§p\"");
 		context.waitTicks(20);
 		context.takeScreenshot("radar-04-no-minimap");
+		//? if fabric {
+		// A proxy can join another backend without disconnecting; its rules start afresh.
+		context.runOnClient(mc -> {
+			dev.diorama.ServerRules.onServerMessage(net.minecraft.network.chat.Component.literal("§x§a§e§r§o§m§m§n§e§t§h§e§r§i§s§f§a§i§r"));
+			net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.invoker().onPlayReady(
+				mc.getConnection(), net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.getSender(), mc);
+			if (!dev.diorama.ServerRules.minimapAllowed() || !dev.diorama.ServerRules.radarAllowed()
+				|| dev.diorama.ServerRules.fogOfWar(false) != dev.diorama.ServerRules.alwaysFogOfWar()) {
+				throw new AssertionError("The new server inherited the previous server's map restrictions");
+			}
+			dev.diorama.ServerRules.onServerMessage(net.minecraft.network.chat.Component.literal("§f§a§i§r§x§a§e§r§o"));
+			if (!dev.diorama.ServerRules.fogOfWar(true)) {
+				throw new AssertionError("The new server inherited the previous server's Nether exemption");
+			}
+		});
+		//?}
 		world.getServer().runCommand("tellraw @a \"§r§e§s§e§t§x§a§e§r§o\"");
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("kill @e[type=!player]");
@@ -1323,9 +1353,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		context.waitTicks(3);
 
-		// Right-click a spot left of the player: the editor opens on the block shown there, which
-		// is the first solid block on the camera ray through that point (a canopy can hide the
-		// ground behind it).
+		// Right-click a spot left of the player and pick Add waypoint here: the editor opens on the
+		// block shown there, which is the first solid block on the camera ray through that point
+		// (a canopy can hide the ground behind it).
 		double[] click = context.computeOnClient(mc -> {
 			MapScreen screen = (MapScreen) mc.gui.screen();
 			MapViewport.View view = screen.view();
@@ -1337,9 +1367,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.getInput().setCursorPos(click[2], click[3]);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
 		context.waitTicks(3);
+		clickMenu(context, "Add waypoint here");
 		boolean editorOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
 		if (!editorOpen) {
-			throw new AssertionError("Right-clicking the map didn't open the waypoint editor");
+			throw new AssertionError("Add waypoint here in the map's menu didn't open the waypoint editor");
 		}
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-04-editor");
@@ -1378,6 +1409,23 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
 		}
+		// Unticking Show on maps and in the world and saving hides it; ticking it again shows it.
+		for (boolean shown : new boolean[] {false, true}) {
+			context.setScreen(() -> new WaypointEditScreen(null, picked, false));
+			context.waitTicks(3);
+			clickAt(context, context.computeOnClient(mc -> {
+				for (var child : mc.gui.screen().children()) {
+					if (child instanceof net.minecraft.client.gui.components.Checkbox box) {
+						return box;
+					}
+				}
+				throw new AssertionError("The editor has no visibility checkbox");
+			}));
+			clickButton(context, "diorama.waypoint.save");
+			if (context.computeOnClient(mc -> picked.visible) != shown) {
+				throw new AssertionError("Saving with the box " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
+			}
+		}
 		context.setScreen(() -> null);
 
 		// A name as long as the editor allows, and coordinates near the world border, stop before
@@ -1387,6 +1435,43 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-05-list");
+
+		// Typing in the search keeps the rows whose name has the text in it, in any case.
+		typeInto(context, 0, "LONG");
+		List<Waypoint> found = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).shown());
+		if (found.size() != 1 || !found.get(0).name.startsWith("Long waypoint name")) {
+			throw new AssertionError("Searching LONG shows " + found.stream().map(w -> w.name).toList());
+		}
+		// Delete asks again in place: the first click turns the row's buttons into Click again to
+		// delete, a click anywhere else puts them back, and only the second click deletes.
+		Waypoint longName = found.get(0);
+		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(longName));
+		clickAtGui(context, row[0], row[1]);
+		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selected()) != longName) {
+			throw new AssertionError("Clicking a row didn't select it");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		context.takeScreenshot("waypoints-05b-list-deleting");
+		// Off the row, on the list's empty space. Enter then mustn't reach a button that's gone.
+		clickAtGui(context, row[0], row[1] + 60);
+		context.runOnClient(mc -> {
+			//? if >=1.21.9 {
+			mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_RETURN, 0, 0));
+			//?} else {
+			/*mc.gui.screen().keyPressed(InputConstants.KEY_RETURN, 0, 0);
+			*///?}
+		});
+		context.waitTicks(2);
+		boolean disarmed = context.computeOnClient(mc ->
+			!buttonLabelled(mc.gui.screen(), "Click again to delete").visible && buttonLabelled(mc.gui.screen(), "Delete").visible);
+		if (!disarmed || !context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Clicking elsewhere didn't put Delete back, or something else deleted the waypoint");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		clickButton(context, "diorama.menu.delete_confirm");
+		if (context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Click again to delete didn't delete");
+		}
 		context.setScreen(() -> null);
 
 		// Dying leaves a death marker.
@@ -1600,6 +1685,406 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(20);
 		assertConnected(context, "sharing a name with a colon");
 		context.takeScreenshot("waypoints-09-shared-own");
+		mapMenu(context);
+		mapControls(context);
+	}
+
+	/**
+	 * The map's controls, used with the mouse: the tabs switch what C switches, a zoom button
+	 * zooms, and dragging the depth gauge's band moves the slice only when it's let go.
+	 */
+	private static void mapControls(ClientGameTestContext context) {
+		openMapOnPlayer(context);
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		int cavesTab = context.computeOnClient(mc -> 2 + mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.surface").getString()) + 13
+			+ (mc.font.width(net.minecraft.network.chat.Component.translatable("diorama.map.caves").getString()) + 13) / 2);
+		moveCursor(context, cavesTab * scale, 8 * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int expected = context.computeOnClient(mc -> MapSession.caveLayerFor(mc.player.getY()));
+		int slice = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (slice != expected) {
+			throw new AssertionError("The Caves tab showed layer " + slice + ", not the slice at the player's feet, " + expected);
+		}
+		context.takeScreenshot("map-controls-01-caves");
+
+		// Dragging the band down shows the height it's at; the map keeps its slice until let go.
+		float[] band = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).sliceBand());
+		moveCursor(context, band[0] * scale, band[1] * scale);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		for (int i = 1; i <= 4; i++) {
+			context.getInput().setCursorPos(band[0] * scale, (band[1] + i * 10) * scale);
+			context.waitTick();
+		}
+		context.waitTicks(2);
+		context.takeScreenshot("map-controls-02-gauge-drag");
+		int during = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (during != slice) {
+			throw new AssertionError("Dragging the gauge moved the slice before it was let go: " + slice + " to " + during);
+		}
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int after = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (after >= slice || after % 4 != 0) {
+			throw new AssertionError("Letting go of the gauge's band 40 px lower left the slice at " + after + " (from " + slice + ")");
+		}
+		context.takeScreenshot("map-controls-03-gauge-dropped");
+
+		// The zoom in button zooms.
+		double zoom = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().zoom());
+		int[] plus = context.computeOnClient(mc -> {
+			net.minecraft.client.gui.components.Button button = buttonLabelled(mc.gui.screen(), "+");
+			return new int[] {button.getX() + button.getWidth() / 2, button.getY() + button.getHeight() / 2};
+		});
+		moveCursor(context, plus[0] * scale, plus[1] * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		double zoomed = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().zoom());
+		if (zoomed <= zoom) {
+			throw new AssertionError("The zoom in button left the zoom at " + zoomed + " (from " + zoom + ")");
+		}
+
+		// The Surface tab goes back.
+		moveCursor(context, (2 + 10) * scale, 8 * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int surface = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+		if (surface != TileKey.SURFACE) {
+			throw new AssertionError("The Surface tab left the map on layer " + surface);
+		}
+		context.setScreen(() -> null);
+	}
+
+	/** The temporary waypoint kept from the menu, and one left temporary, for after rejoining. */
+	private static @Nullable UUID keptTemporary;
+	private static @Nullable UUID leftTemporary;
+
+	/**
+	 * The map's right-click menu, used with the mouse: teleporting to a spot, temporary waypoints,
+	 * a waypoint's own menu, sharing a location, and what closes the menu.
+	 */
+	private static void mapMenu(ClientGameTestContext context) {
+		openMapOnPlayer(context);
+
+		// Teleport here: the player lands standing on the block the map shows at the click, which
+		// is the first solid block on the camera ray through that point.
+		double[] click = rightClickMap(context, 24, 0);
+		context.takeScreenshot("map-menu-01-spot");
+		int[] spot = menuSpot(context);
+		int hitY = spot[1] - 1;
+		boolean onRay = spot[0] == (int) Math.floor(click[0])
+			&& click[1] >= Projection.v(hitY + 1, spot[2]) - 1e-6 && click[1] <= Projection.v(hitY, spot[2] + 1) + 1e-6;
+		if (!onRay) {
+			throw new AssertionError("The menu offers " + spot[0] + "," + spot[1] + "," + spot[2] + ", which isn't the block shown at the click");
+		}
+		clickMenu(context, "Teleport here");
+		context.waitFor(mc -> mc.player.distanceToSqr(spot[0] + 0.5, spot[1], spot[2] + 0.5) < 0.5, 100);
+		context.runOnClient(mc -> {
+			if (mc.gui.screen() != null) {
+				throw new AssertionError("The map stayed open after Teleport here");
+			}
+			if (mc.level.getBlockState(new BlockPos(spot[0], hitY, spot[2])).isAir()) {
+				throw new AssertionError("Teleport here put the player over air at " + spot[0] + "," + spot[1] + "," + spot[2]);
+			}
+		});
+		for (int i = 0; i < (MENU_GIF ? 12 : 0); i++) {
+			context.waitTicks(3);
+			menuFrame(context);
+		}
+		openMapOnPlayer(context);
+		menuFrame(context);
+		context.takeScreenshot("map-menu-02-arrived");
+
+		// Esc closes the menu, not the map.
+		rightClickMap(context, -12, 0);
+		//? if >=1.21.9 {
+		context.runOnClient(mc -> mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_ESCAPE, 0, 0)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gui.screen().keyPressed(InputConstants.KEY_ESCAPE, 0, 0));
+		*///?}
+		context.runOnClient(mc -> {
+			if (!(mc.gui.screen() instanceof MapScreen map) || map.menu() != null) {
+				throw new AssertionError("Esc with the menu open didn't just close the menu");
+			}
+		});
+
+		// A button held since before the menu opened doesn't close it when let go.
+		double[] held = mapPoint(context, -12, 0);
+		moveCursor(context, held[2], held[3]);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		rightClickAt(context, held[2], held[3]);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		boolean keptOpen = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu() != null);
+		if (!keptOpen) {
+			throw new AssertionError("Letting go of a button held from before closed the menu");
+		}
+
+		// C changes the view under the menu, so it closes the menu.
+		//? if >=1.21.9 {
+		context.runOnClient(mc -> mc.gui.screen().keyPressed(new net.minecraft.client.input.KeyEvent(InputConstants.KEY_C, 0, 0)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gui.screen().keyPressed(InputConstants.KEY_C, 0, 0));
+		*///?}
+		boolean closedByC = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu() == null);
+		if (!closedByC) {
+			throw new AssertionError("Switching to caves left the menu open");
+		}
+		openMapOnPlayer(context);
+
+		// So does a click on the Settings button: it doesn't open the settings.
+		rightClickMap(context, -12, 0);
+		double[] settings = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(mc.gui.screen().width - 32) * scale, 7 * scale};
+		});
+		moveCursor(context, settings[0], settings[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		context.runOnClient(mc -> {
+			if (!(mc.gui.screen() instanceof MapScreen map) || map.menu() != null) {
+				throw new AssertionError("Clicking Settings with the menu open didn't just close the menu");
+			}
+		});
+
+		// Where the map has nothing, the menu says so and offers nothing.
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + 100_000, Projection.v(mc.player.getY(), mc.player.getZ()), 4.0, TileKey.SURFACE));
+		context.waitTicks(3);
+		double[] middle = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {mc.gui.screen().width / 2.0 * scale, mc.gui.screen().height / 2.0 * scale};
+		});
+		rightClickAt(context, middle[0], middle[1]);
+		List<String> nothing = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (!nothing.equals(List.of("Nothing mapped here"))) {
+			throw new AssertionError("Off the map, the menu shows " + nothing);
+		}
+		openMapOnPlayer(context);
+
+		// Two temporary waypoints: they're on the map but not in the file. One gets kept.
+		int[] first = addTemporary(context, -12, 0);
+		int[] second = addTemporary(context, 0, -10);
+		context.waitTicks(5);
+		context.takeScreenshot("map-menu-03-temporary");
+		String file = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		if (file.contains("TEMPORARY")) {
+			throw new AssertionError("A temporary waypoint was saved:\n" + file);
+		}
+
+		// The first one's own menu: Delete asks for a second click.
+		rightClickPin(context, first);
+		context.takeScreenshot("map-menu-04-waypoint");
+		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (!labels.get(0).equals("Temporary") || !labels.contains("Keep waypoint") || !labels.contains("Teleport")) {
+			throw new AssertionError("A temporary waypoint's menu shows " + labels);
+		}
+		clickMenu(context, "Delete");
+		boolean deletedEarly = context.computeOnClient(mc -> temporaryAt(first) == null);
+		if (deletedEarly) {
+			throw new AssertionError("Delete went through without a second click");
+		}
+		context.takeScreenshot("map-menu-05-delete-confirm");
+		clickMenu(context, "Click again to delete");
+		boolean deleted = context.computeOnClient(mc -> temporaryAt(first) == null);
+		if (!deleted) {
+			throw new AssertionError("Deleting from the waypoint's menu left it in place");
+		}
+
+		// The second is kept: it's in the file now.
+		UUID keptId = context.computeOnClient(mc -> temporaryAt(second).id);
+		rightClickPin(context, second);
+		clickMenu(context, "Keep waypoint");
+		String kept = context.computeOnClient(mc -> {
+			try {
+				return java.nio.file.Files.readString(WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		if (!kept.contains(keptId.toString())) {
+			throw new AssertionError("Keep waypoint didn't save it:\n" + kept);
+		}
+		keptTemporary = keptId;
+		// One more, left temporary, for leaving the world to clear.
+		int[] third = addTemporary(context, 10, 6);
+		leftTemporary = context.computeOnClient(mc -> temporaryAt(third).id);
+
+		// Share location: nothing goes out until the second click, then one line, with an [Add] link.
+		rightClickMap(context, 8, -8);
+		int[] shared = menuSpot(context);
+		String line = "xaero-waypoint:Shared location:SL:" + shared[0] + ":" + shared[1] + ":" + shared[2] + ":";
+		clickMenu(context, "Share location in chat");
+		context.waitTicks(20);
+		long early = context.computeOnClient(mc -> chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).count());
+		boolean stillOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && map.menu() != null);
+		if (early != 0 || !stillOpen) {
+			throw new AssertionError("Share location went through without a second click");
+		}
+		clickMenu(context, "Click again to post in chat");
+		context.waitTicks(20);
+		assertConnected(context, "sharing a location");
+		context.runOnClient(mc -> {
+			List<net.minecraft.client.multiplayer.chat.GuiMessage> lines = chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).toList();
+			if (lines.size() != 1 || linkIn(lines.get(0).content()) == null) {
+				throw new AssertionError("Expected one shared location line with an [Add] link in chat, found " + lines.size());
+			}
+		});
+		context.takeScreenshot("map-menu-06-shared-location");
+	}
+
+	/** Back in the world after leaving it: the temporary waypoint is gone, the kept one is still there. */
+	private static void temporaryGone(ClientGameTestContext context) {
+		context.waitFor(mc -> mc.player != null && WorldKey.current() != null, 600);
+		context.runOnClient(mc -> {
+			List<Waypoint> all = WaypointStore.get().all();
+			if (all.stream().anyMatch(w -> w.id.equals(leftTemporary) || w.kind == Waypoint.Kind.TEMPORARY)) {
+				throw new AssertionError("A temporary waypoint was still there after leaving the world");
+			}
+			if (all.stream().noneMatch(w -> w.id.equals(keptTemporary) && w.kind == Waypoint.Kind.MANUAL)) {
+				throw new AssertionError("The temporary waypoint kept from the menu is gone after leaving the world");
+			}
+		});
+	}
+
+	private static void openMapOnPlayer(ClientGameTestContext context) {
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 20);
+		menuFrame(context);
+	}
+
+	/**
+	 * Right-clicks the map {@code east} blocks east and {@code down} map rows below the player,
+	 * and returns the map point clicked, {u, v}.
+	 */
+	private static double[] rightClickMap(ClientGameTestContext context, int east, int down) {
+		double[] at = mapPoint(context, east, down);
+		rightClickAt(context, at[2], at[3]);
+		return new double[] {at[0], at[1]};
+	}
+
+	/** The map point {@code east} blocks east and {@code down} rows below the player, and its window position: {u, v, x, y}. */
+	private static double[] mapPoint(ClientGameTestContext context, int east, int down) {
+		return context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			double u = mc.player.getBlockX() + east + 0.5;
+			double v = Projection.v(mc.player.getY(), mc.player.getZ()) + down;
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {u, v, view.screenX(u) * scale, view.screenY(v) * scale};
+		});
+	}
+
+	/** Right-clicks the map at a window position, which must open its menu. */
+	private static void rightClickAt(ClientGameTestContext context, double x, double y) {
+		moveCursor(context, x, y);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(3);
+		menuFrame(context);
+		boolean open = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && map.menu() != null);
+		if (!open) {
+			throw new AssertionError("Right-clicking the map didn't open its menu");
+		}
+	}
+
+	/** Right-clicks the pin of the waypoint at a position. */
+	private static void rightClickPin(ClientGameTestContext context, int[] pos) {
+		double[] at = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
+				if (pin.waypoint().x == pos[0] && pin.waypoint().y == pos[1] && pin.waypoint().z == pos[2]) {
+					return new double[] {pin.x() * scale, pin.y() * scale};
+				}
+			}
+			throw new AssertionError("No pin at " + pos[0] + "," + pos[1] + "," + pos[2]);
+		});
+		moveCursor(context, at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(3);
+		menuFrame(context);
+	}
+
+	/** Adds a temporary waypoint from the menu, and returns where the menu said it is. */
+	private static int[] addTemporary(ClientGameTestContext context, int east, int down) {
+		rightClickMap(context, east, down);
+		int[] spot = menuSpot(context);
+		clickMenu(context, "Add temporary waypoint");
+		boolean added = context.computeOnClient(mc -> temporaryAt(spot) != null);
+		if (!added) {
+			throw new AssertionError("Add temporary waypoint didn't add one at " + spot[0] + "," + spot[1] + "," + spot[2]);
+		}
+		return spot;
+	}
+
+	private static @Nullable Waypoint temporaryAt(int[] pos) {
+		for (Waypoint waypoint : WaypointStore.get().all()) {
+			if (waypoint.kind == Waypoint.Kind.TEMPORARY && waypoint.x == pos[0] && waypoint.y == pos[1] && waypoint.z == pos[2]) {
+				return waypoint;
+			}
+		}
+		return null;
+	}
+
+	/** The block position the open spot menu's first line names: "x, y, z · N m". */
+	private static int[] menuSpot(ClientGameTestContext context) {
+		String line = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels().get(0));
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("(-?\\d+), (-?\\d+), (-?\\d+) · \\d+ m").matcher(line);
+		if (!m.matches()) {
+			throw new AssertionError("The spot menu starts with " + line);
+		}
+		return new int[] {Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+	}
+
+	/** Clicks a line of the map's right-click menu with the mouse, the way a player would. */
+	private static void clickMenu(ClientGameTestContext context, String label) {
+		double[] at = context.computeOnClient(mc -> {
+			MapMenu menu = mc.gui.screen() instanceof MapScreen map ? map.menu() : null;
+			if (menu == null) {
+				throw new AssertionError("The map's menu isn't open, looking for " + label);
+			}
+			float[] centre = menu.centreOf(label);
+			if (centre == null) {
+				throw new AssertionError("The map's menu has no " + label + ": " + menu.labels());
+			}
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {centre[0] * scale, centre[1] * scale};
+		});
+		moveCursor(context, at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		menuFrame(context);
+	}
+
+	/** {@code DIORAMA_GIF=1}: frames of the menu tour for a GIF. */
+	private static final boolean MENU_GIF = "1".equals(System.getenv("DIORAMA_GIF"));
+	/** Where the cursor is, in window pixels; screenshots don't show it, so frames are named with it. */
+	private static double[] cursor = {800, 450};
+	private static int menuFrames;
+
+	/** Moves the cursor, gliding there a frame at a time when GIF frames are wanted. */
+	private static void moveCursor(ClientGameTestContext context, double x, double y) {
+		int steps = MENU_GIF ? 10 : 1;
+		double[] from = cursor;
+		for (int i = 1; i <= steps; i++) {
+			double t = i / (double) steps;
+			double ease = t * t * (3 - 2 * t);
+			cursor = new double[] {from[0] + (x - from[0]) * ease, from[1] + (y - from[1]) * ease};
+			context.getInput().setCursorPos(cursor[0], cursor[1]);
+			context.waitTick();
+			menuFrame(context);
+		}
+		context.waitTicks(1);
+	}
+
+	private static void menuFrame(ClientGameTestContext context) {
+		if (MENU_GIF) {
+			context.takeScreenshot(String.format("map-menu-gif-%03d-%d-%d", menuFrames++, Math.round(cursor[0]), Math.round(cursor[1])));
+		}
 	}
 
 	/**
@@ -1890,6 +2375,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(2);
 	}
 
+	/** Clicks the left mouse button at a point given in GUI pixels. */
+	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		context.getInput().setCursorPos(x * scale, y * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
 	/** Clicks a button with the mouse, which does nothing while it's off (unlike clickScreenButton). */
 	private static void clickButton(ClientGameTestContext context, String translationKey) {
 		String label = net.minecraft.network.chat.Component.translatable(translationKey).getString();
@@ -2173,12 +2666,50 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("settings-02-screen");
+		// Real clicks: a checkbox changes its setting and the preview with it, a tab shows its
+		// settings, and the Size slider sets the size from where it's clicked.
+		click(context, "Compass");
+		if (context.computeOnClient(mc -> Settings.get().compass)) {
+			throw new AssertionError("Clicking Compass didn't switch it off");
+		}
+		context.takeScreenshot("settings-02-compass-off");
+		click(context, "Compass");
+		if (!context.computeOnClient(mc -> Settings.get().compass)) {
+			throw new AssertionError("Clicking Compass again didn't switch it on");
+		}
+		clickAt(context, "Size: ", 1.0);
+		int clickedSize = context.computeOnClient(mc -> Settings.get().minimapSize);
+		if (clickedSize != Settings.MAX_SIZE) {
+			throw new AssertionError("Clicking the right end of the Size slider set " + clickedSize + ", not " + Settings.MAX_SIZE);
+		}
+		// The biggest minimap, switched off: the dimmed preview stops at the settings' edge.
+		click(context, "Minimap", 0.05);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-size-224-off");
+		click(context, "Minimap", 0.05);
+		clickAt(context, "Size: ", 0.3);
+		context.takeScreenshot("settings-02-size-" + context.computeOnClient(mc -> Settings.get().minimapSize));
+		context.runOnClient(mc -> {
+			Settings.get().minimapSize = 128;
+			Settings.get().save();
+		});
+		String[] tabs = {"Radar", "Overlays", "Waypoints", "Look"};
+		String[] shows = {"Height range: 32 m", "Spawn spots: Off", "Death markers", "Quality: Fancy"};
+		for (int i = 0; i < tabs.length; i++) {
+			click(context, tabs[i]);
+			String wanted = shows[i];
+			if (!context.computeOnClient(mc -> widget(mc, wanted) != null)) {
+				throw new AssertionError("The " + tabs[i] + " tab doesn't show " + wanted);
+			}
+			context.takeScreenshot("settings-02-tab-" + tabs[i].toLowerCase(java.util.Locale.ROOT));
+		}
 		context.setScreen(() -> null);
 
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
-			s.minimapSize = Settings.Size.LARGE;
+			s.minimapSize = 176;
 			s.minimapZoom = 1;
 			s.save();
 		});
@@ -2191,14 +2722,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("config.json is missing", e);
 			}
 		});
-		if (!saved.contains("\"BOTTOM_LEFT\"") || !saved.contains("\"LARGE\"")) {
+		if (!saved.contains("\"BOTTOM_LEFT\"") || !saved.contains("\"minimapSize\": 176")) {
 			throw new AssertionError("config.json doesn't have the new settings:\n" + saved);
 		}
 
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = Settings.Size.MEDIUM;
+			s.minimapSize = 128;
 			s.minimapZoom = 3;
 			s.save();
 		});
@@ -2224,6 +2755,29 @@ public class DioramaClientTest implements FabricClientGameTest {
 			s.radarRange = 32;
 			s.save();
 		});
+		// Settings saved before Size was a slider keep their size, and odd sizes snap to the slider's steps.
+		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "128"}};
+		for (String[] size : sizes) {
+			context.runOnClient(mc -> {
+				java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
+				try {
+					java.nio.file.Files.writeString(file, "{\"minimapSize\": " + size[0] + ", \"minimapCorner\": \"BOTTOM_LEFT\", \"compass\": false}");
+				} catch (java.io.IOException e) {
+					throw new AssertionError(e);
+				}
+				Settings s = Settings.reload();
+				if (s.minimapSize != Integer.parseInt(size[1]) || s.minimapCorner != Settings.Corner.BOTTOM_LEFT || s.compass) {
+					throw new AssertionError("A saved size of " + size[0] + " loaded as " + s.minimapSize + " (corner " + s.minimapCorner + ", compass " + s.compass + ")");
+				}
+			});
+		}
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			s.minimapSize = 128;
+			s.minimapCorner = Settings.Corner.TOP_RIGHT;
+			s.compass = true;
+			s.save();
+		});
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(3);
 		context.setScreen(() -> null);
@@ -2235,31 +2789,38 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new SettingsScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("settings-05-small-screen");
-		context.runOnClient(mc -> {
-			java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
-			for (var child : mc.gui.screen().children()) {
-				if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
-					widgets.add(widget);
-				}
-			}
-			int width = mc.gui.screen().width;
-			int height = mc.gui.screen().height;
-			for (var a : widgets) {
-				if (a.getX() < 0 || a.getY() < 0 || a.getRight() > width || a.getBottom() > height) {
-					throw new AssertionError(a.getMessage().getString() + " runs off the screen");
-				}
-				for (var b : widgets) {
-					if (a != b && a.getX() < b.getRight() && b.getX() < a.getRight() && a.getY() < b.getBottom() && b.getY() < a.getBottom()) {
-						throw new AssertionError(a.getMessage().getString() + " overlaps " + b.getMessage().getString());
+		// Every tab: no setting may overlap another or reach under the minimap preview.
+		for (int tab = 0; tab < 5; tab++) {
+			int index = tab;
+			context.runOnClient(mc -> {
+				((SettingsScreen) mc.gui.screen()).selectTab(index);
+				java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+				collectWidgets(mc.gui.screen(), widgets);
+				int width = mc.gui.screen().width;
+				int height = mc.gui.screen().height;
+				// The preview's frame, at the default size in the top right.
+				int preview = width - 6 - 128 - 2;
+				for (var a : widgets) {
+					if (a.getX() < 0 || a.getY() < 0 || a.getRight() > width || a.getBottom() > height) {
+						throw new AssertionError(a.getMessage().getString() + " runs off the screen");
+					}
+					if (a.getRight() > preview && a.getY() < 6 + 128 + 2) {
+						throw new AssertionError(a.getMessage().getString() + " reaches under the minimap preview");
+					}
+					for (var b : widgets) {
+						if (a != b && a.getX() < b.getRight() && b.getX() < a.getRight() && a.getY() < b.getBottom() && b.getY() < a.getBottom()) {
+							throw new AssertionError(a.getMessage().getString() + " overlaps " + b.getMessage().getString());
+						}
 					}
 				}
-			}
-		});
+			});
+		}
+		context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(0));
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
-			s.minimapSize = Settings.Size.LARGE;
+			s.minimapSize = 176;
 			s.save();
 		});
 		context.waitTicks(10);
@@ -2267,7 +2828,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = Settings.Size.MEDIUM;
+			s.minimapSize = 128;
 			s.save();
 		});
 		context.getInput().resizeWindow(1600, 900);
@@ -2390,6 +2951,70 @@ public class DioramaClientTest implements FabricClientGameTest {
 				screen.lookAt(player.getX(), Projection.v(player.getY(), player.getZ()), zoom, layer);
 			}
 		});
+	}
+
+	/** Every widget on a screen, inside containers like the tab bar too. */
+	private static void collectWidgets(net.minecraft.client.gui.components.events.ContainerEventHandler parent, java.util.List<net.minecraft.client.gui.components.AbstractWidget> out) {
+		for (var child : parent.children()) {
+			if (child instanceof net.minecraft.client.gui.components.events.ContainerEventHandler container) {
+				collectWidgets(container, out);
+			} else if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
+				out.add(widget);
+			}
+		}
+	}
+
+	/** The open screen's widget whose label starts with this text. */
+	private static net.minecraft.client.gui.components.@Nullable AbstractWidget widget(Minecraft mc, String label) {
+		java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+		collectWidgets(mc.gui.screen(), widgets);
+		for (var widget : widgets) {
+			if (widget.getMessage().getString().startsWith(label)) {
+				return widget;
+			}
+		}
+		return null;
+	}
+
+	/** Clicks the middle of the widget with this label, as a player would. */
+	private static void click(ClientGameTestContext context, String label) {
+		clickAt(context, label, 0.5);
+	}
+
+	/** Clicks the checkbox with this label this far along it (a tab may have the same label). */
+	private static void click(ClientGameTestContext context, String label, double along) {
+		double[] at = context.computeOnClient(mc -> {
+			java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+			collectWidgets(mc.gui.screen(), widgets);
+			for (var widget : widgets) {
+				if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(label)) {
+					double scale = mc.getWindow().getGuiScale();
+					return new double[] {(widget.getX() + along * widget.getWidth()) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+				}
+			}
+			throw new AssertionError("No checkbox labelled " + label);
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(5);
+	}
+
+	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
+	private static void clickAt(ClientGameTestContext context, String label, double along) {
+		double[] at = context.computeOnClient(mc -> {
+			var widget = widget(mc, label);
+			if (widget == null) {
+				throw new AssertionError("No widget labelled " + label);
+			}
+			double scale = mc.getWindow().getGuiScale();
+			double x = widget.getX() + 1 + along * (widget.getWidth() - 2);
+			return new double[] {x * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(5);
 	}
 
 	/** Waits until no tile has been baking for a while. */

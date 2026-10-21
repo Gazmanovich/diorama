@@ -31,28 +31,6 @@ public final class MapIcons {
 		draw(graphics, caret, x - size / 2, y - size / 2, size, argb, down);
 	}
 
-	/**
-	 * A caret centred on the point, pointing along {@code angle} (radians, screen space, 0 is
-	 * right). {@code grow} enlarges it, for drawing an outline underneath.
-	 */
-	public static void arrow(GuiGraphicsExtractor graphics, float x, float y, float size, double angle, int argb, float grow) {
-		if (caret == null) {
-			caret = create("diorama caret", MapIcons::triangle);
-		}
-		float half = (size + grow) / 2;
-		// The caret texture points up; turn it to point along the angle.
-		double turn = angle + Math.PI / 2;
-		float cos = (float) Math.cos(turn);
-		float sin = (float) Math.sin(turn);
-		float[] corners = new float[8];
-		float[][] local = {{-half, -half}, {-half, half}, {half, half}, {half, -half}};
-		for (int i = 0; i < 4; i++) {
-			corners[i * 2] = x + local[i][0] * cos - local[i][1] * sin;
-			corners[i * 2 + 1] = y + local[i][0] * sin + local[i][1] * cos;
-		}
-		MapCanvas.of(graphics).quad(caret, Sampling.CLAMP_LINEAR, corners, new float[] {0, 0, 0, 1, 1, 1, 1, 0}, argb);
-	}
-
 	private static void draw(GuiGraphicsExtractor graphics, MapTexture texture, float x, float y, float size, int argb, boolean flip) {
 		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_LINEAR, x, y, x + size, y + size, 0, flip ? 1 : 0, 1, flip ? 0 : 1, argb);
 	}

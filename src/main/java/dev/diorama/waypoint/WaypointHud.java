@@ -2,7 +2,7 @@ package dev.diorama.waypoint;
 
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
-import dev.diorama.render.MapIcons;
+import dev.diorama.render.Pins;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
@@ -14,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
- * its disc with the distance, so it shows through terrain at any range. The name appears when it
+ * a pin standing on its spot, with the distance under it, so it shows through terrain at any range. The name appears when it
  * is near the crosshair or close by, which keeps a screen full of waypoints readable.
  */
 public final class WaypointHud implements HudElement {
@@ -60,15 +60,7 @@ public final class WaypointHud implements HudElement {
 				continue;
 			}
 			double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-			float size = 11;
-			MapIcons.dot(graphics, sx, sy, size + 2.5F, 0xD0101418);
-			MapIcons.dot(graphics, sx, sy, size, waypoint.color);
-			String label = waypoint.kind == Waypoint.Kind.DEATH ? "✝" : waypoint.label();
-			graphics.pose().pushMatrix();
-			graphics.pose().translate(sx, sy - 3);
-			graphics.pose().scale(0.75F);
-			graphics.centeredText(font, label, 0, 0, WaypointOverlay.textColour(waypoint.color));
-			graphics.pose().popMatrix();
+			Pins.standing(graphics, waypoint, sx, sy, Pins.LARGE);
 			String text = Math.round(distance) + " m";
 			boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
 			if (nearCrosshair || distance < NAME_DISTANCE) {
@@ -76,7 +68,7 @@ public final class WaypointHud implements HudElement {
 			}
 			int w = font.width(text);
 			int tx = Math.round(sx - w / 2.0F);
-			int ty = Math.round(sy + size / 2 + 3);
+			int ty = Math.round(sy) + 4;
 			graphics.fill(tx - 2, ty - 1, tx + w + 2, ty + 9, 0x80000000);
 			graphics.text(font, text, tx, ty, 0xFFFFFFFF, false);
 		}
