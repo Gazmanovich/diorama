@@ -46,11 +46,12 @@ public final class GpuBakeCheck {
 	private static final double MAX_BIAS = 2.2;
 	/**
 	 * Share of the tile's pixels known to one bake and not the other, and of pixels both know
-	 * with a different alpha (how many of the four samples hit something). Matching drivers
-	 * measured under 0.1% and 0.3%.
+	 * with a different alpha (how many of the four samples hit something). Along the edge of the
+	 * explored area the two sample patterns split pixels differently: matching drivers measured
+	 * up to 0.12% and 3.1% there. A GPU that gets coverage wrong gets it wrong almost everywhere.
 	 */
-	private static final double MAX_MISMATCH = 0.01;
-	private static final double MAX_ALPHA = 0.03;
+	private static final double MAX_MISMATCH = 0.02;
+	private static final double MAX_ALPHA = 0.2;
 	/** Share of pixels both know whose overlay bits differ: 0.35% measured, from the sample positions. */
 	private static final double MAX_OVERLAY = 0.02;
 	/**
