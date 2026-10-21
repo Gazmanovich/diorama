@@ -93,7 +93,7 @@ public final class GpuTileBaker {
 	 * pixels mean the GPU didn't draw it: it couldn't, or, when {@code cancelled}, leaving the
 	 * world handed the job back first.
 	 */
-	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean cancelled) {
+	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean cancelled, MapStyle look) {
 	}
 
 	/**
@@ -202,6 +202,8 @@ public final class GpuTileBaker {
 	static final class Job {
 		final GpuMesher.Mesh mesh;
 		final Consumer<Result> callback;
+		/** The look the uniforms were built with, so a check can tell if it changed under it. */
+		MapStyle look;
 		final long submitted = System.nanoTime();
 		/** Set by the first of done or fail; the other is then ignored. */
 		final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
@@ -244,7 +246,8 @@ public final class GpuTileBaker {
 			}
 			casters.flip();
 			this.casters = casters;
-			this.uniforms = uniforms(mesh, originX, originZ);
+			this.look = MapStyle.get();
+			this.uniforms = uniforms(mesh, originX, originZ, this.look);
 			if (sky) {
 				// Whole rows, as the texture upload takes them.
 				this.voxelRows = (mesh.voxelCount + VOXEL_WIDTH - 1) / VOXEL_WIDTH;
@@ -278,8 +281,7 @@ public final class GpuTileBaker {
 		}
 
 		/** The bake's uniform block: see {@code include/bake.glsl}. Every member is a 16-byte slot in std140. */
-		private static ByteBuffer uniforms(GpuMesher.Mesh mesh, int originX, int originZ) {
-			MapStyle style = MapStyle.get();
+		private static ByteBuffer uniforms(GpuMesher.Mesh mesh, int originX, int originZ, MapStyle style) {
 			double sin = mesh.sin;
 			double cos = mesh.cos;
 			double minV = mesh.key.minV();
@@ -381,7 +383,7 @@ public final class GpuTileBaker {
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
 			);
 			log(timing);
-			this.callback.accept(new Result(pixels, info, timing, false));
+			this.callback.accept(new Result(pixels, info, timing, false, this.look));
 		}
 
 		void fail() {
@@ -399,7 +401,7 @@ public final class GpuTileBaker {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), cancelled));
+			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), cancelled, this.look));
 		}
 
 		void free() {

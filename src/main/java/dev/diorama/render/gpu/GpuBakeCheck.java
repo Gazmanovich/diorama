@@ -1,7 +1,9 @@
 package dev.diorama.render.gpu;
 
 import dev.diorama.Diorama;
+import dev.diorama.Projection;
 import dev.diorama.Settings;
+import org.jspecify.annotations.Nullable;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
@@ -48,6 +50,14 @@ public final class GpuBakeCheck {
 	 */
 	private static final double MAX_MISMATCH = 0.01;
 	private static final double MAX_ALPHA = 0.03;
+	/** Share of pixels both know whose overlay bits differ: 0.35% measured, from the sample positions. */
+	private static final double MAX_OVERLAY = 0.02;
+	/**
+	 * Pixels both bakes must know for a tile to count towards a pass, and, fewer, for its
+	 * differences to fail the check: a tile mostly unexplored still shows a GPU that's wrong.
+	 */
+	private static final int PASS_PIXELS = Projection.TILE_PIXELS * Projection.TILE_PIXELS / 4;
+	private static final int JUDGE_PIXELS = 2048;
 
 	private static final Object LOCK = new Object();
 	private static volatile boolean failed;
@@ -68,6 +78,7 @@ public final class GpuBakeCheck {
 		double worstBias;
 		double worstMismatch;
 		double worstAlpha;
+		double worstOverlay;
 
 		Check(String name) {
 			this.name = name;
@@ -113,11 +124,16 @@ public final class GpuBakeCheck {
 		return Mode.TRACE;
 	}
 
-	/** A check tile came back from both bakers: the GPU's pixels and the tracer's, before any merge. */
-	public static void compare(boolean lit, int[] gpu, int[] traced) {
+	/**
+	 * A check tile came back from both bakers: the GPU's pixels and the tracer's, before any merge,
+	 * with their overlay bits when the bake asked for them.
+	 */
+	public static void compare(boolean lit, int[] gpu, int[] traced, byte @Nullable [] gpuInfo, byte @Nullable [] tracedInfo) {
+		boolean overlays = gpuInfo != null && tracedInfo != null;
 		long both = 0;
 		long mismatched = 0;
 		long alphaDiffers = 0;
+		long overlayDiffers = 0;
 		double sum = 0;
 		double bias = 0;
 		for (int i = 0; i < traced.length; i++) {
@@ -130,6 +146,9 @@ public final class GpuBakeCheck {
 				both++;
 				if ((c >>> 24) != (g >>> 24)) {
 					alphaDiffers++;
+				}
+				if (overlays && gpuInfo[i] != tracedInfo[i]) {
+					overlayDiffers++;
 				}
 				int dr = (g & 0xFF) - (c & 0xFF);
 				int dg = ((g >> 8) & 0xFF) - ((c >> 8) & 0xFF);
@@ -144,31 +163,35 @@ public final class GpuBakeCheck {
 			if (failed || check.passed) {
 				return;
 			}
-			// Mostly unexplored or empty, by both: another tile will tell more. Many pixels
-			// known to only one of them still counts, as a mismatch.
-			if (both < traced.length / 4 && mismatched <= traced.length * MAX_MISMATCH) {
+			double mismatch = mismatched / (double) traced.length;
+			// Too few pixels known to both to judge their colours: only the mismatch tells.
+			boolean judged = both >= JUDGE_PIXELS;
+			double mean = judged ? sum / both : 0;
+			double brighter = judged ? bias / both : 0;
+			double alpha = judged ? alphaDiffers / (double) both : 0;
+			double overlay = judged && overlays ? overlayDiffers / (double) both : 0;
+			// Every tile must match on its own: the two read the same chunks, so nothing but the
+			// GPU makes them differ, and matching tiles mustn't hide one that doesn't.
+			if (mean > MAX_MEAN || Math.abs(brighter) > MAX_BIAS || mismatch > MAX_MISMATCH || alpha > MAX_ALPHA || overlay > MAX_OVERLAY) {
+				fail(String.format(java.util.Locale.ROOT, "a %s tile doesn't match the tracer's (mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits)",
+					check.name, mean, brighter, mismatch * 100, alpha * 100, overlay * 100));
 				return;
 			}
-			double mean = both == 0 ? 0 : sum / both;
-			double brighter = both == 0 ? 0 : bias / both;
-			double mismatch = mismatched / (double) traced.length;
-			double alpha = both == 0 ? 0 : alphaDiffers / (double) both;
+			if (both < PASS_PIXELS) {
+				// Mostly unexplored or empty: it matched, but another tile will tell more.
+				return;
+			}
 			check.compared++;
 			check.worstMean = Math.max(check.worstMean, mean);
 			check.worstBias = Math.abs(brighter) > Math.abs(check.worstBias) ? brighter : check.worstBias;
 			check.worstMismatch = Math.max(check.worstMismatch, mismatch);
 			check.worstAlpha = Math.max(check.worstAlpha, alpha);
-			// Every tile must match on its own: the two read the same chunks, so nothing but the
-			// GPU makes them differ, and matching tiles mustn't hide one that doesn't.
-			if (mean > MAX_MEAN || Math.abs(brighter) > MAX_BIAS || mismatch > MAX_MISMATCH || alpha > MAX_ALPHA) {
-				fail(String.format(java.util.Locale.ROOT, "a %s tile doesn't match the tracer's (mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch, %.2f%% different alpha)",
-					check.name, mean, brighter, mismatch * 100, alpha * 100));
-			} else if (check.compared >= TILES) {
+			check.worstOverlay = Math.max(check.worstOverlay, overlay);
+			if (check.compared >= TILES) {
 				check.passed = true;
-				Diorama.LOGGER.info("GPU baking matches the tracer on {} ({}, {} tiles, worst: mean difference {}/255, {} brighter, {}% known/unknown mismatch, {}% different alpha): on",
-					GpuTileBaker.device(), check.name, check.compared, String.format(java.util.Locale.ROOT, "%.2f", check.worstMean),
-					String.format(java.util.Locale.ROOT, "%+.2f", check.worstBias), String.format(java.util.Locale.ROOT, "%.2f", check.worstMismatch * 100),
-					String.format(java.util.Locale.ROOT, "%.2f", check.worstAlpha * 100));
+				Diorama.LOGGER.info("GPU baking matches the tracer on {} ({}): on", GpuTileBaker.device(), String.format(java.util.Locale.ROOT,
+					"%s, %d tiles, worst: mean difference %.2f/255, %+.2f brighter, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits",
+					check.name, check.compared, check.worstMean, check.worstBias, check.worstMismatch * 100, check.worstAlpha * 100, check.worstOverlay * 100));
 			}
 		}
 	}

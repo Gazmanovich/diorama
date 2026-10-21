@@ -646,7 +646,8 @@ public final class MapLevel implements ChunkSource {
 		TileStore store = key.isCave() ? null : this.store;
 		// Lit as TileBaker decides: a cave slice, or a level under a roof.
 		boolean lit = key.isCave() || this.roofless();
-		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, fog);
+		// Fog of war only changes lit views.
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog);
 		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
 			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK, lit);
 			return;
@@ -678,6 +679,9 @@ public final class MapLevel implements ChunkSource {
 				// A check tile's two bakes read the same chunks, even while more are arriving, so
 				// only the GPU can make them differ.
 				dev.diorama.bake.ChunkSource source = check ? new dev.diorama.bake.PinnedSource(this) : this;
+				// The mesher, the tracer and the GPU's uniforms each read the look, in that order:
+				// if the last saw the same as before the first, the two bakes show one look.
+				dev.diorama.MapStyle look = dev.diorama.MapStyle.get();
 				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
 				byte[] info = check && overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
 				int[] traced = check ? TileBaker.reference(key, source, looks, fog, overlays, info) : null;
@@ -690,8 +694,8 @@ public final class MapLevel implements ChunkSource {
 							}
 							image = traced != null ? TileBaker.gpuImage(key, traced, saved, info) : TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						} else if (traced != null) {
-							if (this.generation(key) == generation) {
-								dev.diorama.render.gpu.GpuBakeCheck.compare(lit, result.pixels(), traced);
+							if (this.generation(key) == generation && look.equals(result.look())) {
+								dev.diorama.render.gpu.GpuBakeCheck.compare(lit, result.pixels(), traced, result.info(), info);
 							} else {
 								// The map's look changed while it was out: the two may have baked different looks.
 								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, false);
