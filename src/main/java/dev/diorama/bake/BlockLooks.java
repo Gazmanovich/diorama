@@ -17,6 +17,7 @@ import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.renderer.block.FluidModel;
 //?} else if >=1.21.5 {
 /*import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.renderer.block.model.BlockModelPart;
@@ -27,8 +28,17 @@ import net.minecraft.client.resources.model.BakedModel;
 import org.jspecify.annotations.Nullable;
 *///?}
 //? if <26.1 && fabric {
-/*import net.fabricmc.loader.api.FabricLoader;
+/*import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
+import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry;
+import net.fabricmc.loader.api.FabricLoader;
+*///?} else if <26.1 && >=1.21.9 {
+/*import net.minecraft.data.AtlasIds;
+import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
+*///?} else if <26.1 {
+/*import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?}
+import net.minecraft.client.renderer.texture.MissingTextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 //? if >=26.1 {
@@ -48,6 +58,8 @@ import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 
 /**
  * What each block state looks like on the map: how rays treat it, and its average top and
@@ -277,7 +289,7 @@ public final class BlockLooks {
 			} else if (block == Blocks.LEAF_LITTER) {
 				looks.tint[id] = TINT_DRY_FOLIAGE;
 			//?}
-			} else if (WATER_TINTED.contains(block) || kind == WATER) {
+			} else if (WATER_TINTED.contains(block)) {
 				looks.tint[id] = TINT_WATER;
 			} else if (block == Blocks.LILY_PAD) {
 				//? if >=1.21.4 {
@@ -311,23 +323,32 @@ public final class BlockLooks {
 				*///?}
 			}
 		}
-		// Fluids have no block model, so their particle texture is the untinted grey water. Every
-		// water cell (including kelp and seagrass, which sit in water) draws as tinted water.
-		int water = Block.BLOCK_STATE_REGISTRY.getId(Blocks.WATER.defaultBlockState());
-		looks.topTinted[water] = looks.top[water];
-		looks.topTintWeight[water] = 1;
-		looks.sideTinted[water] = looks.side[water];
-		looks.sideTintWeight[water] = 1;
-		looks.tint[water] = TINT_WATER;
-		for (int id = 0; id < size; id++) {
-			if (looks.kind[id] == WATER && id != water) {
-				looks.top[id] = looks.top[water];
-				looks.topTinted[id] = looks.topTinted[water];
-				looks.topTintWeight[id] = 1;
-				looks.side[id] = looks.side[water];
-				looks.sideTinted[id] = looks.sideTinted[water];
-				looks.sideTintWeight[id] = 1;
+		// A fluid's block has no model of its own, so every cell holding a fluid and nothing solid
+		// (kelp and seagrass stand in water) draws as the fluid's still texture. Water takes the
+		// biome's water tint; another fluid keeps its own fixed tint, if it has one.
+		Map<Fluid, FluidLook> fluidLooks = new IdentityHashMap<>();
+		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
+			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+			if (id < 0 || id >= size || looks.kind[id] != WATER) {
+				continue;
+			}
+			FluidState fluid = state.getFluidState();
+			FluidLook look = fluidLooks.computeIfAbsent(fluid.getType(), type -> fluidLook(fluid, spriteCache));
+			if (look.color() < 0) {
+				// No texture to be found: keep the colour of the block's particle texture.
+				continue;
+			}
+			looks.top[id] = look.color();
+			looks.topTinted[id] = look.color();
+			looks.topTintWeight[id] = 1;
+			looks.side[id] = look.color();
+			looks.sideTinted[id] = look.color();
+			looks.sideTintWeight[id] = 1;
+			if (fluid.getType().isSame(Fluids.WATER)) {
 				looks.tint[id] = TINT_WATER;
+			} else {
+				looks.tint[id] = TINT_NONE;
+				looks.constantTint[id] = look.tint();
 			}
 		}
 		current = looks;
@@ -365,6 +386,52 @@ public final class BlockLooks {
 			return state.getBlock() instanceof SnowLayerBlock ? SOLID : PLANT;
 		}
 		return SOLID;
+	}
+
+	/** A fluid's colour as 0xRRGGBB, or -1 if its texture can't be found, and its fixed tint or -1. */
+	private record FluidLook(int color, int tint) {
+	}
+
+	/**
+	 * Looks up the still texture and tint the game draws a fluid with. A mod's tint code may not
+	 * expect to be asked without a world, so a failure counts as no tint.
+	 */
+	private static FluidLook fluidLook(FluidState fluid, Map<TextureAtlasSprite, float[]> cache) {
+		TextureAtlasSprite sprite = null;
+		int tint = -1;
+		try {
+			//? if >=26.1 {
+			FluidModel model = Minecraft.getInstance().getModelManager().getFluidStateModelSet().get(fluid);
+			sprite = model.stillMaterial().sprite();
+			BlockTintSource source = model.tintSource();
+			tint = source == null ? -1 : source.color(fluid.createLegacyBlock());
+			//?} else if fabric {
+			/*FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getType());
+			if (handler != null) {
+				sprite = handler.getFluidSprites(null, null, fluid)[0];
+				tint = handler.getFluidColor(null, null, fluid);
+			}
+			*///?} else if >=1.21.9 {
+			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
+			sprite = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS).getSprite(extensions.getStillTexture());
+			tint = extensions.getTintColor();
+			*///?} else {
+			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
+			sprite = Minecraft.getInstance().getTextureAtlas(TextureAtlas.LOCATION_BLOCKS).apply(extensions.getStillTexture());
+			tint = extensions.getTintColor();
+			*///?}
+		} catch (RuntimeException e) {
+			// Keep the sprite if only the tint failed.
+			tint = -1;
+		}
+		if (sprite != null && sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation())) {
+			// An unregistered fluid or a missing texture: better the block's particle colour than purple.
+			sprite = null;
+		}
+		float[] avg = sprite == null ? null : spriteAverage(sprite, cache);
+		int color = avg == null || avg[3] <= 0 ? -1 : FaceColor.pack(avg[0], avg[1], avg[2]);
+		// -1 and opaque white both mean no tint.
+		return new FluidLook(color, (tint & 0xFFFFFF) == 0xFFFFFF ? -1 : tint & 0xFFFFFF);
 	}
 
 	private static void accumulate(FaceColor face, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
