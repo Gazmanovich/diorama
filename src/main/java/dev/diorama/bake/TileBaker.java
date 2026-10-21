@@ -205,13 +205,7 @@ public final class TileBaker {
 		long key = ((long) x << 32) | (z & 0xFFFFFFFFL);
 		int lid = this.lidAt.get(key);
 		if (lid == Integer.MIN_VALUE) {
-			int y = this.startY - 1;
-			// A pocket right under the cut would depend on the block above it, past the cut; edits
-			// there don't re-bake below, so the open cell just under the cut always ends the lid.
-			while (y >= this.limitY && (this.reader.solid(x, y, z) == 1 || y + 1 < this.startY && this.reader.pocket(x, y, z))) {
-				y--;
-			}
-			lid = y + 1;
+			lid = this.reader.lid(x, z, this.startY, this.limitY);
 			this.lidAt.put(key, lid);
 		}
 		return lid;
@@ -562,6 +556,11 @@ public final class TileBaker {
 
 			switch (kind) {
 				case BlockLooks.SOLID, BlockLooks.LAVA -> {
+					if (this.lifted && kind == BlockLooks.SOLID && this.reader.ceilingUnderside(x, by, bz, this.lid(x, bz))) {
+						// A ray that left the rock near a step in a stepped ceiling would clip the
+						// step below it and draw a piece of ceiling floating over the floor.
+						break;
+					}
 					if (this.fogOfWar && !this.source.isSeen(x, by, bz)
 						&& !(enteredTop ? this.source.isSeen(x, by + 1, bz) : this.source.isSeen(x, by, bz + 1))) {
 						return false;
