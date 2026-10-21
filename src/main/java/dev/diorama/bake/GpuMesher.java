@@ -365,11 +365,6 @@ public final class GpuMesher {
 								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
 								byte c = openSouth ? hereFirstWater[i + 1] : NO_WATER;
 								hereFirstWater[i] = a == SEEN_WATER || c == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || c == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
-								if (hereRock[i] && hereFirstWater[i] != NO_WATER) {
-									// The rays from the rock it lets through haven't been in water: one
-									// state for both doesn't hold.
-									mesh.traceInstead = true;
-								}
 							}
 						}
 						if (reached && !traced && wet >= 0) {
@@ -389,6 +384,11 @@ public final class GpuMesher {
 								// this cell's water is drawn, it's nearer and wins.
 								hereWater[i] = false;
 							}
+						}
+						if (fog && hereRock[i] && hereOpen[i] && hereFirstWater[i] != NO_WATER) {
+							// The rays from the rock it lets through haven't been in water, the others
+							// have, here or before: one state for both doesn't hold.
+							mesh.traceInstead = true;
 						}
 					} else if (kind == BlockLooks.SOLID) {
 						if (rockN != 0) {
