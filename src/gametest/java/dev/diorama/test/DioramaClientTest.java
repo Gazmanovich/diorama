@@ -1436,7 +1436,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Clicking elsewhere didn't put Delete back, or the first click deleted");
 		}
 		clickButton(context, "diorama.waypoint.delete");
-		clickButton(context, "diorama.waypoints.delete_confirm");
+		clickButton(context, "diorama.menu.delete_confirm");
 		if (context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
 			throw new AssertionError("Click again to delete didn't delete");
 		}

@@ -24,7 +24,6 @@
 	"diorama.waypoints.empty_map": "or right-click the map and pick %s.",
 	"diorama.waypoints.search": "Search waypoints",
 	"diorama.waypoints.no_match": "No waypoints match",
-	"diorama.waypoints.delete_confirm": "Click again to delete",
 	"diorama.waypoints.edit": "Edit",
 	"diorama.waypoints.hide": "Hide",
 	"diorama.waypoints.show": "Show",

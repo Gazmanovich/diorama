@@ -24,7 +24,6 @@
 	"diorama.waypoints.empty_map": "或在地图上右键并选择“%s”。",
 	"diorama.waypoints.search": "搜索路径点",
 	"diorama.waypoints.no_match": "没有匹配的路径点",
-	"diorama.waypoints.delete_confirm": "再次点击以删除",
 	"diorama.waypoints.edit": "编辑",
 	"diorama.waypoints.hide": "隐藏",
 	"diorama.waypoints.show": "显示",

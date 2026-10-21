@@ -223,7 +223,7 @@ public final class WaypointListScreen extends Screen {
 			span += button.getWidth() + ACTION_GAP;
 		}
 		if (this.armed) {
-			this.armedButton = Button.builder(Component.translatable("diorama.waypoints.delete_confirm").withStyle(ChatFormatting.RED), b -> this.delete(waypoint))
+			this.armedButton = Button.builder(Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED), b -> this.delete(waypoint))
 				.bounds(right - span, y, span, 20).build();
 			this.rowButtons.add(this.addRenderableWidget(this.armedButton));
 			return;
