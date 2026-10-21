@@ -1412,6 +1412,34 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-05-list");
+
+		// Typing in the search keeps the rows whose name has the text in it, in any case.
+		typeInto(context, 0, "LONG");
+		List<Waypoint> found = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).shown());
+		if (found.size() != 1 || !found.get(0).name.startsWith("Long waypoint name")) {
+			throw new AssertionError("Searching LONG shows " + found.stream().map(w -> w.name).toList());
+		}
+		// Delete asks again in place: the first click turns the row's buttons into Click again to
+		// delete, a click anywhere else puts them back, and only the second click deletes.
+		Waypoint longName = found.get(0);
+		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(longName));
+		clickAtGui(context, row[0], row[1]);
+		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selected()) != longName) {
+			throw new AssertionError("Clicking a row didn't select it");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		context.takeScreenshot("waypoints-05b-list-deleting");
+		clickAt(context, context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(0)));
+		boolean disarmed = context.computeOnClient(mc -> mc.gui.screen().children().stream().noneMatch(c ->
+			c instanceof net.minecraft.client.gui.components.Button b && b.getMessage().getString().equals("Click again to delete")));
+		if (!disarmed || !context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Clicking elsewhere didn't put Delete back, or the first click deleted");
+		}
+		clickButton(context, "diorama.waypoint.delete");
+		clickButton(context, "diorama.waypoints.delete_confirm");
+		if (context.computeOnClient(mc -> WaypointStore.get().all().contains(longName))) {
+			throw new AssertionError("Click again to delete didn't delete");
+		}
 		context.setScreen(() -> null);
 
 		// Dying leaves a death marker.
@@ -2244,6 +2272,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 		});
 		context.getInput().setCursorPos(at[0], at[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
+	/** Clicks the left mouse button at a point given in GUI pixels. */
+	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		context.getInput().setCursorPos(x * scale, y * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(2);
 	}
