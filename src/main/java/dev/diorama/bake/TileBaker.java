@@ -448,15 +448,18 @@ public final class TileBaker {
 			int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? this.looks.shape[id] : 0;
 			boolean partial = shape != 0;
 			if (partial) {
+				double tIn = t;
+				boolean hit = this.enterShape(this.looks.shapes[shape], fx, y0, z0, by, bz, t, Math.min(tMaxY, tMaxZ), enteredTop);
 				int wet = this.looks.wetShapes.get(id);
-				if (wet >= 0 && waterId < 0) {
-					// Waterlogged: the ray is in water from where it came into the cell.
+				// Waterlogged: the ray is in water from where it came into the cell, unless it met
+				// the block right there, as on a fence top level with the water.
+				if (wet >= 0 && waterId < 0 && (!hit || this.shapeT - tIn > 0.25)) {
 					waterId = wet;
-					waterT = t;
+					waterT = tIn;
 					waterBy = by;
 					waterBz = bz;
 				}
-				if (this.enterShape(this.looks.shapes[shape], fx, y0, z0, by, bz, t, Math.min(tMaxY, tMaxZ), enteredTop)) {
+				if (hit) {
 					t = this.shapeT;
 					enteredTop = this.shapeTop;
 				} else {
