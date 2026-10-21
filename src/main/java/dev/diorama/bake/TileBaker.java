@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
  * That hit is then lit: in the surface view by the sun, with a second ray toward it for shadows;
  * in a cave slice by the game's own block and sky light. Under a roof (the Nether) it is lit from
  * above as if the rock over the first open space were lifted off, and fades into the biome's fog
- * with depth. Corner ambient occlusion and partial colour from plants, glass and water come on top.
+ * the lower it lies. Corner ambient occlusion and partial colour from plants, glass and water come on top.
  */
 public final class TileBaker {
 	/** Rotated-grid sample offsets inside a pixel. */
@@ -30,7 +30,12 @@ public final class TileBaker {
 	private static final float[] LID_KEY_TINT = {1.1F, 1.0F, 0.88F};
 	private static final float[] LID_FILL_TINT = {1.0F, 0.86F, 0.84F};
 	private static final float LID_GLOW = 0.7F;
-	/** Depth below the cut at which the Nether's fog has covered about two thirds of a surface. */
+	/**
+	 * The Nether's fog starts this far below the roof, so high ground keeps its own colour, the
+	 * way ground near you does in the game, and the same height looks the same in every view.
+	 */
+	private static final int HAZE_START = 30;
+	/** How far below where it starts the fog has covered about two thirds of a surface. */
 	private static final double HAZE_DEPTH = 55;
 	private static final float HAZE_MAX = 0.72F;
 	/** The fog is lit a little brighter than its colour in the game, which is what the far distance fades to. */
@@ -131,8 +136,8 @@ public final class TileBaker {
 	private final double sunZ;
 	/**
 	 * In a dimension with a roof, the sky view and cave slices alike: light falls in from above as
-	 * if the rock over the first open space were lifted off, and the biome's fog thickens with depth
-	 * below the cut.
+	 * if the rock over the first open space were lifted off, and the biome's fog thickens the lower
+	 * the ground lies.
 	 */
 	private final boolean lifted;
 	/** Per column, the lowest y of the lifted rock; see {@link #lid}. */
@@ -803,9 +808,10 @@ public final class TileBaker {
 		this.outG = this.albedoG * lg;
 		this.outB = this.albedoB * lb;
 		if (this.lifted) {
-			// The deeper below the cut, the more of the biome's fog lies in front: ledges near the
+			// The lower the ground, the more of the biome's fog lies in front: ledges high under the
 			// roof stand out over the floor and the lava sea far below.
-			float f = (float) Math.min(HAZE_MAX, 1 - Math.exp(-(this.startY - hitY) / HAZE_DEPTH));
+			double below = this.source.roof() - HAZE_START - hitY;
+			float f = below <= 0 ? 0 : (float) Math.min(HAZE_MAX, 1 - Math.exp(-below / HAZE_DEPTH));
 			this.hazeColor(x + fx, hitY, hitZ);
 			this.outR += (this.hazeR - this.outR) * f;
 			this.outG += (this.hazeG - this.outG) * f;
