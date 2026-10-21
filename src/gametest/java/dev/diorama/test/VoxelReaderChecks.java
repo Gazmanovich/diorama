@@ -1,10 +1,17 @@
-package dev.diorama.bake;
+package dev.diorama.test;
 
+import dev.diorama.bake.BlockLooks;
+import dev.diorama.bake.ChunkSource;
+import dev.diorama.bake.VoxelReader;
 import dev.diorama.data.ChunkSnapshot;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
-/** Compares decoded IDs and solid masks with the snapshot, including modded registry IDs. */
+/**
+ * Compares decoded IDs and solid masks with the snapshot, including modded registry IDs. It lives
+ * outside {@code dev.diorama.bake}: NeoForge loads the test jar as its own module, and two modules
+ * can't share a package.
+ */
 public final class VoxelReaderChecks {
 	public static void check(ChunkSource source, int chunkX, int chunkZ) {
 		ChunkSnapshot snapshot = source.chunk(chunkX, chunkZ);
