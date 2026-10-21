@@ -285,9 +285,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 */
 	//? if fabric {
 	private static void trackedPlayers(ClientGameTestContext context) {
-		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
-		properties.setProperty("gamemode", "creative");
+		java.util.Properties properties = serverProperties();
 		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
 		// Bob is higher up than the radar's default height range reaches, which hides players as it does mobs.
 		int range = context.computeOnClient(mc -> Settings.get().radarRange);
@@ -413,9 +411,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static String playOnServer(ClientGameTestContext context, String seed, String name, @Nullable String beforeJoin,
 		@Nullable String addWaypoint, List<String> expected, List<String> unexpected, @Nullable Boolean stripKnown, byte @Nullable [] levelId) {
 		levelIdOnJoin = levelId;
-		java.util.Properties properties = new java.util.Properties();
-		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
-		properties.setProperty("gamemode", "creative");
+		java.util.Properties properties = serverProperties();
 		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> s.setSeed(seed))
@@ -579,6 +575,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
+	}
+
+	private static java.util.Properties serverProperties() {
+		java.util.Properties properties = new java.util.Properties();
+		properties.setProperty("server-port", String.valueOf(SERVER_PORT));
+		properties.setProperty("gamemode", "creative");
+		// No watchdog: on a slow machine (software rendering on a boat.dev VM) the server can wait
+		// over its 60 s limit for the client's turn, and the watchdog takes that for a hang.
+		properties.setProperty("max-tick-time", "-1");
+		return properties;
 	}
 
 	private static int freePort() {
