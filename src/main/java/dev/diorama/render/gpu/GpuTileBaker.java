@@ -52,8 +52,10 @@ public final class GpuTileBaker {
 	static final int VOXEL_WIDTH = 4096;
 	static final int VOXEL_HEIGHT = 512;
 	/** Per face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot (an int). */
-	static final int FACE_BYTES = 24;
-	static final int CASTER_BYTES = 8;
+	/** A face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot, box (ints). */
+	static final int FACE_BYTES = 28;
+	/** A shadow caster: cell and face (4 shorts), box (int). */
+	static final int CASTER_BYTES = 12;
 	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays. */
 	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13) * 16;
 
@@ -241,8 +243,9 @@ public final class GpuTileBaker {
 			ByteBuffer casters = MemoryUtil.memAlloc(Math.max(1, this.casterCount * CASTER_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
 			int[] d = mesh.casters.data;
 			for (int q = 0; q < this.casterCount; q++) {
-				int i = q * 8;
+				int i = q * GpuMesher.STRIDE;
 				casters.putShort((short) (d[i] - originX)).putShort((short) d[i + 1]).putShort((short) (d[i + 2] - originZ)).putShort((short) d[i + 3]);
+				casters.putInt(d[i + 8]);
 			}
 			casters.flip();
 			this.casters = casters;
@@ -268,7 +271,7 @@ public final class GpuTileBaker {
 		private static void putFaces(ByteBuffer out, GpuMesher.Quads quads, int originX, int originZ, int firstSky) {
 			int[] d = quads.data;
 			for (int q = 0; q < quads.count; q++) {
-				int i = q * 8;
+				int i = q * GpuMesher.STRIDE;
 				out.putShort((short) (d[i] - originX)).putShort((short) d[i + 1]).putShort((short) (d[i + 2] - originZ)).putShort((short) (d[i + 3] | d[i + 7] << 4));
 				int color = d[i + 4];
 				out.put((byte) (color >> 16)).put((byte) (color >> 8)).put((byte) color).put((byte) (color >>> 24));
@@ -277,6 +280,7 @@ public final class GpuTileBaker {
 				int light = d[i + 6];
 				out.put((byte) (light >>> 24)).put((byte) (light >> 16)).put((byte) (light >> 8)).put((byte) light);
 				out.putInt(firstSky < 0 ? -1 : firstSky + q);
+				out.putInt(d[i + 8]);
 			}
 		}
 

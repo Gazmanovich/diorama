@@ -38,7 +38,7 @@ import org.lwjgl.system.MemoryStack;
  * after. Pixels come back through pixel buffers with a fence, picked up by {@link #poll}.
  */
 final class GlBakeBackend implements BakeBackend {
-	private static final String[] ATTRIBUTES = {"Corner", "Cell", "Color", "Occlusion", "FaceLight", "SkyIndex"};
+	private static final String[] ATTRIBUTES = {"Corner", "Cell", "Color", "Occlusion", "FaceLight", "SkyIndex", "Box"};
 	/** Well clear of the binding points vanilla uses. */
 	private static final int UBO_BINDING = 30;
 	/** Texture units 0..5; vanilla's copy covers units 0..11. */
@@ -329,6 +329,7 @@ final class GlBakeBackend implements BakeBackend {
 		glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, true, FACE_BYTES, offset + 12);
 		glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, true, FACE_BYTES, offset + 16);
 		glVertexAttribIPointer(5, 1, GL_INT, FACE_BYTES, offset + 20);
+		glVertexAttribIPointer(6, 1, GL_INT, FACE_BYTES, offset + 24);
 	}
 
 	private void target(int fbo, int width, int height) {
@@ -461,6 +462,9 @@ final class GlBakeBackend implements BakeBackend {
 		glEnableVertexAttribArray(1);
 		divisor(1, 1);
 		glVertexAttribIPointer(1, 4, GL_SHORT, CASTER_BYTES, 0);
+		glEnableVertexAttribArray(6);
+		divisor(6, 1);
+		glVertexAttribIPointer(6, 1, GL_INT, CASTER_BYTES, 8);
 		this.emptyVao = glGenVertexArrays();
 		GlState.forgetBuffers();
 		int error = glGetError();

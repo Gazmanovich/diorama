@@ -61,9 +61,33 @@ public final class GpuMesher {
 	private GpuMesher() {
 	}
 
-	/** A growable list of faces, eight ints each: see {@link #add}. */
+	/** Ints per face in {@link Quads#data}. */
+	public static final int STRIDE = 9;
+
+	/**
+	 * A box inside a cell, in sixteenths: x0, y0, z0, x1, y1, z1 five bits each, low first. A
+	 * face of a smaller block covers its box's face instead of the cell's; at 4 pixels a block, a
+	 * sixteenth is a quarter pixel.
+	 */
+	public static final int FULL_BOX = box(0, 0, 0, 16, 16, 16);
+
+	static int box(int x0, int y0, int z0, int x1, int y1, int z1) {
+		return x0 | y0 << 5 | z0 << 10 | x1 << 15 | y1 << 20 | z1 << 25;
+	}
+
+	/** Box {@code i} of a shape, rounded to sixteenths and kept inside the cell. */
+	static int box(float[] boxes, int i) {
+		return box(sixteenths(boxes[i]), sixteenths(boxes[i + 1]), sixteenths(boxes[i + 2]),
+			sixteenths(boxes[i + 3]), sixteenths(boxes[i + 4]), sixteenths(boxes[i + 5]));
+	}
+
+	private static int sixteenths(float v) {
+		return Math.max(0, Math.min(16, Math.round(v * 16)));
+	}
+
+	/** A growable list of faces, {@link #STRIDE} ints each: see {@link #add}. */
 	public static final class Quads {
-		public int[] data = new int[8 * 1024];
+		public int[] data = new int[STRIDE * 1024];
 		public int count;
 
 		/**
@@ -73,8 +97,13 @@ public final class GpuMesher {
 		 * and sky light in cave views: sky in the top byte, block light in the next.
 		 */
 		void add(int x, int y, int z, int face, int color, int ao, int light, int flags) {
-			int i = this.count * 8;
-			if (i + 8 > this.data.length) {
+			this.add(x, y, z, face, color, ao, light, flags, FULL_BOX);
+		}
+
+		/** A face of one box of a block smaller than a cube: see {@link GpuMesher#box}. */
+		void add(int x, int y, int z, int face, int color, int ao, int light, int flags, int box) {
+			int i = this.count * STRIDE;
+			if (i + STRIDE > this.data.length) {
 				this.data = java.util.Arrays.copyOf(this.data, this.data.length * 2);
 			}
 			this.data[i] = x;
@@ -85,6 +114,7 @@ public final class GpuMesher {
 			this.data[i + 5] = ao;
 			this.data[i + 6] = light;
 			this.data[i + 7] = flags;
+			this.data[i + 8] = box;
 			this.count++;
 		}
 	}
@@ -261,7 +291,46 @@ public final class GpuMesher {
 						continue;
 					}
 					byte kind = looks.kind[id];
-					if (kind == BlockLooks.SOLID) {
+					// Smaller than a cube (only solid and see-through blocks have shapes): a ray
+					// meets one of its boxes or goes on beside them, as TileBaker.enterShape.
+					int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? looks.shape[id] : 0;
+					if (shape != 0) {
+						if (kind == BlockLooks.SOLID && (rockAbove || rockSouth)) {
+							// Inside the rock below a cut, any solid block is rock.
+							hereRock[i] = true;
+							any = true;
+						}
+						boolean entered = kind == BlockLooks.SOLID ? openAbove || openSouth : fromAbove || fromSouth;
+						if (entered) {
+							float[] boxes = looks.shapes[shape];
+							if (kind == BlockLooks.SOLID) {
+								shapeFaces(mesh, helper, source, looks, style, id, x, y, z, boxes, lit, fog);
+								mesh.lowestY = Math.min(mesh.lowestY, y);
+							} else {
+								helper.albedo(id, x, z, true);
+								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 64);
+								for (int b = 0; b < boxes.length; b += 6) {
+									int box = box(boxes, b);
+									mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, box);
+									mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, box);
+								}
+							}
+							// Rays that miss the boxes go on through the cell.
+							hereOpen[i] = true;
+							any = true;
+							if (fog) {
+								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+								byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+								hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+							}
+							int wet = looks.wetShapes.get(id);
+							if (wet >= 0) {
+								// Waterlogged: in water from where the ray came into the cell.
+								waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
+									aboveWater, hereWater, hereFirstWater, lit, fog);
+							}
+						}
+					} else if (kind == BlockLooks.SOLID) {
 						if (rockAbove || rockSouth) {
 							// Still in the rock below the cut.
 							hereRock[i] = true;
@@ -294,24 +363,8 @@ public final class GpuMesher {
 							hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
 						}
 						if (kind == BlockLooks.WATER) {
-							hereWater[i] = true;
-							boolean entersTop = fromAbove && !(openAbove && aboveWater[i]);
-							boolean entersSouth = fromSouth && !(openSouth && hereWater[i + 1]);
-							if (fog && hereFirstWater[i] == NO_WATER) {
-								hereFirstWater[i] = source.isSeen(x, y, z) ? SEEN_WATER : UNSEEN_WATER;
-							}
-							if (entersTop || entersSouth) {
-								helper.albedo(id, x, z, true);
-								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 255);
-								// Lit like the tracer: by the light just above the cell it entered.
-								int light = lit ? light(reader, x, y + 1, z) : 0;
-								if (entersTop) {
-									mesh.water.add(x, y, z, TOP, color, 0, light, WATER_FACE);
-								}
-								if (entersSouth) {
-									mesh.water.add(x, y, z, SOUTH, color, 0, light, WATER_FACE);
-								}
-							}
+							waterCell(mesh, helper, reader, source, id, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
+								aboveWater, hereWater, hereFirstWater, lit, fog);
 						} else if (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) {
 							helper.albedo(id, x, z, true);
 							int weight = kind == BlockLooks.PLANT ? 102 : 64;
@@ -363,7 +416,7 @@ public final class GpuMesher {
 			}
 		}
 		if (!lit) {
-			casters(mesh, reader, style, x0, x1, minV, maxV, source.minY());
+			casters(mesh, reader, looks, style, x0, x1, minV, maxV, source.minY());
 			if (fx0 <= fx1) {
 				voxels(mesh, reader, fx0, fx1, fy0, fy1, fz0, fz1);
 			}
@@ -386,13 +439,60 @@ public final class GpuMesher {
 		return mesh;
 	}
 
+	/** A water cell a ray reaches: its top or south face where the ray first enters water. */
+	private static void waterCell(
+		Mesh mesh, TileBaker helper, VoxelReader reader, ChunkSource source, int id, int x, int y, int z, int i, boolean fromAbove, boolean fromSouth,
+		boolean openAbove, boolean openSouth, boolean[] aboveWater, boolean[] hereWater, byte[] hereFirstWater, boolean lit, boolean fog
+	) {
+		hereWater[i] = true;
+		boolean entersTop = fromAbove && !(openAbove && aboveWater[i]);
+		boolean entersSouth = fromSouth && !(openSouth && hereWater[i + 1]);
+		if (fog && hereFirstWater[i] == NO_WATER) {
+			hereFirstWater[i] = source.isSeen(x, y, z) ? SEEN_WATER : UNSEEN_WATER;
+		}
+		if (entersTop || entersSouth) {
+			helper.albedo(id, x, z, true);
+			int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 255);
+			// Lit like the tracer: by the light just above the cell it entered.
+			int light = lit ? light(reader, x, y + 1, z) : 0;
+			if (entersTop) {
+				mesh.water.add(x, y, z, TOP, color, 0, light, WATER_FACE);
+			}
+			if (entersSouth) {
+				mesh.water.add(x, y, z, SOUTH, color, 0, light, WATER_FACE);
+			}
+		}
+	}
+
+	/**
+	 * The top and south faces of each box of a solid block smaller than a cube, which is all a
+	 * camera ray heading down and north can meet. Shaded as the cube's faces would be at the same
+	 * place: TileBaker.shade reads occlusion, light and sky from the cell in front of the cube's face.
+	 */
+	private static void shapeFaces(
+		Mesh mesh, TileBaker helper, ChunkSource source, BlockLooks looks, MapStyle style, int id, int x, int y, int z, float[] boxes, boolean lit, boolean fog
+	) {
+		for (int b = 0; b < boxes.length; b += 6) {
+			int box = box(boxes, b);
+			solidFace(mesh, helper, source, looks, style, id, x, y, z, true, BlockLooks.SOLID, lit, fog, box);
+			solidFace(mesh, helper, source, looks, style, id, x, y, z, false, BlockLooks.SOLID, lit, fog, box);
+		}
+	}
+
 	/** A solid or lava face, or an unknown one when fog of war hides it. */
 	private static void solidFace(
 		Mesh mesh, TileBaker helper, ChunkSource source, BlockLooks looks, MapStyle style, int id, int x, int y, int z, boolean top, byte kind, boolean lit, boolean fog
 	) {
+		solidFace(mesh, helper, source, looks, style, id, x, y, z, top, kind, lit, fog, FULL_BOX);
+	}
+
+	private static void solidFace(
+		Mesh mesh, TileBaker helper, ChunkSource source, BlockLooks looks, MapStyle style, int id, int x, int y, int z, boolean top, byte kind, boolean lit, boolean fog,
+		int box
+	) {
 		int face = top ? TOP : SOUTH;
 		if (fog && !source.isSeen(x, y, z) && !(top ? source.isSeen(x, y + 1, z) : source.isSeen(x, y, z + 1))) {
-			mesh.opaque.add(x, y, z, face, 0, 0, 0, UNKNOWN);
+			mesh.opaque.add(x, y, z, face, 0, 0, 0, UNKNOWN, box);
 			return;
 		}
 		int color = solidColor(helper, id, x, y, z, top, looks.emission[id], kind, style);
@@ -402,7 +502,7 @@ public final class GpuMesher {
 		if (mesh.overlays != null && kind == BlockLooks.SOLID) {
 			flags |= overlayFlags(mesh, helper.reader, looks, id, x, y, z, top);
 		}
-		mesh.opaque.add(x, y, z, face, color, ao, light, flags);
+		mesh.opaque.add(x, y, z, face, color, ao, light, flags, box);
 	}
 
 	/** TileBaker.overlayBits for a face, all but the chunk lines, which depend on where in the block a pixel is. */
@@ -491,7 +591,7 @@ public final class GpuMesher {
 	 * the west, and a little south. Each column is scanned from its top down to the lowest face
 	 * the camera sees.
 	 */
-	private static void casters(Mesh mesh, VoxelReader reader, MapStyle style, int x0, int x1, double minV, double maxV, int minY) {
+	private static void casters(Mesh mesh, VoxelReader reader, BlockLooks looks, MapStyle style, int x0, int x1, double minV, double maxV, int minY) {
 		double elevation = Math.toRadians(style.sunElevation());
 		double flat = TileBaker.SHADOW_DISTANCE * Math.cos(elevation);
 		int reachX = (int) Math.ceil(flat * 0.878) + 1;
@@ -513,7 +613,24 @@ public final class GpuMesher {
 				// One above the column's top block: nothing above it casts.
 				int top = Math.min(chunk.surface(x & 15, z & 15) + 1, mesh.topY + reachY);
 				for (int y = top; y >= bottom; y--) {
-					if (reader.solid(x, y, z) != 1) {
+					int solid = reader.solid(x, y, z);
+					if (solid == 2) {
+						// Smaller than a cube: shadow rays only stop at its boxes (TileBaker.meetsShape).
+						int id = reader.state(x, y, z);
+						int shape = id < 0 ? 0 : looks.shape[id];
+						if (shape != 0) {
+							float[] boxes = looks.shapes[shape];
+							for (int b = 0; b < boxes.length; b += 6) {
+								int box = box(boxes, b);
+								mesh.casters.add(x, y, z, TOP, 0, 0, 0, 0, box);
+								mesh.casters.add(x, y, z, WEST, 0, 0, 0, 0, box);
+								mesh.casters.add(x, y, z, SOUTH, 0, 0, 0, 0, box);
+							}
+							highest = Math.max(highest, y + 1);
+						}
+						continue;
+					}
+					if (solid != 1) {
 						continue;
 					}
 					if (reader.solid(x, y + 1, z) != 1) {
@@ -548,21 +665,28 @@ public final class GpuMesher {
 		}
 		long[] order = new long[n];
 		for (int q = 0; q < n; q++) {
-			int i = q * 8;
-			double y = quads.data[i + 1] + (quads.data[i + 3] == TOP ? 1 : 0.5);
-			double z = quads.data[i + 2] + (quads.data[i + 3] == TOP ? 0.5 : 1);
+			int i = q * STRIDE;
+			// Where the face's box puts it: its top or its south side, in the middle.
+			int box = quads.data[i + 8];
+			double y0 = (box >> 5 & 31) / 16.0;
+			double z0 = (box >> 10 & 31) / 16.0;
+			double y1 = (box >> 20 & 31) / 16.0;
+			double z1 = (box >> 25 & 31) / 16.0;
+			boolean top = quads.data[i + 3] == TOP;
+			double y = quads.data[i + 1] + (top ? y1 : (y0 + y1) / 2);
+			double z = quads.data[i + 2] + (top ? (z0 + z1) / 2 : z1);
 			double depth = -(sin * y + cos * z);
 			long d = (long) (depth * 1024);
 			order[q] = (d << 24) | q;
 		}
 		java.util.Arrays.sort(order);
-		int[] sorted = new int[n * 8];
+		int[] sorted = new int[n * STRIDE];
 		for (int q = 0; q < n; q++) {
-			int from = (int) (order[q] & 0xFFFFFF) * 8;
-			System.arraycopy(quads.data, from, sorted, q * 8, 8);
+			int from = (int) (order[q] & 0xFFFFFF) * STRIDE;
+			System.arraycopy(quads.data, from, sorted, q * STRIDE, STRIDE);
 		}
 		// Back into the list, which is reused: see LISTS.
-		System.arraycopy(sorted, 0, quads.data, 0, n * 8);
+		System.arraycopy(sorted, 0, quads.data, 0, n * STRIDE);
 	}
 
 	private static int solidColor(TileBaker helper, int id, int x, int y, int z, boolean top, int emission, byte kind, MapStyle style) {

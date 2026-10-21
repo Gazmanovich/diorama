@@ -64,9 +64,11 @@ final class BlazeBakeBackend implements BakeBackend {
 		.addAttribute("Occlusion", GpuFormat.RGBA8_UNORM)
 		.addAttribute("FaceLight", GpuFormat.RGBA8_UNORM)
 		.addAttribute("SkyIndex", GpuFormat.R32_SINT)
+		.addAttribute("Box", GpuFormat.R32_SINT)
 		.build();
 	private static final VertexFormat CASTER = VertexFormat.builder(1)
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
+		.addAttribute("Box", GpuFormat.R32_SINT)
 		.build();
 
 	private static final BindGroupLayout BAKE = BindGroupLayout.builder().withUniform("DioramaBake", UniformType.UNIFORM_BUFFER).build();

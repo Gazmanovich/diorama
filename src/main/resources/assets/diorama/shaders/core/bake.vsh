@@ -24,6 +24,11 @@ LOC(3) in vec4 Occlusion;
 LOC(4) in vec4 FaceLight;
 // Where the face's four corners are in the sky texture, a slot each, or -1 for none.
 LOC(5) in int SkyIndex;
+// The box in the cell the face belongs to, in sixteenths: x0, y0, z0, x1, y1, z1, five bits each.
+// The whole cell for a cube; one box of a smaller block, as GpuMesher.box packs it.
+LOC(6) in int Box;
+#else
+LOC(2) in int Box;
 #endif
 
 const int FLAG_UNKNOWN = 1;
@@ -135,17 +140,23 @@ float sky_slot(int slot) {
 }
 #endif
 
-// A face's corner c in tile-local blocks.
-vec3 corner_position(int face, vec3 base, vec2 c) {
+// The face's box, low corner then high, in blocks within the cell.
+void box_bounds(int box, out vec3 lo, out vec3 hi) {
+    lo = vec3(float(box & 31), float((box >> 5) & 31), float((box >> 10) & 31)) / 16.0;
+    hi = vec3(float((box >> 15) & 31), float((box >> 20) & 31), float((box >> 25) & 31)) / 16.0;
+}
+
+// A face's corner c in tile-local blocks: on its box's face, the cell's face for a cube.
+vec3 corner_position(int face, vec3 base, vec2 c, vec3 lo, vec3 hi) {
     if (face == 0) {
         // Top: corners nw, ne, sw, se.
-        return base + vec3(c.x, 1.0, c.y);
+        return base + vec3(mix(lo.x, hi.x, c.x), hi.y, mix(lo.z, hi.z, c.y));
     } else if (face == 1) {
         // South: top west, top east, bottom west, bottom east.
-        return base + vec3(c.x, 1.0 - c.y, 1.0);
+        return base + vec3(mix(lo.x, hi.x, c.x), mix(hi.y, lo.y, c.y), hi.z);
     } else if (face == 2) {
         // West, for the shadow map only.
-        return base + vec3(0.0, c.x, c.y);
+        return base + vec3(lo.x, mix(lo.y, hi.y, c.x), mix(lo.z, hi.z, c.y));
     }
     // Floor: the bottom of the cell.
     return base + vec3(c.x, 0.0, c.y);
@@ -156,7 +167,16 @@ void main() {
     int face = Cell.w & 15;
     int flags = Cell.w >> 4;
     vec3 base = vec3(Cell.xyz);
-    vec3 p = corner_position(face, base, c);
+    vec3 lo;
+    vec3 hi;
+#ifdef SKY_PASS
+    // Sky occlusion is read at the cube's corners, as the tracer does for a smaller block too.
+    lo = vec3(0.0);
+    hi = vec3(1.0);
+#else
+    box_bounds(Box, lo, hi);
+#endif
+    vec3 p = corner_position(face, base, c, lo, hi);
 #ifdef SHADOW
     float su = dot(p, SunU.xyz) + SunU.w;
     float sv = dot(p, SunV.xyz) + SunV.w;
@@ -182,7 +202,9 @@ void main() {
     // north edge lands on the first rows of the texture.
     gl_Position = vec4((p.x * 4.0 + 1.0) / 257.0 - 1.0, (v * 4.0 + 1.0) / 257.0 - 1.0, bake_ndc_depth(d), 1.0);
     localPos = p;
-    faceUv = c;
+    // Where on the cube's face this corner is: occlusion and sky blend across the cube's face, at
+    // the same place for a smaller block's face as TileBaker.shade reads them.
+    faceUv = face == 1 ? vec2(mix(lo.x, hi.x, c.x), 1.0 - mix(hi.y, lo.y, c.y)) : vec2(mix(lo.x, hi.x, c.x), mix(lo.z, hi.z, c.y));
     faceColor = Color;
     faceOcclusion = Occlusion;
     faceLight = FaceLight;
