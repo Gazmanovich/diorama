@@ -147,8 +147,12 @@ public final class PinArt {
 	private PinArt() {
 	}
 
-	/** A badge of diameter {@code d} (15 or 13) raised on a point, with a small shadow where it touches. */
-	public static Art standing(int colour, boolean death, int d) {
+	/**
+	 * A badge raised on a point, with a small shadow where it touches. The pin comes in the two
+	 * designed sizes, a head of 15 or 13 pixels; other sizes get the nearer one.
+	 */
+	public static Art standing(int colour, boolean death, int head) {
+		int d = standingHead(head);
 		int tip = d == 13 ? 5 : 6;
 		int face = death ? DEATH_FACE : colour;
 		int w = d + 4;
@@ -200,6 +204,11 @@ public final class PinArt {
 			image.put(m, colour, 1);
 		}
 		return new Art(image, pad + d / 2.0F, pad + d / 2.0F, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
+	}
+
+	/** The designed standing pin nearest a head size: 15 or 13. */
+	public static int standingHead(int head) {
+		return head >= 14 ? 15 : 13;
 	}
 
 	/** Where something {@code size} wide starts so it is centred in x0..x1; a half pixel rounds toward the bottom right, where the bevel is darker. */

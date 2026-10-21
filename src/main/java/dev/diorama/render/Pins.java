@@ -29,7 +29,8 @@ public final class Pins {
 	}
 
 	/** A pin standing with its point on (x, y), the spot it marks. */
-	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int head) {
+	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int size) {
+		int head = PinArt.standingHead(size);
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
 		Sprite sprite = sprite("pin " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head));
 		draw(graphics, sprite, waypoint, x, y, head);
@@ -57,7 +58,8 @@ public final class Pins {
 	}
 
 	/** How far above the marked spot a standing pin's head is centred, in GUI pixels. */
-	public static float headAbove(int head) {
+	public static float headAbove(int size) {
+		int head = PinArt.standingHead(size);
 		return (head == SMALL ? 5 : 6) + head / 2.0F;
 	}
 
