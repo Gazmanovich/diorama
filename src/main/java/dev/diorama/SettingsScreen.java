@@ -268,12 +268,15 @@ public final class SettingsScreen extends Screen {
 	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		super.extractBackground(graphics, mouseX, mouseY, a);
-		// After the blur, so the preview stays sharp; under the settings, which a big minimap can reach.
+		// After the blur, so the preview stays sharp. A big minimap would reach under the settings:
+		// it's cut off at their edge, which also keeps its depth (before 1.21.6) clear of them.
+		graphics.enableScissor(this.side, 0, this.width, this.height);
 		//? if >=1.21.2 {
 		this.preview.preview(graphics, this.minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(true));
 		//?} else {
 		/*this.preview.preview(graphics, this.minecraft.getTimer().getGameTimeDeltaPartialTick(true));
 		*///?}
+		graphics.disableScissor();
 		// The settings side, as vanilla draws a list in a world.
 		//? if >=1.21.6 {
 		graphics.nextStratum();
