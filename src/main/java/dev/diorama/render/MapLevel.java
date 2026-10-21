@@ -74,6 +74,8 @@ public final class MapLevel implements ChunkSource {
 	 */
 	private volatile int surfaceGeneration;
 	private volatile int caveGeneration;
+	/** Finished images drawn on the GPU without a check, until the render thread takes them. */
+	private final java.util.Set<TileImage> gpuImages = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	// Render thread only below here.
 	private final Map<TileKey, MapTile> tiles = new HashMap<>();
@@ -522,10 +524,12 @@ public final class MapLevel implements ChunkSource {
 				this.slotReleased(image.key());
 			}
 			boolean background = this.backgroundBakes.remove(image.key());
+			// Drawn on the GPU alone, and the check has failed since: neither shown nor saved.
+			boolean distrusted = this.gpuImages.remove(image) && dev.diorama.render.gpu.GpuBakeCheck.failed();
 			if (this.closed) {
 				continue;
 			}
-			if (image.generation() != this.generation(image.key())) {
+			if (distrusted || image.generation() != this.generation(image.key())) {
 				// Baked under old colours or the other cave mode; bake it again.
 				MapTile stale = this.tiles.remove(image.key());
 				if (stale != null) {
@@ -688,6 +692,7 @@ public final class MapLevel implements ChunkSource {
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image;
+						boolean gpuOnly = false;
 						if (result.pixels() == null) {
 							if (check) {
 								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, !result.cancelled());
@@ -706,8 +711,13 @@ public final class MapLevel implements ChunkSource {
 							image = TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						} else {
 							image = TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+							gpuOnly = true;
 						}
-						this.finished.add(image.withGeneration(generation));
+						TileImage done = image.withGeneration(generation);
+						if (gpuOnly) {
+							this.gpuImages.add(done);
+						}
+						this.finished.add(done);
 					} catch (Throwable t) {
 						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));

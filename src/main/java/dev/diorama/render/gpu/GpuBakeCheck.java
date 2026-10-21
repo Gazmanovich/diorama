@@ -50,10 +50,11 @@ public final class GpuBakeCheck {
 	 * Share of the tile's pixels known to one bake and not the other, and of pixels both know
 	 * with a different alpha (how many of the four samples hit something). Along the edge of the
 	 * explored area the two sample patterns split pixels differently: matching drivers measured
-	 * up to 0.12% and 3.1% there. A GPU that gets coverage wrong gets it wrong almost everywhere.
+	 * up to 0.12% and 3.1% there. Alpha decides which pixels a merge keeps from the saved tile, so
+	 * it can't be loose: 8%, as the comparison test allows.
 	 */
 	private static final double MAX_MISMATCH = 0.02;
-	private static final double MAX_ALPHA = 0.2;
+	private static final double MAX_ALPHA = 0.08;
 	/** Share of pixels both know whose overlay bits differ: 0.35% measured, from the sample positions. */
 	private static final double MAX_OVERLAY = 0.02;
 	/**
@@ -226,6 +227,11 @@ public final class GpuBakeCheck {
 		Diorama.LOGGER.warn("GPU baking turned off for this session on {}: {}. Tiles are traced on the CPU instead.", GpuTileBaker.device(), why);
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> {
+			// Whatever the map shows may have come from the GPU: bake it again with the tracer.
+			dev.diorama.MapSession session = dev.diorama.MapSession.get();
+			if (session != null) {
+				session.map().colorsChanged();
+			}
 			Component message = Component.translatable("diorama.gpu_baking.failed");
 			//? if >=26.1 {
 			mc.gui.hud.getChat().addClientSystemMessage(message);
