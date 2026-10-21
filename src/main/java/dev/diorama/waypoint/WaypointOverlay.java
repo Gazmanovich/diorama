@@ -38,8 +38,9 @@ public final class WaypointOverlay {
 		float inset = Pins.edgeReach(size);
 		float cx = view.x() + view.width() / 2.0F;
 		float cy = view.y() + view.height() / 2.0F;
-		float halfW = view.width() / 2.0F - inset;
-		float halfH = view.height() / 2.0F - inset;
+		// At least a pixel, so a view smaller than a badge still gets finite positions.
+		float halfW = Math.max(1, view.width() / 2.0F - inset);
+		float halfH = Math.max(1, view.height() / 2.0F - inset);
 		for (Waypoint waypoint : waypoints) {
 			if (!waypoint.visible) {
 				continue;
@@ -51,7 +52,8 @@ public final class WaypointOverlay {
 			if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
 			} else {
-				// Too near the edge for the whole pin to show: a badge at the edge, pointing the way.
+				// Too near the edge for the whole pin to show: a badge pointing the way, pulled in to
+				// the view's edge when the spot is outside it.
 				float reach = Math.max(1, Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH));
 				pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
 			}
