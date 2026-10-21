@@ -38,11 +38,13 @@ public final class GpuBakeCheck {
 	private static final int FAILURES = 3;
 	/**
 	 * Limits for each tile, over pixels both bakes know: the mean difference and how much brighter
-	 * or darker the GPU's are on average. Tile by tile, matching drivers measured means up to 2.9
-	 * (bright snow is the worst) and biases up to 1.6; a driver that lost the sky occlusion (an
-	 * integer texture read as zeros) means from 3.4 and biases from 2.8, all of it brighter.
+	 * or darker the GPU's are on average. Tile by tile, matching drivers measured biases up to 1.6
+	 * and means up to 2.9 in forest but 4.4 in bright snow, where every shadow edge the two sample
+	 * patterns place differently costs more. A driver that lost the sky occlusion (an integer
+	 * texture read as zeros) measured biases from 2.8, all of it brighter: the bias tells them
+	 * apart, and the mean only catches what's far off.
 	 */
-	private static final double MAX_MEAN = 4;
+	private static final double MAX_MEAN = 6;
 	private static final double MAX_BIAS = 2.2;
 	/**
 	 * Share of the tile's pixels known to one bake and not the other, and of pixels both know
