@@ -46,32 +46,74 @@ public final class MinimapHud implements HudElement {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		Minecraft mc = Minecraft.getInstance();
-		MapSession session = MapSession.get();
-		LocalPlayer player = mc.player;
 		Settings settings = Settings.get();
 		//? if >=26.2 {
-		if (session == null || player == null || mc.level == null || !settings.minimap || mc.gui.hud.isHidden()
+		if (!settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
-		/*if (session == null || player == null || mc.level == null || !settings.minimap || mc.options.hideGui
+		/*if (!settings.minimap || mc.options.hideGui
 		*///?}
 			|| mc.gui.screen() instanceof MapScreen || mc.gui.screen() instanceof AbstractContainerScreen<?>
-			|| !ServerRules.minimapAllowed()) {
+			|| mc.gui.screen() instanceof SettingsScreen || !this.canDraw(mc)) {
 			// Not drawn. Inventories and chests count, because the item lists other mods (JEI, REI,
-			// EMI) put beside them run into the minimap's corner.
+			// EMI) put beside them run into the minimap's corner. The settings screen draws its own
+			// copy, sharp over the blur, as a preview.
 			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
 			return;
 		}
-		float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
+		Settings.Corner corner = settings.minimapCorner;
+		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
+		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
+		this.draw(graphics, deltaTracker.getGameTimeDeltaPartialTick(true), right, top, top ? this.effectRows(mc.player, right) : 0);
+	}
+
+	/**
+	 * The settings screen's live preview: the minimap as the settings make it, on the right of the
+	 * screen where the settings leave room. A left corner shows on the right at the same height.
+	 * Switched off, it still draws, dimmed, so the other minimap settings can be seen.
+	 */
+	public void preview(GuiGraphicsExtractor graphics, float partialTick) {
+		Minecraft mc = Minecraft.getInstance();
+		if (!this.canDraw(mc)) {
+			return;
+		}
+		Settings settings = Settings.get();
+		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
+		int[] bounds = this.draw(graphics, partialTick, true, top, 0);
+		if (!settings.minimap) {
+			//? if >=1.21.6 {
+			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
+			//?} else {
+			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
+			var pose = graphics.pose();
+			pose.pushPose();
+			pose.translate(0, 0, 1);
+			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
+			pose.popPose();
+			*///?}
+		}
+	}
+
+	/** Frees the GPU texture the minimap's fog uses. For a copy that's done drawing, like the settings preview. */
+	public void close() {
+		this.viewport.close();
+	}
+
+	private boolean canDraw(Minecraft mc) {
+		return MapSession.get() != null && mc.player != null && mc.level != null && ServerRules.minimapAllowed();
+	}
+
+	/** Draws the minimap in a corner, {@code effects} pixels lower for status effect icons. Returns what it covers: x0, y0, x1, y1. */
+	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects) {
+		Minecraft mc = Minecraft.getInstance();
+		MapSession session = MapSession.get();
+		LocalPlayer player = mc.player;
+		Settings settings = Settings.get();
 		Vec3 pos = player.getPosition(partialTick);
-		int size = settings.minimapSize.pixels;
 		Font font = mc.font;
 		List<String> info = this.infoLines(settings, player, mc);
 		int infoHeight = info.size() * 10;
-		boolean right = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.BOTTOM_RIGHT;
-		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
-		int effects = top ? this.effectRows(player, right) : 0;
-		size = this.fit(size, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
+		int size = this.fit(settings.minimapSize, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
@@ -93,12 +135,17 @@ public final class MinimapHud implements HudElement {
 			this.compass(graphics, font, x, y, size);
 		}
 		int textY = y + size + 4;
+		int left = x - 2;
+		int textRight = x + size + 2;
 		for (String line : info) {
 			int w = font.width(line);
 			int tx = right ? x + size - w : x;
 			graphics.text(font, line, tx, textY, 0xFFFFFFFF, true);
+			left = Math.min(left, tx - 1);
+			textRight = Math.max(textRight, tx + w + 1);
 			textY += 10;
 		}
+		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY};
 	}
 
 	/**
