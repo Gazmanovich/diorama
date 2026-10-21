@@ -673,6 +673,10 @@ public final class MapLevel implements ChunkSource {
 			try {
 				int[] saved = store == null ? null : store.read(key);
 				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
+				// Traced straight after the mesh, so both read the same chunks: while the world is
+				// still loading, a trace made when the GPU's pixels come back would know more.
+				byte[] info = check && overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
+				int[] traced = check ? TileBaker.reference(key, this, looks, fog, overlays, info) : null;
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image;
@@ -680,16 +684,8 @@ public final class MapLevel implements ChunkSource {
 							if (check) {
 								dev.diorama.render.gpu.GpuBakeCheck.undrawn(result.cancelled());
 							}
-							image = TileBaker.bake(key, this, looks, null, fog, saved, overlays);
-						} else if (check) {
-							byte[] info = overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS];
-							int[] traced;
-							try {
-								traced = TileBaker.reference(key, this, looks, fog, overlays, info);
-							} catch (Throwable t) {
-								dev.diorama.render.gpu.GpuBakeCheck.undrawn(true);
-								throw t;
-							}
+							image = traced != null ? TileBaker.gpuImage(key, traced, saved, info) : TileBaker.bake(key, this, looks, null, fog, saved, overlays);
+						} else if (traced != null) {
 							dev.diorama.render.gpu.GpuBakeCheck.compare(result.pixels(), traced);
 							image = TileBaker.gpuImage(key, traced, saved, info);
 						} else {

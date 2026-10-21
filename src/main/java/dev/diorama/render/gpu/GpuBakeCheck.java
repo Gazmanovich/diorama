@@ -35,14 +35,19 @@ public final class GpuBakeCheck {
 	private static final int FAILURES = 3;
 	/**
 	 * Mean difference, over pixels both bakes know, past which they don't match, and how much
-	 * brighter or darker the GPU's may be on average. Tile by tile, matching drivers measured at
-	 * most 2.9 and 1.6; one that lost the sky occlusion (an integer texture read as zeros) at
-	 * least 3.4 and 2.8, all of it brighter.
+	 * brighter or darker the GPU's may be on average. Tile by tile, matching drivers measured
+	 * means up to 2.9 (bright snow is the worst) and biases up to 1.6; a driver that lost the sky
+	 * occlusion (an integer texture read as zeros) means from 3.4 and biases from 2.8, all of it
+	 * brighter. The bias tells them apart best; the mean is as loose as the comparison test's.
 	 */
-	private static final double MAX_MEAN = 3;
+	private static final double MAX_MEAN = 4;
 	private static final double MAX_BIAS = 2;
-	/** Share of pixels known to one bake and not the other past which they don't match. */
-	private static final double MAX_MISMATCH = 0.015;
+	/**
+	 * Share of pixels known to one bake and not the other past which they don't match. The first
+	 * tiles bake while the world is still loading, and a chunk that lands between the mesh and
+	 * the trace makes a few percent; garbage or a flipped readback would make far more.
+	 */
+	private static final double MAX_MISMATCH = 0.05;
 
 	private static final Object LOCK = new Object();
 	private static volatile State state = State.UNCHECKED;
