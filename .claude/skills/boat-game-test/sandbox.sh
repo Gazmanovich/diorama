@@ -44,15 +44,18 @@ rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz
 start=$(date +%s)
 echo "running :$node:runClientGameTest (tests: $tests)"
 # 90 min, inside the VM's 2 hours with time to set up and send results back.
-timeout 5400 xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
+timeout --kill-after=60 5400 xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
 code=$?
 minutes=$(( ($(date +%s) - start) / 60 ))
 
-mkdir -p ~/result
-cp ~/gradle.log ~/result/
+# Any failure packing the results fails the script, so the run isn't reported without its evidence.
+mkdir -p ~/result || exit 1
+cp ~/gradle.log ~/result/ || exit 1
 for part in screenshots crash-reports logs/latest.log; do
-	[ -e "$run/$part" ] && cp -r "$run/$part" ~/result/
+	if [ -e "$run/$part" ]; then
+		cp -r "$run/$part" ~/result/ || exit 1
+	fi
 done
-echo "{\"exit\": $code, \"minutes\": $minutes}" > ~/result/result.json
-tar czf ~/result.tgz -C ~/result .
+echo "{\"exit\": $code, \"minutes\": $minutes}" > ~/result/result.json || exit 1
+tar czf ~/result.tgz -C ~/result . || exit 1
 echo "exit=$code after $minutes min"

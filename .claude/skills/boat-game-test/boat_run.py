@@ -117,12 +117,15 @@ def main():
         # A Windows checkout can have CRLF line endings, which bash rejects.
         boat('exec', vm, '--', 'sed', '-i', r's/\r$//', '/home/user/src/.claude/skills/boat-game-test/sandbox.sh')
         print(f'pushed {repo.name}; running {args.tests} on {args.node}')
-        with open(out / 'vm.log', 'w', encoding='utf-8') as log:
-            ran = subprocess.run([BOAT, '--no-update', 'exec', vm, '--timeout', '0', '--', 'bash',
-                            '/home/user/src/.claude/skills/boat-game-test/sandbox.sh', args.node, args.tests, *args.env],
-                           stdout=log, stderr=subprocess.STDOUT)
+        try:
+            with open(out / 'vm.log', 'w', encoding='utf-8') as log:
+                ran = subprocess.run([BOAT, '--no-update', 'exec', vm, '--timeout', '0', '--', 'bash',
+                                      '/home/user/src/.claude/skills/boat-game-test/sandbox.sh', args.node, args.tests,
+                                      *args.env], stdout=log, stderr=subprocess.STDOUT, timeout=6900)
+        except subprocess.TimeoutExpired:
+            sys.exit(f'the VM run took over 115 min; see {out / "vm.log"}')
         if ran.returncode:
-            sys.exit(f'the VM script failed before the tests finished; see {out / "vm.log"}')
+            sys.exit(f'the VM script failed setting up or packing results; see {out / "vm.log"}')
         fetched = boat('scp', f'{vm}:/home/user/result.tgz', 'result.tgz', cwd=out)
         if fetched.returncode or not (out / 'result.tgz').exists():
             sys.exit(f'no results came back; see {out / "vm.log"}')
