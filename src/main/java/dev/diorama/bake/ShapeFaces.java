@@ -47,8 +47,15 @@ final class ShapeFaces {
 	}
 
 	private final int[][] boxBounds;
-	/** {@link #seen} per camera pitch, as the bits of its sine. */
-	private final Map<Long, int[][]> seen = new ConcurrentHashMap<>();
+	/**
+	 * {@link #seen} per camera pitch, by its sine and cosine both: Projection hands them out one at
+	 * a time, so a bake during a pitch change can get a pair of two pitches, which mustn't stand
+	 * for either.
+	 */
+	private final Map<Pitch, int[][]> seen = new ConcurrentHashMap<>();
+
+	private record Pitch(double sin, double cos) {
+	}
 
 	/**
 	 * The parts of the top and south pieces a camera ray meets first, at this pitch: what nearer
@@ -56,7 +63,7 @@ final class ShapeFaces {
 	 * as the tracer meets one box and tints once for see-through blocks.
 	 */
 	int[][] seen(double sin, double cos) {
-		return this.seen.computeIfAbsent(Double.doubleToLongBits(sin), k -> new int[][] {this.unhidden(this.top, true, sin, cos), this.unhidden(this.south, false, sin, cos)});
+		return this.seen.computeIfAbsent(new Pitch(sin, cos), k -> new int[][] {this.unhidden(this.top, true, sin, cos), this.unhidden(this.south, false, sin, cos)});
 	}
 
 	private int[] unhidden(int[] pieces, boolean top, double sin, double cos) {
