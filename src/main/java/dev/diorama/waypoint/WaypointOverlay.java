@@ -1,7 +1,7 @@
 package dev.diorama.waypoint;
 
 import dev.diorama.Projection;
-import dev.diorama.render.MapIcons;
+import dev.diorama.render.Pins;
 import dev.diorama.render.MapViewport;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,13 +13,20 @@ import net.minecraft.world.entity.player.Player;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Waypoints on the minimap and fullscreen map: a coloured disc with the waypoint's initials.
- * Waypoints outside the view sit on its edge with an arrow pointing toward them, so the minimap
- * always shows which way home is.
+ * Waypoints on the minimap and fullscreen map: a pin in the waypoint's colour standing with its
+ * point on the spot. Waypoints outside the view sit on its edge as a badge with a caret pointing
+ * toward them, so the minimap always shows which way home is.
  */
 public final class WaypointOverlay {
-	/** A waypoint placed on screen; {@code clamped} when it was pulled in to the view's edge. */
+	/**
+	 * A waypoint placed on screen: the spot it marks, or for {@code clamped} ones pulled in to the
+	 * view's edge, the badge's centre. {@code size} is the head's diameter.
+	 */
 	public record Pin(Waypoint waypoint, float x, float y, float size, boolean clamped) {
+		/** Where the head is centred: above the spot for a standing pin. */
+		public float headY() {
+			return this.clamped ? this.y : this.y - Pins.headAbove((int) this.size);
+		}
 	}
 
 	private WaypointOverlay() {
@@ -27,12 +34,13 @@ public final class WaypointOverlay {
 
 	public static List<Pin> layout(MapViewport.View view, List<Waypoint> waypoints, boolean fullscreen) {
 		List<Pin> pins = new ArrayList<>();
-		float size = fullscreen ? 14 : 10;
-		float inset = size / 2 + 3;
+		int size = fullscreen ? Pins.LARGE : Pins.SMALL;
+		float inset = Pins.edgeReach(size);
 		float cx = view.x() + view.width() / 2.0F;
 		float cy = view.y() + view.height() / 2.0F;
-		float halfW = view.width() / 2.0F - inset;
-		float halfH = view.height() / 2.0F - inset;
+		// At least a pixel, so a view smaller than a badge still gets finite positions.
+		float halfW = Math.max(1, view.width() / 2.0F - inset);
+		float halfH = Math.max(1, view.height() / 2.0F - inset);
 		for (Waypoint waypoint : waypoints) {
 			if (!waypoint.visible) {
 				continue;
@@ -41,11 +49,13 @@ public final class WaypointOverlay {
 			float y = view.screenY(Projection.v(waypoint.y, waypoint.z + 0.5));
 			float dx = x - cx;
 			float dy = y - cy;
-			float reach = Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH);
-			if (reach > 1) {
-				pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size * 0.85F, true));
-			} else {
+			if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
+			} else {
+				// Too near the edge for the whole pin to show: a badge pointing the way, pulled in to
+				// the view's edge when the spot is outside it.
+				float reach = Math.max(1, Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH));
+				pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
 			}
 		}
 		return pins;
@@ -59,27 +69,16 @@ public final class WaypointOverlay {
 		float cy = view.y() + view.height() / 2.0F;
 		for (Pin pin : pins) {
 			Waypoint waypoint = pin.waypoint();
-			float s = pin.size();
+			int s = (int) pin.size();
 			if (pin.clamped()) {
-				double angle = Math.atan2(pin.y() - cy, pin.x() - cx);
-				float ax = (float) (pin.x() + Math.cos(angle) * s * 0.62);
-				float ay = (float) (pin.y() + Math.sin(angle) * s * 0.62);
-				MapIcons.arrow(graphics, ax, ay, s * 0.55F, angle, 0xE0101418, 1.6F);
-				MapIcons.arrow(graphics, ax, ay, s * 0.55F, angle, waypoint.color, 0);
+				Pins.edge(graphics, waypoint, pin.x(), pin.y(), s, Math.atan2(pin.y() - cy, pin.x() - cx));
+			} else {
+				Pins.standing(graphics, waypoint, pin.x(), pin.y(), s);
 			}
-			MapIcons.dot(graphics, pin.x(), pin.y(), s + 2.5F, 0xF0101418);
-			MapIcons.dot(graphics, pin.x(), pin.y(), s, waypoint.color);
-			String label = waypoint.kind == Waypoint.Kind.DEATH ? "✝" : waypoint.label();
-			float textScale = Math.min(1, (s - 3) / Math.max(5, font.width(label)));
-			graphics.pose().pushMatrix();
-			graphics.pose().translate(pin.x(), pin.y() - 3.5F * textScale);
-			graphics.pose().scale(textScale);
-			graphics.centeredText(font, label, 0, 0, textColour(waypoint.color));
-			graphics.pose().popMatrix();
 			if (fullscreen && !pin.clamped() && (pin == hovered || view.zoom() >= 2)) {
 				int w = font.width(waypoint.name);
 				int tx = Math.round(pin.x() - w / 2.0F);
-				int ty = Math.round(pin.y() + s / 2 + 3);
+				int ty = Math.round(pin.y()) + 3;
 				graphics.fill(tx - 2, ty - 1, tx + w + 2, ty + 9, 0x90000000);
 				graphics.text(font, waypoint.name, tx, ty, 0xFFFFFFFF, false);
 			}
@@ -91,7 +90,11 @@ public final class WaypointOverlay {
 		Pin best = null;
 		double bestDistance = Double.MAX_VALUE;
 		for (Pin pin : pins) {
-			double d = Math.hypot(pin.x() - mouseX, pin.y() - mouseY);
+			// A standing pin answers at its head and at the spot its point touches.
+			double d = Math.hypot(pin.x() - mouseX, pin.headY() - mouseY);
+			if (!pin.clamped()) {
+				d = Math.min(d, Math.hypot(pin.x() - mouseX, pin.y() - mouseY));
+			}
 			if (d <= pin.size() / 2 + 2 && d < bestDistance) {
 				best = pin;
 				bestDistance = d;
@@ -106,13 +109,5 @@ public final class WaypointOverlay {
 		int dy = (int) Math.round(waypoint.y - viewer.getY());
 		String height = dy > 2 ? " · " + dy + " above" : dy < -2 ? " · " + (-dy) + " below" : "";
 		return Component.literal(waypoint.name + " · " + distance + " m" + height);
-	}
-
-	/** Dark letters on light colours, white on dark ones. */
-	static int textColour(int argb) {
-		int r = (argb >> 16) & 0xFF;
-		int g = (argb >> 8) & 0xFF;
-		int b = argb & 0xFF;
-		return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? 0xFF101418 : 0xFFFFFFFF;
 	}
 }
