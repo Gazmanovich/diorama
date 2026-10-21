@@ -20,6 +20,7 @@ import com.mojang.renderpearl.api.pipeline.IndexType;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.UniformType;
+import com.mojang.renderpearl.api.textures.AddressMode;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
@@ -287,7 +288,7 @@ final class BlazeBakeBackend implements BakeBackend {
 				try (RenderPass pass = encoder.createRenderPass(() -> "Diorama bake sky", t.skyView, Optional.empty())) {
 					use(pass, SKY_PASS);
 					pass.setUniform("DioramaBake", t.ubo);
-					bind(pass, "Voxels", t.voxelsView, nearest);
+					bind(pass, "Voxels", t.voxelsView, t.voxelSampler);
 					pass.setVertexBuffer(0, t.corners.slice());
 					if (job.opaqueCount > 0) {
 						pass.setVertexBuffer(1, faceBuffer.slice(0, opaqueBytes));
@@ -454,6 +455,24 @@ final class BlazeBakeBackend implements BakeBackend {
 		return this.targets;
 	}
 
+	/**
+	 * A nearest sampler an integer texture can use. Minecraft's OpenGL samplers minify "nearest"
+	 * with GL_NEAREST_MIPMAP_LINEAR, which OpenGL doesn't allow on integer textures: drivers that
+	 * keep to that (Apple's, Mesa's) read the voxel table as zeros, and lose the sky occlusion.
+	 */
+	private static GpuSampler integerSampler(GpuDevice device) {
+		GpuSampler sampler = device.createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty());
+		//? if >=26.3 {
+		int gl = sampler instanceof com.mojang.renderpearl.backend.opengl.GlSampler glSampler ? glSampler.getId() : 0;
+		//?} else {
+		/*int gl = sampler instanceof com.mojang.blaze3d.opengl.GlSampler glSampler ? glSampler.getId() : 0;
+		*///?}
+		if (gl != 0) {
+			org.lwjgl.opengl.GL33C.glSamplerParameteri(gl, org.lwjgl.opengl.GL33C.GL_TEXTURE_MIN_FILTER, org.lwjgl.opengl.GL33C.GL_NEAREST);
+		}
+		return sampler;
+	}
+
 	/** The textures and buffers every bake reuses. Bakes run one after another in stream order, so one set does. */
 	private static final class Targets {
 		static final int TIMESTAMPS = 128;
@@ -479,6 +498,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		final GpuTextureView skyView;
 		final GpuTexture voxels;
 		final GpuTextureView voxelsView;
+		final GpuSampler voxelSampler;
 		//? if <26.3 {
 		/*final GpuBuffer voxelUpload;
 		*///?}
@@ -519,6 +539,7 @@ final class BlazeBakeBackend implements BakeBackend {
 				"Diorama bake voxels", GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R32_UINT, VOXEL_WIDTH, VOXEL_HEIGHT, 1, 1
 			);
 			this.voxelsView = device.createTextureView(this.voxels);
+			this.voxelSampler = integerSampler(device);
 			//? if <26.3 {
 			/*this.voxelUpload = device.createBuffer(
 				() -> "Diorama bake voxel upload", GpuBuffer.USAGE_COPY_SRC | GpuBuffer.USAGE_COPY_DST, (long) VOXEL_WIDTH * VOXEL_HEIGHT * 4
