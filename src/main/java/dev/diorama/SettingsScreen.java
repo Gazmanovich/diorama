@@ -20,6 +20,9 @@ public final class SettingsScreen extends Screen {
 	private int buttonHeight = 20;
 
 	private final @Nullable Screen parent;
+	/** GPU baking's button, which says so if the check turns it off while the screen is open. */
+	private @Nullable Button gpuBaking;
+	private boolean gpuFailedShown;
 	private final List<Header> headers = new ArrayList<>();
 
 	private record Header(Component text, int x, int y) {
@@ -87,9 +90,9 @@ public final class SettingsScreen extends Screen {
 			i -> s.quality = Settings.Quality.values()[i],
 			i -> Component.translatable("diorama.settings.quality." + Settings.Quality.values()[i].name().toLowerCase(java.util.Locale.ROOT)));
 		// On, but turned off this session because the graphics card's tiles didn't match: say so.
-		this.cycleButton(right, y, "diorama.settings.gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1,
-			i -> Component.translatable(i == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on"))
-			.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.settings.gpu_baking.tooltip")));
+		this.gpuBaking = this.cycleButton(right, y, "diorama.settings.gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
+		this.gpuBaking.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.settings.gpu_baking.tooltip")));
+		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
 			.bounds(this.width / 2 - 100, this.height - 26, 200, 20).build());
@@ -120,6 +123,20 @@ public final class SettingsScreen extends Screen {
 		}).bounds(x, y, this.buttonWidth, this.buttonHeight).build();
 		this.addRenderableWidget(button);
 		return button;
+	}
+
+	private static Component gpuBakingValue(int on) {
+		return Component.translatable(on == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on");
+	}
+
+	@Override
+	public void tick() {
+		super.tick();
+		boolean failed = dev.diorama.render.gpu.GpuBakeCheck.failed();
+		if (this.gpuBaking != null && failed != this.gpuFailedShown) {
+			this.gpuFailedShown = failed;
+			this.gpuBaking.setMessage(label(Component.translatable("diorama.settings.gpu_baking"), gpuBakingValue(Settings.get().gpuBaking ? 1 : 0)));
+		}
 	}
 
 	private static Component label(Component name, Component value) {

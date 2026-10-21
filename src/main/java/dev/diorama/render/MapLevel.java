@@ -70,9 +70,10 @@ public final class MapLevel implements ChunkSource {
 	/**
 	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
 	 * switching to or from fog of war. Bakes that started under an older value are dropped.
+	 * Volatile: the GPU baking check reads them from baker threads.
 	 */
-	private int surfaceGeneration;
-	private int caveGeneration;
+	private volatile int surfaceGeneration;
+	private volatile int caveGeneration;
 
 	// Render thread only below here.
 	private final Map<TileKey, MapTile> tiles = new HashMap<>();
@@ -643,9 +644,11 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
-		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode();
+		// Lit as TileBaker decides: a cave slice, or a level under a roof.
+		boolean lit = key.isCave() || this.roofless();
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(lit);
 		if (gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE) {
-			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK);
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store, gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK, lit);
 			return;
 		}
 		BAKERS.execute(() -> {
@@ -667,7 +670,7 @@ public final class MapLevel implements ChunkSource {
 	 * Falls back to tracing if the GPU didn't draw it. A {@code check} tile is traced too, and the
 	 * map gets the traced one: GPU tiles show only once the check says they match.
 	 */
-	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, boolean check) {
+	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, boolean check, boolean lit) {
 		BAKERS.execute(() -> {
 			boolean answered = !check;
 			try {
@@ -682,11 +685,16 @@ public final class MapLevel implements ChunkSource {
 						TileImage image;
 						if (result.pixels() == null) {
 							if (check) {
-								dev.diorama.render.gpu.GpuBakeCheck.undrawn(result.cancelled());
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, !result.cancelled());
 							}
 							image = traced != null ? TileBaker.gpuImage(key, traced, saved, info) : TileBaker.bake(key, this, looks, null, fog, saved, overlays);
 						} else if (traced != null) {
-							dev.diorama.render.gpu.GpuBakeCheck.compare(result.pixels(), traced);
+							if (this.generation(key) == generation) {
+								dev.diorama.render.gpu.GpuBakeCheck.compare(lit, result.pixels(), traced);
+							} else {
+								// The map's look changed while it was out: the two may have baked different looks.
+								dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, false);
+							}
 							image = TileBaker.gpuImage(key, traced, saved, info);
 						} else {
 							image = TileBaker.gpuImage(key, result.pixels(), saved, result.info());
@@ -702,7 +710,7 @@ public final class MapLevel implements ChunkSource {
 			} catch (Throwable t) {
 				if (!answered) {
 					// The check tile never reached the GPU: hand its turn back.
-					dev.diorama.render.gpu.GpuBakeCheck.undrawn(true);
+					dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, false);
 				}
 				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
