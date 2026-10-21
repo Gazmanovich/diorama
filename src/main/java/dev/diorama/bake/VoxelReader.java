@@ -18,8 +18,8 @@ import org.jspecify.annotations.Nullable;
  * in a small table indexed by their coordinates, so moving between neighbouring chunks (shadow
  * and sky rays do, all the time) doesn't hash.
  */
-final class VoxelReader {
-	static final int UNKNOWN = -1;
+public final class VoxelReader {
+	public static final int UNKNOWN = -1;
 	static final int AIR_ID = Block.BLOCK_STATE_REGISTRY.getId(Blocks.AIR.defaultBlockState());
 	/** The ids of a section with nothing in it. Shared and never written. */
 	private static final int[] AIR_SECTION = new int[4096];
@@ -68,7 +68,7 @@ final class VoxelReader {
 		this(source, null);
 	}
 
-	VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
+	public VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
 		this.source = source;
 		this.kinds = kinds;
 		this.minY = source.minY();
@@ -81,7 +81,7 @@ final class VoxelReader {
 	final java.util.Set<Long> missing = DEBUG ? new java.util.HashSet<>() : null;
 
 	/** Block state id at the position, {@link #AIR_ID} outside the world, or {@link #UNKNOWN}. */
-	int state(int x, int y, int z) {
+	public int state(int x, int y, int z) {
 		if (y < this.minY || y >= this.maxY) {
 			return AIR_ID;
 		}
@@ -116,7 +116,7 @@ final class VoxelReader {
 	 * casts ambient occlusion, 0 if not, or {@link #UNKNOWN}. Reads a bit per block, built once per
 	 * section, which keeps far more of the world in the CPU's caches than the ids do.
 	 */
-	int solid(int x, int y, int z) {
+	public int solid(int x, int y, int z) {
 		if (y < this.minY || y >= this.maxY) {
 			return 0;
 		}
