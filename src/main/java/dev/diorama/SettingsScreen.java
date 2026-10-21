@@ -18,6 +18,7 @@ import net.minecraft.client.gui.components.tabs.GridLayoutTab;
 //? if >=26.2 {
 import net.minecraft.client.gui.components.tabs.MenuTabBar;
 //?}
+import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
@@ -62,7 +63,8 @@ public final class SettingsScreen extends Screen {
 	protected void init() {
 		Settings s = Settings.get();
 		// Resizing the window runs this again: stay on the same tab.
-		int selected = Math.max(0, this.tabs.indexOf(this.tabManager.getCurrentTab()));
+		Tab current = this.tabManager.getCurrentTab();
+		int selected = current == null ? 0 : Math.max(0, this.tabs.indexOf(current));
 		this.side = Math.max(Math.min(SIDE, this.width - PREVIEW_ROOM), Math.min(this.width, CONTENT + 10));
 
 		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
