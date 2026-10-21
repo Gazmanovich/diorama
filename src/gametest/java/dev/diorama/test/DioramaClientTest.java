@@ -904,7 +904,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
-		if (save) {
+		int n = keys.size();
+		int ok = Math.max(1, n - failed);
+		double mean = both == 0 ? 0 : sumDiff / both;
+		double off = both == 0 ? 0 : differ * 100.0 / both;
+		double mismatch = knownMismatch * 100.0 / ((long) n * size * size);
+		double alphaOff = both == 0 ? 0 : alphaDiffer * 100.0 / both;
+		// Fail on a GPU bake that didn't come back, on a comparison of nothing, and on differences
+		// well past what the sample patterns explain (about twice what the bakes measured).
+		boolean differs = mean > 4 || off > 6 || mismatch > 1.5 || alphaOff > 8;
+		// A failing round keeps its pictures too: they're what shows what went wrong.
+		if (save || failed > 0 || both == 0 || differs) {
 			try {
 				java.nio.file.Files.createDirectories(out);
 				javax.imageio.ImageIO.write(cpuImage, "png", out.resolve(name + "-cpu.png").toFile());
@@ -914,21 +924,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new java.io.UncheckedIOException(e);
 			}
 		}
-		int n = keys.size();
-		int ok = Math.max(1, n - failed);
-		// Fail on a GPU bake that didn't come back, on a comparison of nothing, and on differences
-		// well past what the sample patterns explain (about twice what the bakes measured).
 		if (failed > 0) {
 			throw new AssertionError(name + ": " + failed + " GPU bakes failed");
 		}
 		if (both == 0) {
 			throw new AssertionError(name + ": no pixel known to both bakes, nothing was compared");
 		}
-		double mean = sumDiff / both;
-		double off = differ * 100.0 / both;
-		double mismatch = knownMismatch * 100.0 / ((long) n * size * size);
-		double alphaOff = alphaDiffer * 100.0 / both;
-		if (mean > 4 || off > 6 || mismatch > 1.5 || alphaOff > 8) {
+		if (differs) {
 			throw new AssertionError(String.format(java.util.Locale.ROOT,
 				"%s: GPU tiles differ from traced ones: mean %.2f/255, %.2f%% off by >24, %.3f%% known/unknown, %.3f%% alpha", name, mean, off, mismatch, alphaOff));
 		}
