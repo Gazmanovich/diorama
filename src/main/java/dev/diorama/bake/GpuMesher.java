@@ -305,11 +305,17 @@ public final class GpuMesher {
 										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
 									}
 								} else {
+									// A piece on the cell's top or south side is met only by rays coming in
+									// that way; one inside the cell by rays from either.
 									for (int b = 0; b < sh.top.length; b += 2) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1]);
+										if (openAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
+											solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1]);
+										}
 									}
 									for (int b = 0; b < sh.south.length; b += 2) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1]);
+										if (openSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
+											solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1]);
+										}
 									}
 									// One filling the cell's floor stops every ray coming in, as a cube does.
 									passes = !sh.fillsFloor;
@@ -322,10 +328,14 @@ public final class GpuMesher {
 								helper.albedo(id, x, z, true);
 								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 64);
 								for (int b = 0; b < sh.top.length; b += 2) {
-									mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, sh.top[b], sh.top[b + 1]);
+									if (fromAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
+										mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, sh.top[b], sh.top[b + 1]);
+									}
 								}
 								for (int b = 0; b < sh.south.length; b += 2) {
-									mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, sh.south[b], sh.south[b + 1]);
+									if (fromSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
+										mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, sh.south[b], sh.south[b + 1]);
+									}
 								}
 								passes = true;
 							}
@@ -345,6 +355,12 @@ public final class GpuMesher {
 							// where it meets the block right there.
 							waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
 								aboveWater, hereWater, hereFirstWater, lit, fog, sh.wetTop, sh.wetSouth);
+							if (sh.wetCut) {
+								// Rays that came in dry where the block is level with the water are in
+								// water again in the next cell, so that one draws its own surface; where
+								// this cell's water is drawn, it's nearer and wins.
+								hereWater[i] = false;
+							}
 						}
 					} else if (kind == BlockLooks.SOLID) {
 						if (rockAbove || rockSouth) {

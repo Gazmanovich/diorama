@@ -32,9 +32,16 @@ final class ShapeFaces {
 	/** Water's top and south faces in a waterlogged cell, less where the block's face is level with them. */
 	final int[] wetTop;
 	final int[] wetSouth;
+	/** Whether either was cut: then rays that came in dry are in water again only in the next cell. */
+	final boolean wetCut;
 
 	static int pack(int x, int y, int z) {
 		return x | y << 8 | z << 16;
+	}
+
+	/** Whether a top piece ({@code top}) or south piece lies inside the cell rather than on its top or south side. */
+	static boolean inset(int hi, boolean top) {
+		return (top ? hi >> 8 & 255 : hi >> 16 & 255) < UNIT;
 	}
 
 	static ShapeFaces of(float[] boxes) {
@@ -106,6 +113,8 @@ final class ShapeFaces {
 			wetSouth.add(new int[] {pack(r[0], r[2], UNIT), pack(r[1], r[3], UNIT)});
 		}
 		this.wetSouth = flatten(wetSouth);
+		this.wetCut = !(this.wetTop.length == 2 && this.wetTop[0] == pack(0, UNIT, 0) && this.wetTop[1] == FULL_HI)
+			|| !(this.wetSouth.length == 2 && this.wetSouth[0] == pack(0, 0, UNIT) && this.wetSouth[1] == FULL_HI);
 	}
 
 	/** Takes rectangle [s0, s1) x [t0, t1) out of every piece, [u0, u1, v0, v1] each; keeps what's left. */
