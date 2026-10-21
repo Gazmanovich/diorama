@@ -140,7 +140,10 @@ public final class VoxelReader {
 			return UNKNOWN;
 		}
 		int i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-		return ((int) (mask[i >> 6] >>> i) & 1) + ((int) (this.partialMask[i >> 6] >>> i) & 1);
+		if ((mask[i >> 6] >>> i & 1) == 0) {
+			return 0;
+		}
+		return 1 + ((int) (this.partialMask[i >> 6] >>> i) & 1);
 	}
 
 	private void enterSolidSection(int sx, int sy, int sz) {

@@ -444,7 +444,8 @@ public final class TileBaker {
 				return false;
 			}
 			byte kind = this.looks.kind[id];
-			int shape = this.looks.shape[id];
+			// Only solid blocks (and the see-through ones among them) have shapes.
+			int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? this.looks.shape[id] : 0;
 			boolean partial = shape != 0;
 			if (partial) {
 				int wet = this.looks.wetShapes.get(id);
