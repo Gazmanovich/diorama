@@ -71,6 +71,11 @@ public final class Settings {
 	 * lighting them from the sun.
 	 */
 	public Quality quality = Quality.FANCY;
+	/**
+	 * Experimental: bake map tiles on the graphics card. Off until the player turns it on; the
+	 * first tiles are checked against the tracer, which takes over again if they don't match.
+	 */
+	public boolean gpuBaking = false;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;

@@ -52,6 +52,16 @@ public final class MapLevel implements ChunkSource {
 			return thread;
 		}
 	);
+	/**
+	 * Bakes the GPU self-check's tiles both ways, one at a time, beside the bakers: the map gets
+	 * those tiles traced as usual, so checking never makes it wait.
+	 */
+	private static final ExecutorService CHECKER = Executors.newSingleThreadExecutor(task -> {
+		Thread thread = new Thread(task, "diorama-gpu-check");
+		thread.setDaemon(true);
+		thread.setPriority(Thread.MIN_PRIORITY);
+		return thread;
+	});
 
 	private final int minY;
 	private final int maxY;
@@ -70,9 +80,10 @@ public final class MapLevel implements ChunkSource {
 	/**
 	 * Bumped whenever tiles baked before stop being valid: new block colours, or cave slices
 	 * switching to or from fog of war. Bakes that started under an older value are dropped.
+	 * Volatile: the GPU baking check reads them from baker threads.
 	 */
-	private int surfaceGeneration;
-	private int caveGeneration;
+	private volatile int surfaceGeneration;
+	private volatile int caveGeneration;
 
 	// Render thread only below here.
 	private final Map<TileKey, MapTile> tiles = new HashMap<>();
@@ -525,6 +536,9 @@ public final class MapLevel implements ChunkSource {
 		TileImage image;
 		while ((image = this.finished.poll()) != null) {
 			this.inFlight.remove(image.key());
+			if (SLOT_STATS) {
+				this.slotReleased(image.key());
+			}
 			boolean background = this.backgroundBakes.remove(image.key());
 			if (this.closed) {
 				continue;
@@ -580,6 +594,9 @@ public final class MapLevel implements ChunkSource {
 			order.sort(Map.Entry.comparingByValue());
 			for (Map.Entry<TileKey, Double> entry : order) {
 				if (this.inFlight.size() >= limit) {
+					if (SLOT_STATS) {
+						this.slotsFull++;
+					}
 					break;
 				}
 				TileKey key = entry.getKey();
@@ -609,13 +626,57 @@ public final class MapLevel implements ChunkSource {
 		this.evict();
 	}
 
+	/**
+	 * Experiment only, with {@code -Ddiorama.slotStats=true}: how long tiles hold a bake slot, from
+	 * being scheduled to their result reaching {@link #update}, and how often a wanted tile found
+	 * every slot taken.
+	 */
+	private static final boolean SLOT_STATS = Boolean.getBoolean("diorama.slotStats");
+	private final Map<TileKey, Long> slotTaken = new HashMap<>();
+	private final long[] slotNanos = new long[2];
+	private final int[] slotCount = new int[2];
+	private int slotsFull;
+
+	private void slotReleased(TileKey key) {
+		Long taken = this.slotTaken.remove(key);
+		if (taken == null) {
+			return;
+		}
+		int kind = key.isCave() ? 1 : 0;
+		this.slotNanos[kind] += System.nanoTime() - taken;
+		this.slotCount[kind]++;
+		if ((this.slotCount[0] + this.slotCount[1]) % 50 == 0) {
+			Diorama.LOGGER.info("SLOTS held ms: surface {} over {}, cave {} over {}; updates with every slot taken: {}",
+				this.slotCount[0] == 0 ? 0 : this.slotNanos[0] / this.slotCount[0] / 1_000_000, this.slotCount[0],
+				this.slotCount[1] == 0 ? 0 : this.slotNanos[1] / this.slotCount[1] / 1_000_000, this.slotCount[1], this.slotsFull);
+		}
+	}
+
 	/** Bakes one tile on a baker thread: all of it if {@code blocks} is null, else those blocks. */
 	private void bake(TileKey key, BlockLooks looks, @Nullable BitSet blocks) {
 		this.inFlight.add(key);
+		if (SLOT_STATS) {
+			this.slotTaken.put(key, System.nanoTime());
+		}
 		int generation = this.generation(key);
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
+		// Lit as TileBaker decides: a cave slice, or a level under a roof.
+		boolean lit = key.isCave() || this.roofless();
+		// Under a roof (the Nether) the tracer lights every view as if the roof were lifted off,
+		// which the GPU baker doesn't draw yet: those stay on the CPU. Fog of war only changes lit views.
+		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = this.roof() != dev.diorama.bake.ChunkSource.NO_ROOF
+			? dev.diorama.render.gpu.GpuBakeCheck.Mode.TRACE
+			: dev.diorama.render.gpu.GpuBakeCheck.mode(lit, lit && fog, overlays != null);
+		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.GPU) {
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store);
+			return;
+		}
+		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK) {
+			// Traced for the map below, and checked on the side.
+			this.checkOnGpu(key, looks, generation, fog, overlays, lit);
+		}
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
@@ -625,6 +686,74 @@ public final class MapLevel implements ChunkSource {
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to bake tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+			}
+		});
+	}
+
+	/**
+	 * GPU baking: the mesh is built on a baker thread, drawn on the render thread, and the pixels
+	 * come back here a frame or two later. Always the whole tile, which costs the GPU little.
+	 * Falls back to tracing if the GPU didn't draw it.
+	 */
+	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
+		BAKERS.execute(() -> {
+			try {
+				int[] saved = store == null ? null : store.read(key);
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
+				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
+					try {
+						TileImage image = result.pixels() == null
+							? TileBaker.bake(key, this, looks, null, fog, saved, overlays)
+							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+						this.finished.add(image.withGeneration(generation));
+					} catch (Throwable t) {
+						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
+						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+					}
+				}));
+			} catch (Throwable t) {
+				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
+				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
+			}
+		});
+	}
+
+	/**
+	 * A self-check tile: baked on the GPU and traced the same way, from the same chunks, and
+	 * compared (see {@link dev.diorama.render.gpu.GpuBakeCheck}). Nothing here reaches the map,
+	 * which traces the tile as usual meanwhile.
+	 */
+	private void checkOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, boolean lit) {
+		CHECKER.execute(() -> {
+			boolean answered = false;
+			try {
+				// Both bakes read the same chunks, even while more are arriving, so only the GPU
+				// can make them differ.
+				dev.diorama.bake.ChunkSource source = new dev.diorama.bake.PinnedSource(this);
+				// The mesher, the tracer and the GPU's uniforms each read the look, in that order:
+				// if the last saw the same as before the first, the two bakes show one look.
+				dev.diorama.MapStyle look = dev.diorama.MapStyle.get();
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				byte[] info = overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
+				int[] traced = TileBaker.reference(key, source, looks, fog, overlays, info);
+				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> CHECKER.execute(() -> {
+					if (result.pixels() == null) {
+						dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, !result.declined());
+					} else if (this.generation(key) == generation && look.equals(result.look())) {
+						dev.diorama.render.gpu.GpuBakeCheck.compare(lit, result.pixels(), traced, result.info(), info);
+					} else {
+						// The map's look changed while it was out: the two may have baked different looks.
+						dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, false);
+					}
+				}));
+				// From here the callback answers the check.
+				answered = true;
+			} catch (Throwable t) {
+				if (!answered) {
+					// The check tile never reached the GPU: hand its turn back.
+					dev.diorama.render.gpu.GpuBakeCheck.undrawn(lit, overlays != null, false);
+				}
+				Diorama.LOGGER.error("Failed to check tile {} on the GPU", key, t);
 			}
 		});
 	}
@@ -753,6 +882,9 @@ public final class MapLevel implements ChunkSource {
 	private void saveLastBakes(TileStore store) {
 		long deadline = System.currentTimeMillis() + 3000;
 		while (true) {
+			// GPU bakes need frames this wait holds up: trace those tiles instead, including ones
+			// whose mesh a baker thread finishes while it waits.
+			dev.diorama.render.gpu.GpuTileBaker.cancelAll();
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
 				this.inFlight.remove(image.key());

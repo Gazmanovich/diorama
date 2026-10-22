@@ -109,6 +109,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("bench")) {
 				bench(context);
 			}
+			if (tests.contains("gpu-bake")) {
+				gpuBake(context, world);
+			}
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
@@ -681,6 +684,347 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		best.forEach((mode, nanos) -> dev.diorama.Diorama.LOGGER.info("BENCH {}: {} ms per tile", mode, nanos / 9 / 1_000_000));
 		context.runOnClient(mc -> MapStyle.set(Settings.get().style()));
+	}
+
+	/**
+	 * The GPU bake experiment: bakes the nine tiles around a few places with the tracer and on the
+	 * GPU, in the sky view, a cave slice with and without fog of war, and under the Nether's roof;
+	 * saves both and their difference as pictures in {@code gpu-bake/}, and logs what each cost. Opt-in with {@code DIORAMA_TESTS=gpu-bake}; {@code DIORAMA_GPU_SPOTS="x y z;x y z"}
+	 * picks the places.
+	 */
+	private static void gpuBake(ClientGameTestContext context, TestSingleplayerContext world) {
+		String env = System.getenv("DIORAMA_GPU_SPOTS");
+		String[] spots = env != null && !env.isBlank() ? env.split(";") : new String[] {"", "600 140 -300", "-800 140 900"};
+		java.nio.file.Path out = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("gpu-bake"));
+		StringBuilder summary = new StringBuilder();
+		for (int spot = 0; spot < spots.length; spot++) {
+			if (!spots[spot].isBlank()) {
+				world.getServer().runCommand("tp @a " + spots[spot]);
+				context.waitTicks(40);
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+			}
+			settle(context, 200);
+			// The sky view, then a cave slice a little below the ground, with and without fog of war.
+			int cut = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, mc.player.getBlockX(), mc.player.getBlockZ()) - 24);
+			summary.append(compareTiles(context, out, "spot" + spot, TileKey.SURFACE, false, null)).append('\n');
+			if (spot == 0) {
+				// The chunk grid, slime chunks and spawn spots, which the bakes record per pixel.
+				dev.diorama.bake.Overlays overlays = context.computeOnClient(mc -> new dev.diorama.bake.Overlays(MapSession.get().slimeSeed(), true));
+				summary.append(compareTiles(context, out, "spot0-overlays", TileKey.SURFACE, false, overlays)).append('\n');
+			}
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave", cut, false, null)).append('\n');
+			// Fog of war shows only what the player has seen: mark every other 16x16 square of
+			// columns as seen through the slice, so both seen and unseen ground get compared.
+			context.runOnClient(mc -> {
+				dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+				int px = mc.player.getBlockX();
+				int pz = mc.player.getBlockZ();
+				for (int x = px - 200; x < px + 200; x++) {
+					for (int z = pz - 300; z < pz + 300; z++) {
+						if ((((x >> 4) + (z >> 4)) & 1) == 0) {
+							for (int y = cut - dev.diorama.bake.TileBaker.CAVE_DEPTH - 1; y <= cut + 1; y++) {
+								seen.markSeen(x, y, z);
+							}
+						}
+					}
+				}
+			});
+			summary.append(compareTiles(context, out, "spot" + spot + "-cave-fog", cut, true, null)).append('\n');
+		}
+		// Blocks smaller than a cube, which both bakers draw by their shapes.
+		shapesScene(context, world);
+		summary.append(compareTiles(context, out, "shapes", TileKey.SURFACE, false, null)).append('\n');
+		// No Nether: its views, lit as if the roof were lifted off, stay on the tracer for now.
+		world.getServer().runCommand("tp @a 0 100 0");
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		try {
+			java.nio.file.Files.createDirectories(out);
+			java.nio.file.Files.writeString(out.resolve("summary.txt"), summary.toString());
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+		// The map baked its own tiles on the GPU all along, after checking its first ones against
+		// the tracer. These tiles matched, so that check must have too.
+		if (dev.diorama.render.gpu.GpuBakeCheck.failed()) {
+			throw new AssertionError("The map's GPU baking check failed while these tiles matched: see the log");
+		}
+	}
+
+	/**
+	 * A flat field of blocks smaller than a cube, a 3x3 patch each: slabs, stairs every way, fences,
+	 * walls, panes, snow of every height, small things that stand on the ground, and some of them
+	 * waterlogged in a pool. The player stands in the middle of it.
+	 */
+	private static void shapesScene(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("tp @a 1600 140 1600");
+		context.waitTicks(40);
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		int y = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, 1600, 1600));
+		int x0 = 1560;
+		int z0 = 1560;
+		// Cleared in strips: a fill may change only so many blocks at once.
+		for (int x = x0; x < x0 + 80; x += 16) {
+			world.getServer().runCommand("fill " + x + " " + y + " " + z0 + " " + (x + 15) + " " + (y + 24) + " " + (z0 + 79) + " air");
+		}
+		world.getServer().runCommand("fill " + x0 + " " + (y - 1) + " " + z0 + " " + (x0 + 79) + " " + (y - 1) + " " + (z0 + 79) + " grass_block");
+		String[] blocks = {
+			"oak_slab", "oak_slab[type=top]", "stone_slab", "smooth_stone_slab[type=top]",
+			"stone_brick_stairs[facing=north]", "stone_brick_stairs[facing=south]", "stone_brick_stairs[facing=east]", "stone_brick_stairs[facing=west]",
+			"oak_stairs[half=top,facing=north]", "oak_stairs[half=top,facing=south]", "brick_stairs[facing=north,shape=outer_left]", "brick_stairs[facing=south,shape=inner_right]",
+			"oak_fence", "cobblestone_wall", "glass_pane", "iron_bars",
+			"snow[layers=1]", "snow[layers=2]", "snow[layers=3]", "snow[layers=4]",
+			"snow[layers=5]", "snow[layers=6]", "snow[layers=7]", "dirt_path",
+			"farmland", "soul_sand", "chest", "lantern",
+			"oak_trapdoor", "oak_trapdoor[half=top,open=false]", "cauldron", "hopper",
+			"anvil", "stonecutter", "enchanting_table", "daylight_detector",
+			"lectern", "campfire[lit=false]", "composter", "end_rod",
+			// Panes joined to their neighbours: a strip and a cross, whose boxes overlap.
+			"glass_pane[east=true,west=true]", "glass_pane[north=true,south=true,east=true,west=true]",
+			// Off the sixteenths grid (the chain is iron_chain from 1.21.9; the other name fails).
+			"chain", "iron_chain",
+		};
+		for (int b = 0; b < blocks.length; b++) {
+			int bx = x0 + 2 + (b % 8) * 5;
+			int bz = z0 + 2 + (b / 8) * 5;
+			world.getServer().runCommand("fill " + bx + " " + y + " " + bz + " " + (bx + 2) + " " + y + " " + (bz + 2) + " " + blocks[b]);
+		}
+		// Slabs on slabs, a fence on a wall: shapes stacked.
+		world.getServer().runCommand("fill " + (x0 + 2) + " " + (y + 1) + " " + (z0 + 2) + " " + (x0 + 4) + " " + (y + 1) + " " + (z0 + 4) + " oak_slab");
+		world.getServer().runCommand("fill " + (x0 + 17) + " " + (y + 1) + " " + (z0 + 17) + " " + (x0 + 19) + " " + (y + 1) + " " + (z0 + 19) + " oak_fence");
+		// A pool to the east, with waterlogged blocks in it, some level with the water's top.
+		int px = x0 + 45;
+		world.getServer().runCommand("fill " + px + " " + (y - 3) + " " + z0 + " " + (px + 30) + " " + (y - 1) + " " + (z0 + 30) + " water");
+		String[] wet = {
+			"oak_slab[waterlogged=true]", "oak_slab[type=top,waterlogged=true]", "stone_brick_stairs[facing=north,waterlogged=true]", "stone_brick_stairs[facing=south,waterlogged=true]",
+			"oak_fence[waterlogged=true]", "glass_pane[waterlogged=true]", "lantern[waterlogged=true]", "chest[waterlogged=true]",
+			"glass_pane[north=true,south=true,waterlogged=true]", "glass_pane[north=true,south=true,east=true,west=true,waterlogged=true]",
+		};
+		for (int b = 0; b < wet.length; b++) {
+			int bx = px + 2 + (b % 4) * 7;
+			int bz = z0 + 2 + (b / 4) * 7;
+			world.getServer().runCommand("fill " + bx + " " + (y - 1) + " " + bz + " " + (bx + 2) + " " + (y - 1) + " " + (bz + 2) + " " + wet[b]);
+			world.getServer().runCommand("fill " + bx + " " + (y - 3) + " " + (bz + 4) + " " + (bx + 2) + " " + (y - 3) + " " + (bz + 4) + " " + wet[b]);
+		}
+		world.getServer().runCommand("tp @a 1600 " + (y + 1) + " 1600");
+		settle(context, 200);
+	}
+
+	/**
+	 * Bakes the nine tiles of one layer around the player with the tracer and on the GPU, three
+	 * rounds each keeping the best (the first GPU round also compiles the shaders), and writes the
+	 * comparison. {@code layer} is {@link TileKey#SURFACE} or a cave slice's cut.
+	 */
+	private static String compareTiles(
+		ClientGameTestContext context, java.nio.file.Path out, String name, int layer, boolean fog, dev.diorama.bake.@org.jspecify.annotations.Nullable Overlays overlays
+	) {
+		int[] centre = context.computeOnClient(mc -> new int[] {
+			(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
+			(int) Math.floor(Projection.v(layer == TileKey.SURFACE ? mc.player.getY() : layer, mc.player.getZ()) / Projection.TILE_UNITS)
+		});
+		java.util.List<TileKey> keys = new java.util.ArrayList<>();
+		for (int dv = -1; dv <= 1; dv++) {
+			for (int du = -1; du <= 1; du++) {
+				keys.add(new TileKey(layer, centre[0] + du, centre[1] + dv));
+			}
+		}
+		int[][] cpu = new int[keys.size()][];
+		byte[][] cpuInfo = new byte[keys.size()][];
+		long[] cpuNanos = new long[keys.size()];
+		java.util.Arrays.fill(cpuNanos, Long.MAX_VALUE);
+		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu = new java.util.concurrent.ConcurrentHashMap<>();
+		for (int round = 0; round < 3; round++) {
+			context.runOnClient(mc -> {
+				for (int i = 0; i < keys.size(); i++) {
+					long start = System.nanoTime();
+					dev.diorama.bake.TileImage image = dev.diorama.bake.TileBaker.bake(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), null, fog, null, overlays);
+					cpuNanos[i] = Math.min(cpuNanos[i], System.nanoTime() - start);
+					cpu[i] = image.mips()[0];
+					cpuInfo[i] = image.info();
+				}
+			});
+			java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> results = new java.util.concurrent.ConcurrentHashMap<>();
+			context.runOnClient(mc -> {
+				for (int i = 0; i < keys.size(); i++) {
+					int index = i;
+					dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(keys.get(i), MapSession.get().map(), dev.diorama.bake.BlockLooks.get(), fog, overlays);
+					dev.diorama.render.gpu.GpuTileBaker.submit(mesh, r -> results.put(index, r));
+				}
+			});
+			context.waitFor(mc -> results.size() == keys.size(), 600);
+			// Every round has to match, not only the one kept for its timing: a bake that went
+			// wrong once mustn't hide behind a quicker right one.
+			writeGpuComparison(out, name + " round " + round, keys, cpu, cpuNanos, results, false);
+			if (round == 0) {
+				gpu.putAll(results);
+				continue;
+			}
+			for (var e : results.entrySet()) {
+				var old = gpu.get(e.getKey());
+				if (old == null || old.pixels() == null || e.getValue().timing().meshNanos() + e.getValue().timing().recordNanos()
+					< old.timing().meshNanos() + old.timing().recordNanos()) {
+					gpu.put(e.getKey(), e.getValue());
+				}
+			}
+		}
+		String report = writeGpuComparison(out, name, keys, cpu, cpuNanos, gpu, true);
+		if (overlays != null) {
+			// Overlay bits are compared where both bakes know the pixel.
+			long both = 0;
+			long differ = 0;
+			for (int i = 0; i < keys.size(); i++) {
+				var r = gpu.get(i);
+				if (r == null || r.info() == null || cpuInfo[i] == null || r.pixels() == null) {
+					throw new AssertionError(name + ": tile " + keys.get(i) + " came back without overlay bits");
+				}
+				for (int p = 0; p < cpuInfo[i].length; p++) {
+					if ((cpu[i][p] >>> 24) > 0 && (r.pixels()[p] >>> 24) > 0) {
+						both++;
+						if (cpuInfo[i][p] != r.info()[p]) {
+							differ++;
+						}
+					}
+				}
+			}
+			if (both == 0) {
+				throw new AssertionError(name + ": overlays were asked for but no bits came back to compare");
+			}
+			double overlayOff = differ * 100.0 / both;
+			if (overlayOff > 1.5) {
+				throw new AssertionError(String.format(java.util.Locale.ROOT, "%s: overlay bits differ on %.3f%% of known pixels", name, overlayOff));
+			}
+			report += String.format(java.util.Locale.ROOT, " | overlay bits differ on %.3f%% of known pixels", overlayOff);
+		}
+		dev.diorama.Diorama.LOGGER.info("GPUBAKE {}", report);
+		return report;
+	}
+
+	/** Saves the traced and GPU tiles as 3x3 pictures with their difference, and sums up both. */
+	private static String writeGpuComparison(
+		java.nio.file.Path out, String name, java.util.List<TileKey> keys, int[][] cpu, long[] cpuNanos,
+		java.util.Map<Integer, dev.diorama.render.gpu.GpuTileBaker.Result> gpu, boolean save
+	) {
+		int size = Projection.TILE_PIXELS;
+		java.awt.image.BufferedImage cpuImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.image.BufferedImage gpuImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.image.BufferedImage diffImage = new java.awt.image.BufferedImage(size * 3, size * 3, java.awt.image.BufferedImage.TYPE_INT_RGB);
+		long both = 0;
+		long differ = 0;
+		long knownMismatch = 0;
+		// Pixels both bakes know, but to a different share of their samples: that decides which
+		// pixel a merge with the saved tile keeps, and the fog's coverage.
+		long alphaDiffer = 0;
+		double sumDiff = 0;
+		double cpuMs = 0;
+		double mesh = 0;
+		double pack = 0;
+		double record = 0;
+		double gpuMs = 0;
+		double latency = 0;
+		long faces = 0;
+		long casters = 0;
+		long bytes = 0;
+		int failed = 0;
+		int declined = 0;
+		for (int i = 0; i < keys.size(); i++) {
+			cpuMs += cpuNanos[i] / 1e6;
+			var result = gpu.get(i);
+			int[] g = result == null ? null : result.pixels();
+			if (result != null && result.declined()) {
+				// Handed to the tracer on purpose (something the GPU doesn't draw as it does): nothing to compare.
+				declined++;
+				continue;
+			}
+			if (g == null) {
+				failed++;
+			} else {
+				var t = result.timing();
+				mesh += t.meshNanos() / 1e6;
+				pack += t.packNanos() / 1e6;
+				record += t.recordNanos() / 1e6;
+				gpuMs += t.gpuNanos() / 1e6;
+				latency += t.latencyNanos() / 1e6;
+				faces += t.faces();
+				casters += t.casters();
+				bytes += t.bytes();
+			}
+			int ox = (i % 3) * size;
+			int oy = (i / 3) * size;
+			for (int y = 0; y < size; y++) {
+				for (int x = 0; x < size; x++) {
+					int c = cpu[i][y * size + x];
+					int p = g == null ? 0 : g[y * size + x];
+					cpuImage.setRGB(ox + x, oy + y, argb(c));
+					gpuImage.setRGB(ox + x, oy + y, argb(p));
+					boolean ck = (c >>> 24) > 0;
+					boolean gk = (p >>> 24) > 0;
+					if (ck != gk) {
+						knownMismatch++;
+						diffImage.setRGB(ox + x, oy + y, 0xFF00FF);
+						continue;
+					}
+					if (!ck) {
+						continue;
+					}
+					if ((c >>> 24) != (p >>> 24)) {
+						alphaDiffer++;
+					}
+					int dr = Math.abs((c & 0xFF) - (p & 0xFF));
+					int dg = Math.abs(((c >> 8) & 0xFF) - ((p >> 8) & 0xFF));
+					int db = Math.abs(((c >> 16) & 0xFF) - ((p >> 16) & 0xFF));
+					both++;
+					sumDiff += (dr + dg + db) / 3.0;
+					if (Math.max(dr, Math.max(dg, db)) > 24) {
+						differ++;
+					}
+					diffImage.setRGB(ox + x, oy + y, (Math.min(255, dr * 4) << 16) | (Math.min(255, dg * 4) << 8) | Math.min(255, db * 4));
+				}
+			}
+		}
+		int n = keys.size();
+		int compared = n - declined;
+		int ok = Math.max(1, compared - failed);
+		double mean = both == 0 ? 0 : sumDiff / both;
+		double off = both == 0 ? 0 : differ * 100.0 / both;
+		double mismatch = knownMismatch * 100.0 / ((long) Math.max(1, compared) * size * size);
+		double alphaOff = both == 0 ? 0 : alphaDiffer * 100.0 / both;
+		// Fail on a GPU bake that didn't come back, on a comparison of nothing, and on differences
+		// well past what the sample patterns explain (about twice what the bakes measured).
+		boolean differs = mean > 4 || off > 6 || mismatch > 1.5 || alphaOff > 8;
+		// A failing round keeps its pictures too: they're what shows what went wrong.
+		if (save || failed > 0 || both == 0 || differs) {
+			try {
+				java.nio.file.Files.createDirectories(out);
+				javax.imageio.ImageIO.write(cpuImage, "png", out.resolve(name + "-cpu.png").toFile());
+				javax.imageio.ImageIO.write(gpuImage, "png", out.resolve(name + "-gpu.png").toFile());
+				javax.imageio.ImageIO.write(diffImage, "png", out.resolve(name + "-diff.png").toFile());
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		}
+		if (failed > 0) {
+			throw new AssertionError(name + ": " + failed + " GPU bakes failed");
+		}
+		if (declined == n) {
+			throw new AssertionError(name + ": the GPU declined every tile, nothing was compared");
+		}
+		if (both == 0) {
+			throw new AssertionError(name + ": no pixel known to both bakes, nothing was compared");
+		}
+		if (differs) {
+			throw new AssertionError(String.format(java.util.Locale.ROOT,
+				"%s: GPU tiles differ from traced ones: mean %.2f/255, %.2f%% off by >24, %.3f%% known/unknown, %.3f%% alpha", name, mean, off, mismatch, alphaOff));
+		}
+		return String.format(java.util.Locale.ROOT,
+			"%s tiles=%d failed=%d declined=%d | cpu trace %.1f ms/tile | gpu: mesh %.1f, pack %.1f, render thread %.2f, gpu %.2f, submit-to-pixels %.1f ms/tile; %d faces, %d casters, %.2f MB/tile"
+				+ " | diff: mean %.2f/255, %.2f%% pixels off by >24, %.3f%% known/unknown mismatch, %.3f%% known with a different alpha",
+			name, n, failed, declined, cpuMs / n, mesh / ok, pack / ok, record / ok, gpuMs / ok, latency / ok, faces / ok, casters / ok, bytes / (double) ok / 1e6,
+			mean, off, mismatch, alphaOff
+		);
+	}
+
+	/** ABGR as the tiles store it to ARGB for a picture. */
+	private static int argb(int abgr) {
+		return (abgr & 0xFF00FF00) | ((abgr & 0xFF) << 16) | ((abgr >> 16) & 0xFF);
 	}
 
 	/**

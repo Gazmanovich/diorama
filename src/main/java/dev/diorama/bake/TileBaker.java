@@ -44,18 +44,18 @@ public final class TileBaker {
 	private static final float HAZE_MAX_LUMINANCE = 0.025F;
 
 	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
-	private static final double SUN_AZIMUTH_X = -0.878;
-	private static final double SUN_AZIMUTH_Z = 0.479;
+	public static final double SUN_AZIMUTH_X = -0.878;
+	public static final double SUN_AZIMUTH_Z = 0.479;
 	/** Small per-sample nudges of the sun direction, which soften shadow edges. */
-	private static final double[][] SUN_JITTER = {{0.03, 0.0, -0.02}, {-0.02, 0.0, 0.03}, {0.02, 0.0, 0.02}, {-0.03, 0.0, -0.03}};
+	public static final double[][] SUN_JITTER = {{0.03, 0.0, -0.02}, {-0.02, 0.0, 0.03}, {0.02, 0.0, 0.02}, {-0.03, 0.0, -0.03}};
 
 
 	/**
 	 * Directions for sky occlusion: two rings round the sky and one straight up, weighted by how
 	 * much light each part of the sky sends onto flat ground.
 	 */
-	private static final double[][] SKY_RAYS;
-	private static final double[] SKY_WEIGHTS;
+	public static final double[][] SKY_RAYS;
+	public static final double[] SKY_WEIGHTS;
 	/** How far sky occlusion looks for something overhead, in blocks. */
 	public static final int SKY_REACH = 12;
 
@@ -108,20 +108,20 @@ public final class TileBaker {
 
 	private final TileKey key;
 	private final BlockLooks looks;
-	private final VoxelReader reader;
-	private final boolean cave;
+	final VoxelReader reader;
+	final boolean cave;
 	/** The sky view of a dimension with a roof: it starts under the roof and skips rock. */
-	private final boolean roofless;
+	final boolean roofless;
 	/** Starts inside rock, which it skips, and isn't lit by the sun: caves, and under a roof. */
-	private final boolean lit;
-	private final int startY;
-	private final int limitY;
+	final boolean lit;
+	final int startY;
+	final int limitY;
 	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
-	private final int topY;
+	final int topY;
 	/** The same for shadow and sky rays, which reach further north. */
-	private final int rayTop;
+	final int rayTop;
 	/** Cave slice that may only show blocks the player has seen. */
-	private final boolean fogOfWar;
+	final boolean fogOfWar;
 	/** What to record for the overlays, or null to record nothing. */
 	private final @Nullable Overlays overlays;
 	private final java.util.Map<Long, Boolean> slimeChunks = new java.util.HashMap<>();
@@ -170,6 +170,9 @@ public final class TileBaker {
 	 * small enough for float precision anywhere in the world.
 	 */
 	private final double depthOrigin;
+
+	/** Four samples per pixel even when the Quality setting asks for one: see {@link #reference}. */
+	private boolean fourSamples;
 
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
@@ -278,6 +281,11 @@ public final class TileBaker {
 		return NETHER_WASTES_FOG;
 	}
 
+	/** A baker that only answers colour and occlusion questions, for {@link GpuMesher}. */
+	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
+		return new TileBaker(key, source, looks, fogOfWar, null);
+	}
+
 	/**
 	 * One above the tallest block any ray or shadow ray of this tile can touch. Starting rays here
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
@@ -364,6 +372,27 @@ public final class TileBaker {
 		return TileImage.partial(key, patches);
 	}
 
+	/**
+	 * The whole tile traced the way the GPU bakes it, four samples per pixel whatever the Quality
+	 * setting, and not merged with anything saved: what a GPU bake of it should look like.
+	 * {@code info} gets the overlay bits when {@code overlays} asks for them.
+	 */
+	public static int[] reference(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, byte @Nullable [] info) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
+		baker.fourSamples = true;
+		int size = Projection.TILE_PIXELS;
+		int[] pixels = new int[size * size];
+		baker.bakePixels(0, 0, size, size, pixels, info);
+		return pixels;
+	}
+
+	/** A tile drawn on the GPU, merged with what was saved the same way a traced bake is. */
+	public static TileImage gpuImage(TileKey key, int[] pixels, int @Nullable [] saved, byte @Nullable [] info) {
+		merge(pixels, saved, 0, 0, Projection.TILE_PIXELS);
+		int size = Projection.TILE_PIXELS;
+		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
+	}
+
 	/** A full tile image from level-0 pixels: mips and fog coverage. */
 	public static TileImage image(TileKey key, int[] pixels) {
 		int size = Projection.TILE_PIXELS;
@@ -400,7 +429,7 @@ public final class TileBaker {
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
-		double[][] samples = fast ? FAST_SAMPLES : SAMPLES;
+		double[][] samples = fast && !this.fourSamples ? FAST_SAMPLES : SAMPLES;
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				float r = 0;
@@ -671,12 +700,12 @@ public final class TileBaker {
 		return true;
 	}
 
-	private float albedoR;
-	private float albedoG;
-	private float albedoB;
+	float albedoR;
+	float albedoG;
+	float albedoB;
 
 	/** Sets {@code albedo*} to the block's linear colour for its top or front face at this column. */
-	private void albedo(int id, int x, int z, boolean top) {
+	void albedo(int id, int x, int z, boolean top) {
 		BlockLooks l = this.looks;
 		int base = top ? l.top[id] : l.side[id];
 		int tinted = top ? l.topTinted[id] : l.sideTinted[id];
@@ -918,7 +947,7 @@ public final class TileBaker {
 	}
 
 	/** Share of the sky seen from a block corner, 0..1, from a few short rays upward. */
-	private float skyAt(int x, int y, int z) {
+	float skyAt(int x, int y, int z) {
 		long key = ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | ((y + 2048) & 0xFFF);
 		float cached = this.skyAtCorner.getOrDefault(key, -1F);
 		if (cached >= 0) {
@@ -1078,7 +1107,7 @@ public final class TileBaker {
 		return best != Double.MAX_VALUE;
 	}
 
-	private boolean occludes(int x, int y, int z) {
+	boolean occludes(int x, int y, int z) {
 		return this.reader.solid(x, y, z) > 0;
 	}
 
@@ -1108,7 +1137,7 @@ public final class TileBaker {
 		return bilinear(tw, te, bw, be, fx, 1 - fy);
 	}
 
-	private static float corner(boolean side1, boolean side2, boolean diagonal) {
+	static float corner(boolean side1, boolean side2, boolean diagonal) {
 		if (side1 && side2) {
 			return AO_LEVELS[0];
 		}
@@ -1127,7 +1156,7 @@ public final class TileBaker {
 	}
 
 	/** -1..1, fixed per block position. */
-	private static float blockNoise(int x, int y, int z) {
+	static float blockNoise(int x, int y, int z) {
 		int h = x * 73_856_093 ^ y * 19_349_663 ^ z * 83_492_791;
 		h ^= h >>> 13;
 		h *= 0x5bd1e995;

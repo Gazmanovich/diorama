@@ -56,6 +56,9 @@ public final class SettingsScreen extends Screen {
 	private List<SettingsTab> tabs = List.of();
 	/** Right edge of the settings side: left of the preview where there's room, else the whole screen. */
 	private int side = SIDE;
+	/** GPU baking's button, which says so if the check turns it off while the screen is open. */
+	private @Nullable Button gpuBaking;
+	private boolean gpuFailedShown;
 
 	public SettingsScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.settings.title"));
@@ -111,6 +114,9 @@ public final class SettingsScreen extends Screen {
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
 			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));
+		// On, but turned off this session because the graphics card's tiles didn't match: say so.
+		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
+		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 
 		// Vanilla's tab bar, over the settings side instead of the whole screen. It's drawn by hand
 		// (extractRenderState), clipped to the side: its separator line runs on past the last tab.
@@ -131,6 +137,20 @@ public final class SettingsScreen extends Screen {
 			.bounds(this.side / 2 - 100, this.height - 26, 200, 20).build());
 		this.tabManager.setTabArea(new ScreenRectangle(0, TAB_BAR_HEIGHT, this.side, this.listBottom() - TAB_BAR_HEIGHT));
 		bar.selectTab(selected, false);
+	}
+
+	private static Component gpuBakingValue(int on) {
+		return Component.translatable(on == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on");
+	}
+
+	@Override
+	public void tick() {
+		super.tick();
+		boolean failed = dev.diorama.render.gpu.GpuBakeCheck.failed();
+		if (this.gpuBaking != null && failed != this.gpuFailedShown) {
+			this.gpuFailedShown = failed;
+			this.gpuBaking.setMessage(label(Component.translatable("diorama.settings.gpu_baking"), gpuBakingValue(Settings.get().gpuBaking ? 1 : 0)));
+		}
 	}
 
 	private int listBottom() {
@@ -168,7 +188,7 @@ public final class SettingsScreen extends Screen {
 			this.checkboxes.add(checkbox);
 		}
 
-		void cycle(String key, IntSupplier get, int count, IntConsumer set, IntFunction<Component> name) {
+		Button cycle(String key, IntSupplier get, int count, IntConsumer set, IntFunction<Component> name) {
 			Component label = Component.translatable("diorama.settings." + key);
 			Button button = Button.builder(label(label, name.apply(get.getAsInt())), b -> {
 				int next = (get.getAsInt() + 1) % count;
@@ -177,6 +197,7 @@ public final class SettingsScreen extends Screen {
 				b.setMessage(label(label, name.apply(next)));
 			}).size(CONTENT, 20).tooltip(tooltip(key)).build();
 			this.wide.add(button);
+			return button;
 		}
 
 		void slider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {

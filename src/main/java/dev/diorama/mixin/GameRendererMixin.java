@@ -21,6 +21,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
+	// The GPU bake experiment draws its tiles before the frame opens any pass.
+	//? if >=26.3 {
+	@Inject(method = "render()V", at = @At("HEAD"))
+	//?} else {
+	/*@Inject(method = "render(Lnet/minecraft/client/DeltaTracker;Z)V", at = @At("HEAD"))
+	*///?}
+	private void diorama$gpuBakes(CallbackInfo ci) {
+		dev.diorama.render.gpu.GpuTileBaker.frame();
+	}
+
 	//? if >=26.1 {
 	// Before 26.3, renderLevel sets the projection a second time, for the hand.
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;setProjectionMatrix", ordinal = 0))
