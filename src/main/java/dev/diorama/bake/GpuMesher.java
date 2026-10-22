@@ -341,15 +341,27 @@ public final class GpuMesher {
 									solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
 								}
 								mesh.lowestY = Math.min(mesh.lowestY, y);
-							} else if (kind == BlockLooks.AIR) {
+							} else if (kind == BlockLooks.AIR || (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) && shape == 0) {
 								hereOpen[i] = true;
 								if (fog) {
 									byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
 									byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
 									hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
 								}
+								if (kind != BlockLooks.AIR) {
+									// Roots, fungi, vines and fire in a gap: they tint only the open rays.
+									helper.albedo(id, x, z, true);
+									int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, kind == BlockLooks.PLANT ? 102 : 64);
+									if (openAbove) {
+										tintedFace(mesh.tinted, x, y, z, true, color, rockIn, rockN, cot, pieces);
+									}
+									if (openSouth) {
+										tintedFace(mesh.tinted, x, y, z, false, color, rockIn, rockN, cot, pieces);
+									}
+								}
 							} else {
-								// Water, plants or glass in a pocket that rays of both kinds reach.
+								// Water, or a see-through block smaller than a cube, in a pocket that rays
+								// of both kinds reach.
 								mesh.traceInstead = true;
 							}
 						}
@@ -668,6 +680,14 @@ public final class GpuMesher {
 			n += end;
 		}
 		return java.util.Arrays.copyOf(out, n);
+	}
+
+	/** A plant or glass cell's top or south face, less where rays still in the rock cross it. */
+	private static void tintedFace(Quads tinted, int x, int y, int z, boolean top, int color, double[] rock, int rockN, double cot, int[] pieces) {
+		int n = RockRays.pieces(pieces, 0, top, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rock, rockN, y, z, cot, false);
+		for (int b = 0; b < n; b += 2) {
+			tinted.add(x, y, z, top ? TOP : SOUTH, color, 0, 0, 0, pieces[b], pieces[b + 1]);
+		}
 	}
 
 	/** A face piece, less where rays still in the rock meet it: they go on through. */

@@ -888,6 +888,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			long differ = 0;
 			for (int i = 0; i < keys.size(); i++) {
 				var r = gpu.get(i);
+				if (r != null && r.declined()) {
+					// Handed to the tracer on purpose: no GPU bits to compare.
+					continue;
+				}
 				if (r == null || r.info() == null || cpuInfo[i] == null || r.pixels() == null) {
 					throw new AssertionError(name + ": tile " + keys.get(i) + " came back without overlay bits");
 				}
