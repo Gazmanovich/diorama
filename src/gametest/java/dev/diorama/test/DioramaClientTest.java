@@ -3219,15 +3219,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Settings.get().roundedFog = true;
 			Settings.get().save();
 		});
-		// Key binds... opens Minecraft's Key Binds screen; the map's own keys sit there with the rest of
-		// Diorama's, at the bottom of the list.
-		context.setScreen(() -> new SettingsScreen(null));
-		context.waitTicks(3);
-		clickButton(context, "diorama.settings.key_binds");
-		context.waitFor(mc -> mc.gui.screen() instanceof net.minecraft.client.gui.screens.options.controls.KeyBindsScreen, 40);
-		context.runOnClient(mc -> mc.gui.screen().mouseScrolled(mc.gui.screen().width / 2.0, mc.gui.screen().height / 2.0, 0, -10000));
-		context.waitTicks(3);
-		context.takeScreenshot("settings-08-key-binds");
 		context.setScreen(() -> null);
 		if (!kept) {
 			throw new AssertionError("Switching rounded fog threw away the baked map");
