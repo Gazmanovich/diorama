@@ -139,17 +139,54 @@ public final class Radar {
 				continue;
 			}
 			int alpha = alphaFor(blip.dy());
-			pixelHead(graphics, blip, alpha, settings.radarTypeOutline);
+			switch (settings.radarStyle) {
+				case FRAMED -> framed(graphics, blip, alpha);
+				case DOTS -> dot(graphics, blip, alpha);
+				default -> pixelHead(graphics, blip, alpha, settings.radarTypeOutline);
+			}
 			if (names && blip.kind() == Kind.PLAYER) {
 				nameTag(graphics, blip, alpha);
 			}
 			if (Math.abs(blip.dy()) > CARET_HEIGHT) {
 				boolean below = blip.dy() < 0;
 				float s = blip.size();
-				pixelCaret(graphics, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
+				if (settings.radarStyle == Settings.RadarStyle.FRAMED) {
+					float caret = Math.max(4, s * 0.7F);
+					float cx = blip.x() + s * 0.55F + caret * 0.3F;
+					float cy = blip.y() - s * 0.45F;
+					MapIcons.caret(graphics, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
+					MapIcons.caret(graphics, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
+				} else {
+					pixelCaret(graphics, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
+				}
 			}
 		}
 		graphics.disableScissor();
+	}
+
+	/** Master's look: a player's face on a dark disc, a mob's face in a dark box framed in its kind's colour. */
+	private static void framed(GuiGraphicsExtractor graphics, Blip blip, int alpha) {
+		float s = blip.size();
+		if (blip.kind() == Kind.PLAYER && blip.entity() instanceof AbstractClientPlayer player) {
+			MapIcons.dot(graphics, blip.x(), blip.y(), s * 1.55F, withAlpha(0xFF101418, alpha));
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(blip.x() - s / 2, blip.y() - s / 2);
+			graphics.pose().scale(s / 8);
+			MapCanvas.of(graphics).playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
+			graphics.pose().popMatrix();
+		} else if (MobFaces.has(blip.entity())) {
+			int box = Math.round(s * 1.6F);
+			int x0 = Math.round(blip.x() - box / 2.0F);
+			int y0 = Math.round(blip.y() - box / 2.0F);
+			graphics.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
+			graphics.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
+			if (!MobFaces.draw(graphics, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
+				MapIcons.dot(graphics, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
+			}
+		} else {
+			MapIcons.dot(graphics, blip.x(), blip.y(), s + 2, withAlpha(0xE0101418, alpha));
+			MapIcons.dot(graphics, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
+		}
 	}
 
 	/**
@@ -164,7 +201,7 @@ public final class Radar {
 			pixelFrame(graphics, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
 			MapCanvas.of(graphics).playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
-		} else if (!MobFaces.draw(graphics, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
+		} else if (!MobFaces.drawPixel(graphics, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
 			dot(graphics, blip, alpha);
 		}
 	}
@@ -202,9 +239,12 @@ public final class Radar {
 		graphics.pose().scale(texel);
 		graphics.fill(0, 0, w + 2, h + 2, withAlpha(0x60000000, alpha));
 		graphics.fill(-1, -1, w + 1, h + 1, outline);
+		// Dark under the face, as the framed faces had: an enderman's face has see-through rows at the
+		// bottom, which would otherwise show the outline colour as a block.
+		graphics.fill(0, 0, w, h, withAlpha(0xFF101418, alpha));
 	}
 
-	/** A square dot in the kind's colour with a black outline, on the GUI pixel grid: mobs with no face to show. */
+	/** A square dot in the kind's colour with a black outline, on the GUI pixel grid. */
 	private static void dot(GuiGraphicsExtractor graphics, Blip blip, int alpha) {
 		int d = Math.max(2, Math.round(blip.size() * (blip.kind() == Kind.PLAYER ? 0.6F : 0.8F)));
 		int x0 = Math.round(blip.x() - d / 2.0F);

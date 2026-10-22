@@ -199,5 +199,15 @@
 	"diorama.settings.icon_size": "Icon size",
 	"diorama.settings.icon_size.tooltip": "How big players and mobs are drawn on the minimap and the map.",
 	"diorama.folder.rename": "Rename",
-	"diorama.folder.rename_title": "Rename folder"
+	"diorama.folder.rename_title": "Rename folder",
+	"diorama.settings.frame": "Frame",
+	"diorama.settings.frame.classic": "Classic",
+	"diorama.settings.frame.minecraft": "Minecraft",
+	"diorama.settings.frame.none": "None",
+	"diorama.settings.frame.tooltip": "The border around the minimap: the dark frame, a clean Minecraft edge, or none.",
+	"diorama.settings.radar_style": "Icons",
+	"diorama.settings.radar_style.heads": "Pixel heads",
+	"diorama.settings.radar_style.framed": "Framed",
+	"diorama.settings.radar_style.dots": "Dots",
+	"diorama.settings.radar_style.tooltip": "How players and mobs show: their heads as pixel art, faces in boxes framed by mob type, or plain coloured dots."
 }

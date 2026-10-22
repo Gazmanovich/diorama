@@ -12,14 +12,14 @@ Places the map has no data for sit under animated fog. Underground, the map swit
 
 - **Minimap** in a corner of your choice, with a compass, coordinates and biome. `=` and `-` zoom it.
 - **Fullscreen map** you can pan and zoom, from close-up blocks out to about 10,000 blocks across.
-- **Radar** for other players and mobs, each shown as its own head in pixel art, outlined red, yellow or green for hostile, neutral or passive, with markers for whether they're above or below you. The heads' size and where player names show are settings.
+- **Radar** for other players and mobs, each shown as its own head in pixel art, outlined red, yellow or green for hostile, neutral or passive, with markers for whether they're above or below you. Framed faces or plain dots instead, the icons' size and where player names show are settings.
 - **Waypoints** on the map and as labels in the world, plus a marker wherever you die. Share one in chat from its edit screen; shared waypoints, including Xaero's, get an [Add] link in chat. Teleport to one if you're allowed to use `/tp`. Coming from Xaero's Minimap? The waypoint list offers to import its waypoints for the world you're in.
 - **Saved map.** Everything your client loads is saved per world and dimension, so the map is still there next time, and you can zoom out over everywhere you've been.
 - **The Nether** from above: the sky view starts under the bedrock roof and shows everything below it, lit from above as if the roof were lifted off, with each biome's fog thickening the deeper the ground lies. Unexplored places sit under smoke instead of clouds.
 - **Overlays** on the fullscreen map: chunk grid, slime chunks (singleplayer) and the spots where monsters can spawn.
 - **Waypoint folders**: every dimension has its own, and you can make your own (say, "Overworld secret"), hide a whole folder from the maps, rename and delete them.
 - **Waypoint colours**: each new waypoint gets a random colour; the editor offers Diorama's palette and the 16 dye colours, hue and shade bars, or any colour by hex.
-- **Settings** for all of the above, including your arrow's colour and what waypoint labels in the world show, from a button on the fullscreen map, from Mod Menu's Configure button on Fabric, or from the mod list's Config button on NeoForge.
+- **Settings** for all of the above, including the minimap's frame, your arrow's colour and what waypoint labels in the world show, from a button on the fullscreen map, from Mod Menu's Configure button on Fabric, or from the mod list's Config button on NeoForge.
 
 Saved maps and waypoints live in `.minecraft/diorama/`, one folder per world. On a server, each world behind its address gets its own folder, told apart by the world seed the server sends, so a network's lobby and survival worlds, or a map reset, don't mix.
 

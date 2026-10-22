@@ -28,7 +28,7 @@ import org.jspecify.annotations.Nullable;
  * The waypoints of one folder, nearest first, in vanilla's in-world list. Every dimension has a
  * folder of its own, made for it; the player can add folders of their own, rename and delete them,
  * and hide any folder from the maps. The folder bar picks the folder, a search box filters its
- * waypoints by name and New waypoint sits beside it. Clicking a row selects it and shows
+ * waypoints by name, and New folder and New waypoint sit beside it. Clicking a row selects it and shows
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
  * which asks for a second click in place. Double-clicking a row edits it. With no waypoints in
  * this dimension, a pin standing on a piece of the map shows what one is and how to add one.
@@ -36,8 +36,9 @@ import org.jspecify.annotations.Nullable;
  */
 public final class WaypointListScreen extends Screen {
 	private static final int LIST_WIDTH = 340;
-	private static final int SEARCH_WIDTH = 236;
+	private static final int SEARCH_WIDTH = 160;
 	private static final int NEW_WIDTH = 100;
+	private static final int NEW_FOLDER_WIDTH = 72;
 	/** Rows are 24 tall with 2 between them, as in vanilla's lists. */
 	private static final int ROW = 24;
 	private static final int PITCH = 26;
@@ -45,10 +46,10 @@ public final class WaypointListScreen extends Screen {
 	private static final int FOLDER_Y = 22;
 	private static final int SEARCH_Y = 46;
 	private static final int LIST_TOP = 72;
-	/** The folder bar's square buttons: the arrows either side of the name, and New folder. */
+	/** The arrows either side of the folder's name. */
 	private static final int ARROW = 20;
 	/** The folder's name between its arrows: wide enough for the actions of a folder of the player's own beside it. */
-	private static final int FOLDER_NAME_WIDTH = 128;
+	private static final int FOLDER_NAME_WIDTH = 160;
 	/** Where a row's name and position start, right of its badge. */
 	private static final int TEXT_LEFT = 24;
 	private static final int ACTION_GAP = 2;
@@ -242,15 +243,12 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 
-		// The folder bar, like the search row under it: on the left the folder's name between arrows
-		// that step through the folders, and New folder; at the right end the folder's own buttons.
+		// The folder bar: on the left the folder's name between arrows that step through the folders,
+		// at the right end the folder's own buttons, as a selected row has them.
 		Folder folder = this.folder();
 		int nameRight = folderNameLeft(left) + FOLDER_NAME_WIDTH;
 		this.addRenderableWidget(Button.builder(Component.literal("<"), b -> this.stepFolder(-1)).bounds(left, FOLDER_Y, ARROW, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal(">"), b -> this.stepFolder(1)).bounds(nameRight + ACTION_GAP, FOLDER_Y, ARROW, 20).build());
-		this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
-			.bounds(nameRight + 2 * ACTION_GAP + ARROW + 4, FOLDER_Y, ARROW, 20)
-			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.folder.new"))).build());
 		boolean hidden = store != null && store.folderHidden(folder.key());
 		this.folderActions.add(this.action(Component.translatable(hidden ? "diorama.waypoints.show" : "diorama.waypoints.hide"), () -> {
 			WaypointStore current = WaypointStore.get();
@@ -285,6 +283,9 @@ public final class WaypointListScreen extends Screen {
 		box.setValue(query);
 		box.setResponder(text -> this.filter());
 		this.search = this.addRenderableWidget(box);
+		// The two ways to add something sit beside the search box: New folder, then New waypoint.
+		this.addRenderableWidget(Button.builder(Component.translatable("diorama.folder.new"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
+			.bounds(left + LIST_WIDTH - NEW_WIDTH - 4 - NEW_FOLDER_WIDTH, SEARCH_Y, NEW_FOLDER_WIDTH, 20).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 			.bounds(left + LIST_WIDTH - NEW_WIDTH, SEARCH_Y, NEW_WIDTH, 20).build());
 		this.actions.clear();

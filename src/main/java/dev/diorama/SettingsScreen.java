@@ -86,6 +86,7 @@ public final class SettingsScreen extends Screen {
 		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
 			i -> s.minimapSize = Settings.MIN_SIZE + i * Settings.SIZE_STEP, i -> Component.literal(Integer.toString(Settings.MIN_SIZE + i * Settings.SIZE_STEP)));
 		minimap.slider("zoom", s.minimapZoom, Settings.ZOOMS.length, i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
+		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
@@ -93,6 +94,7 @@ public final class SettingsScreen extends Screen {
 		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
 		radar.toggle("passive", () -> s.radarPassive, v -> s.radarPassive = v);
 		radar.toggle("type_outline", () -> s.radarTypeOutline, v -> s.radarTypeOutline = v);
+		radar.choice("radar_style", Settings.RadarStyle.values(), () -> s.radarStyle, v -> s.radarStyle = v);
 		int scales = (Settings.MAX_SCALE - Settings.MIN_SCALE) / Settings.SCALE_STEP + 1;
 		radar.slider("icon_size", (s.radarIconScale - Settings.MIN_SCALE) / Settings.SCALE_STEP, scales,
 			i -> s.radarIconScale = Settings.MIN_SCALE + i * Settings.SCALE_STEP, i -> Component.literal((Settings.MIN_SCALE + i * Settings.SCALE_STEP) + "%"));

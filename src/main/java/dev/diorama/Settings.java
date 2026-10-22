@@ -51,12 +51,15 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public boolean autoCaves = true;
+	public Frame minimapFrame = Frame.CLASSIC;
 
 	public boolean radarPlayers = true;
 	public boolean radarHostile = true;
 	public boolean radarNeutral = true;
 	public boolean radarPassive = true;
 	public int radarRange = 32;
+	/** How players and mobs are drawn: their pixel-art heads, faces in framed boxes, or plain dots. */
+	public RadarStyle radarStyle = RadarStyle.HEADS;
 	/** Radar heads' size, in percent of the normal size: {@link #MIN_SCALE} to {@link #MAX_SCALE} in steps of {@link #SCALE_STEP}. */
 	public int radarIconScale = 100;
 	/** Outlines mob heads in red, yellow or green by how they treat you; off, they're outlined in black. */
@@ -91,6 +94,19 @@ public final class Settings {
 	public enum Quality {
 		FANCY,
 		FAST
+	}
+
+	/** The minimap's border: the dark frame, a clean Minecraft edge, or none. */
+	public enum Frame {
+		CLASSIC,
+		MINECRAFT,
+		NONE
+	}
+
+	public enum RadarStyle {
+		HEADS,
+		FRAMED,
+		DOTS
 	}
 
 	public static final int MIN_SCALE = 50;
@@ -210,6 +226,12 @@ public final class Settings {
 		}
 		if (settings.quality == null) {
 			settings.quality = Quality.FANCY;
+		}
+		if (settings.minimapFrame == null) {
+			settings.minimapFrame = Frame.CLASSIC;
+		}
+		if (settings.radarStyle == null) {
+			settings.radarStyle = RadarStyle.HEADS;
 		}
 		settings.radarIconScale = snapScale(settings.radarIconScale);
 		if (settings.playerNames == null) {
