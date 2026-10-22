@@ -25,23 +25,23 @@ public final class TileBaker {
 	private static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
 	private static volatile boolean fast;
 	/** Under a roof: light filling shadows, direct light from above, and the block light glow. */
-	private static final float LID_AMBIENT = 0.26F;
-	private static final float LID_KEY = 0.52F;
-	private static final float[] LID_KEY_TINT = {1.1F, 1.0F, 0.88F};
-	private static final float[] LID_FILL_TINT = {1.0F, 0.86F, 0.84F};
-	private static final float LID_GLOW = 0.7F;
+	public static final float LID_AMBIENT = 0.26F;
+	public static final float LID_KEY = 0.52F;
+	public static final float[] LID_KEY_TINT = {1.1F, 1.0F, 0.88F};
+	public static final float[] LID_FILL_TINT = {1.0F, 0.86F, 0.84F};
+	public static final float LID_GLOW = 0.7F;
 	/**
 	 * The Nether's fog starts this far below the roof, so high ground keeps its own colour, the
 	 * way ground near you does in the game, and the same height looks the same in every view.
 	 */
-	private static final int HAZE_START = 30;
+	public static final int HAZE_START = 30;
 	/** How far below where it starts the fog has covered about two thirds of a surface. */
-	private static final double HAZE_DEPTH = 55;
-	private static final float HAZE_MAX = 0.72F;
+	public static final double HAZE_DEPTH = 55;
+	public static final float HAZE_MAX = 0.72F;
 	/** The fog is lit a little brighter than its colour in the game, which is what the far distance fades to. */
-	private static final float HAZE_LIGHT = 1.6F;
+	public static final float HAZE_LIGHT = 1.6F;
 	/** The brightest a biome's fog colour may be before {@link #HAZE_LIGHT}, in linear luminance. */
-	private static final float HAZE_MAX_LUMINANCE = 0.025F;
+	public static final float HAZE_MAX_LUMINANCE = 0.025F;
 
 	// The sun is in the west, slightly south, so shadows fall to the east; how high is per style.
 	public static final double SUN_AZIMUTH_X = -0.878;
@@ -141,7 +141,7 @@ public final class TileBaker {
 	 * if the rock over the first open space were lifted off, and the biome's fog thickens the lower
 	 * the ground lies.
 	 */
-	private final boolean lifted;
+	final boolean lifted;
 	/** Per column, the lowest y of the lifted rock; see {@link #lid}. */
 	private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap lidAt = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
 	/** The fog colour per biome cell (quart), in sRGB. */
@@ -208,7 +208,7 @@ public final class TileBaker {
 	 * The lowest y of the rock lifted off this column: the solid blocks from the cut down to the
 	 * first open space that isn't a {@link VoxelReader#pocket}. Light rays treat it as open.
 	 */
-	private int lid(int x, int z) {
+	int lid(int x, int z) {
 		long key = ((long) x << 32) | (z & 0xFFFFFFFFL);
 		int lid = this.lidAt.get(key);
 		if (lid == Integer.MIN_VALUE) {
@@ -218,12 +218,26 @@ public final class TileBaker {
 		return lid;
 	}
 
-	private float hazeR;
-	private float hazeG;
-	private float hazeB;
+	float hazeR;
+	float hazeG;
+	float hazeB;
 
 	/** Sets {@code haze*} to the Nether's fog colour at a point, linear, blended between biome cells so borders don't step. */
 	private void hazeColor(double x, double y, double z) {
+		this.fogBlend(x, y, z);
+		// The soul sand valley's and basalt deltas' fogs are several times brighter than the
+		// rest and wash those biomes out pale; each fog keeps its hue but no more than this light.
+		float scale = HAZE_LIGHT * Math.min(1, HAZE_MAX_LUMINANCE / Math.max(1e-6F, luminance(this.hazeR, this.hazeG, this.hazeB)));
+		this.hazeR *= scale;
+		this.hazeG *= scale;
+		this.hazeB *= scale;
+	}
+
+	/**
+	 * Sets {@code haze*} to the biome fog colours around a point, blended, before {@link #hazeColor}
+	 * limits their light: the GPU baker blends these from a face's corners and limits each pixel.
+	 */
+	void fogBlend(double x, double y, double z) {
 		double qx = x / 4 - 0.5;
 		double qz = z / 4 - 0.5;
 		int x0 = (int) Math.floor(qx);
@@ -243,12 +257,9 @@ public final class TileBaker {
 			g += (float) (w * SRGB_TO_LINEAR[(c >> 8) & 0xFF]);
 			b += (float) (w * SRGB_TO_LINEAR[c & 0xFF]);
 		}
-		// The soul sand valley's and basalt deltas' fogs are several times brighter than the
-		// rest and wash those biomes out pale; each fog keeps its hue but no more than this light.
-		float scale = HAZE_LIGHT * Math.min(1, HAZE_MAX_LUMINANCE / Math.max(1e-6F, luminance(r, g, b)));
-		this.hazeR = r * scale;
-		this.hazeG = g * scale;
-		this.hazeB = b * scale;
+		this.hazeR = r;
+		this.hazeG = g;
+		this.hazeB = b;
 	}
 
 	private int fogCell(int qx, int qy, int qz) {

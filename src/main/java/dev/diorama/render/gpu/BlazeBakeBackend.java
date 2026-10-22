@@ -65,6 +65,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		.addAttribute("FaceLight", GpuFormat.RGBA8_UNORM)
 		.addAttribute("SkyIndex", GpuFormat.R32_SINT)
 		.addAttribute("Box", GpuFormat.RG32_SINT)
+		.addAttribute("Haze", GpuFormat.RGBA32_SINT)
 		.build();
 	private static final VertexFormat CASTER = VertexFormat.builder(1)
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
@@ -190,6 +191,7 @@ final class BlazeBakeBackend implements BakeBackend {
 	private static final RenderPipeline OPAQUE = faces("bake_opaque", null, FACE)
 		.withBindGroupLayout(SHADOW_MAP)
 		.withBindGroupLayout(SKY)
+		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(0, target(GpuFormat.RGBA16_FLOAT))
 		.withColorTargetState(1, target(GpuFormat.RGBA16_FLOAT))
 		.withDepthStencilState(DepthStencilState.DEFAULT)
@@ -339,6 +341,8 @@ final class BlazeBakeBackend implements BakeBackend {
 					pass.setUniform("DioramaBake", t.ubo);
 					bind(pass, "ShadowMap", t.shadowView, nearest);
 					bind(pass, "Sky", t.skyView, nearest);
+					// Under a roof, for the shadows the shadow map misses.
+					bind(pass, "Voxels", t.voxelsView, t.voxelSampler);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
 					pass.setVertexBuffer(1, faceBuffer.slice(0, opaqueBytes));

@@ -734,9 +734,24 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Blocks smaller than a cube, which both bakers draw by their shapes.
 		shapesScene(context, world);
 		summary.append(compareTiles(context, out, "shapes", TileKey.SURFACE, false, null)).append('\n');
-		// No Nether: its views, lit as if the roof were lifted off, stay on the tracer for now.
-		world.getServer().runCommand("tp @a 0 100 0");
-		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		// The Nether: its views start under the roof, lit as if the rock over the first open space
+		// were lifted off and fading into the biome's fog, its cave slices too.
+		String[] nether = {"0 70 0", "300 70 -200"};
+		for (int n = 0; n < nether.length; n++) {
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + nether[n]);
+			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 300, 2400);
+			settle(context, 200);
+			summary.append(compareTiles(context, out, "nether" + n, TileKey.SURFACE, false, null)).append('\n');
+			if (n == 0) {
+				dev.diorama.bake.Overlays overlays = context.computeOnClient(mc -> new dev.diorama.bake.Overlays(MapSession.get().slimeSeed(), true));
+				summary.append(compareTiles(context, out, "nether0-overlays", TileKey.SURFACE, false, overlays)).append('\n');
+			}
+			int cut = context.computeOnClient(mc -> mc.player.getBlockY() - 8);
+			summary.append(compareTiles(context, out, "nether" + n + "-cave", cut, false, null)).append('\n');
+		}
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 100 0");
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 		try {
 			java.nio.file.Files.createDirectories(out);
 			java.nio.file.Files.writeString(out.resolve("summary.txt"), summary.toString());
@@ -873,6 +888,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			long differ = 0;
 			for (int i = 0; i < keys.size(); i++) {
 				var r = gpu.get(i);
+				if (r != null && r.declined()) {
+					// Handed to the tracer on purpose: no GPU bits to compare.
+					continue;
+				}
 				if (r == null || r.info() == null || cpuInfo[i] == null || r.pixels() == null) {
 					throw new AssertionError(name + ": tile " + keys.get(i) + " came back without overlay bits");
 				}

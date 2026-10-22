@@ -38,7 +38,7 @@ import org.lwjgl.system.MemoryStack;
  * after. Pixels come back through pixel buffers with a fence, picked up by {@link #poll}.
  */
 final class GlBakeBackend implements BakeBackend {
-	private static final String[] ATTRIBUTES = {"Corner", "Cell", "Color", "Occlusion", "FaceLight", "SkyIndex", "Box"};
+	private static final String[] ATTRIBUTES = {"Corner", "Cell", "Color", "Occlusion", "FaceLight", "SkyIndex", "Box", "Haze"};
 	/** Well clear of the binding points vanilla uses. */
 	private static final int UBO_BINDING = 30;
 	/** Texture units 0..5; vanilla's copy covers units 0..11. */
@@ -159,7 +159,7 @@ final class GlBakeBackend implements BakeBackend {
 			this.clearColor(0, 0.01F, 0.01F, 0.015F, 1);
 			this.clearColor(1, 0, 0, 0, 0);
 			this.clearDepth();
-			this.bindTextures(this.shadowTexture, this.sky);
+			this.bindTextures(this.shadowTexture, this.sky, this.voxels);
 			GlState.bindVertexArray(this.faceVao);
 			if (job.opaqueCount > 0) {
 				this.depth(true);
@@ -330,6 +330,7 @@ final class GlBakeBackend implements BakeBackend {
 		glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, true, FACE_BYTES, offset + 16);
 		glVertexAttribIPointer(5, 1, GL_INT, FACE_BYTES, offset + 20);
 		glVertexAttribIPointer(6, 2, GL_INT, FACE_BYTES, offset + 24);
+		glVertexAttribIPointer(7, 4, GL_INT, FACE_BYTES, offset + 32);
 	}
 
 	private void target(int fbo, int width, int height) {
@@ -403,7 +404,8 @@ final class GlBakeBackend implements BakeBackend {
 		this.skyProgram = program(vsh, fsh, Map.of("Voxels", 0), "SKY_PASS", depth);
 		this.shadowProgram = program(vsh, fsh, Map.of(), "SHADOW", depth);
 		Map<String, Integer> faces = Map.of("ShadowMap", 0, "Sky", 1);
-		this.opaqueProgram = program(vsh, fsh, faces, null, depth);
+		// Under a roof the voxels too, for the shadows the shadow map misses.
+		this.opaqueProgram = program(vsh, fsh, Map.of("ShadowMap", 0, "Sky", 1, "Voxels", 2), null, depth);
 		this.tintedProgram = program(vsh, fsh, faces, "TINTED", depth);
 		this.waterProgram = program(vsh, fsh, faces, "WATER", depth);
 		Map<String, Integer> composite = new LinkedHashMap<>();

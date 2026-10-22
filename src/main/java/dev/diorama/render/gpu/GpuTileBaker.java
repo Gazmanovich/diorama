@@ -51,13 +51,12 @@ public final class GpuTileBaker {
 	/** The voxel texture holds the mesher's packed solid bits, a word per texel. */
 	static final int VOXEL_WIDTH = 4096;
 	static final int VOXEL_HEIGHT = 512;
-	/** Per face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot (an int). */
-	/** A face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot, box (2 ints). */
-	static final int FACE_BYTES = 32;
+	/** A face: cell and face (4 shorts), colour, occlusion, light (4 bytes each), sky slot, box (2 ints), haze (4 ints). */
+	static final int FACE_BYTES = 48;
 	/** A shadow caster: cell and face (4 shorts), box (2 ints). */
 	static final int CASTER_BYTES = 16;
-	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays. */
-	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13) * 16;
+	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays, two vec4s for under a roof. */
+	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13 + 2) * 16;
 
 	/** Set when the first tile is queued: until then frames don't touch the GPU code at all. */
 	private static volatile boolean used;
@@ -286,6 +285,7 @@ public final class GpuTileBaker {
 				out.put((byte) (light >>> 24)).put((byte) (light >> 16)).put((byte) (light >> 8)).put((byte) light);
 				out.putInt(firstSky < 0 ? -1 : firstSky + q);
 				out.putInt(d[i + 8]).putInt(d[i + 9]);
+				out.putInt(d[i + 10]).putInt(d[i + 11]).putInt(d[i + 12]).putInt(d[i + 13]);
 			}
 		}
 
@@ -346,21 +346,30 @@ public final class GpuTileBaker {
 			vec4(out, ux, 0, uz, -uRange[0]);
 			vec4(out, vx, vy, vz, -vRange[0]);
 			vec4(out, 2 / uExtent, 2 / vExtent, dRange[0] - 1, dRange[1] + 1);
-			vec4(out, style.ambient(), style.sunStrength(), style.skyOcclusion(), style.heightShade());
-			vec4(out, style.sunTint()[0], style.sunTint()[1], style.sunTint()[2], 0);
-			vec4(out, style.shadowTint()[0], style.shadowTint()[1], style.shadowTint()[2], 0);
+			if (mesh.lifted) {
+				// Under a roof the light from above is TileBaker's own, not the style's day.
+				vec4(out, TileBaker.LID_AMBIENT, TileBaker.LID_KEY, style.skyOcclusion(), 0);
+				vec4(out, TileBaker.LID_KEY_TINT[0], TileBaker.LID_KEY_TINT[1], TileBaker.LID_KEY_TINT[2], 0);
+				vec4(out, TileBaker.LID_FILL_TINT[0], TileBaker.LID_FILL_TINT[1], TileBaker.LID_FILL_TINT[2], 0);
+			} else {
+				vec4(out, style.ambient(), style.sunStrength(), style.skyOcclusion(), style.heightShade());
+				vec4(out, style.sunTint()[0], style.sunTint()[1], style.sunTint()[2], 0);
+				vec4(out, style.shadowTint()[0], style.shadowTint()[1], style.shadowTint()[2], 0);
+			}
 			vec4(out, style.saturation(), style.exposure(), style.outline(), style.clearWater() ? 1 : 0);
 			vec4(out, 1.5 * texel + 0.02, 0, 0, 0);
 			for (double[] j : TileBaker.SUN_JITTER) {
 				vec4(out, j[0], j[1], j[2], 0);
 			}
-			vec4(out, mesh.lit ? 1 : 0, mesh.cave ? 1 : 0, mesh.topY, 0);
+			vec4(out, mesh.lit ? 1 : 0, mesh.cave ? 1 : 0, mesh.topY, mesh.lifted ? 1 : 0);
 			out.putInt(mesh.voxelOrigin[0]).putInt(mesh.voxelOrigin[1]).putInt(mesh.voxelOrigin[2]).putInt(mesh.rayTop);
 			out.putInt(mesh.voxelSize[0]).putInt(mesh.voxelSize[1]).putInt(mesh.voxelSize[2]).putInt(0);
 			for (int r = 0; r < TileBaker.SKY_RAYS.length; r++) {
 				double[] d = TileBaker.SKY_RAYS[r];
 				vec4(out, d[0], d[1], d[2], TileBaker.SKY_WEIGHTS[r]);
 			}
+			vec4(out, mesh.roof - TileBaker.HAZE_START, TileBaker.HAZE_DEPTH, TileBaker.HAZE_MAX, TileBaker.LID_GLOW);
+			vec4(out, TileBaker.HAZE_LIGHT, TileBaker.HAZE_MAX_LUMINANCE, 0, 0);
 			out.flip();
 			return out;
 		}
