@@ -18,7 +18,7 @@ layout(std140) uniform DioramaBake {
     vec4 ShadowTint;
     // saturation, exposure, outline, clear water
     vec4 Grade;
-    // x: shadow map bias in blocks
+    // x: shadow map bias in blocks; y: how much corner occlusion dims the sunlight (MapStyle.cornerOcclusion)
     vec4 Shadow;
     // The tracer nudges the sun a little per sample, which softens shadow edges.
     vec4 Jitter[4];
