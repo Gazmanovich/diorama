@@ -254,7 +254,9 @@ public final class Radar {
 			double dx = blip.x() - mouseX;
 			double dy = blip.y() - mouseY;
 			double d = Math.sqrt(dx * dx + dy * dy);
-			if (d > blip.size() / 2 + 3) {
+			// The square head as drawn (a mob's is 1.6 times its size), with its outline and a little slack.
+			double reach = (blip.kind() == Kind.PLAYER ? blip.size() / 2 : blip.size() * 0.8) + 3;
+			if (Math.max(Math.abs(dx), Math.abs(dy)) > reach) {
 				continue;
 			}
 			boolean better = best == null
