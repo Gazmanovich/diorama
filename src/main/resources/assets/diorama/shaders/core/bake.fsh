@@ -143,7 +143,7 @@ vec3 hazed(vec3 c, float y) {
     float f = min(Lid.z, 1.0 - exp(-below / Lid.y));
     vec3 h = mix(mix(haze_corner(faceHaze.x), haze_corner(faceHaze.y), faceUv.x), mix(haze_corner(faceHaze.z), haze_corner(faceHaze.w), faceUv.x), faceUv.y);
     // Each fog keeps its hue but no more than this light, as TileBaker.hazeColor.
-    h *= Haze.x * min(1.0, Haze.y / max(1e-6, luminance(h)));
+    h *= HazeLight.x * min(1.0, HazeLight.y / max(1e-6, luminance(h)));
     return c + (h - c) * f;
 }
 

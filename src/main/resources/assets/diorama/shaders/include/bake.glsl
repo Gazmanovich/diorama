@@ -34,7 +34,7 @@ layout(std140) uniform DioramaBake {
     // Under a roof: where the biome's fog starts, how fast it thickens, the most of it, and the block light glow.
     vec4 Lid;
     // Under a roof: the fog's light, and the most light a biome's fog colour may have before it.
-    vec4 Haze;
+    vec4 HazeLight;
 };
 
 // Reversed depth like vanilla: near is 1, far is 0.
