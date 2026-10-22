@@ -237,5 +237,11 @@
 	"diorama.folder.delete": "Delete folder",
 	"diorama.folder.empty": "No waypoints in this folder yet",
 	"diorama.waypoint.folder_caption": "Folder",
-	"diorama.waypoint.folder_tooltip": "The folder this waypoint is in. Click to move it to the next one; make folders in the waypoint list."
+	"diorama.waypoint.folder_tooltip": "The folder this waypoint is in. Click to move it to the next one; make folders in the waypoint list.",
+	"key.diorama.toggle_caves": "Map: surface or caves",
+	"key.diorama.slice_up": "Map: cave slice up",
+	"key.diorama.slice_down": "Map: cave slice down",
+	"key.diorama.recenter": "Map: recenter on you",
+	"diorama.settings.key_binds": "Key binds...",
+	"diorama.settings.key_binds.tooltip": "Change Diorama's keys, including the fullscreen map's, in Minecraft's Key Binds screen under Diorama."
 }

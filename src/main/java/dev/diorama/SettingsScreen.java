@@ -150,8 +150,13 @@ public final class SettingsScreen extends Screen {
 		*///?}
 		this.tabs = List.of(minimap, radar, overlays, waypoints, look);
 		this.tabBar = this.addWidget(bar);
+		// Diorama's keys live in vanilla's Key Binds screen, under Diorama; this goes straight there.
+		this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.key_binds"),
+				b -> this.minecraft.gui.setScreen(new net.minecraft.client.gui.screens.options.controls.KeyBindsScreen(this, this.minecraft.options)))
+			.bounds(this.side / 2 - 100, this.height - 26, 98, 20)
+			.tooltip(Tooltip.create(Component.translatable("diorama.settings.key_binds.tooltip"))).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
-			.bounds(this.side / 2 - 100, this.height - 26, 200, 20).build());
+			.bounds(this.side / 2 + 2, this.height - 26, 98, 20).build());
 		this.tabManager.setTabArea(new ScreenRectangle(0, TAB_BAR_HEIGHT, this.side, this.listBottom() - TAB_BAR_HEIGHT));
 		bar.selectTab(selected, false);
 	}

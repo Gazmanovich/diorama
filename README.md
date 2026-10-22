@@ -29,6 +29,7 @@ Saved maps and waypoints live in `.minecraft/diorama/`, one folder per world. On
 - In the fullscreen map, `C` toggles the cave slice, `PgUp`/`PgDn` move the slice by 4 blocks, `U` lists waypoints, and `Space` recenters on you.
 - `B` adds a waypoint where you stand, and `U` opens the waypoint list.
 - `=` and `-` zoom the minimap. Map settings and hiding the minimap have keys too, unbound by default.
+- Every key above can be changed in Minecraft's Controls → Key Binds, under Diorama, or from the Key binds button in Diorama's settings.
 
 ## Building
 
