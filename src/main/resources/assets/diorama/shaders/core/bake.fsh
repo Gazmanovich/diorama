@@ -93,6 +93,11 @@ float sunlight(vec3 p, vec3 jitter) {
     return nudged > Shadow.x && nudged < SunDir.w ? 0.0 : 1.0;
 }
 
+// Corner occlusion as it dims the sunlight, as TileBaker.shade; the sky light gets the deeper of it and ao.
+float ao_sun(float ao) {
+    return max(0.0, 1.0 - Shadow.y * (1.0 - ao));
+}
+
 // Sky view: the direct and ambient light on a face, before its colour.
 vec3 sun_light(vec3 p, bool top, float ao, float sky) {
     int sampleIndex = (int(gl_FragCoord.x) & 1) + 2 * (int(gl_FragCoord.y) & 1);
@@ -103,9 +108,9 @@ vec3 sun_light(vec3 p, bool top, float ao, float sky) {
     if (lambert > 0.0) {
         // Off the face a little, toward the open side, so the face doesn't shade itself.
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
-        direct = sunlight(p + normal * 0.06, jitter) * Light.y * lambert;
+        direct = sunlight(p + normal * 0.06, jitter) * Light.y * lambert * ao_sun(ao);
     }
-    float ambient = Light.x * ao;
+    float ambient = Light.x * min(ao, ao_sun(ao));
     if (Light.z > 0.0) {
         ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * sky));
     }
@@ -142,12 +147,12 @@ vec3 lid_light(vec3 p, bool top, float ao, float sky) {
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
         vec3 o = top ? vec3(p.x, float(faceCell.y) + 1.0, p.z) : vec3(p.x, p.y, float(faceCell.z) + 1.0);
 #ifdef VOXEL_WALK
-        direct = lid_sunlight(o + normal * 0.06, o + normal * 1e-4, jitter) * Light.y * lambert;
+        direct = lid_sunlight(o + normal * 0.06, o + normal * 1e-4, jitter) * Light.y * lambert * ao_sun(ao);
 #else
-        direct = sunlight(o + normal * 0.06, jitter) * Light.y * lambert;
+        direct = sunlight(o + normal * 0.06, jitter) * Light.y * lambert * ao_sun(ao);
 #endif
     }
-    float ambient = Light.x * ao * (1.0 - Light.z * (1.0 - (0.15 + 0.85 * sky)));
+    float ambient = Light.x * min(ao, ao_sun(ao)) * (1.0 - Light.z * (1.0 - (0.15 + 0.85 * sky)));
     float warm = pow(faceLight.y * 255.0 / 15.0, 1.5) * Lid.w;
     return ambient * ShadowTint.rgb + direct * SunTint.rgb + warm * vec3(0.9, 0.75, 0.5) * ao;
 }
