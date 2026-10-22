@@ -734,13 +734,17 @@ public final class GpuMesher {
 		}
 		mesh.opaque.add(x, y, z, face, color, ao, light, flags, lo, hi);
 		if (mesh.lifted) {
-			// TileBaker.shade reads the fog where the ray lands, in this block's quart row.
-			double fy = y + 0.5;
+			// TileBaker.shade reads the fog where the ray lands: on a top face its plane, which for a
+			// cube is the bottom of the cell above, and on a south face its plane in z, below its top.
+			double unit = ShapeFaces.UNIT;
 			if (top) {
+				double fy = y + (hi >> 8 & 255) / unit;
 				mesh.opaque.haze(fogAt(helper, x, fy, z), fogAt(helper, x + 1, fy, z), fogAt(helper, x, fy, z + 1), fogAt(helper, x + 1, fy, z + 1));
 			} else {
-				int west = fogAt(helper, x, fy, z + 1);
-				int east = fogAt(helper, x + 1, fy, z + 1);
+				double fy = y + 0.5;
+				double fz = z + (hi >> 16 & 255) / unit;
+				int west = fogAt(helper, x, fy, fz);
+				int east = fogAt(helper, x + 1, fy, fz);
 				mesh.opaque.haze(west, east, west, east);
 			}
 		}
