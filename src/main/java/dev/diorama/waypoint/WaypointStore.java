@@ -18,7 +18,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
@@ -50,11 +52,25 @@ public final class WaypointStore {
 	private final String worldKey;
 	private final Path file;
 	private final List<Waypoint> waypoints = new ArrayList<>();
+	private final Path foldersFile;
+	private Folders folders = new Folders();
+
+	/**
+	 * The player's own folders and which folders are hidden, saved beside the waypoints in
+	 * {@code folders.json}. Every dimension has a folder of its own without being listed here.
+	 */
+	private static final class Folders {
+		List<String> custom = new ArrayList<>();
+		/** Folder keys, as {@link #folderKey} makes them. */
+		Set<String> hidden = new LinkedHashSet<>();
+	}
 
 	private WaypointStore(String worldKey) {
 		this.worldKey = worldKey;
 		this.file = WorldKey.folder(worldKey).resolve("waypoints.json");
+		this.foldersFile = WorldKey.folder(worldKey).resolve("folders.json");
 		this.load();
+		this.loadFolders();
 	}
 
 	/**
@@ -99,6 +115,110 @@ public final class WaypointStore {
 			}
 		}
 		return out;
+	}
+
+	/** The key of a dimension's own folder. */
+	public static String dimensionKey(String dimension) {
+		return "dim:" + dimension;
+	}
+
+	/** The key of a custom folder. */
+	public static String customKey(String name) {
+		return "folder:" + name;
+	}
+
+	/** The folder a waypoint is in: its custom folder if that still exists, else its dimension's. */
+	public String folderKey(Waypoint waypoint) {
+		String folder = this.folderName(waypoint.folder);
+		return folder != null ? customKey(folder) : dimensionKey(waypoint.dimension);
+	}
+
+	/** The custom folders, in the order they were made. */
+	public List<String> customFolders() {
+		return List.copyOf(this.folders.custom);
+	}
+
+	/** The custom folder with this name, any case, as it's spelled; null if there's none. */
+	public @Nullable String folderName(@Nullable String name) {
+		if (name == null || name.isBlank()) {
+			return null;
+		}
+		for (String folder : this.folders.custom) {
+			if (folder.equalsIgnoreCase(name.trim())) {
+				return folder;
+			}
+		}
+		return null;
+	}
+
+	/** Makes a custom folder; false if the name is blank or already taken. */
+	public boolean addFolder(String name) {
+		String trimmed = name.trim();
+		if (trimmed.isEmpty() || this.folderName(trimmed) != null) {
+			return false;
+		}
+		this.folders.custom.add(trimmed);
+		this.saveFolders();
+		return true;
+	}
+
+	/** Renames a custom folder, taking its waypoints and its hidden state along; false if the new name won't do. */
+	public boolean renameFolder(String old, String name) {
+		String trimmed = name.trim();
+		int index = this.folders.custom.indexOf(old);
+		String clash = this.folderName(trimmed);
+		if (index < 0 || trimmed.isEmpty() || clash != null && !clash.equals(old)) {
+			return false;
+		}
+		this.folders.custom.set(index, trimmed);
+		for (Waypoint waypoint : this.waypoints) {
+			if (old.equalsIgnoreCase(waypoint.folder)) {
+				waypoint.folder = trimmed;
+			}
+		}
+		if (this.folders.hidden.remove(customKey(old))) {
+			this.folders.hidden.add(customKey(trimmed));
+		}
+		this.saveFolders();
+		this.save();
+		return true;
+	}
+
+	/** Deletes a custom folder; its waypoints go back to their dimensions' folders. */
+	public void deleteFolder(String name) {
+		if (!this.folders.custom.remove(name)) {
+			return;
+		}
+		for (Waypoint waypoint : this.waypoints) {
+			if (name.equalsIgnoreCase(waypoint.folder)) {
+				waypoint.folder = "";
+			}
+		}
+		this.folders.hidden.remove(customKey(name));
+		this.saveFolders();
+		this.save();
+	}
+
+	public boolean folderHidden(String key) {
+		return this.folders.hidden.contains(key);
+	}
+
+	/** Hides or shows a whole folder on the maps and in the world. */
+	public void setFolderHidden(String key, boolean hidden) {
+		if (hidden ? this.folders.hidden.add(key) : this.folders.hidden.remove(key)) {
+			this.saveFolders();
+		}
+	}
+
+	/** Whether a waypoint shows on the maps and in the world: it's visible and its folder isn't hidden. */
+	public boolean shown(Waypoint waypoint) {
+		return waypoint.visible && !this.folderHidden(this.folderKey(waypoint));
+	}
+
+	/** {@link #shown} for the current world's store; a waypoint with no store loaded goes by its own setting. */
+	public static boolean isShown(Waypoint waypoint) {
+		WaypointStore store = get();
+		return store == null ? waypoint.visible : store.shown(waypoint);
 	}
 
 	public void add(Waypoint waypoint) {
@@ -195,7 +315,49 @@ public final class WaypointStore {
 		if (waypoint.kind == null) {
 			waypoint.kind = Waypoint.Kind.MANUAL;
 		}
+		if (waypoint.folder == null) {
+			waypoint.folder = "";
+		}
 		return waypoint;
+	}
+
+	private void loadFolders() {
+		if (!Files.isRegularFile(this.foldersFile)) {
+			return;
+		}
+		try (Reader reader = Files.newBufferedReader(this.foldersFile, StandardCharsets.UTF_8)) {
+			Folders read = GSON.fromJson(reader, Folders.class);
+			if (read != null) {
+				// Drop blank and repeated names a hand edit might have left.
+				Folders clean = new Folders();
+				if (read.custom != null) {
+					for (String name : read.custom) {
+						if (name != null && !name.isBlank() && clean.custom.stream().noneMatch(n -> n.equalsIgnoreCase(name.trim()))) {
+							clean.custom.add(name.trim());
+						}
+					}
+				}
+				if (read.hidden != null) {
+					clean.hidden.addAll(read.hidden);
+				}
+				this.folders = clean;
+			}
+		} catch (Exception e) {
+			Diorama.LOGGER.error("Couldn't read waypoint folders from {}", this.foldersFile, e);
+		}
+	}
+
+	private void saveFolders() {
+		try {
+			Files.createDirectories(this.foldersFile.getParent());
+			Path temp = this.foldersFile.resolveSibling("folders.json.tmp");
+			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+				GSON.toJson(this.folders, writer);
+			}
+			Files.move(temp, this.foldersFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		} catch (IOException | RuntimeException e) {
+			Diorama.LOGGER.error("Couldn't save waypoint folders to {}", this.foldersFile, e);
+		}
 	}
 
 	/** Writes to a temporary file and moves it over the old one, so a crash can't leave half a file. */

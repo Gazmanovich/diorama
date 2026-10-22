@@ -18,6 +18,9 @@
 	"entrypoints": {
 		"client": [
 			"dev.diorama.fabric.DioramaFabric"
+		],
+		"modmenu": [
+			"dev.diorama.fabric.ModMenuCompat"
 		]
 	},
 	"depends": {
@@ -25,6 +28,16 @@
 		"minecraft": "${minecraft}",
 		"java": ">=${java}",
 		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	},
+	"custom": {
+		"modmenu": {
+			"links": {
+				"modmenu.modrinth": "https://modrinth.com/mod/diorama-map"
+			}
+		}
 	},
 	"mixins": [
 		"diorama.mixins.json"

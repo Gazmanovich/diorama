@@ -200,6 +200,33 @@ public final class MobFaces {
 		return true;
 	}
 
+	/**
+	 * Draws an entity's face as pixel art centred on (x, y), about {@code size} GUI pixels across:
+	 * each texel a whole number of screen pixels, with a one-texel outline and a drop shadow.
+	 * Returns false if it has no face icon.
+	 */
+	public static boolean drawPixel(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
+		Face face = face(entity);
+		Identifier texture = face == null ? null : texture(entity);
+		if (face == null || texture == null) {
+			return false;
+		}
+		float texel = Radar.texel(size, Math.max(face.w(), face.h()));
+		Radar.pixelFrame(graphics, x, y, face.w(), face.h(), texel, outline, alpha);
+		MapCanvas canvas = MapCanvas.of(graphics);
+		canvas.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
+		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
+		if (feature != null) {
+			canvas.blit(texture, feature.dx(), feature.dy(), feature.u(), feature.v(), feature.w(), feature.h(), face.texW(), face.texH(), color);
+		}
+		if (face.hat() != null) {
+			Piece p = face.hat();
+			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
+		}
+		graphics.pose().popMatrix();
+		return true;
+	}
+
 	/** Cold cows use a different model, with the muzzle elsewhere in the texture. */
 	private static boolean coldCow(Entity entity) {
 		//? if >=1.21.5 {

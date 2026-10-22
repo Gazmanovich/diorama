@@ -6,6 +6,7 @@ import dev.diorama.MapSession;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
+import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
@@ -29,6 +31,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 //? if >=1.21.6 {
 import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
 //?}
@@ -43,8 +46,10 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  */
 @Mod(value = Diorama.MOD_ID, dist = Dist.CLIENT)
 public final class DioramaNeoForge {
-	public DioramaNeoForge(IEventBus modBus) {
+	public DioramaNeoForge(IEventBus modBus, ModContainer container) {
 		DioramaClient.init();
+		// The mod list's Config button opens the map settings.
+		container.registerExtensionPoint(IConfigScreenFactory.class, (mod, parent) -> new SettingsScreen(parent));
 		// The settings file sits in the game directory, and from NeoForge 21.5 mods are constructed
 		// before Minecraft exists. Client setup comes after; load them there, on the main thread.
 		modBus.addListener(FMLClientSetupEvent.class, event -> event.enqueueWork(Settings::get));

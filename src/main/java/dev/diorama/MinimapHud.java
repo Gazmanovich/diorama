@@ -119,8 +119,7 @@ public final class MinimapHud implements HudElement {
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 
-		graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, 0xC0101418);
-		graphics.fill(x - 1, y - 1, x + size + 1, y + size + 1, 0x60FFFFFF);
+		this.frame(graphics, settings.minimapFrame, x, y, size);
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer);
 		this.viewport.draw(graphics, session.map(), view);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() ? Radar.collect(view, partialTick, false) : List.of();
@@ -134,7 +133,7 @@ public final class MinimapHud implements HudElement {
 		if (settings.compass) {
 			this.compass(graphics, font, x, y, size);
 		}
-		int textY = y + size + 4;
+		int textY = y + size + Math.max(2, border(settings.minimapFrame)) + 2;
 		int left = x - 2;
 		int textRight = x + size + 2;
 		for (String line : info) {
@@ -145,7 +144,8 @@ public final class MinimapHud implements HudElement {
 			textRight = Math.max(textRight, tx + w + 1);
 			textY += 10;
 		}
-		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY};
+		int b = Math.max(2, border(settings.minimapFrame));
+		return new int[] {Math.min(left, x - b), y - b, Math.max(textRight, x + size + b), info.isEmpty() ? y + size + b : textY};
 	}
 
 	/**
@@ -187,6 +187,49 @@ public final class MinimapHud implements HudElement {
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);
 		}
 		return Math.max(SMALLEST, Math.min(size, fitted));
+	}
+
+	/**
+	 * The border around the map. The Minecraft edge is a black line with its corner pixels cut and a
+	 * light grey line inside it, even on every side. The panel is a whole inventory window: black
+	 * outline, white highlight on the top and left, grey body, dark shade on the bottom and right,
+	 * and the map sunk into it like a slot.
+	 */
+	private void frame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size) {
+		int x1 = x + size;
+		int y1 = y + size;
+		switch (frame) {
+			case CLASSIC -> {
+				graphics.fill(x - 2, y - 2, x1 + 2, y1 + 2, 0xC0101418);
+				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0x60FFFFFF);
+			}
+			case MINECRAFT -> {
+				graphics.fill(x - 2, y - 1, x1 + 2, y1 + 1, 0xFF000000);
+				graphics.fill(x - 1, y - 2, x1 + 1, y1 + 2, 0xFF000000);
+				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0xFFA0A0A0);
+			}
+			case PANEL -> {
+				int b = border(frame);
+				graphics.fill(x - b, y - b + 1, x1 + b, y1 + b - 1, 0xFF000000);
+				graphics.fill(x - b + 1, y - b, x1 + b - 1, y1 + b, 0xFF000000);
+				graphics.fill(x - b + 1, y - b + 1, x1 + b - 1, y1 + b - 1, 0xFF555555);
+				graphics.fill(x - b + 1, y - b + 1, x1 + b - 2, y1 + b - 2, 0xFFFFFFFF);
+				graphics.fill(x - b + 2, y - b + 2, x1 + b - 2, y1 + b - 2, 0xFFC6C6C6);
+				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0xFFFFFFFF);
+				graphics.fill(x - 1, y - 1, x1, y1, 0xFF373737);
+			}
+			case NONE -> {
+			}
+		}
+	}
+
+	/** How far the frame reaches out from the map. */
+	private static int border(Settings.Frame frame) {
+		return switch (frame) {
+			case PANEL -> 5;
+			case NONE -> 0;
+			default -> 2;
+		};
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */

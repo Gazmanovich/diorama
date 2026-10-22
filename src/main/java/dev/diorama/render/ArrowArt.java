@@ -17,9 +17,7 @@ public final class ArrowArt {
 	/** Supersampled pixels per GUI pixel while drawing. */
 	private static final int SS = 16;
 	private static final int WHITE = 0xFFFFFF;
-	private static final int BLUE = 0x3FA9F5;
 	private static final int LIT_SIDE = 0xE8EEF4;
-	private static final int SHADE_SIDE = 0x2A7FC4;
 	private static final int DARK = 0x101418;
 	/** The map's sun: from the west and a little south, 38 degrees up (the same light the tiles are baked with). */
 	private static final double[] SUN = normalise(-0.878 * Math.cos(Math.toRadians(38)), Math.sin(Math.toRadians(38)), 0.479 * Math.cos(Math.toRadians(38)));
@@ -32,7 +30,9 @@ public final class ArrowArt {
 	 * pixels from the centre to the tip of today's flat arrow, under a camera tilted so north-south
 	 * distances shrink by {@code sin} and heights by {@code cos}.
 	 */
-	public static PinArt.Image voxel(double yawDegrees, float size, double sin, double cos) {
+	public static PinArt.Image voxel(double yawDegrees, float size, double sin, double cos, int accent) {
+		// The sides in shade take a darker accent, as the blue arrow's did.
+		int shade = PinArt.mix(accent, 0x000000, 0.33F);
 		float s = size * 1.15F;
 		float[] outer = turn(dart(s), yawDegrees);
 		float[] inner = turn(dart(s * 0.5F), yawDegrees);
@@ -79,7 +79,7 @@ public final class ArrowArt {
 		canvas.cast(shadow);
 		cells.sort(Comparator.comparingInt(c -> c[1]));
 		for (int[] c : cells) {
-			prism(canvas, c[0], c[1], c[2] == 1 ? BLUE : WHITE, sin, cos);
+			prism(canvas, c[0], c[1], c[2] == 1 ? accent : WHITE, sin, cos, shade);
 		}
 		return canvas.result(0.28F, 1.0F);
 	}
@@ -105,7 +105,7 @@ public final class ArrowArt {
 	}
 
 	/** One block: its top and the sides the camera sees, far ones first. */
-	private static void prism(Canvas canvas, int i, int j, int top, double sin, double cos) {
+	private static void prism(Canvas canvas, int i, int j, int top, double sin, double cos, int shade) {
 		double[][] base = {{i, j}, {i + 1, j}, {i + 1, j + 1}, {i, j + 1}};
 		List<Object[]> faces = new ArrayList<>();
 		faces.add(new Object[] {new double[][] {{i, 1, j}, {i + 1, 1, j}, {i + 1, 1, j + 1}, {i, 1, j + 1}}, top, new double[] {0, 1, 0}});
@@ -117,7 +117,7 @@ public final class ArrowArt {
 		for (int k = 0; k < 4; k++) {
 			double x0 = base[k][0], z0 = base[k][1], x1 = base[(k + 1) % 4][0], z1 = base[(k + 1) % 4][1];
 			double[] n = {sign * (z1 - z0), 0, -sign * (x1 - x0)};
-			faces.add(new Object[] {new double[][] {{x0, 0, z0}, {x1, 0, z1}, {x1, 1, z1}, {x0, 1, z0}}, material(n), n});
+			faces.add(new Object[] {new double[][] {{x0, 0, z0}, {x1, 0, z1}, {x1, 1, z1}, {x0, 1, z0}}, material(n, shade), n});
 		}
 		List<Object[]> shown = new ArrayList<>();
 		for (Object[] f : faces) {
@@ -146,10 +146,10 @@ public final class ArrowArt {
 	}
 
 	/** Warm light on faces toward the sun, the cool shade colour away from it, like the map's grade. */
-	private static int material(double[] n) {
+	private static int material(double[] n, int shade) {
 		double[] u = normalise(n[0], n[1], n[2]);
 		double lit = Math.max(0, u[0] * SUN[0] + u[1] * SUN[1] + u[2] * SUN[2]) / SUN[1];
-		return PinArt.mix(SHADE_SIDE, LIT_SIDE, (float) Math.min(1, lit));
+		return PinArt.mix(shade, LIT_SIDE, (float) Math.min(1, lit));
 	}
 
 	private static double[] normalise(double x, double y, double z) {

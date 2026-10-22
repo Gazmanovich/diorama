@@ -32,14 +32,16 @@ public final class Pins {
 	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int size) {
 		int head = PinArt.standingHead(size);
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
-		Sprite sprite = sprite("pin " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head));
+		boolean square = square();
+		Sprite sprite = sprite("pin " + head + " " + rgb(waypoint) + " " + death + " " + square, () -> PinArt.standing(rgb(waypoint), death, head, square));
 		draw(graphics, sprite, waypoint, x, y, head);
 	}
 
 	/** A round badge centred on (x, y): the waypoint list's rows. */
 	public static void badge(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int head) {
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
-		Sprite sprite = sprite("badge " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.badge(rgb(waypoint), death, head, Double.NaN, 0));
+		boolean square = square();
+		Sprite sprite = sprite("badge " + head + " " + rgb(waypoint) + " " + death + " " + square, () -> PinArt.badge(rgb(waypoint), death, head, Double.NaN, 0, square));
 		draw(graphics, sprite, waypoint, x, y, head);
 	}
 
@@ -52,8 +54,9 @@ public final class Pins {
 		int step = Math.floorMod(Math.round((float) (angle / (Math.PI * 2) * CARET_STEPS)), CARET_STEPS);
 		double snapped = step * Math.PI * 2 / CARET_STEPS;
 		int caret = head >= LARGE ? 6 : 5;
-		Sprite sprite = sprite("edge " + head + " " + rgb(waypoint) + " " + death + " " + step,
-			() -> PinArt.badge(rgb(waypoint), death, head, snapped, caret));
+		boolean square = square();
+		Sprite sprite = sprite("edge " + head + " " + rgb(waypoint) + " " + death + " " + step + " " + square,
+			() -> PinArt.badge(rgb(waypoint), death, head, snapped, caret, square));
 		draw(graphics, sprite, waypoint, x, y, head);
 	}
 
@@ -74,6 +77,11 @@ public final class Pins {
 	/** How far a badge with a caret reaches from its centre, so a view can keep it inside. */
 	public static float edgeReach(int head) {
 		return head / 2.0F + 6;
+	}
+
+	/** Whether the settings ask for the square, Minecraft-style markers. */
+	private static boolean square() {
+		return dev.diorama.Settings.get().waypointStyle == dev.diorama.Settings.PinStyle.SQUARE;
 	}
 
 	private static int rgb(Waypoint waypoint) {

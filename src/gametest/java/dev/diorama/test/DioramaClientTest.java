@@ -1995,14 +1995,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitFor(mc -> mc.gui.screen() instanceof WaypointEditScreen, 100);
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
-			// What the editor shows: name, initials, x, y, z.
+			// What the editor shows: name, initials, x, y, z, and the colour as hex.
 			java.util.List<String> shown = new java.util.ArrayList<>();
 			for (var child : mc.gui.screen().children()) {
 				if (child instanceof net.minecraft.client.gui.components.EditBox box) {
 					shown.add(box.getValue());
 				}
 			}
-			if (!shown.equals(java.util.List.of("Old Mine", "O", "120", "40", "-80"))) {
+			String hex = dev.diorama.waypoint.WaypointColours.hex(((WaypointEditScreen) mc.gui.screen()).waypoint().color);
+			if (!shown.equals(java.util.List.of("Old Mine", "O", "120", "40", "-80", hex))) {
 				throw new AssertionError("The editor shows " + shown);
 			}
 		});

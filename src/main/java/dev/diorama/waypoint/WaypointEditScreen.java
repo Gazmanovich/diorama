@@ -1,8 +1,9 @@
 package dev.diorama.waypoint;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import dev.diorama.render.MapIcons;
 import dev.diorama.render.Pins;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -17,9 +18,9 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Creates or edits one waypoint: name, initials, position, colour and whether it shows. A preview
- * on the right stands its pin on a piece of the map, as the map will draw it, and follows the
- * colour and initials as they change; Share in chat and Teleport sit under it. The footer is only
+ * Creates or edits one waypoint: name, initials, position, colour, folder and whether it shows. A
+ * preview on the right stands its pin on a piece of the map, as the map will draw it, and follows
+ * the colour and initials as they change; the folder, Share in chat and Teleport sit under it. The footer is only
  * the two ways out, Save and Cancel. Deleting lives on the list's rows and the map's menu.
  */
 public final class WaypointEditScreen extends Screen {
@@ -27,8 +28,12 @@ public final class WaypointEditScreen extends Screen {
 	private static final int WIDTH = 292;
 	private static final int FORM = 200;
 	private static final int PREVIEW_LEFT = 212;
-	private static final int SWATCH = 16;
-	private static final int SWATCH_GAP = 4;
+	/** Each colour swatch's cell; the swatch is a pixel in from each side. */
+	private static final int SLOT = 12;
+	/** The hue and shade bars under the swatches, side by side. */
+	private static final int BAR_HEIGHT = 8;
+	private static final int BAR_WIDTH = 96;
+	private static final int BAR_GAP = 8;
 	/** Vanilla's colour for a number field it can't read, from the game rules screen. */
 	private static final int INVALID_TEXT = 0xFFFF0000;
 	private static final int LABEL = 0xFFA0A0A0;
@@ -49,8 +54,17 @@ public final class WaypointEditScreen extends Screen {
 	private @Nullable Button teleport;
 	private int color;
 	private boolean visible;
+	private EditBox hex;
 	private int swatchX;
 	private int swatchY;
+	/** Where the colour sits on the hue and shade bars. */
+	private float hue;
+	private float shade = 0.5F;
+	/** The bar being dragged: 0 none, 1 hue, 2 shade. */
+	private int dragging;
+	/** The custom folder name, or empty for the dimension's own folder. */
+	private String folder;
+	private @Nullable Button folderButton;
 
 	public WaypointEditScreen(@Nullable Screen parent, Waypoint waypoint, boolean isNew) {
 		super(Component.translatable(isNew ? "diorama.waypoint.new" : "diorama.waypoint.edit"));
@@ -59,6 +73,10 @@ public final class WaypointEditScreen extends Screen {
 		this.isNew = isNew;
 		this.color = waypoint.color;
 		this.visible = waypoint.visible;
+		WaypointStore store = WaypointStore.get();
+		String known = store == null ? null : store.folderName(waypoint.folder);
+		this.folder = known == null ? "" : known;
+		this.matchBars();
 	}
 
 	private int left() {
@@ -83,10 +101,23 @@ public final class WaypointEditScreen extends Screen {
 		this.x.setResponder(text -> this.validate());
 		this.y.setResponder(text -> this.validate());
 		this.z.setResponder(text -> this.validate());
-		this.swatchX = cx - (Waypoint.PALETTE.length / 2 * (SWATCH + SWATCH_GAP) - SWATCH_GAP) / 2;
+		this.swatchX = cx - WaypointColours.COLUMNS * SLOT / 2;
 		this.swatchY = top + 92;
+		// The hex field sits right of a chip showing the colour, then Random.
+		this.hex = this.field(left + 24, top + 143, 70, draft(this.hex, WaypointColours.hex(this.color)), "diorama.waypoint.hex", 7);
+		this.hex.setResponder(text -> {
+			Integer picked = WaypointColours.parse(text);
+			this.hex.setTextColor(picked != null ? EditBox.DEFAULT_TEXT_COLOR : INVALID_TEXT);
+			if (picked != null && (picked & 0xFFFFFF) != (this.color & 0xFFFFFF)) {
+				this.color = picked;
+				this.matchBars();
+			}
+		});
+		// Always a new colour, never close to the one shown.
+		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.random"), b -> this.pick(WaypointColours.random(this.color)))
+			.bounds(left + 98, top + 143, FORM - 98, 20).build());
 		this.addRenderableWidget(Checkbox.builder(Component.translatable("diorama.waypoint.show_on_maps"), this.font)
-			.pos(left, top + 141)
+			.pos(left, top + 168)
 			.selected(this.visible)
 			.onValueChange((box, value) -> this.visible = value)
 			.build());
@@ -96,11 +127,15 @@ public final class WaypointEditScreen extends Screen {
 		int previewWidth = WIDTH - PREVIEW_LEFT;
 		this.share = null;
 		this.teleport = null;
+		this.folderButton = this.addRenderableWidget(Button.builder(this.folderLabel(), b -> this.nextFolder())
+			.bounds(previewLeft, this.previewBottom() + 14, previewWidth, 20)
+			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.waypoint.folder_tooltip")))
+			.build());
 		if (!this.isNew) {
 			this.share = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.share"), b -> this.share())
-				.bounds(previewLeft, this.previewBottom() + 4, previewWidth, 20).build());
+				.bounds(previewLeft, this.previewBottom() + 38, previewWidth, 20).build());
 			this.teleport = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.teleport"), b -> this.teleport())
-				.bounds(previewLeft, this.previewBottom() + 28, previewWidth, 20).build());
+				.bounds(previewLeft, this.previewBottom() + 62, previewWidth, 20).build());
 		}
 
 		// The footer: only the two ways out, Save then Cancel, as vanilla orders them.
@@ -118,7 +153,41 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	private int previewBottom() {
-		return this.top() + 132;
+		return this.top() + 98;
+	}
+
+	/** The folders this waypoint can go in: its dimension's own, then the custom ones. */
+	private List<String> folders() {
+		List<String> out = new ArrayList<>();
+		out.add("");
+		WaypointStore store = WaypointStore.get();
+		if (store != null) {
+			out.addAll(store.customFolders());
+		}
+		return out;
+	}
+
+	private void nextFolder() {
+		List<String> folders = this.folders();
+		int index = folders.indexOf(this.folder);
+		this.folder = folders.get((index + 1) % folders.size());
+		if (this.folderButton != null) {
+			this.folderButton.setMessage(this.folderLabel());
+		}
+	}
+
+	/**
+	 * The folder's name alone, cut to fit the narrow button; the button's tooltip and the "Folder"
+	 * caption drawn on the preview say what it is.
+	 */
+	private Component folderLabel() {
+		Component name = this.folder.isEmpty() ? Waypoints.dimensionName(this.waypoint.dimension) : Component.literal(this.folder);
+		String text = name.getString();
+		int room = WIDTH - PREVIEW_LEFT - 8;
+		if (this.font.width(text) > room) {
+			text = this.font.plainSubstrByWidth(text, room - this.font.width("...")) + "...";
+		}
+		return Component.literal(text);
 	}
 
 	private static String draft(@Nullable EditBox box, String saved) {
@@ -164,17 +233,145 @@ public final class WaypointEditScreen extends Screen {
 		graphics.text(this.font, Component.translatable("diorama.waypoint.name"), left, top + 5, LABEL, true);
 		graphics.text(this.font, Component.translatable("diorama.waypoint.initials"), left + 160, top + 5, LABEL, true);
 		graphics.text(this.font, Component.translatable("diorama.waypoint.position"), left, top + 45, LABEL, true);
-		graphics.text(this.font, Component.translatable("diorama.waypoint.colour"), left, top + 81, LABEL, true);
-		for (int i = 0; i < Waypoint.PALETTE.length; i++) {
-			float sx = this.swatchX + (i % 8) * (SWATCH + SWATCH_GAP) + SWATCH / 2.0F;
-			float sy = this.swatchY + (i / 8) * (SWATCH + SWATCH_GAP) + SWATCH / 2.0F;
-			if (Waypoint.PALETTE[i] == this.color) {
-				MapIcons.dot(graphics, sx, sy, SWATCH + 6, 0xFFFFFFFF);
-			}
-			MapIcons.dot(graphics, sx, sy, SWATCH + 2, 0xFF101418);
-			MapIcons.dot(graphics, sx, sy, SWATCH, Waypoint.PALETTE[i]);
+		Component colourLabel = Component.translatable("diorama.waypoint.colour");
+		graphics.text(this.font, colourLabel, left, top + 81, LABEL, true);
+		WaypointColours.Swatch current = WaypointColours.named(this.color);
+		if (current != null) {
+			graphics.text(this.font, Component.literal("· ").append(current.name()), left + this.font.width(colourLabel) + 4, top + 81, 0xFFFFFFFF, true);
 		}
+		this.drawSwatches(graphics, mouseX, mouseY);
 		this.drawPreview(graphics);
+	}
+
+	/**
+	 * The colours as flat swatches on a dark panel, the hovered one ringed in grey and the picked
+	 * one in white; then the hue bar and the shade bar for any other colour, each with a marker
+	 * where the colour sits; then a chip of the colour itself beside its hex.
+	 */
+	private void drawSwatches(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int rows = WaypointColours.rows();
+		int x0 = this.swatchX;
+		int y0 = this.swatchY;
+		int x1 = x0 + WaypointColours.COLUMNS * SLOT;
+		int y1 = y0 + rows * SLOT;
+		graphics.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, 0x80000000);
+		int hovered = this.swatchAt(mouseX, mouseY);
+		int selected = -1;
+		for (int i = 0; i < WaypointColours.ALL.size(); i++) {
+			int sx = x0 + (i % WaypointColours.COLUMNS) * SLOT;
+			int sy = y0 + (i / WaypointColours.COLUMNS) * SLOT;
+			int argb = WaypointColours.ALL.get(i).argb();
+			if (i == hovered) {
+				graphics.fill(sx, sy, sx + SLOT, sy + SLOT, 0xFFA0A0A0);
+			}
+			graphics.fill(sx + 1, sy + 1, sx + SLOT - 1, sy + SLOT - 1, argb);
+			if ((argb & 0xFFFFFF) == (this.color & 0xFFFFFF) && selected < 0) {
+				selected = i;
+			}
+		}
+		if (selected >= 0) {
+			int sx = x0 + (selected % WaypointColours.COLUMNS) * SLOT;
+			int sy = y0 + (selected / WaypointColours.COLUMNS) * SLOT;
+			ring(graphics, sx - 1, sy - 1, sx + SLOT + 1, sy + SLOT + 1, 0xFF000000);
+			ring(graphics, sx, sy, sx + SLOT, sy + SLOT, 0xFFFFFFFF);
+		}
+		int barY = this.barY();
+		int hueX = this.hueX();
+		int shadeX = hueX + BAR_WIDTH + BAR_GAP;
+		graphics.fill(hueX - 1, barY - 1, hueX + BAR_WIDTH + 1, barY + BAR_HEIGHT + 1, 0xFF000000);
+		graphics.fill(shadeX - 1, barY - 1, shadeX + BAR_WIDTH + 1, barY + BAR_HEIGHT + 1, 0xFF000000);
+		for (int i = 0; i < BAR_WIDTH; i++) {
+			float t = i / (float) (BAR_WIDTH - 1);
+			graphics.fill(hueX + i, barY, hueX + i + 1, barY + BAR_HEIGHT, WaypointColours.rgb(t, 1, 1));
+			graphics.fill(shadeX + i, barY, shadeX + i + 1, barY + BAR_HEIGHT, WaypointColours.shade(this.hue, t));
+		}
+		marker(graphics, hueX + Math.round(this.hue * (BAR_WIDTH - 1)), barY);
+		marker(graphics, shadeX + Math.round(this.shade * (BAR_WIDTH - 1)), barY);
+		// The colour chip, framed like the text fields beside it.
+		int chipX = this.left();
+		int chipY = this.top() + 143;
+		graphics.fill(chipX, chipY, chipX + 20, chipY + 20, 0xFFA0A0A0);
+		graphics.fill(chipX + 1, chipY + 1, chipX + 19, chipY + 19, 0xFF000000);
+		graphics.fill(chipX + 2, chipY + 2, chipX + 18, chipY + 18, 0xFF000000 | this.color);
+		if (hovered >= 0) {
+			WaypointColours.Swatch swatch = WaypointColours.ALL.get(hovered);
+			graphics.setTooltipForNextFrame(this.font, Component.empty().append(swatch.name()).append(" " + WaypointColours.hex(swatch.argb())), mouseX, mouseY);
+		}
+	}
+
+	private static void ring(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1, int color) {
+		graphics.fill(x0, y0, x1, y0 + 1, color);
+		graphics.fill(x0, y1 - 1, x1, y1, color);
+		graphics.fill(x0, y0 + 1, x0 + 1, y1 - 1, color);
+		graphics.fill(x1 - 1, y0 + 1, x1, y1 - 1, color);
+	}
+
+	/** A bar's marker: a white line a pixel wide in a black outline, a little taller than the bar. */
+	private static void marker(GuiGraphicsExtractor graphics, int x, int barY) {
+		graphics.fill(x - 1, barY - 2, x + 2, barY + BAR_HEIGHT + 2, 0xFF000000);
+		graphics.fill(x, barY - 1, x + 1, barY + BAR_HEIGHT + 1, 0xFFFFFFFF);
+	}
+
+	private int barY() {
+		return this.swatchY + WaypointColours.rows() * SLOT + 4;
+	}
+
+	private int hueX() {
+		return this.left() + (FORM - 2 * BAR_WIDTH - BAR_GAP) / 2;
+	}
+
+	/** The swatch under a point, or -1. */
+	private int swatchAt(double x, double y) {
+		if (x < this.swatchX || y < this.swatchY) {
+			return -1;
+		}
+		int column = (int) ((x - this.swatchX) / SLOT);
+		int row = (int) ((y - this.swatchY) / SLOT);
+		int i = row * WaypointColours.COLUMNS + column;
+		return column < WaypointColours.COLUMNS && i < WaypointColours.ALL.size() ? i : -1;
+	}
+
+	/** The bar under a point: 1 hue, 2 shade, 0 neither. Its marker overhangs it, so a pixel more counts. */
+	private int barAt(double x, double y) {
+		int barY = this.barY();
+		if (y < barY - 2 || y >= barY + BAR_HEIGHT + 2) {
+			return 0;
+		}
+		int hueX = this.hueX();
+		int shadeX = hueX + BAR_WIDTH + BAR_GAP;
+		if (x >= hueX - 1 && x < hueX + BAR_WIDTH + 1) {
+			return 1;
+		}
+		return x >= shadeX - 1 && x < shadeX + BAR_WIDTH + 1 ? 2 : 0;
+	}
+
+	/** Moves a bar's marker to x and takes the colour it gives. */
+	private void dragBar(int bar, double x) {
+		int start = bar == 1 ? this.hueX() : this.hueX() + BAR_WIDTH + BAR_GAP;
+		float t = (float) Math.max(0, Math.min(1, (x - start) / (BAR_WIDTH - 1)));
+		if (bar == 1) {
+			this.hue = Math.min(t, 0.999F);
+		} else {
+			this.shade = t;
+		}
+		this.color = WaypointColours.shade(this.hue, this.shade);
+		this.hex.setValue(WaypointColours.hex(this.color));
+	}
+
+	/** Picks a colour and shows it in the hex field and on the bars. */
+	private void pick(int argb) {
+		this.color = argb;
+		this.matchBars();
+		this.hex.setValue(WaypointColours.hex(argb));
+	}
+
+	/** Puts the bars' markers where the colour is; a grey keeps the hue it had. */
+	private void matchBars() {
+		float[] hsv = WaypointColours.hsv(this.color);
+		if (hsv[1] > 0.05F) {
+			this.hue = hsv[0];
+		}
+		this.shade = WaypointColours.shadeOf(this.color);
 	}
 
 	/**
@@ -198,6 +395,8 @@ public final class WaypointEditScreen extends Screen {
 		int pieceX = (x0 + x1) / 2 - this.piece.outerWidth() / 2;
 		int pieceY = y0 + (y1 - y0 - total) / 2 + rise;
 		this.piece.draw(graphics, pieceX, pieceY);
+		// The caption of the folder button under the panel.
+		graphics.text(this.font, Component.translatable("diorama.waypoint.folder_caption"), x0, y1 + 3, LABEL, true);
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(pieceX + this.piece.tipX(), pieceY + this.piece.tipY());
 		graphics.pose().scale(2);
@@ -211,26 +410,60 @@ public final class WaypointEditScreen extends Screen {
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		return this.clicked(event.x(), event.y(), event.button()) || super.mouseClicked(event, doubleClick);
 	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		return this.dragged(event.x()) || super.mouseDragged(event, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		this.dragging = 0;
+		return super.mouseReleased(event);
+	}
 	//?} else {
 	/*@Override
 	public boolean mouseClicked(double x, double y, int button) {
 		return this.clicked(x, y, button) || super.mouseClicked(x, y, button);
 	}
+
+	@Override
+	public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
+		return this.dragged(x) || super.mouseDragged(x, y, button, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(double x, double y, int button) {
+		this.dragging = 0;
+		return super.mouseReleased(x, y, button);
+	}
 	*///?}
 
-	/** Picks the colour swatch under a left click; false if the click wasn't on one. */
+	/** Picks the colour swatch or the bar spot under a left click; false if the click was on neither. */
 	private boolean clicked(double x, double y, int button) {
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
-			for (int i = 0; i < Waypoint.PALETTE.length; i++) {
-				int sx = this.swatchX + (i % 8) * (SWATCH + SWATCH_GAP);
-				int sy = this.swatchY + (i / 8) * (SWATCH + SWATCH_GAP);
-				if (x >= sx && x < sx + SWATCH && y >= sy && y < sy + SWATCH) {
-					this.color = Waypoint.PALETTE[i];
-					return true;
-				}
+			int i = this.swatchAt(x, y);
+			if (i >= 0) {
+				this.pick(WaypointColours.ALL.get(i).argb());
+				return true;
+			}
+			int bar = this.barAt(x, y);
+			if (bar != 0) {
+				this.dragging = bar;
+				this.dragBar(bar, x);
+				return true;
 			}
 		}
 		return false;
+	}
+
+	/** Follows the mouse along the bar being dragged. */
+	private boolean dragged(double x) {
+		if (this.dragging == 0) {
+			return false;
+		}
+		this.dragBar(this.dragging, x);
+		return true;
 	}
 
 	/** The waypoint being edited. For tests. */
@@ -290,6 +523,7 @@ public final class WaypointEditScreen extends Screen {
 		this.waypoint.z = shown.z;
 		this.waypoint.color = this.color;
 		this.waypoint.visible = this.visible;
+		this.waypoint.folder = this.folder;
 		// Saving a temporary waypoint from the editor keeps it; otherwise a renamed one would still
 		// vanish on leaving the world.
 		if (this.waypoint.kind == Waypoint.Kind.TEMPORARY) {

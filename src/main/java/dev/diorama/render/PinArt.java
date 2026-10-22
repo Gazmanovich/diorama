@@ -74,6 +74,54 @@ public final class PinArt {
 		"........#........"
 	};
 
+	/**
+	 * The square, Minecraft-style markers: a block with its corner pixels cut, like the game's
+	 * panels, standing on a stepped point. Same sizes and anchors as the round pins.
+	 */
+	private static final String[] LARGE_SQUARE = {
+		"...#############...",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"..###############..",
+		"...#############...",
+		".....#########.....",
+		"......#######......",
+		".......#####.......",
+		"........###........",
+		"........###........",
+		".........#........."
+	};
+	private static final String[] SMALL_SQUARE = {
+		"...###########...",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"..#############..",
+		"...###########...",
+		".....#######.....",
+		"......#####......",
+		".......###.......",
+		".......###.......",
+		"........#........"
+	};
+
 	/** RGBA pixels with straight alpha, 0..255 per channel. */
 	public static final class Image {
 		public final int width;
@@ -152,6 +200,11 @@ public final class PinArt {
 	 * designed sizes, a head of 15 or 13 pixels; other sizes get the nearer one.
 	 */
 	public static Art standing(int colour, boolean death, int head) {
+		return standing(colour, death, head, false);
+	}
+
+	/** A pin raised on a point; {@code square} for the Minecraft-style block marker. */
+	public static Art standing(int colour, boolean death, int head, boolean square) {
 		int d = standingHead(head);
 		int tip = d == 13 ? 5 : 6;
 		int face = death ? DEATH_FACE : colour;
@@ -162,7 +215,7 @@ public final class PinArt {
 		float ax = ox + d / 2.0F;
 		float ay = d + tip;
 		image.over(ellipse(w, h, ax, ay - 0.5F, d * 0.26F + 0.6F, 1.3F), 0x000000, 0.28F);
-		boolean[] mask = outline(d == 13 ? SMALL_PIN : LARGE_PIN, w, h);
+		boolean[] mask = outline(square ? (d == 13 ? SMALL_SQUARE : LARGE_SQUARE) : (d == 13 ? SMALL_PIN : LARGE_PIN), w, h);
 		face(image, mask, w, h, face);
 		if (death) {
 			headstone(image, ox + 1, 1, ox + d - 1, d - 1);
@@ -172,12 +225,17 @@ public final class PinArt {
 
 	/** A round badge of diameter {@code d}; with {@code caretAngle} (radians, screen space, 0 is right) a caret beside it points that way. */
 	public static Art badge(int colour, boolean death, int d, double caretAngle, int caretSize) {
+		return badge(colour, death, d, caretAngle, caretSize, false);
+	}
+
+	/** A badge, round or, with {@code square}, a block with its corners cut. */
+	public static Art badge(int colour, boolean death, int d, double caretAngle, int caretSize, boolean square) {
 		int face = death ? DEATH_FACE : colour;
 		boolean caret = !Double.isNaN(caretAngle);
 		int pad = caret ? 6 : 0;
 		int w = d + pad * 2;
 		Image image = new Image(w, w);
-		boolean[] mask = disc(w, w, pad + d / 2.0F, pad + d / 2.0F, d / 2.0F);
+		boolean[] mask = square ? block(w, w, pad, pad, d) : disc(w, w, pad + d / 2.0F, pad + d / 2.0F, d / 2.0F);
 		face(image, mask, w, w, face);
 		if (death) {
 			headstone(image, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
@@ -294,6 +352,18 @@ public final class PinArt {
 				float dx = x + 0.5F - cx;
 				float dy = y + 0.5F - cy;
 				m[y * w + x] = dx * dx + dy * dy <= rr;
+			}
+		}
+		return m;
+	}
+
+	/** A d x d square at (x0, y0) without its four corner pixels. */
+	private static boolean[] block(int w, int h, int x0, int y0, int d) {
+		boolean[] m = new boolean[w * h];
+		for (int y = y0; y < y0 + d; y++) {
+			for (int x = x0; x < x0 + d; x++) {
+				boolean corner = (x == x0 || x == x0 + d - 1) && (y == y0 || y == y0 + d - 1);
+				m[y * w + x] = !corner;
 			}
 		}
 		return m;

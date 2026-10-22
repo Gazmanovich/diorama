@@ -86,12 +86,24 @@ public final class SettingsScreen extends Screen {
 		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
 			i -> s.minimapSize = Settings.MIN_SIZE + i * Settings.SIZE_STEP, i -> Component.literal(Integer.toString(Settings.MIN_SIZE + i * Settings.SIZE_STEP)));
 		minimap.slider("zoom", s.minimapZoom, Settings.ZOOMS.length, i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
+		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
 		radar.toggle("hostile", () -> s.radarHostile, v -> s.radarHostile = v);
 		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
 		radar.toggle("passive", () -> s.radarPassive, v -> s.radarPassive = v);
+		radar.toggle("type_outline", () -> s.radarTypeOutline, v -> s.radarTypeOutline = v);
+		radar.choice("radar_style", Settings.RadarStyle.values(), () -> s.radarStyle, v -> s.radarStyle = v);
+		int scales = (Settings.MAX_SCALE - Settings.MIN_SCALE) / Settings.SCALE_STEP + 1;
+		IntFunction<Component> percent = i -> Component.literal((Settings.MIN_SCALE + i * Settings.SCALE_STEP) + "%");
+		// Side by side, so the tab still fits a small screen.
+		radar.sliders(
+			radar.halfSlider("mob_icon_size", (s.mobIconScale - Settings.MIN_SCALE) / Settings.SCALE_STEP, scales,
+				i -> s.mobIconScale = Settings.MIN_SCALE + i * Settings.SCALE_STEP, percent),
+			radar.halfSlider("player_icon_size", (s.playerIconScale - Settings.MIN_SCALE) / Settings.SCALE_STEP, scales,
+				i -> s.playerIconScale = Settings.MIN_SCALE + i * Settings.SCALE_STEP, percent));
+		radar.choice("player_names", Settings.NameTags.values(), () -> s.playerNames, v -> s.playerNames = v);
 		int[] ranges = Settings.RANGES;
 		radar.slider("range", indexOf(ranges, s.radarRange), ranges.length, i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
 
@@ -106,6 +118,8 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
 		waypoints.toggle("waypoints_world", () -> s.waypointsInWorld, v -> s.waypointsInWorld = v);
 		waypoints.toggle("deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
+		waypoints.choice("waypoint_style", Settings.PinStyle.values(), () -> s.waypointStyle, v -> s.waypointStyle = v);
+		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
 
 		SettingsTab look = new SettingsTab("diorama.settings.look");
 		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
@@ -117,6 +131,9 @@ public final class SettingsScreen extends Screen {
 		// On, but turned off this session because the graphics card's tiles didn't match: say so.
 		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
 		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
+		look.choice("arrow_style", Settings.ArrowStyle.values(), () -> s.arrowStyle, v -> s.arrowStyle = v);
+		look.cycle("arrow_color", () -> s.arrowColor, Settings.ARROW_COLORS.length, i -> s.arrowColor = i,
+			i -> Component.translatable("diorama.settings.arrow_color." + Settings.ARROW_COLOR_NAMES[i]).withColor(Settings.ARROW_COLORS[i]));
 
 		// Vanilla's tab bar, over the settings side instead of the whole screen. It's drawn by hand
 		// (extractRenderState), clipped to the side: its separator line runs on past the last tab.
@@ -164,10 +181,12 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
-	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width. */
+	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width, or two to a row. */
 	private final class SettingsTab extends GridLayoutTab {
 		private final List<AbstractWidget> checkboxes = new ArrayList<>();
 		private final List<AbstractWidget> wide = new ArrayList<>();
+		/** Widgets that share a row with the one after them in {@link #wide}. */
+		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
@@ -200,10 +219,30 @@ public final class SettingsScreen extends Screen {
 			return button;
 		}
 
+		/** A button that steps through an enum's values, named diorama.settings.<key>.<value>. */
+		<E extends Enum<E>> Button choice(String key, E[] values, java.util.function.Supplier<E> get, Consumer<E> set) {
+			return this.cycle(key, () -> get.get().ordinal(), values.length, i -> set.accept(values[i]),
+				i -> Component.translatable("diorama.settings." + key + "." + values[i].name().toLowerCase(Locale.ROOT)));
+		}
+
 		void slider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {
 			StepSlider slider = new StepSlider(Component.translatable("diorama.settings." + key), index, count, set, name);
 			slider.setTooltip(tooltip(key));
 			this.wide.add(slider);
+		}
+
+		/** A slider for {@link #sliders}, not yet in the tab. */
+		StepSlider halfSlider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {
+			StepSlider slider = new StepSlider(Component.translatable("diorama.settings." + key), index, count, set, name);
+			slider.setTooltip(tooltip(key));
+			return slider;
+		}
+
+		/** Two sliders sharing one row. */
+		void sliders(StepSlider first, StepSlider second) {
+			this.wide.add(first);
+			this.wide.add(second);
+			this.pairedWithNext.add(first);
 		}
 
 		@Override
@@ -224,9 +263,18 @@ public final class SettingsScreen extends Screen {
 			if (!this.checkboxes.isEmpty()) {
 				y += (this.checkboxes.size() + 1) / 2 * 22 + 10;
 			}
-			for (AbstractWidget widget : this.wide) {
-				widget.setPosition(left, y);
-				widget.setWidth(content);
+			for (int i = 0; i < this.wide.size(); i++) {
+				AbstractWidget widget = this.wide.get(i);
+				if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
+					AbstractWidget next = this.wide.get(++i);
+					widget.setPosition(left, y);
+					widget.setWidth(column);
+					next.setPosition(left + column + COLUMN_GAP, y);
+					next.setWidth(content - column - COLUMN_GAP);
+				} else {
+					widget.setPosition(left, y);
+					widget.setWidth(content);
+				}
 				y += 24;
 			}
 		}
