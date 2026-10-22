@@ -775,6 +775,10 @@ public final class TileBaker {
 			this.albedoB *= crust;
 		}
 
+		// Shade in corners and creases dims the sunlight too as far as the style asks, and the sky
+		// light by at least as much as always.
+		float aoSun = Math.max(0, 1 - this.style.cornerOcclusion() * (1 - ao));
+		float aoSky = Math.min(ao, aoSun);
 		float lr;
 		float lg;
 		float lb;
@@ -792,10 +796,10 @@ public final class TileBaker {
 				double ox = x + fx;
 				double oy = top ? by + 1 + 1e-4 : hitY;
 				double oz = top ? hitZ : bz + 1 + 1e-4;
-				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (LID_KEY * lambert);
+				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (LID_KEY * lambert) * aoSun;
 			}
 			float sky = top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by);
-			float ambient = LID_AMBIENT * ao * (1 - this.style.skyOcclusion() * (1 - (0.15F + 0.85F * sky)));
+			float ambient = LID_AMBIENT * aoSky * (1 - this.style.skyOcclusion() * (1 - (0.15F + 0.85F * sky)));
 			float warm = (float) Math.pow(this.reader.blockLight(x, frontY, frontZ) / 15.0F, 1.5) * LID_GLOW;
 			lr = ambient * LID_FILL_TINT[0] + direct * LID_KEY_TINT[0] + warm * 0.9F * ao;
 			lg = ambient * LID_FILL_TINT[1] + direct * LID_KEY_TINT[1] + warm * 0.75F * ao;
@@ -832,11 +836,11 @@ public final class TileBaker {
 				// A partial block's face can sit inside its cell; the shadow ray starts on the face.
 				double oy = top ? (partial ? hitY : by + 1) + 1e-4 : hitY;
 				double oz = top ? hitZ : (partial ? hitZ : bz + 1) + 1e-4;
-				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (this.style.sunStrength() * lambert);
+				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (this.style.sunStrength() * lambert) * aoSun;
 			}
 			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
 			// blocks alone and light updates never make its colours stale.
-			float ambient = this.style.ambient() * ao;
+			float ambient = this.style.ambient() * aoSky;
 			float occlusion = this.style.skyOcclusion();
 			if (occlusion > 0) {
 				// Less sky overhead, less ambient light: under trees, down in valleys and at the

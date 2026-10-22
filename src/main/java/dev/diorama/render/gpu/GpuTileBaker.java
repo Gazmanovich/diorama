@@ -357,7 +357,7 @@ public final class GpuTileBaker {
 				vec4(out, style.shadowTint()[0], style.shadowTint()[1], style.shadowTint()[2], 0);
 			}
 			vec4(out, style.saturation(), style.exposure(), style.outline(), style.clearWater() ? 1 : 0);
-			vec4(out, 1.5 * texel + 0.02, 0, 0, 0);
+			vec4(out, 1.5 * texel + 0.02, style.cornerOcclusion(), 0, 0);
 			for (double[] j : TileBaker.SUN_JITTER) {
 				vec4(out, j[0], j[1], j[2], 0);
 			}
