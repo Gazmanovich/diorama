@@ -14,11 +14,12 @@ import net.minecraft.network.chat.Component;
  * turns GPU baking off for the rest of the session, so it can't spoil a map.
  *
  * <p>Both bakes of a check tile read the same chunks (a {@code PinnedSource}), so any difference
- * past what the two sample patterns explain is the GPU's. Four kinds of bake are checked apart:
- * sky views and lit views (cave slices, the Nether under its roof), each with overlays and
- * without. Only sky views draw sun shadows and sky occlusion, and only overlay bakes write the
- * overlay bits, so a pass on one kind says nothing about another. Fog-of-war bakes are never
- * check tiles, since what the player has seen keeps changing under them.
+ * past what the two sample patterns explain is the GPU's. Six kinds of bake are checked apart:
+ * sky views, cave slices and views under a roof (the Nether's, cave slices there too), each with
+ * overlays and without. Each kind lights its own way (the sun, block light, light from above with
+ * the lid off and the biome's fog), and only overlay bakes write the overlay bits, so a pass on
+ * one kind says nothing about another. Fog-of-war bakes are never check tiles, since what the
+ * player has seen keeps changing under them.
  *
  * <p>A kind that passed is trusted: its own tiles showed this GPU draws it right. A later
  * failure of another kind stops GPU baking from then on, but doesn't reach back into tiles the
@@ -76,9 +77,14 @@ public final class GpuBakeCheck {
 
 	private static final Object LOCK = new Object();
 	private static volatile boolean failed;
-	/** By kind: sky view, lit view, each without overlays and with. */
+	/** The views, as {@link #mode} and the rest take them. */
+	public static final int SKY = 0;
+	public static final int CAVE = 1;
+	public static final int UNDER_ROOF = 2;
+	/** By kind: each view without overlays, then with. */
 	private static final Check[] CHECKS = {
-		new Check("sky view"), new Check("lit view"), new Check("sky view with overlays"), new Check("lit view with overlays")
+		new Check("sky view"), new Check("cave view"), new Check("view under a roof"),
+		new Check("sky view with overlays"), new Check("cave view with overlays"), new Check("view under a roof with overlays")
 	};
 
 	private GpuBakeCheck() {
@@ -116,20 +122,20 @@ public final class GpuBakeCheck {
 		return failed;
 	}
 
-	private static Check check(boolean lit, boolean overlays) {
-		return CHECKS[(lit ? 1 : 0) + (overlays ? 2 : 0)];
+	private static Check check(int view, boolean overlays) {
+		return CHECKS[view + (overlays ? 3 : 0)];
 	}
 
 	/**
-	 * How the next bake of a sky view or a {@code lit} one runs, with fog of war and overlays or
-	 * not. A {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn},
+	 * How the next bake of a {@code view} ({@link #SKY}, {@link #CAVE} or {@link #UNDER_ROOF}) runs,
+	 * with fog of war and overlays or not. A {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn},
 	 * exactly once, with the same kind, and its two bakes must read the same chunks.
 	 */
-	public static Mode mode(boolean lit, boolean fogOfWar, boolean overlays) {
+	public static Mode mode(int view, boolean fogOfWar, boolean overlays) {
 		if (!wanted() || failed) {
 			return Mode.TRACE;
 		}
-		Check check = check(lit, overlays);
+		Check check = check(view, overlays);
 		if (check.passed) {
 			return Mode.GPU;
 		}
@@ -150,7 +156,7 @@ public final class GpuBakeCheck {
 	 * A check tile came back from both bakers: the GPU's pixels and the tracer's, before any merge,
 	 * with their overlay bits when the bake asked for them.
 	 */
-	public static void compare(boolean lit, int[] gpu, int[] traced, byte @Nullable [] gpuInfo, byte @Nullable [] tracedInfo) {
+	public static void compare(int view, int[] gpu, int[] traced, byte @Nullable [] gpuInfo, byte @Nullable [] tracedInfo) {
 		boolean overlays = tracedInfo != null;
 		long both = 0;
 		long mismatched = 0;
@@ -185,7 +191,7 @@ public final class GpuBakeCheck {
 				blueBias += db;
 			}
 		}
-		Check check = check(lit, overlays);
+		Check check = check(view, overlays);
 		synchronized (LOCK) {
 			check.out--;
 			if (failed || check.passed) {
@@ -231,8 +237,8 @@ public final class GpuBakeCheck {
 	 * Only one the GPU couldn't draw counts against it, not one handed back because the world
 	 * closed or the map's look changed meanwhile.
 	 */
-	public static void undrawn(boolean lit, boolean overlays, boolean cannotDraw) {
-		Check check = check(lit, overlays);
+	public static void undrawn(int view, boolean overlays, boolean cannotDraw) {
+		Check check = check(view, overlays);
 		synchronized (LOCK) {
 			check.out--;
 			if (cannotDraw && !failed && !check.passed && ++check.failures >= FAILURES) {

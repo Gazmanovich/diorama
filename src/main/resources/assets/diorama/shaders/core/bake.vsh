@@ -27,6 +27,8 @@ LOC(5) in int SkyIndex;
 // The piece of the cell the face covers, in 128ths: x0, y0, z0 a byte each in x, x1, y1, z1 in y.
 // The whole cell for a cube; part of a box of a smaller block, as ShapeFaces packs it.
 LOC(6) in ivec2 Box;
+// Under a roof, the biome fog at the cube face's corners: sRGB bytes, red lowest.
+LOC(7) in ivec4 Haze;
 #else
 LOC(2) in ivec2 Box;
 #endif
@@ -134,6 +136,7 @@ LOC(4) flat out vec4 faceLight;
 LOC(5) flat out ivec2 faceInfo;
 LOC(6) flat out vec4 faceSky;
 LOC(7) flat out ivec3 faceCell;
+LOC(8) flat out ivec4 faceHaze;
 
 float sky_slot(int slot) {
     return texelFetch(Sky, ivec2(slot % SKY_WIDTH, slot / SKY_WIDTH), 0).r;
@@ -210,6 +213,7 @@ void main() {
     faceLight = FaceLight;
     faceInfo = ivec2(face, flags);
     faceCell = Cell.xyz;
+    faceHaze = Haze;
     faceSky = vec4(1.0);
     if (SkyIndex >= 0) {
         int slot = SkyIndex * 4;

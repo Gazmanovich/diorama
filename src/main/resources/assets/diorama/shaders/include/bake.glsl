@@ -22,7 +22,8 @@ layout(std140) uniform DioramaBake {
     vec4 Shadow;
     // The tracer nudges the sun a little per sample, which softens shadow edges.
     vec4 Jitter[4];
-    // x: 1 when lit by block and sky light (caves, under a roof); y: 1 for a cave slice; z: the y rays start at
+    // x: 1 when lit by block and sky light (caves, under a roof); y: 1 for a cave slice; z: the y rays start at;
+    // w: 1 under a roof, lit from above as if the rock over the open space were lifted off
     vec4 Mode;
     // The voxel table's first section (x and z relative to the origin), and in w the top a sky ray can meet.
     ivec4 VoxelOrigin;
@@ -30,6 +31,10 @@ layout(std140) uniform DioramaBake {
     ivec4 VoxelSize;
     // The tracer's sky occlusion rays: direction, and in w how much each counts.
     vec4 SkyRays[13];
+    // Under a roof: where the biome's fog starts, how fast it thickens, the most of it, and the block light glow.
+    vec4 Lid;
+    // Under a roof: the fog's light, and the most light a biome's fog colour may have before it.
+    vec4 Haze;
 };
 
 // Reversed depth like vanilla: near is 1, far is 0.

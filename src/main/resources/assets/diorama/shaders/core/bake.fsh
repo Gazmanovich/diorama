@@ -31,6 +31,7 @@ LOC(4) flat in vec4 faceLight;
 LOC(5) flat in ivec2 faceInfo;
 LOC(6) flat in vec4 faceSky;
 LOC(7) flat in ivec3 faceCell;
+LOC(8) flat in ivec4 faceHaze;
 
 layout(location = 0) out vec4 fragColor;
 #if !defined(WATER) && !defined(TINTED)
@@ -40,6 +41,7 @@ layout(location = 1) out vec4 fragAux;
 #endif
 
 const int FLAG_UNKNOWN = 1;
+const int FLAG_LAVA = 2;
 const int FLAG_CUT = 4;
 const int FLAG_OVERLAY = 16;
 const int FLAG_SLIME = 32;
@@ -106,6 +108,43 @@ vec3 sun_light(vec3 p, bool top, float ao, float sky) {
         l *= 1.0 + Light.w * clamp((p.y - 64.0) / 64.0, -1.0, 1.0);
     }
     return l;
+}
+
+// Under a roof, as TileBaker.shade: lit like the surface with the lid off, direct light from above
+// casting shadows under ledges and down pillars, the fill weaker where little of the open space
+// above is seen, and block light glowing on top.
+vec3 lid_light(vec3 p, bool top, float ao, float sky) {
+    int sampleIndex = (int(gl_FragCoord.x) & 1) + 2 * (int(gl_FragCoord.y) & 1);
+    vec3 jitter = Jitter[sampleIndex].xyz;
+    vec3 sun = SunDir.xyz + jitter;
+    float lambert = top ? 1.0 : max(0.0, sun.z) / sun.y;
+    float direct = 0.0;
+    if (lambert > 0.0) {
+        // The tracer starts these shadow rays on the cube's face, a smaller block's too.
+        vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+        vec3 o = top ? vec3(p.x, float(faceCell.y) + 1.0, p.z) : vec3(p.x, p.y, float(faceCell.z) + 1.0);
+        direct = sunlight(o + normal * 0.06, jitter) * Light.y * lambert;
+    }
+    float ambient = Light.x * ao * (1.0 - Light.z * (1.0 - (0.15 + 0.85 * sky)));
+    float warm = pow(faceLight.y * 255.0 / 15.0, 1.5) * Lid.w;
+    return ambient * ShadowTint.rgb + direct * SunTint.rgb + warm * vec3(0.9, 0.75, 0.5) * ao;
+}
+
+vec3 haze_corner(int c) {
+    return to_linear(vec3(float(c & 255), float((c >> 8) & 255), float((c >> 16) & 255)) / 255.0);
+}
+
+// Under a roof: the lower the ground, the more of the biome's fog lies in front, as TileBaker.shade.
+vec3 hazed(vec3 c, float y) {
+    float below = Lid.x - y;
+    if (below <= 0.0) {
+        return c;
+    }
+    float f = min(Lid.z, 1.0 - exp(-below / Lid.y));
+    vec3 h = mix(mix(haze_corner(faceHaze.x), haze_corner(faceHaze.y), faceUv.x), mix(haze_corner(faceHaze.z), haze_corner(faceHaze.w), faceUv.x), faceUv.y);
+    // Each fog keeps its hue but no more than this light, as TileBaker.hazeColor.
+    h *= Haze.x * min(1.0, Haze.y / max(1e-6, luminance(h)));
+    return c + (h - c) * f;
 }
 
 // Caves and under a roof: the game's block and sky light in the cell the face looks into.
@@ -199,16 +238,21 @@ void main() {
         return;
     }
     float ao = bilinear(faceOcclusion, faceUv);
-    vec3 l = Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, bilinear(faceSky, faceUv));
+    bool lid = Mode.w > 0.5;
+    vec3 l = lid ? lid_light(localPos, top, ao, bilinear(faceSky, faceUv))
+        : Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, bilinear(faceSky, faceUv));
     float emission = faceColor.a;
     if (emission > 0.0) {
-        l = max(l, vec3(0.35 + emission * 0.85));
+        // In the fog, small lights like shroomlights and glowstone glow softer, so they don't
+        // speckle the view; lava keeps its full glow.
+        l = max(l, vec3(lid && (flags & FLAG_LAVA) == 0 ? 0.3 + emission * 0.45 : 0.35 + emission * 0.85));
     }
     if (!top) {
         // Faces that aren't up read darker, the way Minecraft shades its own block sides.
         l *= 0.82;
     }
-    fragColor = vec4(albedo * l, 1.0);
+    vec3 shaded = albedo * l;
+    fragColor = vec4(lid ? hazed(shaded, localPos.y) : shaded, 1.0);
     fragAux = vec4(bits, luminance(albedo), 0.0, 0.0);
 #endif
 #endif

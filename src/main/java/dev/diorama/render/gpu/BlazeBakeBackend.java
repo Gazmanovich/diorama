@@ -65,6 +65,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		.addAttribute("FaceLight", GpuFormat.RGBA8_UNORM)
 		.addAttribute("SkyIndex", GpuFormat.R32_SINT)
 		.addAttribute("Box", GpuFormat.RG32_SINT)
+		.addAttribute("Haze", GpuFormat.RGBA32_SINT)
 		.build();
 	private static final VertexFormat CASTER = VertexFormat.builder(1)
 		.addAttribute("Cell", GpuFormat.RGBA16_SINT)
