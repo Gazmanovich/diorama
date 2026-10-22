@@ -41,5 +41,3 @@ replay_*.log
 
 # game logs from local runs
 logs/
-dist/
-build-release.log

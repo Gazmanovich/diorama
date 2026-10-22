@@ -36,14 +36,8 @@ public final class DioramaClient {
 	public static final KeyMapping ZOOM_OUT = new KeyMapping("key.diorama.zoom_out", InputConstants.KEY_MINUS, CATEGORY);
 	public static final KeyMapping SETTINGS = new KeyMapping("key.diorama.settings", InputConstants.UNKNOWN.getValue(), CATEGORY);
 	public static final KeyMapping TOGGLE_MINIMAP = new KeyMapping("key.diorama.toggle_minimap", InputConstants.UNKNOWN.getValue(), CATEGORY);
-	// Keys of the fullscreen map, which only act while it's open.
-	public static final KeyMapping TOGGLE_CAVES = new KeyMapping("key.diorama.toggle_caves", InputConstants.KEY_C, CATEGORY);
-	public static final KeyMapping SLICE_UP = new KeyMapping("key.diorama.slice_up", InputConstants.KEY_PAGEUP, CATEGORY);
-	public static final KeyMapping SLICE_DOWN = new KeyMapping("key.diorama.slice_down", InputConstants.KEY_PAGEDOWN, CATEGORY);
-	public static final KeyMapping RECENTER = new KeyMapping("key.diorama.recenter", InputConstants.KEY_SPACE, CATEGORY);
 	/** Every key binding, for the loader to register. */
-	public static final List<KeyMapping> KEY_MAPPINGS = List.of(OPEN_MAP, NEW_WAYPOINT, WAYPOINT_LIST, ZOOM_IN, ZOOM_OUT, SETTINGS, TOGGLE_MINIMAP,
-		TOGGLE_CAVES, SLICE_UP, SLICE_DOWN, RECENTER);
+	public static final List<KeyMapping> KEY_MAPPINGS = List.of(OPEN_MAP, NEW_WAYPOINT, WAYPOINT_LIST, ZOOM_IN, ZOOM_OUT, SETTINGS, TOGGLE_MINIMAP);
 
 	private DioramaClient() {
 	}

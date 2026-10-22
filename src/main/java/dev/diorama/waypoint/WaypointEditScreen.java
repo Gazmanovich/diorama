@@ -104,7 +104,7 @@ public final class WaypointEditScreen extends Screen {
 		this.swatchX = cx - WaypointColours.COLUMNS * SLOT / 2;
 		this.swatchY = top + 92;
 		// The hex field sits right of a chip showing the colour, then Random.
-		this.hex = this.field(left + 24, top + 143, 70, draft(this.hex, WaypointColours.hex(this.color)), "diorama.waypoint.hex", 7);
+		this.hex = this.field(left + 24, top + 132, 70, draft(this.hex, WaypointColours.hex(this.color)), "diorama.waypoint.hex", 7);
 		this.hex.setResponder(text -> {
 			Integer picked = WaypointColours.parse(text);
 			this.hex.setTextColor(picked != null ? EditBox.DEFAULT_TEXT_COLOR : INVALID_TEXT);
@@ -115,9 +115,9 @@ public final class WaypointEditScreen extends Screen {
 		});
 		// Always a new colour, never close to the one shown.
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.random"), b -> this.pick(WaypointColours.random(this.color)))
-			.bounds(left + 98, top + 143, FORM - 98, 20).build());
+			.bounds(left + 98, top + 132, FORM - 98, 20).build());
 		this.addRenderableWidget(Checkbox.builder(Component.translatable("diorama.waypoint.show_on_maps"), this.font)
-			.pos(left, top + 168)
+			.pos(left, top + 157)
 			.selected(this.visible)
 			.onValueChange((box, value) -> this.visible = value)
 			.build());
@@ -212,7 +212,8 @@ public final class WaypointEditScreen extends Screen {
 			this.share.active = valid;
 		}
 		if (this.teleport != null) {
-			this.teleport.active = valid && Waypoints.canTeleport();
+			// /tp moves within the dimension you're in, so a waypoint in another one is out of reach.
+			this.teleport.active = valid && Waypoints.canTeleport() && this.waypoint.dimension.equals(Waypoints.dimension());
 		}
 	}
 
@@ -289,7 +290,7 @@ public final class WaypointEditScreen extends Screen {
 		marker(graphics, shadeX + Math.round(this.shade * (BAR_WIDTH - 1)), barY);
 		// The colour chip, framed like the text fields beside it.
 		int chipX = this.left();
-		int chipY = this.top() + 143;
+		int chipY = this.top() + 132;
 		graphics.fill(chipX, chipY, chipX + 20, chipY + 20, 0xFFA0A0A0);
 		graphics.fill(chipX + 1, chipY + 1, chipX + 19, chipY + 19, 0xFF000000);
 		graphics.fill(chipX + 2, chipY + 2, chipX + 18, chipY + 18, 0xFF000000 | this.color);

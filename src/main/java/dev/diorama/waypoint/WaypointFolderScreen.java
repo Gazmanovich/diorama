@@ -1,6 +1,5 @@
 package dev.diorama.waypoint;
 
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -10,8 +9,8 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Makes one of the player's waypoint folders, or renames or deletes one. Deleting asks for a
- * second click, and puts the folder's waypoints back in their dimensions' folders.
+ * Makes one of the player's waypoint folders, or renames one. Deleting one is on the waypoint
+ * list's folder bar, beside the folder.
  */
 public final class WaypointFolderScreen extends Screen {
 	private static final int WIDTH = 200;
@@ -23,11 +22,10 @@ public final class WaypointFolderScreen extends Screen {
 	private final @Nullable String existing;
 	private @Nullable EditBox name;
 	private @Nullable Button save;
-	private boolean armed;
 	private @Nullable Component problem;
 
 	public WaypointFolderScreen(WaypointListScreen parent, @Nullable String existing) {
-		super(Component.translatable(existing == null ? "diorama.folder.new" : "diorama.folder.edit"));
+		super(Component.translatable(existing == null ? "diorama.folder.new" : "diorama.folder.rename_title"));
 		this.parent = parent;
 		this.existing = existing;
 	}
@@ -56,20 +54,6 @@ public final class WaypointFolderScreen extends Screen {
 			.bounds(left, top + 64, half, 20).build());
 		this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, b -> this.onClose())
 			.bounds(left + WIDTH - half, top + 64, half, 20).build());
-		if (this.existing != null) {
-			this.addRenderableWidget(Button.builder(Component.translatable("diorama.folder.delete").withStyle(ChatFormatting.RED), b -> {
-				if (this.armed) {
-					WaypointStore store = WaypointStore.get();
-					if (store != null) {
-						store.deleteFolder(this.existing);
-					}
-					this.onClose();
-				} else {
-					this.armed = true;
-					b.setMessage(Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED));
-				}
-			}).bounds(left, top + 88, WIDTH, 20).build());
-		}
 		this.validate();
 		this.setInitialFocus(box);
 	}

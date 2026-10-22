@@ -9,9 +9,9 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The colours the waypoint editor offers, in three rows of sixteen: Diorama's own palette, the
- * sixteen dye colours in creative-inventory order, and the sixteen chat colours. Any other colour
- * can still be typed as hex.
+ * The colours the waypoint editor offers, in two rows of sixteen: Diorama's own palette and the
+ * sixteen dye colours in creative-inventory order. Any other colour comes from the hue and shade
+ * bars or as hex.
  */
 public final class WaypointColours {
 	public static final int COLUMNS = 16;
@@ -33,16 +33,6 @@ public final class WaypointColours {
 		"white", "light_gray", "gray", "black", "brown", "red", "orange", "yellow",
 		"lime", "green", "cyan", "light_blue", "blue", "purple", "magenta", "pink"
 	};
-	/** The chat colours, §0 to §f. */
-	private static final int[] CHAT = {
-		0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xFFAA00, 0xAAAAAA,
-		0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
-	};
-	private static final String[] CHAT_NAMES = {
-		"black", "dark_blue", "dark_green", "dark_aqua", "dark_red", "dark_purple", "gold", "gray",
-		"dark_gray", "blue", "green", "aqua", "red", "light_purple", "yellow", "white"
-	};
-
 	public static final List<Swatch> ALL;
 
 	static {
@@ -53,9 +43,6 @@ public final class WaypointColours {
 		for (int i = 0; i < DYES.length; i++) {
 			// The game's own names for its dye colours.
 			all.add(new Swatch(0xFF000000 | DYES[i], Component.translatable("color.minecraft." + DYE_NAMES[i])));
-		}
-		for (int i = 0; i < CHAT.length; i++) {
-			all.add(new Swatch(0xFF000000 | CHAT[i], Component.translatable("diorama.colour.chat." + CHAT_NAMES[i])));
 		}
 		ALL = Collections.unmodifiableList(all);
 	}

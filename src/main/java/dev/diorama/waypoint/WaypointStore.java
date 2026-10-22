@@ -170,12 +170,13 @@ public final class WaypointStore {
 		if (index < 0 || trimmed.isEmpty() || clash != null && !clash.equals(old)) {
 			return false;
 		}
-		this.folders.custom.set(index, trimmed);
+		// Its waypoints first, while the old name still finds the folder however they spell it.
 		for (Waypoint waypoint : this.waypoints) {
-			if (old.equalsIgnoreCase(waypoint.folder)) {
+			if (old.equals(this.folderName(waypoint.folder))) {
 				waypoint.folder = trimmed;
 			}
 		}
+		this.folders.custom.set(index, trimmed);
 		if (this.folders.hidden.remove(customKey(old))) {
 			this.folders.hidden.add(customKey(trimmed));
 		}
@@ -186,14 +187,15 @@ public final class WaypointStore {
 
 	/** Deletes a custom folder; its waypoints go back to their dimensions' folders. */
 	public void deleteFolder(String name) {
-		if (!this.folders.custom.remove(name)) {
+		if (!this.folders.custom.contains(name)) {
 			return;
 		}
 		for (Waypoint waypoint : this.waypoints) {
-			if (name.equalsIgnoreCase(waypoint.folder)) {
+			if (name.equals(this.folderName(waypoint.folder))) {
 				waypoint.folder = "";
 			}
 		}
+		this.folders.custom.remove(name);
 		this.folders.hidden.remove(customKey(name));
 		this.saveFolders();
 		this.save();

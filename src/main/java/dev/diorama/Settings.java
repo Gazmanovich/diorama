@@ -51,29 +51,23 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public boolean autoCaves = true;
-	public Frame minimapFrame = Frame.MINECRAFT;
 
 	public boolean radarPlayers = true;
 	public boolean radarHostile = true;
 	public boolean radarNeutral = true;
 	public boolean radarPassive = true;
 	public int radarRange = 32;
-	/** How players and mobs are drawn: their pixel-art heads, heads in a framed box, or plain dots. */
-	public RadarStyle radarStyle = RadarStyle.HEADS;
-	/** Mob and player icon sizes, in percent of the normal size: {@link #MIN_SCALE} to {@link #MAX_SCALE} in steps of {@link #SCALE_STEP}. */
-	public int mobIconScale = 100;
-	public int playerIconScale = 100;
-	/** Outlines mob heads in red, yellow or green by how they treat you, instead of black. */
-	public boolean radarTypeOutline = false;
+	/** Radar heads' size, in percent of the normal size: {@link #MIN_SCALE} to {@link #MAX_SCALE} in steps of {@link #SCALE_STEP}. */
+	public int radarIconScale = 100;
+	/** Outlines mob heads in red, yellow or green by how they treat you; off, they're outlined in black. */
+	public boolean radarTypeOutline = true;
 	public NameTags playerNames = NameTags.FULLSCREEN;
-	public ArrowStyle arrowStyle = ArrowStyle.VOXEL;
 	/** Index into {@link #ARROW_COLORS}. */
 	public int arrowColor = 0;
 
 	public boolean waypointsOnMap = true;
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
-	public PinStyle waypointStyle = PinStyle.SQUARE;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
 
 	public boolean outlines = true;
@@ -99,22 +93,8 @@ public final class Settings {
 		FAST
 	}
 
-	/** The minimap's border: a clean Minecraft edge, a whole inventory-window panel, the original dark frame, or none. */
-	public enum Frame {
-		MINECRAFT,
-		PANEL,
-		CLASSIC,
-		NONE
-	}
-
-	public enum RadarStyle {
-		HEADS,
-		FRAMED,
-		DOTS
-	}
-
 	public static final int MIN_SCALE = 50;
-	public static final int MAX_SCALE = 250;
+	public static final int MAX_SCALE = 200;
 	public static final int SCALE_STEP = 25;
 
 	/** The nearest icon scale the settings screen can show. */
@@ -128,17 +108,6 @@ public final class Settings {
 		NEVER,
 		FULLSCREEN,
 		ALWAYS
-	}
-
-	public enum ArrowStyle {
-		VOXEL,
-		FLAT
-	}
-
-	/** Waypoint markers: a square Minecraft-style marker or the original round pin. */
-	public enum PinStyle {
-		SQUARE,
-		ROUND
 	}
 
 	/** What in-world waypoint labels say: name when near or aimed at, always the name, only the distance, or nothing. */
@@ -242,22 +211,9 @@ public final class Settings {
 		if (settings.quality == null) {
 			settings.quality = Quality.FANCY;
 		}
-		if (settings.minimapFrame == null) {
-			settings.minimapFrame = Frame.MINECRAFT;
-		}
-		if (settings.radarStyle == null) {
-			settings.radarStyle = RadarStyle.HEADS;
-		}
-		settings.mobIconScale = snapScale(settings.mobIconScale);
-		settings.playerIconScale = snapScale(settings.playerIconScale);
+		settings.radarIconScale = snapScale(settings.radarIconScale);
 		if (settings.playerNames == null) {
 			settings.playerNames = NameTags.FULLSCREEN;
-		}
-		if (settings.arrowStyle == null) {
-			settings.arrowStyle = ArrowStyle.VOXEL;
-		}
-		if (settings.waypointStyle == null) {
-			settings.waypointStyle = PinStyle.SQUARE;
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;

@@ -41,7 +41,7 @@ public final class Markers {
 		int heading = Math.floorMod(Math.round(yawDegrees / (360.0F / HEADINGS)), HEADINGS);
 		dev.diorama.Settings settings = dev.diorama.Settings.get();
 		int accent = settings.arrowRgb();
-		MapTexture texture = settings.arrowStyle == dev.diorama.Settings.ArrowStyle.FLAT ? null : arrow(heading, size, accent, settings.arrowColor);
+		MapTexture texture = arrow(heading, size, accent, settings.arrowColor);
 		if (texture == null) {
 			// For the first frames, while the voxel arrow for this heading is still being drawn.
 			flat(graphics, x, y, yawDegrees, size, accent);

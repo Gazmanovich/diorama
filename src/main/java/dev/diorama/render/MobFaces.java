@@ -145,11 +145,6 @@ public final class MobFaces {
 	private MobFaces() {
 	}
 
-	/** Whether this entity has a face icon; if not the radar draws a dot. */
-	public static boolean has(Entity entity) {
-		return face(entity) != null;
-	}
-
 	/** Whether this entity's face can be drawn now: it has one, and its renderer gives a texture. For tests. */
 	public static boolean canDraw(Entity entity) {
 		return face(entity) != null && texture(entity) != null;
@@ -170,42 +165,11 @@ public final class MobFaces {
 	}
 
 	/**
-	 * Draws an entity's face centred on (x, y), fitted in a square {@code size} across, keeping
-	 * the face's proportions. Returns false if it has no face icon.
-	 */
-	public static boolean draw(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color) {
-		Face face = face(entity);
-		Identifier texture = face == null ? null : texture(entity);
-		if (face == null || texture == null) {
-			return false;
-		}
-		float scale = size / Math.max(face.w(), face.h());
-		float w = face.w() * scale;
-		float h = face.h() * scale;
-		graphics.pose().pushMatrix();
-		graphics.pose().translate(x - w / 2, y - h / 2);
-		graphics.pose().scale(scale);
-		MapCanvas canvas = MapCanvas.of(graphics);
-		canvas.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
-		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
-		if (feature != null) {
-			Piece p = feature;
-			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
-		}
-		if (face.hat() != null) {
-			Piece p = face.hat();
-			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
-		}
-		graphics.pose().popMatrix();
-		return true;
-	}
-
-	/**
 	 * Draws an entity's face as pixel art centred on (x, y), about {@code size} GUI pixels across:
 	 * each texel a whole number of screen pixels, with a one-texel outline and a drop shadow.
 	 * Returns false if it has no face icon.
 	 */
-	public static boolean drawPixel(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
+	public static boolean draw(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
 		Face face = face(entity);
 		Identifier texture = face == null ? null : texture(entity);
 		if (face == null || texture == null) {

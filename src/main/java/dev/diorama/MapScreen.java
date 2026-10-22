@@ -18,7 +18,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
@@ -46,8 +45,7 @@ import org.jspecify.annotations.Nullable;
 import com.mojang.blaze3d.platform.InputConstants;
 
 /**
- * The fullscreen map: drag to pan, scroll to zoom, C for caves, PgUp/PgDn to move the slice (each
- * key a binding the player can change),
+ * The fullscreen map: drag to pan, scroll to zoom, C for caves, PgUp/PgDn to move the slice,
  * click a waypoint to edit it, right-click for a menu of what can be done at a spot or waypoint.
  * Each key also has a control on screen: Surface and Caves tabs, a Waypoints button, zoom and
  * recenter buttons, and on the cave map a depth gauge whose band moves the slice.
@@ -310,7 +308,8 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		return this.keyDown(event.key(), mapping -> mapping.matches(event)) || super.keyPressed(event);
+		return this.keyDown(event.key(), DioramaClient.WAYPOINT_LIST.matches(event), DioramaClient.OPEN_MAP.matches(event))
+			|| super.keyPressed(event);
 	}
 	//?} else {
 	/*@Override
@@ -330,7 +329,8 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(int key, int scancode, int modifiers) {
-		return this.keyDown(key, mapping -> mapping.matches(key, scancode)) || super.keyPressed(key, scancode, modifiers);
+		return this.keyDown(key, DioramaClient.WAYPOINT_LIST.matches(key, scancode), DioramaClient.OPEN_MAP.matches(key, scancode))
+			|| super.keyPressed(key, scancode, modifiers);
 	}
 	*///?}
 
@@ -588,17 +588,14 @@ public final class MapScreen extends Screen {
 		this.zoom = Math.max(this.minZoom(), Math.min(MAX_ZOOM, this.zoom * Math.pow(1.25, steps)));
 	}
 
-	/**
-	 * A key press, given its key and a test of whether one of the player's bindings matches it;
-	 * false leaves it to the screen. Every key here is a binding the player can change in Controls.
-	 */
-	private boolean keyDown(int key, java.util.function.Predicate<KeyMapping> pressed) {
-		// The waypoint list and the map's own key come first, so Open map rebound to C still closes it.
-		if (pressed.test(DioramaClient.WAYPOINT_LIST)) {
+	/** A key press, and whether it is bound to the waypoint list or the map; false leaves it to the screen. */
+	private boolean keyDown(int key, boolean waypointListKey, boolean mapKey) {
+		// The player's own bindings come before the map's fixed keys, so Open map rebound to C still closes it.
+		if (waypointListKey) {
 			this.minecraft.gui.setScreen(new WaypointListScreen(this));
 			return true;
 		}
-		if (pressed.test(DioramaClient.OPEN_MAP)) {
+		if (mapKey) {
 			this.onClose();
 			return true;
 		}
@@ -608,24 +605,28 @@ public final class MapScreen extends Screen {
 		}
 		LocalPlayer player = this.minecraft.player;
 		// Each of these changes the view, which an open menu belongs to, so they close it.
-		if (pressed.test(DioramaClient.TOGGLE_CAVES)) {
-			this.toggleCaves();
-			return true;
-		}
-		if (pressed.test(DioramaClient.SLICE_UP)) {
-			this.menu = null;
-			this.shiftSlice(4, player);
-			return true;
-		}
-		if (pressed.test(DioramaClient.SLICE_DOWN)) {
-			this.menu = null;
-			this.shiftSlice(-4, player);
-			return true;
-		}
-		if (pressed.test(DioramaClient.RECENTER)) {
-			this.menu = null;
-			this.following = true;
-			return true;
+		switch (key) {
+			case InputConstants.KEY_C -> {
+				this.toggleCaves();
+				return true;
+			}
+			case InputConstants.KEY_PAGEUP -> {
+				this.menu = null;
+				this.shiftSlice(4, player);
+				return true;
+			}
+			case InputConstants.KEY_PAGEDOWN -> {
+				this.menu = null;
+				this.shiftSlice(-4, player);
+				return true;
+			}
+			case InputConstants.KEY_SPACE -> {
+				this.menu = null;
+				this.following = true;
+				return true;
+			}
+			default -> {
+			}
 		}
 		return false;
 	}
@@ -769,7 +770,7 @@ public final class MapScreen extends Screen {
 	private @Nullable Tip controlTooltip(double x, double y) {
 		int tab = this.tabAt(x, y);
 		if (tab >= 0) {
-			return new Tip(lines(TAB_NAMES[tab], key(DioramaClient.TOGGLE_CAVES.getTranslatedKeyMessage())), new ScreenRectangle(this.tabX[tab], 0, this.tabWidth[tab], BAR));
+			return new Tip(lines(TAB_NAMES[tab], key(keyName(InputConstants.KEY_C))), new ScreenRectangle(this.tabX[tab], 0, this.tabWidth[tab], BAR));
 		}
 		if (on(this.waypointsButton, x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
 			return tip(this.waypointsButton, this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
@@ -781,13 +782,13 @@ public final class MapScreen extends Screen {
 			return tip(this.zoomOut, Component.translatable("diorama.map.zoom_out"), Component.translatable("diorama.map.scroll_down"));
 		}
 		if (on(this.recenter, x, y)) {
-			return tip(this.recenter, Component.translatable("diorama.map.recenter"), key(DioramaClient.RECENTER.getTranslatedKeyMessage()));
+			return tip(this.recenter, Component.translatable("diorama.map.recenter"), key(keyName(InputConstants.KEY_SPACE)));
 		}
 		if (on(this.sliceUp, x, y)) {
-			return tip(this.sliceUp, Component.translatable("diorama.map.slice_up"), key(DioramaClient.SLICE_UP.getTranslatedKeyMessage()));
+			return tip(this.sliceUp, Component.translatable("diorama.map.slice_up"), key(keyName(InputConstants.KEY_PAGEUP)));
 		}
 		if (on(this.sliceDown, x, y)) {
-			return tip(this.sliceDown, Component.translatable("diorama.map.slice_down"), key(DioramaClient.SLICE_DOWN.getTranslatedKeyMessage()));
+			return tip(this.sliceDown, Component.translatable("diorama.map.slice_down"), key(keyName(InputConstants.KEY_PAGEDOWN)));
 		}
 		return null;
 	}
@@ -845,6 +846,15 @@ public final class MapScreen extends Screen {
 
 	private static Component key(Component name) {
 		return Component.translatable("diorama.map.key", name);
+	}
+
+	/** A fixed key's name in the player's keyboard layout and language. */
+	private static Component keyName(int key) {
+		//? if >=26.3 {
+		return InputConstants.Type.KEYBOARD.getOrCreate(key).getDisplayName();
+		//?} else {
+		/*return InputConstants.Type.KEYSYM.getOrCreate(key).getDisplayName();
+		*///?}
 	}
 
 	@Override

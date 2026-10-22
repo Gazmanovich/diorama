@@ -45,10 +45,10 @@ public final class WaypointListScreen extends Screen {
 	private static final int FOLDER_Y = 22;
 	private static final int SEARCH_Y = 46;
 	private static final int LIST_TOP = 72;
+	/** The folder bar's square buttons: the arrows either side of the name, and New folder. */
 	private static final int ARROW = 20;
-	private static final int FOLDER_HIDE_WIDTH = 46;
-	private static final int FOLDER_EDIT_WIDTH = 36;
-	private static final int NEW_FOLDER_WIDTH = 66;
+	/** The folder's name between its arrows: wide enough for the actions of a folder of the player's own beside it. */
+	private static final int FOLDER_NAME_WIDTH = 128;
 	/** Where a row's name and position start, right of its badge. */
 	private static final int TEXT_LEFT = 24;
 	private static final int ACTION_GAP = 2;
@@ -64,7 +64,14 @@ public final class WaypointListScreen extends Screen {
 	/** The folders, dimensions' first, and which one is shown, by key (see {@link WaypointStore#folderKey}). */
 	private final List<Folder> folders = new ArrayList<>();
 	private @Nullable String folderKey;
-	private @Nullable Button folderHide;
+	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
+	private boolean empty;
+	/**
+	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for a folder of the
+	 * player's own Rename and Delete in red. Delete arms them into one red Click again to delete.
+	 */
+	private final List<Button> folderActions = new ArrayList<>();
+	private boolean folderArmed;
 	/** Every waypoint in the folder shown, nearest first. */
 	private final List<Waypoint> all = new ArrayList<>();
 	/** The ones the search lets through, still nearest first. */
@@ -163,6 +170,11 @@ public final class WaypointListScreen extends Screen {
 		this.rebuildWidgets();
 	}
 
+	/** Right of the name's right arrow, before the folder's own buttons. */
+	private static int folderNameLeft(int left) {
+		return left + ARROW + ACTION_GAP;
+	}
+
 	@Override
 	protected void init() {
 		this.all.clear();
@@ -182,7 +194,9 @@ public final class WaypointListScreen extends Screen {
 				.thenComparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(player.getX(), player.getY(), player.getZ()) : 0)
 				.thenComparing(w -> w.name.toLowerCase(Locale.ROOT)));
 		}
-		boolean nothing = store == null || store.all().isEmpty() && store.customFolders().isEmpty();
+		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty();
+		this.folderArmed = false;
+		this.folderActions.clear();
 		if (this.selected != null && !this.all.contains(this.selected)) {
 			this.selected = null;
 		}
@@ -215,15 +229,12 @@ public final class WaypointListScreen extends Screen {
 		}
 		this.listBottom = above - (above == footer ? 10 : 6);
 
-		if (nothing) {
-			// The empty list: the piece of map, the headline and hints, then New waypoint and New folder under them.
+		if (this.empty) {
+			// The empty list: the piece of map, the headline and hints, then New waypoint under them.
 			int newY = 186;
 			this.emptyTop = Math.min(0, this.listBottom + 6 - (newY + 20 + 4));
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
-				.bounds(cx - 102, newY + this.emptyTop, 100, 20).build());
-			this.addRenderableWidget(Button.builder(Component.translatable("diorama.folder.new"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
-				.bounds(cx + 2, newY + this.emptyTop, 100, 20).build());
-			this.folderHide = null;
+				.bounds(cx - 75, newY + this.emptyTop, 150, 20).build());
 			this.search = null;
 			this.actions.clear();
 			this.visibility = null;
@@ -231,31 +242,40 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 
-		// The folder bar: the arrows either side of the folder's name step through the folders; then
-		// hide or show the whole folder, edit it (only the player's own), and make a new one.
+		// The folder bar, like the search row under it: on the left the folder's name between arrows
+		// that step through the folders, and New folder; at the right end the folder's own buttons.
 		Folder folder = this.folder();
-		int nameRight = left + LIST_WIDTH - NEW_FOLDER_WIDTH - FOLDER_EDIT_WIDTH - FOLDER_HIDE_WIDTH - 3 * ACTION_GAP - 4;
+		int nameRight = folderNameLeft(left) + FOLDER_NAME_WIDTH;
 		this.addRenderableWidget(Button.builder(Component.literal("<"), b -> this.stepFolder(-1)).bounds(left, FOLDER_Y, ARROW, 20).build());
-		this.addRenderableWidget(Button.builder(Component.literal(">"), b -> this.stepFolder(1)).bounds(nameRight - ARROW, FOLDER_Y, ARROW, 20).build());
-		int x = nameRight + 4;
+		this.addRenderableWidget(Button.builder(Component.literal(">"), b -> this.stepFolder(1)).bounds(nameRight + ACTION_GAP, FOLDER_Y, ARROW, 20).build());
+		this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
+			.bounds(nameRight + 2 * ACTION_GAP + ARROW + 4, FOLDER_Y, ARROW, 20)
+			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.folder.new"))).build());
 		boolean hidden = store != null && store.folderHidden(folder.key());
-		this.folderHide = this.addRenderableWidget(Button.builder(Component.translatable(hidden ? "diorama.waypoints.show" : "diorama.waypoints.hide"), b -> {
+		this.folderActions.add(this.action(Component.translatable(hidden ? "diorama.waypoints.show" : "diorama.waypoints.hide"), () -> {
 			WaypointStore current = WaypointStore.get();
 			if (current != null) {
 				current.setFolderHidden(this.folder().key(), !current.folderHidden(this.folder().key()));
 				this.rebuildWidgets();
 			}
-		}).bounds(x, FOLDER_Y, FOLDER_HIDE_WIDTH, 20).build());
-		x += FOLDER_HIDE_WIDTH + ACTION_GAP;
-		Button editFolder = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoints.edit"), b -> {
-			if (this.folder().custom() != null) {
-				this.minecraft.gui.setScreen(new WaypointFolderScreen(this, this.folder().custom()));
-			}
-		}).bounds(x, FOLDER_Y, FOLDER_EDIT_WIDTH, 20).build());
-		editFolder.active = folder.custom() != null;
-		x += FOLDER_EDIT_WIDTH + ACTION_GAP;
-		this.addRenderableWidget(Button.builder(Component.translatable("diorama.folder.new"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
-			.bounds(x, FOLDER_Y, left + LIST_WIDTH - x, 20).build());
+		}));
+		String custom = folder.custom();
+		if (custom != null) {
+			this.folderActions.add(this.action(Component.translatable("diorama.folder.rename"),
+				() -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, custom))));
+			this.folderActions.add(this.action(Component.translatable("diorama.waypoint.delete").withStyle(ChatFormatting.RED), () -> {
+				this.folderArmed = true;
+				this.placeFolderButtons();
+			}));
+			this.folderActions.add(this.addRenderableWidget(Button.builder(Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED), b -> {
+				WaypointStore current = WaypointStore.get();
+				if (this.folderArmed && current != null) {
+					current.deleteFolder(custom);
+					this.rebuildWidgets();
+				}
+			}).size(20, 20).build()));
+		}
+		this.placeFolderButtons();
 
 		// The search box: vanilla's text field frame with the search icon in it, the text right of the icon.
 		String query = this.search != null ? this.search.getValue() : "";
@@ -354,6 +374,31 @@ public final class WaypointListScreen extends Screen {
 		}
 	}
 
+	/**
+	 * The folder's buttons, right-aligned in the folder bar. The last one, for a folder of the
+	 * player's own, is Click again to delete: shown alone across the others once Delete is clicked.
+	 */
+	private void placeFolderButtons() {
+		boolean custom = this.folderActions.size() > 1;
+		List<Button> buttons = custom ? this.folderActions.subList(0, this.folderActions.size() - 1) : this.folderActions;
+		int span = -ACTION_GAP;
+		for (Button button : buttons) {
+			span += button.getWidth() + ACTION_GAP;
+		}
+		int right = this.width / 2 + LIST_WIDTH / 2;
+		int x = right - span;
+		for (Button button : buttons) {
+			show(button, !this.folderArmed);
+			button.setPosition(x, FOLDER_Y);
+			x += button.getWidth() + ACTION_GAP;
+		}
+		if (custom) {
+			Button confirm = this.folderActions.get(this.folderActions.size() - 1);
+			show(confirm, this.folderArmed);
+			confirm.setRectangle(span, 20, right - span, FOLDER_Y);
+		}
+	}
+
 	private static void show(Button button, boolean shown) {
 		button.visible = shown;
 		button.active = shown;
@@ -402,7 +447,7 @@ public final class WaypointListScreen extends Screen {
 		//? if >=1.21.6 {
 		graphics.nextStratum();
 		//?}
-		if (this.folderHide == null) {
+		if (this.empty) {
 			this.drawEmpty(graphics);
 		} else {
 			this.drawList(graphics, mouseX, mouseY);
@@ -415,8 +460,8 @@ public final class WaypointListScreen extends Screen {
 		int right = left + LIST_WIDTH;
 		graphics.centeredText(this.font, this.title, cx, 8, 0xFFFFFFFF);
 		// The folder's name between its arrows, with how many waypoints it holds; dimmed when hidden.
-		int nameLeft = left + ARROW + ACTION_GAP;
-		int nameRight = left + LIST_WIDTH - NEW_FOLDER_WIDTH - FOLDER_EDIT_WIDTH - FOLDER_HIDE_WIDTH - 3 * ACTION_GAP - 4 - ARROW - ACTION_GAP;
+		int nameLeft = folderNameLeft(left);
+		int nameRight = nameLeft + FOLDER_NAME_WIDTH;
 		ScreenArt.sprite(graphics, ScreenArt.TEXT_FIELD, nameLeft, FOLDER_Y, nameRight - nameLeft, 20);
 		WaypointStore store = WaypointStore.get();
 		Folder folder = this.folder();
@@ -662,13 +707,12 @@ public final class WaypointListScreen extends Screen {
 
 	/** A click no widget took: the search frame, the scrollbar, or a row. */
 	private boolean clicked(double x, double y, int button) {
-		if (button != InputConstants.MOUSE_BUTTON_LEFT || this.folderHide == null) {
+		if (button != InputConstants.MOUSE_BUTTON_LEFT || this.empty) {
 			return false;
 		}
 		int left = this.width / 2 - LIST_WIDTH / 2;
 		// A click on the folder's name steps to the next folder, as its right arrow does.
-		int nameRight = left + LIST_WIDTH - NEW_FOLDER_WIDTH - FOLDER_EDIT_WIDTH - FOLDER_HIDE_WIDTH - 3 * ACTION_GAP - 4 - ARROW - ACTION_GAP;
-		if (x >= left + ARROW + ACTION_GAP && x < nameRight && y >= FOLDER_Y && y < FOLDER_Y + 20) {
+		if (x >= folderNameLeft(left) && x < folderNameLeft(left) + FOLDER_NAME_WIDTH && y >= FOLDER_Y && y < FOLDER_Y + 20) {
 			this.stepFolder(1);
 			return true;
 		}
