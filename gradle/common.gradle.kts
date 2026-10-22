@@ -27,6 +27,11 @@ configure<JavaPluginExtension> {
 	targetCompatibility = JavaVersion.toVersion(javaVersion)
 }
 
+// Mod Menu's API is compiled against stand-ins in src/main; the real one comes with Mod Menu.
+tasks.withType<Jar>().configureEach {
+	exclude("com/terraformersmc/**")
+}
+
 tasks.named<Jar>("jar") {
 	from(rootProject.file("LICENSE")) {
 		rename { "${it}_diorama" }

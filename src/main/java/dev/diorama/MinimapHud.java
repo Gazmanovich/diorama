@@ -119,8 +119,7 @@ public final class MinimapHud implements HudElement {
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 
-		graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, 0xC0101418);
-		graphics.fill(x - 1, y - 1, x + size + 1, y + size + 1, 0x60FFFFFF);
+		this.frame(graphics, settings.minimapFrame, x, y, size);
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer);
 		this.viewport.draw(graphics, session.map(), view);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() ? Radar.collect(view, partialTick, false) : List.of();
@@ -187,6 +186,28 @@ public final class MinimapHud implements HudElement {
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);
 		}
 		return Math.max(SMALLEST, Math.min(size, fitted));
+	}
+
+	/**
+	 * The border around the map: the classic dark frame with a faint light line inside it, or the
+	 * Minecraft edge, a black line with its corner pixels cut and a light grey line inside it.
+	 */
+	private void frame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size) {
+		int x1 = x + size;
+		int y1 = y + size;
+		switch (frame) {
+			case CLASSIC -> {
+				graphics.fill(x - 2, y - 2, x1 + 2, y1 + 2, 0xC0101418);
+				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0x60FFFFFF);
+			}
+			case MINECRAFT -> {
+				graphics.fill(x - 2, y - 1, x1 + 2, y1 + 1, 0xFF000000);
+				graphics.fill(x - 1, y - 2, x1 + 1, y1 + 2, 0xFF000000);
+				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0xFFA0A0A0);
+			}
+			case NONE -> {
+			}
+		}
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */

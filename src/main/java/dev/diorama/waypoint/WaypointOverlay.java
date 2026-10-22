@@ -42,7 +42,7 @@ public final class WaypointOverlay {
 		float halfW = Math.max(1, view.width() / 2.0F - inset);
 		float halfH = Math.max(1, view.height() / 2.0F - inset);
 		for (Waypoint waypoint : waypoints) {
-			if (!waypoint.visible) {
+			if (!WaypointStore.isShown(waypoint)) {
 				continue;
 			}
 			float x = view.screenX(waypoint.x + 0.5);

@@ -39,10 +39,12 @@ public final class Markers {
 	 */
 	public static void player(GuiGraphicsExtractor graphics, float x, float y, float yawDegrees, float size) {
 		int heading = Math.floorMod(Math.round(yawDegrees / (360.0F / HEADINGS)), HEADINGS);
-		MapTexture texture = arrow(heading, size);
+		dev.diorama.Settings settings = dev.diorama.Settings.get();
+		int accent = settings.arrowRgb();
+		MapTexture texture = arrow(heading, size, accent, settings.arrowColor);
 		if (texture == null) {
 			// For the first frames, while the voxel arrow for this heading is still being drawn.
-			flat(graphics, x, y, yawDegrees, size);
+			flat(graphics, x, y, yawDegrees, size, accent);
 			return;
 		}
 		float half = ArrowArt.GUI_SIZE / 2.0F;
@@ -54,16 +56,17 @@ public final class Markers {
 	 * size is needed, every heading is drawn on a worker thread, the current one first, so the render
 	 * thread never waits; finished ones are uploaded as they come in.
 	 */
-	private static @Nullable MapTexture arrow(int heading, float size) {
+	private static @Nullable MapTexture arrow(int heading, float size, int accent, int colour) {
 		double sin = Projection.sin();
 		double cos = Projection.cos();
-		long style = (long) Math.round(size * 4) << 40 | Math.round(sin * 10000) << 20 | Math.round(cos * 10000);
+		// The colour's index takes three bits above the size; the key times HEADINGS still fits a long.
+		long style = ((long) (colour & 7) << 12 | Math.round(size * 4) & 0xFFF) << 40 | Math.round(sin * 10000) << 20 | Math.round(cos * 10000);
 		if (STARTED.add(style)) {
 			for (int i = 0; i < HEADINGS; i++) {
 				int h = (heading + i) % HEADINGS;
 				double yaw = h * 360.0 / HEADINGS;
 				DRAWING.put(style * HEADINGS + h, CompletableFuture.supplyAsync(() -> {
-					PinArt.Image image = ArrowArt.voxel(yaw, size, sin, cos);
+					PinArt.Image image = ArrowArt.voxel(yaw, size, sin, cos, accent);
 					return image.abgr(image.width);
 				}, WORKER));
 			}
@@ -100,7 +103,7 @@ public final class Markers {
 	}
 
 	/** The flat arrow, drawn while the voxel one isn't ready. North-south distances look shorter under the tilted camera. */
-	private static void flat(GuiGraphicsExtractor graphics, float x, float y, float yawDegrees, float size) {
+	private static void flat(GuiGraphicsExtractor graphics, float x, float y, float yawDegrees, float size, int accent) {
 		double yaw = Math.toRadians(yawDegrees);
 		double dx = -Math.sin(yaw);
 		double dy = Math.cos(yaw) * Projection.sin();
@@ -109,7 +112,7 @@ public final class Markers {
 		dy /= len;
 		quad(graphics, x, y, dx, dy, size + 1.6F, 0xE0101418);
 		quad(graphics, x, y, dx, dy, size, 0xFFFFFFFF);
-		quad(graphics, x, y, dx, dy, size * 0.55F, 0xFF3FA9F5);
+		quad(graphics, x, y, dx, dy, size * 0.55F, 0xFF000000 | accent);
 	}
 
 	private static void quad(GuiGraphicsExtractor graphics, float x, float y, double dx, double dy, float size, int color) {
