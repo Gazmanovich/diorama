@@ -787,12 +787,24 @@ public final class GpuMesher {
 	 */
 	private static void voxels(Mesh mesh, TileBaker helper, VoxelReader reader, int fx0, int fx1, int fy0, int fy1, int fz0, int fz1) {
 		int reach = TileBaker.SKY_REACH + 1;
-		int sx0 = (fx0 - reach) >> 4;
+		// Under a roof the GPU walks shadow rays through the table too (see bake.fsh), as far as
+		// the tracer's go toward the sun: west, a little south, and up.
+		int west = reach;
+		int south = reach;
+		int up = reach;
+		if (mesh.lifted) {
+			double elevation = Math.toRadians(MapStyle.get().sunElevation());
+			double flat = TileBaker.SHADOW_DISTANCE * Math.cos(elevation);
+			west = Math.max(reach, (int) Math.ceil(flat * -TileBaker.SUN_AZIMUTH_X) + 2);
+			south = Math.max(reach, (int) Math.ceil(flat * TileBaker.SUN_AZIMUTH_Z) + 2);
+			up = Math.max(reach, (int) Math.ceil(TileBaker.SHADOW_DISTANCE * Math.sin(elevation)) + 2);
+		}
+		int sx0 = (fx0 - west) >> 4;
 		int sx1 = (fx1 + reach) >> 4;
 		int sz0 = (fz0 - reach) >> 4;
-		int sz1 = (fz1 + reach) >> 4;
+		int sz1 = (fz1 + south) >> 4;
 		int sy0 = (fy0 - 2) >> 4;
-		int sy1 = (Math.min(fy1 + reach, mesh.rayTop) + 1) >> 4;
+		int sy1 = (Math.min(fy1 + up, mesh.rayTop) + 1) >> 4;
 		int nx = sx1 - sx0 + 1;
 		int ny = sy1 - sy0 + 1;
 		int nz = sz1 - sz0 + 1;

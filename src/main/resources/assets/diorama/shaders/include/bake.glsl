@@ -37,6 +37,81 @@ layout(std140) uniform DioramaBake {
     vec4 HazeLight;
 };
 
+#ifdef VOXEL_WALK
+// The solid blocks around the tile, for sky occlusion and, under a roof, the shadows the sun's
+// map misses: a section table, then 128 words of bits per section.
+uniform usampler2D Voxels;
+
+
+const int VOXEL_WIDTH = 4096;
+const uint SECTION_UNKNOWN = 0xFFFFFFFEu;
+const uint SECTION_EMPTY = 0xFFFFFFFFu;
+
+uint voxel(int i) {
+    return texelFetch(Voxels, ivec2(i % VOXEL_WIDTH, i / VOXEL_WIDTH), 0).r;
+}
+
+// 1 if the block is solid, 0 if not, -1 in a chunk the map has no data for.
+int solid_at(ivec3 c) {
+    ivec3 s = (c >> 4) - VoxelOrigin.xyz;
+    if (any(lessThan(s, ivec3(0))) || any(greaterThanEqual(s, VoxelSize.xyz))) {
+        return 0;
+    }
+    uint entry = voxel((s.y * VoxelSize.z + s.z) * VoxelSize.x + s.x);
+    if (entry == SECTION_EMPTY) {
+        return 0;
+    }
+    if (entry == SECTION_UNKNOWN) {
+        return -1;
+    }
+    int i = ((c.y & 15) << 8) | ((c.z & 15) << 4) | (c.x & 15);
+    uint word = voxel(int(entry) + (i >> 5));
+    return int((word >> uint(i & 31)) & 1u);
+}
+
+// TileBaker.blocked: walks from o along d for up to dist blocks; true if a solid block is in the way.
+bool blocked(vec3 o, vec3 d, float dist, int steps) {
+    ivec3 c = ivec3(floor(o));
+    int top = VoxelOrigin.w;
+    if (c.y < top && solid_at(c) == 1) {
+        return true;
+    }
+    ivec3 st = ivec3(d.x > 0.0 ? 1 : -1, d.y > 0.0 ? 1 : -1, d.z > 0.0 ? 1 : -1);
+    vec3 tDelta = vec3(d.x == 0.0 ? 1e30 : abs(1.0 / d.x), d.y == 0.0 ? 1e30 : abs(1.0 / d.y), d.z == 0.0 ? 1e30 : abs(1.0 / d.z));
+    vec3 tMax = vec3(
+        d.x == 0.0 ? 1e30 : (d.x > 0.0 ? float(c.x) + 1.0 - o.x : o.x - float(c.x)) * tDelta.x,
+        d.y == 0.0 ? 1e30 : (d.y > 0.0 ? float(c.y) + 1.0 - o.y : o.y - float(c.y)) * tDelta.y,
+        d.z == 0.0 ? 1e30 : (d.z > 0.0 ? float(c.z) + 1.0 - o.z : o.z - float(c.z)) * tDelta.z
+    );
+    for (int i = 0; i < steps; i++) {
+        if (min(tMax.x, min(tMax.y, tMax.z)) > dist) {
+            return false;
+        }
+        if (tMax.x < tMax.y && tMax.x < tMax.z) {
+            c.x += st.x;
+            tMax.x += tDelta.x;
+        } else if (tMax.y < tMax.z) {
+            c.y += st.y;
+            tMax.y += tDelta.y;
+        } else {
+            c.z += st.z;
+            tMax.z += tDelta.z;
+        }
+        if (c.y >= top) {
+            return false;
+        }
+        int s = solid_at(c);
+        if (s < 0) {
+            return false;
+        }
+        if (s == 1) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 // Reversed depth like vanilla: near is 1, far is 0.
 float bake_ndc_depth(float window) {
 #if defined(RENDERPEARL_DEPTH_IS_ZERO_TO_ONE) || defined(DIORAMA_DEPTH_ZERO_TO_ONE)

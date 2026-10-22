@@ -6,11 +6,17 @@
 #extension GL_ARB_separate_shader_objects : require
 #define LOC(n) layout(location = n)
 #define VERTEX_INDEX gl_VertexIndex
+#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(WATER) && !defined(TINTED)
+#define VOXEL_WALK
+#endif
 
 #include <diorama:bake.glsl>
 //?} else {
 /*#define LOC(n)
 #define VERTEX_INDEX gl_VertexID
+#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(WATER) && !defined(TINTED)
+#define VOXEL_WALK
+#endif
 
 #moj_import <diorama:bake.glsl>
 *///?}
@@ -110,6 +116,18 @@ vec3 sun_light(vec3 p, bool top, float ao, float sky) {
     return l;
 }
 
+#ifdef VOXEL_WALK
+// Under a roof, sunlight at p, but where the caster nearest the sun is past the shadow's reach a
+// shelf below it can still be in the way, as the Nether's stack them: the map only keeps the one,
+// so walk toward the sun from o as TileBaker.blocked does. A smaller block counts as a cube here.
+float lid_sunlight(vec3 p, vec3 o, vec3 jitter) {
+    if (caster_gap(p) >= SunDir.w) {
+        return blocked(o, SunDir.xyz + jitter, SunDir.w, 96) ? 0.0 : 1.0;
+    }
+    return sunlight(p, jitter);
+}
+#endif
+
 // Under a roof, as TileBaker.shade: lit like the surface with the lid off, direct light from above
 // casting shadows under ledges and down pillars, the fill weaker where little of the open space
 // above is seen, and block light glowing on top.
@@ -123,7 +141,11 @@ vec3 lid_light(vec3 p, bool top, float ao, float sky) {
         // The tracer starts these shadow rays on the cube's face, a smaller block's too.
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
         vec3 o = top ? vec3(p.x, float(faceCell.y) + 1.0, p.z) : vec3(p.x, p.y, float(faceCell.z) + 1.0);
+#ifdef VOXEL_WALK
+        direct = lid_sunlight(o + normal * 0.06, o + normal * 1e-4, jitter) * Light.y * lambert;
+#else
         direct = sunlight(o + normal * 0.06, jitter) * Light.y * lambert;
+#endif
     }
     float ambient = Light.x * ao * (1.0 - Light.z * (1.0 - (0.15 + 0.85 * sky)));
     float warm = pow(faceLight.y * 255.0 / 15.0, 1.5) * Lid.w;
