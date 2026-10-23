@@ -188,6 +188,8 @@
 	"diorama.folder.overworld": "Overworld",
 	"diorama.folder.nether": "Nether",
 	"diorama.folder.end": "End",
+	"diorama.folder.waystones": "Waystones",
+	"diorama.waystones.untitled": "Waystone",
 	"diorama.folder.new": "New folder",
 	"diorama.folder.name": "Folder name",
 	"diorama.folder.name_hint": "Overworld secret",

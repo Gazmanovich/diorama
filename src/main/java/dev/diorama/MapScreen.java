@@ -420,8 +420,11 @@ public final class MapScreen extends Screen {
 		}
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
-			if (pin != null) {
+			if (pin != null && pin.waypoint().editable()) {
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint(), false));
+			} else if (pin != null) {
+				// A waystone can't be edited here: its menu instead.
+				this.openMenu(x, y);
 			}
 			return true;
 		}
@@ -488,8 +491,10 @@ public final class MapScreen extends Screen {
 		List<MapMenu.Item> items = new ArrayList<>();
 		items.add(MapMenu.Item.title(Component.literal(waypoint.name)));
 		items.add(MapMenu.Item.info(this.where(waypoint.x, waypoint.y, waypoint.z)));
-		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
-			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
+		if (waypoint.editable()) {
+			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
+		}
 		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(), () -> {
 			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
@@ -506,15 +511,19 @@ public final class MapScreen extends Screen {
 			}));
 		}
 		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, () -> {
-			waypoint.visible = false;
-			this.changed();
-		}));
-		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), () -> {
 			WaypointStore store = WaypointStore.get();
 			if (store != null) {
-				store.remove(waypoint);
+				store.setVisible(waypoint, false);
 			}
 		}));
+		if (waypoint.editable()) {
+			items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), () -> {
+				WaypointStore store = WaypointStore.get();
+				if (store != null) {
+					store.remove(waypoint);
+				}
+			}));
+		}
 		return items;
 	}
 

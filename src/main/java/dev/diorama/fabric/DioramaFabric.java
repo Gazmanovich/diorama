@@ -11,6 +11,7 @@ import dev.diorama.XaeroChannels;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.Waystones;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -64,6 +65,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
+			Waystones.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
@@ -72,6 +74,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
+			Waystones.clear();
 		});
 		XaeroChannels.register();
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.

@@ -136,6 +136,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("waystones")) {
+				waystones(context, world);
+			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
 				brokenFog(context);
@@ -147,10 +150,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints")) && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("waypoints")) {
 					temporaryGone(context);
+				}
+				if (tests.contains("waystones")) {
+					waystonesAfterRejoin(context, reopened);
 				}
 				if (spawnCell != null) {
 					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
@@ -2469,6 +2475,305 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Back in the world after leaving it: the temporary waypoint is gone, the kept one is still there. */
+	/** The waystone the Waystones scenario hid, which the server sends again on rejoining. */
+	private static @Nullable UUID hiddenWaystone;
+	/** The one it picked up with Silk Touch, which the server sends again too, from where it stood. */
+	private static @Nullable UUID pickedUpWaystone;
+	private static @Nullable BlockPos pickedUpAt;
+
+	/**
+	 * Waystones, with the Waystones mod installed (opt-in: DIORAMA_TESTS=waystones). Two waystones
+	 * the player places show on the minimap, the map and in the list's Waystones folder, whose rows
+	 * and map menu have no Edit or Delete. Renaming one renames its pin; hiding one takes it off the
+	 * map; picking the other up with Silk Touch takes it away; forgetting one in Waystones' own
+	 * screen takes it away too.
+	 */
+	private static void waystones(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> waystonesClass("api.WaystonesAPI") != null)) {
+			throw new AssertionError("DIORAMA_TESTS=waystones needs the Waystones mod installed");
+		}
+		// A flat, open patch far from anything placed before.
+		int cx = 2400;
+		int cz = 2400;
+		// Go there first: fill does nothing where chunks aren't loaded.
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		int y = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz));
+		world.getServer().runCommand("fill " + (cx - 16) + " " + y + " " + (cz - 16) + " " + (cx + 16) + " " + (y + 16) + " " + (cz + 16) + " air");
+		world.getServer().runCommand("fill " + (cx - 16) + " " + (y - 1) + " " + (cz - 16) + " " + (cx + 16) + " " + (y - 1) + " " + (cz + 16) + " grass_block");
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+		BlockPos eastSpot = new BlockPos(cx + 10, y, cz - 6);
+		BlockPos westSpot = new BlockPos(cx - 9, y, cz + 7);
+		placeWaystone(world, eastSpot);
+		placeWaystone(world, westSpot);
+		// Placing one may open Waystones' settings screen for it.
+		waitForWaystones(context, world, 2, eastSpot, westSpot);
+		context.setScreen(() -> null);
+		// Where they stand, which on uneven ground can be a block off the spot aimed at.
+		BlockPos east = context.computeOnClient(mc -> standing(waystoneAt(eastSpot)));
+		BlockPos west = context.computeOnClient(mc -> standing(waystoneAt(westSpot)));
+		UUID eastId = context.computeOnClient(mc -> waystoneAt(east).id);
+		UUID westId = context.computeOnClient(mc -> waystoneAt(west).id);
+		// Naming one in Waystones' screen renames it here too. Waystones only takes an edit from a
+		// player standing by the waystone.
+		world.getServer().runCommand("tp @a " + (east.getX() - 2) + " " + east.getY() + " " + east.getZ());
+		context.waitTicks(5);
+		renameWaystone(world, eastId, "Iron Farm");
+		context.waitFor(mc -> waystoneAt(east).name.equals("Iron Farm"), 200);
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		context.waitTicks(10);
+		context.takeScreenshot("waystones-01-minimap");
+
+		openMapOnPlayer(context);
+		float[] pin = waystonePin(context, eastId);
+		if (pin == null || waystonePin(context, westId) == null) {
+			throw new AssertionError("The waystones aren't both on the map");
+		}
+		context.getInput().setCursorPos(pin[0], pin[1]);
+		context.waitTicks(5);
+		context.takeScreenshot("waystones-02-map");
+		// A waystone's menu: no Edit or Delete, as Waystones owns it.
+		rightClickAt(context, pin[0], pin[1]);
+		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		context.takeScreenshot("waystones-03-menu");
+		if (labels.contains("Edit") || labels.contains("Delete") || !labels.contains("Hide")) {
+			throw new AssertionError("A waystone's menu should have Hide and no Edit or Delete: " + labels);
+		}
+		clickMenu(context, "Hide");
+		context.waitTicks(3);
+		if (waystonePin(context, eastId) != null) {
+			throw new AssertionError("The hidden waystone is still on the map");
+		}
+		hiddenWaystone = eastId;
+		context.setScreen(() -> null);
+
+		// The list's Waystones folder; a waystone's row has Show and Teleport, no Edit or Delete.
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(3);
+		for (int i = 0; i < 8 && !context.computeOnClient(mc -> folderTitle(mc).startsWith("Waystones")); i++) {
+			clickButton(context, ">");
+		}
+		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(waystoneAt(east)));
+		if (row == null) {
+			throw new AssertionError("The list has no Waystones folder with the hidden waystone in it: " + context.computeOnClient(DioramaClientTest::folderTitle));
+		}
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		context.getInput().setCursorPos(row[0] * scale, row[1] * scale);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		List<String> buttons = context.computeOnClient(mc -> visibleButtons(mc));
+		context.takeScreenshot("waystones-04-list");
+		if (buttons.contains("Edit") || buttons.contains("Delete") || !buttons.contains("Show")) {
+			throw new AssertionError("A hidden waystone's row should have Show and no Edit or Delete: " + buttons);
+		}
+		// Renamed while the list is open, the row follows.
+		world.getServer().runCommand("tp @a " + (west.getX() + 2) + " " + west.getY() + " " + west.getZ());
+		context.waitTicks(5);
+		renameWaystone(world, westId, "Mine");
+		context.waitFor(mc -> ((WaypointListScreen) mc.gui.screen()).shown().stream().anyMatch(w -> w.name.equals("Mine")), 200);
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		context.setScreen(() -> null);
+
+		// Picking one up with Silk Touch removes it. Waystones keeps it activated and sends no new
+		// list for this, so only its removal message can take it off. In survival, so it drops.
+		world.getServer().runCommand("gamemode survival @a");
+		world.getServer().runCommand("item replace entity @a weapon.mainhand with diamond_pickaxe");
+		world.getServer().runCommand("enchant @a minecraft:silk_touch");
+		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).gameMode.destroyBlock(west));
+		context.waitFor(mc -> WaypointStore.get().waystones().stream().noneMatch(w -> w.id.equals(westId)), 200);
+		world.getServer().runCommand("tp @a " + west.getX() + " " + west.getY() + " " + west.getZ());
+		for (int tick = 0; tick < 200 && world.getServer().computeOnServer(server -> waystoneSlot(server) < 0); tick++) {
+			context.waitTick();
+		}
+		if (world.getServer().computeOnServer(server -> waystoneSlot(server) < 0)) {
+			throw new AssertionError("The waystone picked up with Silk Touch didn't drop into the inventory");
+		}
+		world.getServer().runCommand("gamemode creative @a");
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		pickedUpWaystone = westId;
+		pickedUpAt = west;
+		// Waystones' own screen forgets one on the client before telling the server, which sends no
+		// new list back: do what that screen does on the client.
+		context.runOnClient(mc -> {
+			try {
+				Class<?> api = waystonesClass("api.WaystonesAPI");
+				// A copy, as forgetting one changes the list.
+				for (Object waystone : List.copyOf((java.util.Collection<?>) api.getMethod("getActivatedWaystones", net.minecraft.world.entity.player.Player.class).invoke(null, mc.player))) {
+					Class<?> manager = waystonesClass("core.PlayerWaystoneManager");
+					Class<?> type = waystonesClass("api.Waystone");
+					manager.getMethod("deactivateWaystone", net.minecraft.world.entity.player.Player.class, type).invoke(null, mc.player, waystone);
+				}
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
+		context.waitFor(mc -> WaypointStore.get().waystones().isEmpty(), 200);
+		openMapOnPlayer(context);
+		context.takeScreenshot("waystones-05-map-after");
+		context.setScreen(() -> null);
+	}
+
+	/**
+	 * After rejoining, the server sends the hidden waystone again, and it is still hidden. It sends
+	 * the picked-up one too, from where it stood, and that one stays off until it's placed again
+	 * on the same spot.
+	 */
+	private static void waystonesAfterRejoin(ClientGameTestContext context, TestSingleplayerContext world) {
+		UUID id = hiddenWaystone;
+		context.waitFor(mc -> WaypointStore.get() != null && WaypointStore.get().waystones().stream().anyMatch(w -> w.id.equals(id)), 600);
+		context.waitTicks(20);
+		context.runOnClient(mc -> {
+			for (Waypoint w : WaypointStore.get().waystones()) {
+				if (w.id.equals(id) && w.visible) {
+					throw new AssertionError("The hidden waystone shows again after rejoining");
+				}
+				if (w.id.equals(pickedUpWaystone)) {
+					throw new AssertionError("The waystone picked up with Silk Touch is back on the map after rejoining");
+				}
+			}
+		});
+		BlockPos spot = pickedUpAt;
+		world.getServer().runCommand("tp @a " + (spot.getX() + 2) + " " + spot.getY() + " " + spot.getZ());
+		context.waitTicks(20);
+		world.getServer().runOnServer(server -> {
+			net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayers().get(0);
+			int slot = waystoneSlot(server);
+			net.minecraft.world.item.ItemStack stack = player.getInventory().getItem(slot).copy();
+			player.getInventory().setItem(slot, net.minecraft.world.item.ItemStack.EMPTY);
+			player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, stack);
+		});
+		placeHeld(world, spot);
+		context.waitFor(mc -> WaypointStore.get().waystones().stream().anyMatch(w -> w.id.equals(pickedUpWaystone) && w.x == spot.getX() && w.z == spot.getZ()), 200);
+	}
+
+	/** The player's inventory slot holding a waystone item, or -1. */
+	private static int waystoneSlot(net.minecraft.server.MinecraftServer server) {
+		var inventory = server.getPlayerList().getPlayers().get(0).getInventory();
+		for (int i = 0; i < inventory.getContainerSize(); i++) {
+			var item = inventory.getItem(i);
+			// waystones:waystone, which 26.1 renamed waystones:andesite_waystone.
+			String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item.getItem()).toString();
+			if (!item.isEmpty() && id.startsWith("waystones:") && id.endsWith("waystone")) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** Waits until the client knows {@code count} waystones, and says what the server and Waystones have if it doesn't. */
+	private static void waitForWaystones(ClientGameTestContext context, TestSingleplayerContext world, int count, BlockPos... at) {
+		for (int tick = 0; tick < 200; tick++) {
+			if (context.computeOnClient(mc -> WaypointStore.get() != null && WaypointStore.get().waystones().size() == count)) {
+				return;
+			}
+			context.waitTick();
+		}
+		String blocks = world.getServer().computeOnServer(server -> {
+			StringBuilder out = new StringBuilder();
+			for (BlockPos pos : at) {
+				out.append(pos.toShortString()).append(' ').append(server.overworld().getBlockState(pos)).append("; ");
+			}
+			return out.toString();
+		});
+		String known = context.computeOnClient(mc -> {
+			try {
+				Object list = waystonesClass("api.WaystonesAPI").getMethod("getActivatedWaystones", net.minecraft.world.entity.player.Player.class).invoke(null, mc.player);
+				return "Waystones knows " + ((java.util.Collection<?>) list).size() + ", Diorama " + (WaypointStore.get() == null ? "no store" : WaypointStore.get().waystones().size()) + ", screen " + mc.gui.screen();
+			} catch (ReflectiveOperationException e) {
+				return e.toString();
+			}
+		});
+		throw new AssertionError("Expected " + count + " waystones: " + blocks + known);
+	}
+
+	private static @Nullable Class<?> waystonesClass(String name) {
+		try {
+			return Class.forName("net.blay09.mods.waystones." + name);
+		} catch (ClassNotFoundException e) {
+			return null;
+		}
+	}
+
+	/** Renames a waystone as Waystones' edit screen does, through the handler of the message it sends. */
+	private static void renameWaystone(TestSingleplayerContext world, UUID id, String name) {
+		world.getServer().runOnServer(server -> {
+			try {
+				Class<?> message = waystonesClass("network.message.EditWaystoneMessage");
+				if (message == null) {
+					message = waystonesClass("network.message.ServerboundEditWaystonePacket");
+				}
+				Class<?> visibility = waystonesClass("api.WaystoneVisibility");
+				Object activation = visibility.getField("ACTIVATION").get(null);
+				Object edit = message.getConstructor(UUID.class, String.class, visibility).newInstance(id, name, activation);
+				message.getMethod("handle", net.minecraft.server.level.ServerPlayer.class, message).invoke(null, server.getPlayerList().getPlayers().get(0), edit);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
+	}
+
+	/** Places a waystone standing on the block under {@code pos}, as the player would. */
+	private static void placeWaystone(TestSingleplayerContext world, BlockPos pos) {
+		world.getServer().runCommand("item replace entity @a weapon.mainhand with waystones:waystone");
+		placeHeld(world, pos);
+	}
+
+	/** Places what the player holds on the block under {@code pos}. */
+	private static void placeHeld(TestSingleplayerContext world, BlockPos pos) {
+		world.getServer().runOnServer(server -> {
+			net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayers().get(0);
+			BlockPos ground = pos.below();
+			player.gameMode.useItemOn(player, player.level(), player.getMainHandItem(), net.minecraft.world.InteractionHand.MAIN_HAND,
+				new net.minecraft.world.phys.BlockHitResult(new Vec3(ground.getX() + 0.5, ground.getY() + 1, ground.getZ() + 0.5), net.minecraft.core.Direction.UP, ground, false));
+		});
+	}
+
+	private static BlockPos standing(Waypoint waypoint) {
+		return new BlockPos(waypoint.x, waypoint.y, waypoint.z);
+	}
+
+	/** The waystone standing at a column. */
+	private static Waypoint waystoneAt(BlockPos pos) {
+		for (Waypoint w : WaypointStore.get().waystones()) {
+			if (w.x == pos.getX() && w.z == pos.getZ() && w.kind == Waypoint.Kind.WAYSTONE) {
+				return w;
+			}
+		}
+		throw new AssertionError("No waystone at " + pos + ": " + WaypointStore.get().waystones().stream().map(w -> w.name + " " + w.x + "," + w.y + "," + w.z).toList());
+	}
+
+	/** A waystone's pin on the open map, in window pixels; null if it isn't drawn. */
+	private static float @Nullable [] waystonePin(ClientGameTestContext context, UUID id) {
+		return context.computeOnClient(mc -> {
+			float scale = (float) mc.getWindow().getGuiScale();
+			for (WaypointOverlay.Pin p : ((MapScreen) mc.gui.screen()).pins()) {
+				if (p.waypoint().id.equals(id) && !p.clamped()) {
+					return new float[] {p.x() * scale, p.y() * scale};
+				}
+			}
+			return null;
+		});
+	}
+
+	/** The name of the folder the waypoint list shows. */
+	private static String folderTitle(Minecraft mc) {
+		return ((WaypointListScreen) mc.gui.screen()).folderName();
+	}
+
+	private static List<String> visibleButtons(Minecraft mc) {
+		List<String> out = new java.util.ArrayList<>();
+		for (var child : mc.gui.screen().children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.visible) {
+				out.add(button.getMessage().getString());
+			}
+		}
+		return out;
+	}
+
 	private static void temporaryGone(ClientGameTestContext context) {
 		context.waitFor(mc -> mc.player != null && WorldKey.current() != null, 600);
 		context.runOnClient(mc -> {
