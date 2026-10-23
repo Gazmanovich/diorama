@@ -125,7 +125,7 @@
 	"diorama.settings.compass.tooltip": "Puts N, S, W and E on the minimap's edges. The map always faces north.",
 	"diorama.settings.coordinates.tooltip": "Shows your block coordinates under the minimap.",
 	"diorama.settings.biome.tooltip": "Shows the biome you're in under the minimap.",
-	"diorama.settings.auto_caves.tooltip": "When you're underground, the minimap shows the cave you're in instead of the surface above.",
+	"diorama.settings.auto_caves.tooltip": "When you're underground, the minimap and the map show the cave you're in instead of the surface above.",
 	"diorama.settings.corner.tooltip": "Which corner of the screen the minimap sits in.",
 	"diorama.settings.size.tooltip": "How wide the minimap is. It shrinks to fit a small screen.",
 	"diorama.settings.zoom.tooltip": "How close the minimap is zoomed in. The zoom keys change it too.",
