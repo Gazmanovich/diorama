@@ -209,6 +209,20 @@ public final class VoxelReader {
 		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds, this.shapes);
 	}
 
+	/**
+	 * Which of a section's {@link #solidSection} bits are blocks smaller than a cube, indexed the
+	 * same: null when its chunk is missing, {@link #NOTHING_SOLID} when there are none. Don't write to it.
+	 */
+	long @Nullable [] partialSection(int sx, int sy, int sz) {
+		Decoded chunk = this.chunk(sx, sz);
+		if (chunk == null) {
+			return null;
+		}
+		int index = sy - chunk.snapshot.minSectionY;
+		chunk.solid(index, this.kinds, this.shapes);
+		return chunk.partial(index);
+	}
+
 	static boolean nothingSolid(long[] mask) {
 		return mask == NOTHING_SOLID;
 	}

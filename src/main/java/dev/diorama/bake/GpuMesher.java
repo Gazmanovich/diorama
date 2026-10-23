@@ -57,6 +57,8 @@ public final class GpuMesher {
 	/** The section table's entries for sections without solid bits: a missing chunk, or nothing solid. */
 	public static final int SECTION_UNKNOWN = 0xFFFFFFFE;
 	public static final int SECTION_EMPTY = 0xFFFFFFFF;
+	/** On a section's table entry: 128 more words follow its solid bits, marking the smaller blocks. */
+	public static final int SECTION_PARTIAL = 0x80000000;
 
 	private GpuMesher() {
 	}
@@ -827,13 +829,22 @@ public final class GpuMesher {
 						out[index] = SECTION_EMPTY;
 						continue;
 					}
-					if (next + 128 > out.length) {
+					// On the surface the GPU's shadow walk passes smaller blocks (see bake.fsh), so mark them.
+					long[] partial = mesh.lifted ? null : reader.partialSection(sx, sy, sz);
+					boolean marked = partial != null && !VoxelReader.nothingSolid(partial);
+					if (next + 256 > out.length) {
 						out = java.util.Arrays.copyOf(out, out.length * 2);
 					}
-					out[index] = next;
+					out[index] = marked ? next | SECTION_PARTIAL : next;
 					for (int w = 0; w < 64; w++) {
 						out[next++] = (int) mask[w];
 						out[next++] = (int) (mask[w] >>> 32);
+					}
+					if (marked) {
+						for (int w = 0; w < 64; w++) {
+							out[next++] = (int) partial[w];
+							out[next++] = (int) (partial[w] >>> 32);
+						}
 					}
 				}
 			}

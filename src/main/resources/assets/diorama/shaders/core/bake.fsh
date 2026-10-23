@@ -102,10 +102,10 @@ float ao_sun(float ao) {
 // Sunlight at p, but where the caster nearest the sun is past the shadow's reach a nearer block
 // can still be in the way: a lower building in front of a tower, or a shelf under a higher one in
 // the Nether. The map only keeps the one, so walk toward the sun from o as TileBaker.blocked does.
-// A smaller block counts as a cube here.
-float far_sunlight(vec3 p, vec3 o, vec3 jitter) {
+// The table has no shapes, so a smaller block counts as a cube, or with cubesOnly as open.
+float far_sunlight(vec3 p, vec3 o, vec3 jitter, bool cubesOnly) {
     if (caster_gap(p) >= SunDir.w) {
-        return blocked(o, SunDir.xyz + jitter, SunDir.w, 96) ? 0.0 : 1.0;
+        return blocked(o, SunDir.xyz + jitter, SunDir.w, 96, cubesOnly) ? 0.0 : 1.0;
     }
     return sunlight(p, jitter);
 }
@@ -122,9 +122,9 @@ vec3 sun_light(vec3 p, bool top, float ao, float sky) {
         // Off the face a little, toward the open side, so the face doesn't shade itself.
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
 #ifdef VOXEL_WALK
-        // The walk starts on the cube's face, as under a roof: the table counts a smaller block as a cube.
-        vec3 o = top ? vec3(p.x, float(faceCell.y) + 1.0, p.z) : vec3(p.x, p.y, float(faceCell.z) + 1.0);
-        direct = far_sunlight(p + normal * 0.06, o + normal * 1e-4, jitter) * Light.y * lambert * ao_sun(ao);
+        // From the face itself, as the tracer starts these rays, past smaller blocks: a ray over a
+        // slab's open half mustn't be shaded by it, and a slab's own top starts inside its cell.
+        direct = far_sunlight(p + normal * 0.06, p + normal * 1e-4, jitter, true) * Light.y * lambert * ao_sun(ao);
 #else
         direct = sunlight(p + normal * 0.06, jitter) * Light.y * lambert * ao_sun(ao);
 #endif
@@ -154,7 +154,7 @@ vec3 lid_light(vec3 p, bool top, float ao, float sky) {
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
         vec3 o = top ? vec3(p.x, float(faceCell.y) + 1.0, p.z) : vec3(p.x, p.y, float(faceCell.z) + 1.0);
 #ifdef VOXEL_WALK
-        direct = far_sunlight(o + normal * 0.06, o + normal * 1e-4, jitter) * Light.y * lambert * ao_sun(ao);
+        direct = far_sunlight(o + normal * 0.06, o + normal * 1e-4, jitter, false) * Light.y * lambert * ao_sun(ao);
 #else
         direct = sunlight(o + normal * 0.06, jitter) * Light.y * lambert * ao_sun(ao);
 #endif
