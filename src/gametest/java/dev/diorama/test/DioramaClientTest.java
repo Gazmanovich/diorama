@@ -320,8 +320,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 			case OTHER -> {
+				float known = context.computeOnClient(mc -> overviewKnown(100, Projection.v(70, 0)));
 				if (names.contains("Realm Camp")) {
 					throw new AssertionError("Another realm shows the first realm's waypoint: " + names);
+				}
+				if (known > 0.1F) {
+					throw new AssertionError("Another realm shows the first realm's map: the strip east of spawn is " + known + " known");
 				}
 			}
 		}

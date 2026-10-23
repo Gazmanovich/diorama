@@ -126,7 +126,12 @@ public final class WorldKey {
 		String key = id != null ? idKey(address, id) : seedKey(address, level);
 		if (REALMS.containsKey(data)) {
 			String old = key("realms", data.ip);
-			adoptAddressFolder(key, id != null ? idKey(old, id) : seedKey(old, level));
+			String oldKey = id != null ? idKey(old, id) : seedKey(old, level);
+			if (!adoptAddressFolder(key, oldKey)) {
+				// This connection stays on the old folder; the next one tries again.
+				REALMS.remove(data);
+				key = oldKey;
+			}
 		}
 		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, id, key);
 		return key;
@@ -197,18 +202,21 @@ public final class WorldKey {
 	 * Before Diorama read a realm's ID, its folder was named by the address it ran at. The folder
 	 * for the realm's address now holds what the player saw last time, so it becomes the realm's
 	 * folder the first time the realm's own is asked for. The ones from earlier addresses stay.
+	 * False if the move failed: then the realm's own folder mustn't be made empty in its place.
 	 */
-	private static void adoptAddressFolder(String key, String old) {
+	private static boolean adoptAddressFolder(String key, String old) {
 		Path target = folder(key);
 		Path source = folder(old);
 		if (Files.exists(target) || !Files.isDirectory(source)) {
-			return;
+			return true;
 		}
 		try {
 			Files.move(source, target);
 			Diorama.LOGGER.info("This realm's map moved from {} to {}, named by the realm instead of its address", old, key);
+			return true;
 		} catch (IOException e) {
-			Diorama.LOGGER.warn("Couldn't move this realm's map from {} to {}", old, key, e);
+			Diorama.LOGGER.warn("Couldn't move this realm's map from {} to {}; using it where it is", old, key, e);
+			return false;
 		}
 	}
 
