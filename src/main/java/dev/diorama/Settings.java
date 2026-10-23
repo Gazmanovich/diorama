@@ -44,7 +44,7 @@ public final class Settings {
 	public boolean minimap = true;
 	/** In GUI pixels. Saved as a number; files from before it was a slider say SMALL, MEDIUM or LARGE. */
 	@JsonAdapter(SizeAdapter.class)
-	public int minimapSize = 128;
+	public int minimapSize = 96;
 	public Corner minimapCorner = Corner.TOP_RIGHT;
 	public int minimapZoom = 3;
 	public boolean compass = true;

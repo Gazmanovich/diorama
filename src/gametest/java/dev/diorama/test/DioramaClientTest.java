@@ -3068,7 +3068,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		clickAt(context, "Size: ", 0.3);
 		context.takeScreenshot("settings-02-size-" + context.computeOnClient(mc -> Settings.get().minimapSize));
 		context.runOnClient(mc -> {
-			Settings.get().minimapSize = 128;
+			Settings.get().minimapSize = 96;
 			Settings.get().save();
 		});
 		String[] tabs = {"Radar", "Overlays", "Waypoints", "Look"};
@@ -3106,7 +3106,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = 128;
+			s.minimapSize = 96;
 			s.minimapZoom = 3;
 			s.save();
 		});
@@ -3133,7 +3133,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			s.save();
 		});
 		// Settings saved before Size was a slider keep their size, and odd sizes snap to the slider's steps.
-		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "128"}};
+		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "96"}};
 		for (String[] size : sizes) {
 			context.runOnClient(mc -> {
 				java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
@@ -3150,7 +3150,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
-			s.minimapSize = 128;
+			s.minimapSize = 96;
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
 			s.compass = true;
 			s.save();
@@ -3205,7 +3205,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
-			s.minimapSize = 128;
+			s.minimapSize = 96;
 			s.save();
 		});
 		context.getInput().resizeWindow(1600, 900);
