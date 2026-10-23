@@ -170,6 +170,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			trackedPlayers(context);
 		}
 		//?}
+		//? if >=1.21.11 && fabric {
+		if (tests.contains("realms")) {
+			realms(context);
+		}
+		//?}
 	}
 
 	/**
@@ -199,6 +204,109 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Coming back to a world opened another folder: " + first + " then " + again);
 		}
 	}
+
+	private static final long REALM_ID = 4242;
+
+	/**
+	 * A realm that went to sleep wakes up at another address. Joined through Realms' own connection
+	 * code at one address, then at another, the realm keeps its map and waypoints.
+	 */
+	//? if >=1.21.11 && fabric {
+	private static void realms(ClientGameTestContext context) {
+		String realm = WorldKey.key("realm", Long.toString(REALM_ID));
+		context.runOnClient(mc -> {
+			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
+				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(realm)).toList()) {
+					org.apache.commons.io.FileUtils.deleteDirectory(folder.toFile());
+				}
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed("diorama-realm"))
+			.createServer(serverProperties())) {
+			String first = playOnRealm(context, server, "localhost", true);
+			String woken = playOnRealm(context, server, "127.0.0.1", false);
+			if (!first.startsWith(realm + "-")) {
+				throw new AssertionError("The realm's folder isn't named by its ID: " + first);
+			}
+			if (!first.equals(woken)) {
+				throw new AssertionError("The realm opened another folder at its new address: " + first + " then " + woken);
+			}
+		}
+	}
+
+	/** Joins the server as a realm at {@code host}, plays a little, leaves, and returns the realm's folder. */
+	private static String playOnRealm(ClientGameTestContext context, TestDedicatedServerContext server, String host, boolean firstVisit) {
+		net.minecraft.realms.RealmsConnect connect = context.computeOnClient(mc -> new net.minecraft.realms.RealmsConnect(new net.minecraft.client.gui.screens.TitleScreen()));
+		context.setScreen(() -> new RealmsJoinScreen(connect));
+		context.runOnClient(mc -> {
+			com.mojang.realmsclient.dto.RealmsServer realm = new com.mojang.realmsclient.dto.RealmsServer();
+			realm.id = REALM_ID;
+			realm.name = "Diorama Realm";
+			connect.connect(realm, new net.minecraft.client.multiplayer.resolver.ServerAddress(host, SERVER_PORT));
+		});
+		context.waitFor(mc -> MapSession.get() != null && mc.player != null && MapSession.get().map().chunkCount() > 150, 2400);
+		server.runCommand("time set noon");
+		server.runCommand("weather clear");
+		settle(context, 60);
+		String joined = context.computeOnClient(mc -> mc.getCurrentServer() == null ? null : mc.getCurrentServer().isRealm() + " " + mc.getCurrentServer().ip);
+		if (!("true " + host).equals(joined)) {
+			throw new AssertionError("Not joined as a realm at " + host + ": " + joined);
+		}
+		String key = context.computeOnClient(mc -> WorldKey.current());
+		dev.diorama.Diorama.LOGGER.info("Realm at {}: folder {}", host, key);
+		if (firstVisit) {
+			context.runOnClient(mc -> {
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("Realm Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+			});
+			for (int x = 200; x <= 600; x += 200) {
+				server.runCommand("tp @a " + x + " 200 0");
+				context.waitTicks(20);
+				settle(context, 60);
+			}
+		} else {
+			// Zoomed out over what the first visit walked, past the chunks loaded now.
+			context.setScreen(MapScreen::new);
+			lookAtPlayer(context, 0.25, TileKey.SURFACE);
+			settle(context, 40);
+			context.takeScreenshot("realms-woken");
+			context.setScreen(() -> null);
+			float known = context.computeOnClient(mc -> overviewKnown(500, Projection.v(70, 0)));
+			List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
+			if (!names.contains("Realm Camp")) {
+				throw new AssertionError("The realm lost its waypoint at its new address: " + names);
+			}
+			if (known < 0.5F) {
+				throw new AssertionError("The realm lost its map at its new address: the strip walked east is " + known + " known");
+			}
+		}
+		context.runOnClient(mc -> {
+			mc.level.disconnect(net.minecraft.network.chat.Component.literal("The realm went to sleep"));
+			mc.disconnect(new net.minecraft.client.gui.screens.TitleScreen(), false);
+		});
+		context.waitFor(mc -> mc.level == null && MapSession.get() == null, 600);
+		return key;
+	}
+
+	/** Ticks a Realms connection while it logs in, as Realms' connecting screen does. */
+	private static final class RealmsJoinScreen extends net.minecraft.client.gui.screens.Screen {
+		private final net.minecraft.realms.RealmsConnect connect;
+
+		RealmsJoinScreen(net.minecraft.realms.RealmsConnect connect) {
+			super(net.minecraft.network.chat.Component.literal("Joining a realm"));
+			this.connect = connect;
+		}
+
+		@Override
+		public void tick() {
+			this.connect.tick();
+		}
+	}
+	//?}
 
 	/** Level ID messages as MapModCompanion sent them through Velocity, for two same-seed servers. */
 	private static final byte[] LOBBY_ID = {0, 124, 86, -44, -107};
@@ -3243,7 +3351,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players");
+			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
 			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");

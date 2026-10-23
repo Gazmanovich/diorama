@@ -25,7 +25,8 @@ import org.jspecify.annotations.Nullable;
  * Names the world the client is in, so per-world data (waypoints, the saved map) lands in its
  * own folder: the save folder for singleplayer; for multiplayer, the server address and the
  * server's name for the world, since one address can lead to several worlds (a network's lobby
- * and survival servers, or a map reset).
+ * and survival servers, or a map reset). A realm is named by its ID instead of its address: one
+ * that went to sleep wakes up at another address.
  *
  * <p>Servers built around Xaero's mods name their worlds with a level ID (see
  * {@link XaeroChannels}). Other servers name nothing, and the world is the hashed seed the
@@ -72,6 +73,8 @@ public final class WorldKey {
 	/** This server let a wait run out without naming its world, so it isn't waited on again. */
 	private static boolean silent;
 	private static @Nullable Last last;
+	/** The realm the player last set off to join, by its ID. Kept past joining, which clears the rest. */
+	private static @Nullable Long realm;
 
 	private WorldKey() {
 	}
@@ -173,7 +176,12 @@ public final class WorldKey {
 	}
 
 	private static String address(ServerData data) {
-		return key(data.isRealm() ? "realms" : "server", data.ip);
+		if (data.isRealm()) {
+			// Folders from before Diorama read the realm's ID are named by its address of the time.
+			Long id = realm;
+			return id != null ? key("realm", Long.toString(id)) : key("realms", data.ip);
+		}
+		return key("server", data.ip);
 	}
 
 	private static String idPrefix(ServerData data) {
@@ -218,6 +226,11 @@ public final class WorldKey {
 		} else if (!Integer.valueOf(id).equals(naming.named)) {
 			Diorama.LOGGER.info("The server named this world {} after its map opened, so the name applies from the next world on", HexFormat.of().toHexDigits(id));
 		}
+	}
+
+	/** The player is joining this realm. Comes before the join, so {@link #onJoinOrLeave} keeps it. */
+	public static void joiningRealm(long id) {
+		realm = id;
 	}
 
 	/** Left the server, or a network moved the player to another of its servers. */
