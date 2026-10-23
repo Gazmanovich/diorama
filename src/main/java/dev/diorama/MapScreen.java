@@ -112,7 +112,8 @@ public final class MapScreen extends Screen {
 		super(Component.translatable("diorama.screen.title"));
 		MapSession session = MapSession.get();
 		LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
-		this.layer = session != null && player != null ? session.autoLayer(player) : TileKey.SURFACE;
+		// Underground it opens on the cave the player is in, unless the settings say surface only.
+		this.layer = session != null && player != null && Settings.get().autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 	}
 
 	@Override

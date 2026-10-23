@@ -1453,6 +1453,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("tp @a 103.5 -40 116.5 -90 0");
 		settle(context, 100);
 		context.takeScreenshot("diorama-07-fog-of-war-minimap");
+		// Down here the map opens on the cave, unless Caves underground is off.
+		for (boolean caves : new boolean[] {false, true}) {
+			context.runOnClient(mc -> Settings.get().autoCaves = caves);
+			context.setScreen(MapScreen::new);
+			context.waitTicks(5);
+			int layer = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+			int expected = caves ? context.computeOnClient(mc -> MapSession.caveLayerFor(mc.player.getY())) : TileKey.SURFACE;
+			context.takeScreenshot("fog-of-war-map-opens-" + (caves ? "caves" : "surface"));
+			if (layer != expected) {
+				throw new AssertionError("Underground with Caves underground " + (caves ? "on" : "off") + ", the map opened on layer " + layer + ", not " + expected);
+			}
+			context.setScreen(() -> null);
+		}
 		assertSeen(context, 115, -39, 116, true, "corridor in front of the player");
 		assertSeen(context, 123, -39, 104, false, "room around the corner");
 		showScene(context);
