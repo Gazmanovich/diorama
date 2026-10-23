@@ -791,18 +791,14 @@ public final class GpuMesher {
 	 */
 	private static void voxels(Mesh mesh, TileBaker helper, VoxelReader reader, int fx0, int fx1, int fy0, int fy1, int fz0, int fz1) {
 		int reach = TileBaker.SKY_REACH + 1;
-		// Under a roof the GPU walks shadow rays through the table too (see bake.fsh), as far as
-		// the tracer's go toward the sun: west, a little south, and up.
-		int west = reach;
-		int south = reach;
-		int up = reach;
-		if (mesh.lifted) {
-			double elevation = Math.toRadians(MapStyle.get().sunElevation());
-			double flat = TileBaker.SHADOW_DISTANCE * Math.cos(elevation);
-			west = Math.max(reach, (int) Math.ceil(flat * -TileBaker.SUN_AZIMUTH_X) + 2);
-			south = Math.max(reach, (int) Math.ceil(flat * TileBaker.SUN_AZIMUTH_Z) + 2);
-			up = Math.max(reach, (int) Math.ceil(TileBaker.SHADOW_DISTANCE * Math.sin(elevation)) + 2);
-		}
+		// Where the shadow map's caster is past the shadow's reach, the GPU walks shadow rays
+		// through the table too (see bake.fsh), as far as the tracer's go toward the sun: west, a
+		// little south, and up.
+		double elevation = Math.toRadians(MapStyle.get().sunElevation());
+		double flat = TileBaker.SHADOW_DISTANCE * Math.cos(elevation);
+		int west = Math.max(reach, (int) Math.ceil(flat * -TileBaker.SUN_AZIMUTH_X) + 2);
+		int south = Math.max(reach, (int) Math.ceil(flat * TileBaker.SUN_AZIMUTH_Z) + 2);
+		int up = Math.max(reach, (int) Math.ceil(TileBaker.SHADOW_DISTANCE * Math.sin(elevation)) + 2);
 		int sx0 = (fx0 - west) >> 4;
 		int sx1 = (fx1 + reach) >> 4;
 		int sz0 = (fz0 - reach) >> 4;
