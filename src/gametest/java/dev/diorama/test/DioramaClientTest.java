@@ -2655,7 +2655,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		var inventory = server.getPlayerList().getPlayers().get(0).getInventory();
 		for (int i = 0; i < inventory.getContainerSize(); i++) {
 			var item = inventory.getItem(i);
-			if (!item.isEmpty() && net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item.getItem()).toString().equals("waystones:waystone")) {
+			// waystones:waystone, which 26.1 renamed waystones:andesite_waystone.
+			String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item.getItem()).toString();
+			if (!item.isEmpty() && id.startsWith("waystones:") && id.endsWith("waystone")) {
 				return i;
 			}
 		}
