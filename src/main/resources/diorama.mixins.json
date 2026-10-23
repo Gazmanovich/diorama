@@ -9,7 +9,8 @@
 		"ClientPacketListenerMixin",
 		"DeathPacketMixin",
 		"GameRendererMixin",
-		"LevelChunkMixin"
+		"LevelChunkMixin",
+		"RealmsServerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

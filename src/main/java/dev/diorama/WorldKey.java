@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
@@ -25,7 +26,8 @@ import org.jspecify.annotations.Nullable;
  * Names the world the client is in, so per-world data (waypoints, the saved map) lands in its
  * own folder: the save folder for singleplayer; for multiplayer, the server address and the
  * server's name for the world, since one address can lead to several worlds (a network's lobby
- * and survival servers, or a map reset).
+ * and survival servers, or a map reset). A realm is named by its ID instead of its address: one
+ * that went to sleep wakes up at another address.
  *
  * <p>Servers built around Xaero's mods name their worlds with a level ID (see
  * {@link XaeroChannels}). Other servers name nothing, and the world is the hashed seed the
@@ -72,6 +74,11 @@ public final class WorldKey {
 	/** This server let a wait run out without naming its world, so it isn't waited on again. */
 	private static boolean silent;
 	private static @Nullable Last last;
+	/**
+	 * The realm each realm connection's server entry is for, by ID. Realms makes a new entry for
+	 * each connection, on a thread of its own.
+	 */
+	private static final Map<ServerData, Long> REALMS = Collections.synchronizedMap(new WeakHashMap<>());
 
 	private WorldKey() {
 	}
@@ -115,7 +122,17 @@ public final class WorldKey {
 		if (seen != null && seen.matches(data, level, data.ip, realm, id)) {
 			return seen.key;
 		}
-		String key = id != null ? idKey(data, id) : seedKey(data, level);
+		String address = address(data);
+		String key = id != null ? idKey(address, id) : seedKey(address, level);
+		if (REALMS.containsKey(data)) {
+			String old = key("realms", data.ip);
+			String oldKey = id != null ? idKey(old, id) : seedKey(old, level);
+			if (!adoptAddressFolder(key, oldKey)) {
+				// This connection stays on the old folder; the next one tries again.
+				REALMS.remove(data);
+				key = oldKey;
+			}
+		}
 		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, id, key);
 		return key;
 	}
@@ -172,21 +189,48 @@ public final class WorldKey {
 		return namedBefore;
 	}
 
+	/** A realm by its ID; a realm whose ID wasn't seen, and any other server, by its address. */
 	private static String address(ServerData data) {
+		Long realm = REALMS.get(data);
+		if (realm != null) {
+			return key("realm", Long.toString(realm));
+		}
 		return key(data.isRealm() ? "realms" : "server", data.ip);
+	}
+
+	/**
+	 * Before Diorama read a realm's ID, its folder was named by the address it ran at. The folder
+	 * for the realm's address now holds what the player saw last time, so it becomes the realm's
+	 * folder the first time the realm's own is asked for. The ones from earlier addresses stay.
+	 * False if the move failed: then the realm's own folder mustn't be made empty in its place.
+	 */
+	private static boolean adoptAddressFolder(String key, String old) {
+		Path target = folder(key);
+		Path source = folder(old);
+		if (Files.exists(target) || !Files.isDirectory(source)) {
+			return true;
+		}
+		try {
+			Files.move(source, target);
+			Diorama.LOGGER.info("This realm's map moved from {} to {}, named by the realm instead of its address", old, key);
+			return true;
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't move this realm's map from {} to {}; using it where it is", old, key, e);
+			return false;
+		}
 	}
 
 	private static String idPrefix(ServerData data) {
 		return address(data) + "-id-";
 	}
 
-	private static String idKey(ServerData data, int id) {
-		return idPrefix(data) + HexFormat.of().toHexDigits(id);
+	private static String idKey(String address, int id) {
+		return address + "-id-" + HexFormat.of().toHexDigits(id);
 	}
 
 	/** The folder for a server's world before Diorama read level IDs. */
-	private static String seedKey(ServerData data, ClientLevel level) {
-		return address(data) + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
+	private static String seedKey(String address, ClientLevel level) {
+		return address + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
 	}
 
 	/**
@@ -202,7 +246,7 @@ public final class WorldKey {
 			return;
 		}
 		try {
-			Files.createDirectories(folder(idKey(data, id)));
+			Files.createDirectories(folder(idKey(address(data), id)));
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't make the folder for this server's world {}", HexFormat.of().toHexDigits(id), e);
 		}
@@ -218,6 +262,11 @@ public final class WorldKey {
 		} else if (!Integer.valueOf(id).equals(naming.named)) {
 			Diorama.LOGGER.info("The server named this world {} after its map opened, so the name applies from the next world on", HexFormat.of().toHexDigits(id));
 		}
+	}
+
+	/** Realms made this server entry to connect to the realm with this ID. */
+	public static void realmEntry(ServerData data, long id) {
+		REALMS.put(data, id);
 	}
 
 	/** Left the server, or a network moved the player to another of its servers. */
