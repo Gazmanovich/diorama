@@ -207,16 +207,31 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	private static final long REALM_ID = 4242;
 
+	/** What a visit to a realm does after joining. */
+	private enum RealmVisit {
+		/** Sets a waypoint and walks 600 blocks east. */
+		FIRST,
+		/** Finds that waypoint and the map near spawn. */
+		RETURN,
+		/** Another realm: finds neither. */
+		OTHER
+	}
+
 	/**
 	 * A realm that went to sleep wakes up at another address. Joined through Realms' own connection
-	 * code at one address, then at another, the realm keeps its map and waypoints.
+	 * code at one address, then at another, the realm keeps its map and waypoints. The map an older
+	 * Diorama kept under the realm's address becomes the realm's, and another realm on the same
+	 * server and seed gets a folder of its own.
 	 */
 	//? if >=1.21.11 && fabric {
 	private static void realms(ClientGameTestContext context) {
 		String realm = WorldKey.key("realm", Long.toString(REALM_ID));
+		String otherRealm = WorldKey.key("realm", Long.toString(REALM_ID + 1));
+		String oldAddress = WorldKey.key("realms", "127.0.0.1");
 		context.runOnClient(mc -> {
 			try (java.util.stream.Stream<java.nio.file.Path> old = java.nio.file.Files.list(WorldKey.folder("."))) {
-				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(realm)).toList()) {
+				for (java.nio.file.Path folder : old.filter(p -> p.getFileName().toString().startsWith(realm)
+					|| p.getFileName().toString().startsWith(otherRealm) || p.getFileName().toString().startsWith(oldAddress)).toList()) {
 					org.apache.commons.io.FileUtils.deleteDirectory(folder.toFile());
 				}
 			} catch (java.io.IOException e) {
@@ -227,24 +242,41 @@ public class DioramaClientTest implements FabricClientGameTest {
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> s.setSeed("diorama-realm"))
 			.createServer(serverProperties())) {
-			String first = playOnRealm(context, server, "localhost", true);
-			String woken = playOnRealm(context, server, "127.0.0.1", false);
+			String first = playOnRealm(context, server, "localhost", REALM_ID, RealmVisit.FIRST);
 			if (!first.startsWith(realm + "-")) {
 				throw new AssertionError("The realm's folder isn't named by its ID: " + first);
 			}
+			// Where an older Diorama would have kept it: under the address the realm runs at next.
+			String legacy = oldAddress + first.substring(realm.length());
+			context.runOnClient(mc -> {
+				try {
+					java.nio.file.Files.move(WorldKey.folder(first), WorldKey.folder(legacy));
+				} catch (java.io.IOException e) {
+					throw new AssertionError(e);
+				}
+			});
+			String woken = playOnRealm(context, server, "127.0.0.1", REALM_ID, RealmVisit.RETURN);
 			if (!first.equals(woken)) {
 				throw new AssertionError("The realm opened another folder at its new address: " + first + " then " + woken);
+			}
+			boolean legacyLeft = context.computeOnClient(mc -> java.nio.file.Files.exists(WorldKey.folder(legacy)));
+			if (legacyLeft) {
+				throw new AssertionError("The realm's map under its address wasn't moved to the realm's folder: " + legacy);
+			}
+			String other = playOnRealm(context, server, "127.0.0.1", REALM_ID + 1, RealmVisit.OTHER);
+			if (!other.startsWith(otherRealm + "-")) {
+				throw new AssertionError("Another realm at the same address got " + other);
 			}
 		}
 	}
 
-	/** Joins the server as a realm at {@code host}, plays a little, leaves, and returns the realm's folder. */
-	private static String playOnRealm(ClientGameTestContext context, TestDedicatedServerContext server, String host, boolean firstVisit) {
+	/** Joins the server as realm {@code id} at {@code host}, does the visit's part, leaves, and returns the realm's folder. */
+	private static String playOnRealm(ClientGameTestContext context, TestDedicatedServerContext server, String host, long id, RealmVisit visit) {
 		net.minecraft.realms.RealmsConnect connect = context.computeOnClient(mc -> new net.minecraft.realms.RealmsConnect(new net.minecraft.client.gui.screens.TitleScreen()));
 		context.setScreen(() -> new RealmsJoinScreen(connect));
 		context.runOnClient(mc -> {
 			com.mojang.realmsclient.dto.RealmsServer realm = new com.mojang.realmsclient.dto.RealmsServer();
-			realm.id = REALM_ID;
+			realm.id = id;
 			realm.name = "Diorama Realm";
 			connect.connect(realm, new net.minecraft.client.multiplayer.resolver.ServerAddress(host, SERVER_PORT));
 		});
@@ -257,32 +289,40 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Not joined as a realm at " + host + ": " + joined);
 		}
 		String key = context.computeOnClient(mc -> WorldKey.current());
-		dev.diorama.Diorama.LOGGER.info("Realm at {}: folder {}", host, key);
-		if (firstVisit) {
-			context.runOnClient(mc -> {
-				BlockPos at = mc.player.blockPosition();
-				WaypointStore.get().add(new Waypoint("Realm Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
-			});
-			for (int x = 200; x <= 600; x += 200) {
-				server.runCommand("tp @a " + x + " 200 0");
-				context.waitTicks(20);
-				settle(context, 60);
+		dev.diorama.Diorama.LOGGER.info("Realm {} at {}: folder {}", id, host, key);
+		List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
+		switch (visit) {
+			case FIRST -> {
+				context.runOnClient(mc -> {
+					BlockPos at = mc.player.blockPosition();
+					WaypointStore.get().add(new Waypoint("Realm Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+				});
+				for (int x = 200; x <= 600; x += 200) {
+					server.runCommand("tp @a " + x + " 200 0");
+					context.waitTicks(20);
+					settle(context, 60);
+				}
 			}
-		} else {
-			// Zoomed out over what the first visit walked. The player comes back where they left, at
-			// x 600, so the map near spawn is from the first visit alone.
-			context.setScreen(MapScreen::new);
-			lookAtPlayer(context, 0.25, TileKey.SURFACE);
-			settle(context, 40);
-			context.takeScreenshot("realms-woken");
-			context.setScreen(() -> null);
-			float known = context.computeOnClient(mc -> overviewKnown(100, Projection.v(70, 0)));
-			List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
-			if (!names.contains("Realm Camp")) {
-				throw new AssertionError("The realm lost its waypoint at its new address: " + names);
+			case RETURN -> {
+				// Zoomed out over what the first visit walked. The player comes back where they left, at
+				// x 600, so the map near spawn is from the first visit alone.
+				context.setScreen(MapScreen::new);
+				lookAtPlayer(context, 0.25, TileKey.SURFACE);
+				settle(context, 40);
+				context.takeScreenshot("realms-woken");
+				context.setScreen(() -> null);
+				float known = context.computeOnClient(mc -> overviewKnown(100, Projection.v(70, 0)));
+				if (!names.contains("Realm Camp")) {
+					throw new AssertionError("The realm lost its waypoint at its new address: " + names);
+				}
+				if (known < 0.5F) {
+					throw new AssertionError("The realm lost its map at its new address: the strip east of spawn is " + known + " known");
+				}
 			}
-			if (known < 0.5F) {
-				throw new AssertionError("The realm lost its map at its new address: the strip east of spawn is " + known + " known");
+			case OTHER -> {
+				if (names.contains("Realm Camp")) {
+					throw new AssertionError("Another realm shows the first realm's waypoint: " + names);
+				}
 			}
 		}
 		context.runOnClient(mc -> {

@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
@@ -73,8 +74,11 @@ public final class WorldKey {
 	/** This server let a wait run out without naming its world, so it isn't waited on again. */
 	private static boolean silent;
 	private static @Nullable Last last;
-	/** The realm the player last set off to join, by its ID. Kept past joining, which clears the rest. */
-	private static @Nullable Long realmId;
+	/**
+	 * The realm each realm connection's server entry is for, by ID. Realms makes a new entry for
+	 * each connection, on a thread of its own.
+	 */
+	private static final Map<ServerData, Long> REALMS = Collections.synchronizedMap(new WeakHashMap<>());
 
 	private WorldKey() {
 	}
@@ -118,7 +122,12 @@ public final class WorldKey {
 		if (seen != null && seen.matches(data, level, data.ip, realm, id)) {
 			return seen.key;
 		}
-		String key = id != null ? idKey(data, id) : seedKey(data, level);
+		String address = address(data);
+		String key = id != null ? idKey(address, id) : seedKey(address, level);
+		if (REALMS.containsKey(data)) {
+			String old = key("realms", data.ip);
+			adoptAddressFolder(key, id != null ? idKey(old, id) : seedKey(old, level));
+		}
 		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, id, key);
 		return key;
 	}
@@ -175,26 +184,45 @@ public final class WorldKey {
 		return namedBefore;
 	}
 
+	/** A realm by its ID; a realm whose ID wasn't seen, and any other server, by its address. */
 	private static String address(ServerData data) {
-		if (data.isRealm()) {
-			// Folders from before Diorama read the realm's ID are named by its address of the time.
-			Long id = realmId;
-			return id != null ? key("realm", Long.toString(id)) : key("realms", data.ip);
+		Long realm = REALMS.get(data);
+		if (realm != null) {
+			return key("realm", Long.toString(realm));
 		}
-		return key("server", data.ip);
+		return key(data.isRealm() ? "realms" : "server", data.ip);
+	}
+
+	/**
+	 * Before Diorama read a realm's ID, its folder was named by the address it ran at. The folder
+	 * for the realm's address now holds what the player saw last time, so it becomes the realm's
+	 * folder the first time the realm's own is asked for. The ones from earlier addresses stay.
+	 */
+	private static void adoptAddressFolder(String key, String old) {
+		Path target = folder(key);
+		Path source = folder(old);
+		if (Files.exists(target) || !Files.isDirectory(source)) {
+			return;
+		}
+		try {
+			Files.move(source, target);
+			Diorama.LOGGER.info("This realm's map moved from {} to {}, named by the realm instead of its address", old, key);
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't move this realm's map from {} to {}", old, key, e);
+		}
 	}
 
 	private static String idPrefix(ServerData data) {
 		return address(data) + "-id-";
 	}
 
-	private static String idKey(ServerData data, int id) {
-		return idPrefix(data) + HexFormat.of().toHexDigits(id);
+	private static String idKey(String address, int id) {
+		return address + "-id-" + HexFormat.of().toHexDigits(id);
 	}
 
 	/** The folder for a server's world before Diorama read level IDs. */
-	private static String seedKey(ServerData data, ClientLevel level) {
-		return address(data) + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
+	private static String seedKey(String address, ClientLevel level) {
+		return address + "-world-" + HexFormat.of().toHexDigits(((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed());
 	}
 
 	/**
@@ -210,7 +238,7 @@ public final class WorldKey {
 			return;
 		}
 		try {
-			Files.createDirectories(folder(idKey(data, id)));
+			Files.createDirectories(folder(idKey(address(data), id)));
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't make the folder for this server's world {}", HexFormat.of().toHexDigits(id), e);
 		}
@@ -228,9 +256,9 @@ public final class WorldKey {
 		}
 	}
 
-	/** The player is joining this realm. Comes before the join, so {@link #onJoinOrLeave} keeps it. */
-	public static void joiningRealm(long id) {
-		realmId = id;
+	/** Realms made this server entry to connect to the realm with this ID. */
+	public static void realmEntry(ServerData data, long id) {
+		REALMS.put(data, id);
 	}
 
 	/** Left the server, or a network moved the player to another of its servers. */
