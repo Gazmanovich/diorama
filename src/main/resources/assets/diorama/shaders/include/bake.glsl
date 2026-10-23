@@ -38,8 +38,9 @@ layout(std140) uniform DioramaBake {
 };
 
 #ifdef VOXEL_WALK
-// The solid blocks around the tile, for sky occlusion and, under a roof, the shadows the sun's
-// map misses: a section table, then 128 words of bits per section.
+// The solid blocks around the tile, for sky occlusion and the shadows the sun's map misses: a
+// section table, then 128 words of bits per section, and where the entry's top bit is set 128
+// more marking the solid blocks smaller than a cube.
 uniform usampler2D Voxels;
 
 
@@ -51,8 +52,9 @@ uint voxel(int i) {
     return texelFetch(Voxels, ivec2(i % VOXEL_WIDTH, i / VOXEL_WIDTH), 0).r;
 }
 
-// 1 if the block is solid, 0 if not, -1 in a chunk the map has no data for.
-int solid_at(ivec3 c) {
+// 1 if the block is solid, 0 if not, -1 in a chunk the map has no data for. With cubesOnly a
+// smaller block counts as open.
+int solid_at(ivec3 c, bool cubesOnly) {
     ivec3 s = (c >> 4) - VoxelOrigin.xyz;
     if (any(lessThan(s, ivec3(0))) || any(greaterThanEqual(s, VoxelSize.xyz))) {
         return 0;
@@ -65,15 +67,20 @@ int solid_at(ivec3 c) {
         return -1;
     }
     int i = ((c.y & 15) << 8) | ((c.z & 15) << 4) | (c.x & 15);
-    uint word = voxel(int(entry) + (i >> 5));
-    return int((word >> uint(i & 31)) & 1u);
+    int words = int(entry & 0x7FFFFFFFu);
+    uint bit = (voxel(words + (i >> 5)) >> uint(i & 31)) & 1u;
+    if (bit != 0u && cubesOnly && (entry & 0x80000000u) != 0u) {
+        bit &= ~(voxel(words + 128 + (i >> 5)) >> uint(i & 31)) & 1u;
+    }
+    return int(bit);
 }
 
-// TileBaker.blocked: walks from o along d for up to dist blocks; true if a solid block is in the way.
-bool blocked(vec3 o, vec3 d, float dist, int steps) {
+// TileBaker.blocked: walks from o along d for up to dist blocks; true if a solid block is in the
+// way. A smaller block counts as a cube, or with cubesOnly as open.
+bool blocked(vec3 o, vec3 d, float dist, int steps, bool cubesOnly) {
     ivec3 c = ivec3(floor(o));
     int top = VoxelOrigin.w;
-    if (c.y < top && solid_at(c) == 1) {
+    if (c.y < top && solid_at(c, cubesOnly) == 1) {
         return true;
     }
     ivec3 st = ivec3(d.x > 0.0 ? 1 : -1, d.y > 0.0 ? 1 : -1, d.z > 0.0 ? 1 : -1);
@@ -100,7 +107,7 @@ bool blocked(vec3 o, vec3 d, float dist, int steps) {
         if (c.y >= top) {
             return false;
         }
-        int s = solid_at(c);
+        int s = solid_at(c, cubesOnly);
         if (s < 0) {
             return false;
         }

@@ -53,7 +53,7 @@ float sky_at(vec3 corner) {
     float total = 0.0;
     for (int r = 0; r < 13; r++) {
         vec3 d = SkyRays[r].xyz;
-        if (!blocked(corner + d * 1e-3, d, 12.0, 36)) {
+        if (!blocked(corner + d * 1e-3, d, 12.0, 36, false)) {
             open += SkyRays[r].w;
         }
         total += SkyRays[r].w;
