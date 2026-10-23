@@ -26,7 +26,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The waypoints of one world, saved as JSON in {@code .minecraft/diorama/<world>/waypoints.json}.
- * Temporary waypoints stay in memory only. Client thread only.
+ * Temporary waypoints stay in memory only. Waystones' waystones ({@link Waystones}) aren't kept
+ * here, but show with this world's waypoints, and which of them are hidden is saved with the folders.
+ * Client thread only.
  */
 public final class WaypointStore {
 	/** How many death markers to keep; older ones are dropped as new deaths come in. */
@@ -107,6 +109,7 @@ public final class WaypointStore {
 		return this.waypoints;
 	}
 
+	/** The waypoints in a dimension, its known waystones included. */
 	public List<Waypoint> in(String dimension) {
 		List<Waypoint> out = new ArrayList<>();
 		for (Waypoint waypoint : this.waypoints) {
@@ -114,7 +117,35 @@ public final class WaypointStore {
 				out.add(waypoint);
 			}
 		}
+		for (Waypoint waystone : Waystones.in(dimension)) {
+			out.add(this.withVisibility(waystone));
+		}
 		return out;
+	}
+
+	/** The known waystones in every dimension, which sit in the Waystones folder. */
+	public List<Waypoint> waystones() {
+		List<Waypoint> out = new ArrayList<>();
+		for (Waypoint waystone : Waystones.all()) {
+			out.add(this.withVisibility(waystone));
+		}
+		return out;
+	}
+
+	/** Waystones arrive fresh from the server, so whether one is hidden comes from the folders file. */
+	private Waypoint withVisibility(Waypoint waystone) {
+		waystone.visible = !this.folders.hidden.contains(waystoneKey(waystone.id));
+		return waystone;
+	}
+
+	/** Hides or shows one waypoint. */
+	public void setVisible(Waypoint waypoint, boolean visible) {
+		waypoint.visible = visible;
+		if (waypoint.kind == Waypoint.Kind.WAYSTONE) {
+			this.setFolderHidden(waystoneKey(waypoint.id), !visible);
+		} else {
+			this.save();
+		}
 	}
 
 	/** The key of a dimension's own folder. */
@@ -122,13 +153,24 @@ public final class WaypointStore {
 		return "dim:" + dimension;
 	}
 
+	/** The key of the Waystones folder. */
+	public static final String WAYSTONES_KEY = "waystones";
+
+	/** The key a hidden waystone is saved under, with the hidden folders. */
+	private static String waystoneKey(UUID id) {
+		return "waystone:" + id;
+	}
+
 	/** The key of a custom folder. */
 	public static String customKey(String name) {
 		return "folder:" + name;
 	}
 
-	/** The folder a waypoint is in: its custom folder if that still exists, else its dimension's. */
+	/** The folder a waypoint is in: Waystones for a waystone, else its custom folder if that still exists, else its dimension's. */
 	public String folderKey(Waypoint waypoint) {
+		if (waypoint.kind == Waypoint.Kind.WAYSTONE) {
+			return WAYSTONES_KEY;
+		}
 		String folder = this.folderName(waypoint.folder);
 		return folder != null ? customKey(folder) : dimensionKey(waypoint.dimension);
 	}

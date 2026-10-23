@@ -1,0 +1,396 @@
+package dev.diorama.waypoint;
+
+import dev.diorama.Diorama;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+//? if fabric {
+import net.fabricmc.loader.api.FabricLoader;
+//?} else {
+/*import net.neoforged.fml.ModList;
+*///?}
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * The waystones and sharestones that the Waystones mod has told the player about, shown as
+ * waypoints in a folder of their own. Waystones owns them: they aren't saved, and can't be edited
+ * or deleted here. The server sends them again each time the player joins. Client thread only.
+ *
+ * <p>Diorama doesn't build against Waystones. When Waystones is installed, this class looks up
+ * Waystones' client events by name, because they changed shape across versions: before 1.21.11
+ * they register through {@code Balm.getEvents().onEvent(...)} and have {@code getX()} getters,
+ * and from 1.21.11 each event is a record with its own {@code EVENT} field. If anything isn't where
+ * this class expects it, it logs once and stays off.
+ */
+public final class Waystones {
+	private static final String API = "net.blay09.mods.waystones.api.";
+	/** The kind of an ordinary waystone, the only kind that Waystones' own screen can forget without telling the client. */
+	private static final String WAYSTONE = "waystones:waystone";
+	private static final int COLOUR = 0xFF8E4EC6;
+	/** Sharestones' dye colours, by the start of their kind before 26.1, e.g. {@code waystones:lime_sharestone}. */
+	private static final Map<String, Integer> DYES = Map.ofEntries(
+		Map.entry("white", 0xFFF9FFFE), Map.entry("orange", 0xFFF9801D), Map.entry("magenta", 0xFFC74EBD),
+		Map.entry("light_blue", 0xFF3AB3DA), Map.entry("yellow", 0xFFFED83D), Map.entry("lime", 0xFF80C71F),
+		Map.entry("pink", 0xFFF38BAA), Map.entry("gray", 0xFF474F52), Map.entry("light_gray", 0xFF9D9D97),
+		Map.entry("cyan", 0xFF169C9C), Map.entry("purple", 0xFF8932B8), Map.entry("blue", 0xFF3C44AA),
+		Map.entry("brown", 0xFF835432), Map.entry("green", 0xFF5E7C16), Map.entry("red", 0xFFB02E26),
+		Map.entry("black", 0xFF1D1D21));
+	/** How often the ordinary waystones are checked against Waystones' own list, in milliseconds. */
+	private static final long CHECK_MS = 1000;
+
+	/** By kind, then by waystone id, as a full list replaces only the waystones of its own kind. */
+	private static final Map<String, Map<UUID, Waypoint>> KNOWN = new LinkedHashMap<>();
+	/**
+	 * Waystones picked up with Silk Touch, and where they stood. The server goes on sending them in
+	 * full lists, at that spot, as nothing it sends says a waystone is in someone's inventory. One
+	 * placed again comes back in the same kind of list, so it shows once it's sent from somewhere
+	 * else, or the client sees its block back at the spot. Kept until the game closes, as the ids
+	 * are unique.
+	 */
+	private static final Map<UUID, String> PICKED_UP = new HashMap<>();
+	/** Counts changes to what's known, so a screen showing waystones can tell when to show them again. */
+	private static int changes;
+	/** Looked up once each; the events may come on the network thread while the client thread checks. */
+	private static final Map<String, Optional<Method>> METHODS = new ConcurrentHashMap<>();
+	private static boolean started;
+	private static volatile boolean failed;
+	private static @Nullable Method activated;
+	private static long nextCheck;
+
+	private Waystones() {
+	}
+
+	/** Listens to Waystones' events if Waystones is installed. Called every tick; does its work on the first. */
+	public static void start() {
+		if (started) {
+			return;
+		}
+		started = true;
+		if (!installed()) {
+			return;
+		}
+		try {
+			listen("WaystonesListReceivedEvent", Waystones::listReceived);
+			listen("WaystoneUpdateReceivedEvent", Waystones::updateReceived);
+			listen("WaystoneRemoveReceivedEvent", Waystones::removeReceived);
+			Class<?> api = Class.forName(API + "WaystonesAPI");
+			for (Method method : api.getMethods()) {
+				if (method.getName().equals("getActivatedWaystones") && method.getParameterCount() == 1 && Modifier.isStatic(method.getModifiers())) {
+					activated = method;
+				}
+			}
+			Diorama.LOGGER.info("Waystones is installed: showing known waystones on the map");
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			fail(e);
+		}
+	}
+
+	private static boolean installed() {
+		//? if fabric {
+		return FabricLoader.getInstance().isModLoaded("waystones");
+		//?} else {
+		/*return ModList.get().isLoaded("waystones");
+		*///?}
+	}
+
+	/** Registers a handler for one of Waystones' client events, in whichever way this version takes. */
+	private static void listen(String name, Handler handler) throws ReflectiveOperationException {
+		Class<?> event = Class.forName(API + "event." + name);
+		Consumer<Object> guarded = e -> {
+			if (!failed) {
+				try {
+					handler.handle(e);
+				} catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
+					fail(ex);
+				}
+			}
+		};
+		Field field = null;
+		try {
+			field = event.getField("EVENT");
+		} catch (NoSuchFieldException e) {
+			// Before 1.21.11: through Balm's event bus.
+		}
+		if (field != null) {
+			Object mapper = field.get(null);
+			one(field.getType(), "register", 1).invoke(mapper, guarded);
+		} else {
+			Method getEvents = Class.forName("net.blay09.mods.balm.api.Balm").getMethod("getEvents");
+			Object events = getEvents.invoke(null);
+			getEvents.getReturnType().getMethod("onEvent", Class.class, Consumer.class).invoke(events, event, guarded);
+		}
+	}
+
+	private static Method one(Class<?> type, String name, int parameters) throws NoSuchMethodException {
+		for (Method method : type.getMethods()) {
+			if (method.getName().equals(name) && method.getParameterCount() == parameters) {
+				return method;
+			}
+		}
+		throw new NoSuchMethodException(type.getName() + "." + name);
+	}
+
+	private interface Handler {
+		void handle(Object event) throws ReflectiveOperationException;
+	}
+
+	/** One kind's full list: waystones of that kind that aren't in it are gone. */
+	private static void listReceived(Object event) throws ReflectiveOperationException {
+		String kind = String.valueOf(get(event, "getWaystoneType", "waystoneType"));
+		if (!shown(kind)) {
+			return;
+		}
+		List<Waypoint> waypoints = new ArrayList<>();
+		for (Object waystone : (Collection<?>) get(event, "getWaystones", "waystones")) {
+			Waypoint waypoint = waypoint(waystone);
+			if (waypoint != null) {
+				waypoints.add(waypoint);
+			}
+		}
+		onClient(() -> {
+			Map<UUID, Waypoint> waystones = new LinkedHashMap<>();
+			for (Waypoint waypoint : waypoints) {
+				waystones.put(waypoint.id, waypoint);
+			}
+			KNOWN.put(kind, waystones);
+			changes++;
+		});
+	}
+
+	/** One waystone changed: renamed, say. */
+	private static void updateReceived(Object event) throws ReflectiveOperationException {
+		Object waystone = get(event, "getWaystone", "waystone");
+		UUID id = (UUID) get(waystone, "getWaystoneUid");
+		String kind = kind(waystone);
+		Waypoint waypoint = waypoint(waystone);
+		onClient(() -> {
+			forget(id);
+			if (waypoint != null) {
+				KNOWN.computeIfAbsent(kind, k -> new LinkedHashMap<>()).put(id, waypoint);
+			}
+			changes++;
+		});
+	}
+
+	/** Destroyed, or picked up with Silk Touch: either way it's no longer there. */
+	private static void removeReceived(Object event) throws ReflectiveOperationException {
+		UUID id = (UUID) get(event, "getWaystoneId", "waystoneId");
+		boolean destroyed = (Boolean) get(event, "wasDestroyed");
+		onClient(() -> {
+			if (!destroyed) {
+				for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+					Waypoint waypoint = waystones.get(id);
+					if (waypoint != null) {
+						PICKED_UP.put(id, spot(waypoint));
+					}
+				}
+			}
+			forget(id);
+			changes++;
+		});
+	}
+
+	/** False for a waystone the server still sends from where it stood before it was picked up. */
+	private static boolean placed(Waypoint waypoint) {
+		String spot = PICKED_UP.get(waypoint.id);
+		if (spot == null) {
+			return true;
+		}
+		if (!spot.equals(spot(waypoint)) || blockThere(waypoint)) {
+			PICKED_UP.remove(waypoint.id);
+			return true;
+		}
+		return false;
+	}
+
+	/** Whether the client has the waystone's spot loaded with one of Waystones' blocks on it. */
+	private static boolean blockThere(Waypoint waypoint) {
+		Minecraft mc = Minecraft.getInstance();
+		BlockPos pos = new BlockPos(waypoint.x, waypoint.y, waypoint.z);
+		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(waypoint.dimension) || !mc.level.hasChunkAt(pos)) {
+			return false;
+		}
+		return BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock()).getNamespace().equals("waystones");
+	}
+
+	private static String spot(Waypoint waypoint) {
+		return waypoint.dimension + " " + waypoint.x + " " + waypoint.y + " " + waypoint.z;
+	}
+
+	/** The events may come on the network thread; the waypoints are only touched on the client thread. */
+	private static void onClient(Runnable task) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.isSameThread()) {
+			task.run();
+		} else {
+			mc.execute(task);
+		}
+	}
+
+	private static void forget(UUID id) {
+		for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+			waystones.remove(id);
+		}
+	}
+
+	/** Waystones and sharestones, as Waystones' own JourneyMap markers have it; not warp plates and the like. */
+	private static boolean shown(String kind) {
+		return kind.equals(WAYSTONE) || kind.endsWith("_sharestone");
+	}
+
+	private static String kind(Object waystone) throws ReflectiveOperationException {
+		return String.valueOf(get(waystone, "getWaystoneType", "getWaystoneKind"));
+	}
+
+	/** A waystone as a waypoint, or null for one that isn't placed in the world (picked up with Silk Touch). */
+	private static @Nullable Waypoint waypoint(Object waystone) throws ReflectiveOperationException {
+		String kind = kind(waystone);
+		if (!shown(kind) || (Boolean) get(waystone, "isTransient")) {
+			return null;
+		}
+		Component name = (Boolean) get(waystone, "hasName")
+			? (Component) get(waystone, "getEffectiveName", "getName")
+			: Component.translatable("diorama.waystones.untitled");
+		BlockPos pos = (BlockPos) get(waystone, "getPos");
+		ResourceKey<?> dimension = (ResourceKey<?>) get(waystone, "getDimension");
+		String dye = kind.substring(kind.indexOf(':') + 1, kind.length() - (kind.endsWith("_sharestone") ? "_sharestone".length() : 0));
+		Waypoint waypoint = new Waypoint(name.getString(), pos.getX(), pos.getY(), pos.getZ(), dimension.identifier().toString(), DYES.getOrDefault(dye, COLOUR));
+		waypoint.id = (UUID) get(waystone, "getWaystoneUid");
+		waypoint.kind = Waypoint.Kind.WAYSTONE;
+		return waypoint;
+	}
+
+	/**
+	 * Calls the first of these no-argument methods the object has, looked up on Waystones' API
+	 * types rather than the object's own class, which may not be public. The names are Waystones'
+	 * own, which a Fabric install leaves as they are.
+	 */
+	private static Object get(Object target, String... names) throws ReflectiveOperationException {
+		Class<?> type = target.getClass();
+		for (String name : names) {
+			Optional<Method> method = METHODS.computeIfAbsent(type.getName() + "." + name, key -> Optional.ofNullable(publicMethod(type, name)));
+			if (method.isPresent()) {
+				return method.get().invoke(target);
+			}
+		}
+		throw new NoSuchMethodException(type.getName() + "." + String.join("/", names));
+	}
+
+	/** A no-argument method by name from a public class or interface the type is or has. */
+	private static @Nullable Method publicMethod(Class<?> type, String name) {
+		Set<Class<?>> seen = new HashSet<>();
+		List<Class<?>> queue = new ArrayList<>(List.of(type));
+		while (!queue.isEmpty()) {
+			Class<?> next = queue.remove(0);
+			if (!seen.add(next)) {
+				continue;
+			}
+			if (Modifier.isPublic(next.getModifiers())) {
+				try {
+					return next.getMethod(name);
+				} catch (NoSuchMethodException e) {
+					// Not on this one; try the ones it extends.
+				}
+			}
+			if (next.getSuperclass() != null) {
+				queue.add(next.getSuperclass());
+			}
+			queue.addAll(List.of(next.getInterfaces()));
+		}
+		return null;
+	}
+
+	private static void fail(Throwable e) {
+		if (!failed) {
+			failed = true;
+			onClient(Waystones::clear);
+			Diorama.LOGGER.warn("Couldn't read Waystones' waystones, so they won't show on the map", e);
+		}
+	}
+
+	/**
+	 * Every known waystone in a dimension. Waystones' own screen forgets a waystone on the client
+	 * without the server sending a new list, so the ordinary ones are checked against Waystones'
+	 * list now and then.
+	 */
+	static List<Waypoint> in(String dimension) {
+		check();
+		List<Waypoint> out = new ArrayList<>();
+		for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+			for (Waypoint waypoint : waystones.values()) {
+				if (waypoint.dimension.equals(dimension) && placed(waypoint)) {
+					out.add(waypoint);
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Every known waystone, in any dimension. */
+	static List<Waypoint> all() {
+		check();
+		List<Waypoint> out = new ArrayList<>();
+		for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+			for (Waypoint waypoint : waystones.values()) {
+				if (placed(waypoint)) {
+					out.add(waypoint);
+				}
+			}
+		}
+		return out;
+	}
+
+	private static void check() {
+		Map<UUID, Waypoint> ordinary = KNOWN.get(WAYSTONE);
+		Method method = activated;
+		long now = System.currentTimeMillis();
+		if (failed || method == null || ordinary == null || ordinary.isEmpty() || now < nextCheck) {
+			return;
+		}
+		nextCheck = now + CHECK_MS;
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return;
+		}
+		try {
+			Set<UUID> ids = new HashSet<>();
+			for (Object waystone : (Collection<?>) method.invoke(null, mc.player)) {
+				ids.add((UUID) get(waystone, "getWaystoneUid"));
+			}
+			if (ordinary.keySet().retainAll(ids)) {
+				changes++;
+			}
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			fail(e);
+		}
+	}
+
+	/** Goes up each time the known waystones change. */
+	static int changes() {
+		check();
+		return changes;
+	}
+
+	/** The player left the server or joined another; the next one sends its own. */
+	public static void clear() {
+		KNOWN.clear();
+		changes++;
+	}
+}

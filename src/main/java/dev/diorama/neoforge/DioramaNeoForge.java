@@ -16,6 +16,7 @@ import dev.diorama.render.DioramaPipelines;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.Waystones;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -89,6 +90,7 @@ public final class DioramaNeoForge {
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
+			Waystones.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
@@ -97,6 +99,7 @@ public final class DioramaNeoForge {
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
+			Waystones.clear();
 		});
 		modBus.addListener(RegisterPayloadHandlersEvent.class, XaeroChannels::register);
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking. This

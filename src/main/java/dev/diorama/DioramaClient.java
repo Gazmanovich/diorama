@@ -8,6 +8,7 @@ import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.Waypoints;
+import dev.diorama.waypoint.Waystones;
 import java.util.List;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -66,6 +67,8 @@ public final class DioramaClient {
 
 	/** Called at the end of every client tick. */
 	public static void tick(Minecraft mc) {
+		// On the first tick every mod is set up, Waystones and its event library included.
+		Waystones.start();
 		MapSession.tick(mc);
 		while (OPEN_MAP.consumeClick()) {
 			if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {

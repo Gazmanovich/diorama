@@ -12,7 +12,9 @@ public final class Waypoint {
 		/** Added automatically where the player died. */
 		DEATH,
 		/** Set from the map's menu; never saved, so it's gone once the player leaves the world. */
-		TEMPORARY
+		TEMPORARY,
+		/** A waystone the Waystones mod told the client about ({@link Waystones}). Never saved, and Waystones names it. */
+		WAYSTONE
 	}
 
 	/** Colours a waypoint can take, picked to stay readable on both grass and water. */
@@ -47,6 +49,11 @@ public final class Waypoint {
 		this.z = z;
 		this.dimension = dimension;
 		this.color = color;
+	}
+
+	/** Whether the player can edit or delete it here: everything but waystones, which Waystones owns. */
+	public boolean editable() {
+		return this.kind != Kind.WAYSTONE;
 	}
 
 	public String label() {
