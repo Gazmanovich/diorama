@@ -173,10 +173,12 @@ public final class GpuMesher {
 		public int casterY0;
 		public int casterY1;
 		/**
-		 * The solid blocks around the camera's faces, for sky occlusion on the GPU: a table of
-		 * {@code voxelSize[0] * [1] * [2]} sections (x fastest, then z, then y) holding each one's
-		 * offset into the same array or a {@code SECTION_*} value, then 128 words of solid bits
-		 * per section that has any. Null in lit views, which don't use sky occlusion.
+		 * The solid blocks around the camera's faces, for sky occlusion and shadow walks on the GPU:
+		 * a table of {@code voxelSize[0] * [1] * [2]} sections (x fastest, then z, then y) holding
+		 * each one's offset into the same array or a {@code SECTION_*} value, then 128 words of solid
+		 * bits per section that has any. Where an offset carries {@link #SECTION_PARTIAL}, 128 more
+		 * words follow marking which of those blocks are smaller than a cube. Null in lit views,
+		 * which don't use sky occlusion.
 		 */
 		public int[] voxels;
 		public int voxelCount;
