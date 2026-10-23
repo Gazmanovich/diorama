@@ -74,7 +74,7 @@ public final class WorldKey {
 	private static boolean silent;
 	private static @Nullable Last last;
 	/** The realm the player last set off to join, by its ID. Kept past joining, which clears the rest. */
-	private static @Nullable Long realm;
+	private static @Nullable Long realmId;
 
 	private WorldKey() {
 	}
@@ -178,7 +178,7 @@ public final class WorldKey {
 	private static String address(ServerData data) {
 		if (data.isRealm()) {
 			// Folders from before Diorama read the realm's ID are named by its address of the time.
-			Long id = realm;
+			Long id = realmId;
 			return id != null ? key("realm", Long.toString(id)) : key("realms", data.ip);
 		}
 		return key("server", data.ip);
@@ -230,7 +230,7 @@ public final class WorldKey {
 
 	/** The player is joining this realm. Comes before the join, so {@link #onJoinOrLeave} keeps it. */
 	public static void joiningRealm(long id) {
-		realm = id;
+		realmId = id;
 	}
 
 	/** Left the server, or a network moved the player to another of its servers. */

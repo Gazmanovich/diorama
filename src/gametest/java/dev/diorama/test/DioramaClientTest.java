@@ -269,19 +269,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 				settle(context, 60);
 			}
 		} else {
-			// Zoomed out over what the first visit walked, past the chunks loaded now.
+			// Zoomed out over what the first visit walked. The player comes back where they left, at
+			// x 600, so the map near spawn is from the first visit alone.
 			context.setScreen(MapScreen::new);
 			lookAtPlayer(context, 0.25, TileKey.SURFACE);
 			settle(context, 40);
 			context.takeScreenshot("realms-woken");
 			context.setScreen(() -> null);
-			float known = context.computeOnClient(mc -> overviewKnown(500, Projection.v(70, 0)));
+			float known = context.computeOnClient(mc -> overviewKnown(100, Projection.v(70, 0)));
 			List<String> names = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.name).toList());
 			if (!names.contains("Realm Camp")) {
 				throw new AssertionError("The realm lost its waypoint at its new address: " + names);
 			}
 			if (known < 0.5F) {
-				throw new AssertionError("The realm lost its map at its new address: the strip walked east is " + known + " known");
+				throw new AssertionError("The realm lost its map at its new address: the strip east of spawn is " + known + " known");
 			}
 		}
 		context.runOnClient(mc -> {
