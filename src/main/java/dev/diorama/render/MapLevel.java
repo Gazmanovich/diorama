@@ -5,6 +5,7 @@ import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.Overlays;
+import dev.diorama.bake.PinnedSource;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
@@ -683,9 +684,10 @@ public final class MapLevel implements ChunkSource {
 			try {
 				long start = System.nanoTime();
 				int[] saved = store == null ? null : store.read(key);
-				TileImage image = TileBaker.bake(key, this, looks, blocks, fog, saved, overlays);
+				ChunkSource source = this.sourceFor(store);
+				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, saved, overlays);
 				long spots = System.nanoTime();
-				this.finished.add(this.withSpots(image, looks, fog, store).withGeneration(generation));
+				this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to bake tile {}", key, t);
@@ -703,13 +705,14 @@ public final class MapLevel implements ChunkSource {
 		BAKERS.execute(() -> {
 			try {
 				int[] saved = store == null ? null : store.read(key);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, this, looks, fog, overlays);
+				ChunkSource source = this.sourceFor(store);
+				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						TileImage image = result.pixels() == null
-							? TileBaker.bake(key, this, looks, null, fog, saved, overlays)
+							? TileBaker.bake(key, source, looks, null, fog, saved, overlays)
 							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
-						this.finished.add(this.withSpots(image, looks, fog, store).withGeneration(generation));
+						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					} catch (Throwable t) {
 						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
@@ -763,14 +766,23 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * A bake of a tile to be saved, with its {@link TileSpots} worked out from the same chunks, so
-	 * the right-click menu still works there once they're gone. Baker threads.
+	 * What a bake reads chunks from. A tile to be saved gets its {@link TileSpots} too, in a second
+	 * pass, and both passes have to see the same chunks, or a block changed in between would save
+	 * pixels showing it with spots that don't.
 	 */
-	private TileImage withSpots(TileImage image, BlockLooks looks, boolean fog, @Nullable TileStore store) {
+	private ChunkSource sourceFor(@Nullable TileStore store) {
+		return store == null ? this : new PinnedSource(this);
+	}
+
+	/**
+	 * A bake of a tile to be saved, with its {@link TileSpots} worked out from the chunks the bake
+	 * read, so the right-click menu still works there once they're gone. Baker threads.
+	 */
+	private TileImage withSpots(TileImage image, ChunkSource source, BlockLooks looks, boolean fog, @Nullable TileStore store) {
 		if (store == null) {
 			return image;
 		}
-		return image.withSpots(TileSpots.pick(image, this, looks, fog, store.spots(image.key())));
+		return image.withSpots(TileSpots.pick(image, source, looks, fog, store.spots(image.key())));
 	}
 
 	/**

@@ -100,6 +100,14 @@ public final class TileSpots {
 		return key.minV() + (row + 0.5) / Projection.PIXELS_PER_UNIT;
 	}
 
+	/**
+	 * The middle of the pixel row map row {@code v} falls in. The map shows one colour per pixel
+	 * row, so a pick there answers for what the pixel shows, and live picks agree with saved ones.
+	 */
+	public static double rowMiddle(double v) {
+		return (Math.floor(v * Projection.PIXELS_PER_UNIT) + 0.5) / Projection.PIXELS_PER_UNIT;
+	}
+
 	private static int encode(int y, int z, double v) {
 		int back = (int) Math.floor(Projection.zAt(v, y)) - z;
 		if (back < 0 || back > 0xFF || y != (short) y) {

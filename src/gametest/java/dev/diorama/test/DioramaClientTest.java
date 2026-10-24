@@ -2020,11 +2020,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Expected 3 waypoints after saving the picked one, found " + count);
 		}
 		Waypoint picked = context.computeOnClient(mc -> WaypointStore.get().all().get(2));
-		// The hit block sits under the waypoint; the ray crosses its top or south face.
+		// The hit block sits under the waypoint; the ray through the middle of the pixel row clicked
+		// crosses its top or south face.
 		int hitY = picked.y - 1;
 		double vTop = Projection.v(hitY + 1, picked.z);
 		double vBottom = Projection.v(hitY, picked.z + 1);
-		boolean onRay = picked.x == (int) Math.floor(click[0]) && click[1] >= vTop - 1e-6 && click[1] <= vBottom + 1e-6;
+		double pickedRow = dev.diorama.bake.TileSpots.rowMiddle(click[1]);
+		boolean onRay = picked.x == (int) Math.floor(click[0]) && pickedRow >= vTop - 1e-6 && pickedRow <= vBottom + 1e-6;
 		boolean solid = context.computeOnClient(mc -> !mc.level.getBlockState(new BlockPos(picked.x, hitY, picked.z)).isAir());
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
@@ -2388,13 +2390,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 		openMapOnPlayer(context);
 
 		// Teleport here: the player lands standing on the block the map shows at the click, which
-		// is the first solid block on the camera ray through that point.
+		// is the first solid block on the camera ray through the middle of the pixel row clicked.
 		double[] click = rightClickMap(context, 24, 0);
 		context.takeScreenshot("map-menu-01-spot");
 		int[] spot = menuSpot(context);
 		int hitY = spot[1] - 1;
+		double row = dev.diorama.bake.TileSpots.rowMiddle(click[1]);
 		boolean onRay = spot[0] == (int) Math.floor(click[0])
-			&& click[1] >= Projection.v(hitY + 1, spot[2]) - 1e-6 && click[1] <= Projection.v(hitY, spot[2] + 1) + 1e-6;
+			&& row >= Projection.v(hitY + 1, spot[2]) - 1e-6 && row <= Projection.v(hitY, spot[2] + 1) + 1e-6;
 		if (!onRay) {
 			throw new AssertionError("The menu offers " + spot[0] + "," + spot[1] + "," + spot[2] + ", which isn't the block shown at the click");
 		}
@@ -2910,6 +2913,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!open) {
 			throw new AssertionError("Right-clicking the map didn't open its menu");
 		}
+		// Where the spot comes from a saved tile on a slow disk, a placeholder shows first.
+		context.waitFor(mc -> !(mc.gui.screen() instanceof MapScreen map && map.menu() != null
+			&& map.menu().labels().equals(List.of("Finding the ground…"))), 200);
 	}
 
 	/** Right-clicks the pin of the waypoint at a position. */

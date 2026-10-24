@@ -4,6 +4,7 @@ import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.MapPick;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.bake.TileSpots;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
@@ -486,7 +487,7 @@ public final class MapScreen extends Screen {
 			return CompletableFuture.completedFuture(null);
 		}
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
-		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
+		double v = TileSpots.rowMiddle(view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom());
 		TileKey tile = new TileKey(this.layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		MapPick pick = new MapPick(session.map(), looks, tile, session.map().fogOfWar());
 		return switch (pick.pick(u, v)) {
