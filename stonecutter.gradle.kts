@@ -90,6 +90,9 @@ stonecutter parameters {
 		"\\bgamerule show_death_messages\\b" to "gamerule showDeathMessages",
 		"\\bgamerule immediate_respawn\\b" to "gamerule doImmediateRespawn",
 		"\\bgamerule random_tick_speed\\b" to "gamerule randomTickSpeed",
+		// The F3 screen's on/off switch was named after the key.
+		"\\bdebugEntries\\.isOverlayVisible\\(\\)" to "debugEntries.isF3Visible()",
+		"\\bdebugEntries\\.toggleDebugOverlay\\(\\)" to "debugEntries.toggleF3Visible()",
 	)
 	for ((pattern, older) in before1_21_11) {
 		replacements.regex(current.parsed < "1.21.11") {

@@ -3433,7 +3433,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 20);
 		context.takeScreenshot("screens-03-pause");
 		context.setScreen(() -> null);
+		// F3's debug screen fills both top corners; the minimap steps out of its way, and comes back.
+		context.runOnClient(DioramaClientTest::toggleDebugScreen);
+		settle(context, 20);
+		context.takeScreenshot("screens-04-debug");
+		context.runOnClient(DioramaClientTest::toggleDebugScreen);
+		settle(context, 20);
+		context.takeScreenshot("screens-05-debug-closed");
 		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	private static void toggleDebugScreen(Minecraft mc) {
+		//? if >=1.21.9 {
+		mc.debugEntries.toggleDebugOverlay();
+		//?} else {
+		/*mc.getDebugOverlay().toggleOverlay();
+		*///?}
 	}
 
 	private static void overlays(ClientGameTestContext context, TestSingleplayerContext world) {
