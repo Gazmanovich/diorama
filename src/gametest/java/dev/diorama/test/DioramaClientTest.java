@@ -123,6 +123,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("radar")) {
 				radar(context, world);
 			}
+			if (tests.contains("xaero-icons")) {
+				xaeroIcons(context, world);
+			}
 			if (tests.contains("waypoints")) {
 				waypoints(context, world);
 			}
@@ -1917,6 +1920,188 @@ public class DioramaClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("kill @e[type=!player]");
 		context.waitTicks(10);
+	}
+
+	/**
+	 * Radar icons from Xaero's Minimap's icon files. The test mod's own assets give the ocelot an
+	 * image, the way a mod ships icons for its mobs, and have pig and villager files shaped like the
+	 * ones Xaero's ships for vanilla mobs, which keep Diorama's faces. Then a resource pack, switched
+	 * on and off with the reload F3+T runs, gives mobs images (one in Xaero's old upside-down form,
+ * one of thin lines), items and dots, one by texture, and
+	 * has files Diorama ignores: Xaero's model renderer, a form Xaero's doesn't know, a missing
+	 * image and broken JSON. Screenshots of the minimap and the map in each radar style.
+	 */
+	private static void xaeroIcons(ClientGameTestContext context, TestSingleplayerContext world) {
+		// Night, so the zombie and skeleton don't burn.
+		world.getServer().runCommand("time set midnight");
+		context.waitFor(mc -> mc.player.onGround(), 600);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = at.getX();
+		int y = at.getY();
+		int z = at.getZ();
+		world.getServer().runCommand("fill " + (x - 10) + " " + y + " " + (z - 10) + " " + (x + 10) + " " + (y + 4) + " " + (z + 10) + " air");
+		world.getServer().runCommand("fill " + (x - 10) + " " + (y - 1) + " " + (z - 10) + " " + (x + 10) + " " + (y - 1) + " " + (z + 10) + " grass_block");
+		String sprites = "xaerominimap:entity/icon/sprite/diorama_test/";
+		String heart = "outlined_sprite " + sprites + "heart.png 13x12";
+		String sun = "outlined_sprite " + sprites + "sun.png 36x36";
+		// Each mob: its name, where it stands, its extra NBT, and its icon without and with the pack
+		// ("own" for Diorama's own face or dot).
+		String[][] mobs = {
+			{"creeper", "-6", "-5", "", "own", heart},
+			{"slime", "-3", "-5", ",Size:0", "own", heart},
+			{"sheep", "0", "-5", "", "own", "normal_sprite " + sprites + "star.png 11x11"},
+			{"cow", "3", "-5", "", "own", "dot"},
+			{"fox", "6", "-5", ",Type:\"red\"", "own", "item minecraft:sweet_berries"},
+			{"ocelot", "-6", "0", "", sun, sun},
+			{"pig", "-3", "0", "", "own", "own"},
+			{"villager", "3", "0", "", "own", "own"},
+			{"spider", "6", "0", "", "own", "own"},
+			{"fox", "-6", "5", ",Type:\"snow\"", "own", "dot"},
+			{"rabbit", "-3", "5", "", "own", "item minecraft:carrot"},
+			{"zombie", "0", "5", "", "own", "own"},
+			{"skeleton", "3", "5", "", "own", "own"},
+			{"witch", "6", "5", "", "own", "own"},
+			{"chicken", "0", "8", "", "own", "own"},
+			// Xaero's old "sprite" form, drawn upside down as Xaero's draws it, and a ring of thin
+			// lines, which mustn't vanish when shrunk.
+			{"goat", "-3", "8", "", "own", "sprite " + sprites + "arrow.png 9x11"},
+			{"cat", "3", "8", "", "own", "normal_sprite " + sprites + "ring.png 40x40"},
+			// Icons on top of each other: a block item, a flat item and a head, drawn in that order.
+			{"mooshroom", "8", "-9", "", "own", "item minecraft:red_mushroom_block"},
+			{"rabbit", "9", "-9", "", "own", "item minecraft:carrot"},
+			{"zombie", "9", "-8", "", "own", "own"},
+		};
+		for (String[] mob : mobs) {
+			world.getServer().runCommand("summon " + mob[0] + " " + (x + Integer.parseInt(mob[1])) + " " + y + " " + (z + Integer.parseInt(mob[2]))
+				+ " {NoAI:1b,PersistenceRequired:1b,Silent:1b" + mob[3] + "}");
+		}
+		// An item well above: its caret sits on its slot.
+		world.getServer().runCommand("fill " + (x - 8) + " " + y + " " + (z - 8) + " " + (x - 8) + " " + (y + 4) + " " + (z - 8) + " stone");
+		world.getServer().runCommand("summon rabbit " + (x - 8) + " " + (y + 5) + " " + (z - 8) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b}");
+		context.waitTicks(20);
+		assertIcons(context, x, z, mobs, 4, "without the pack");
+		settle(context, 40);
+		context.takeScreenshot("xaero-icons-01-minimap-no-pack");
+		context.setScreen(MapScreen::new);
+		lookAtPlayer(context, 9.0, TileKey.SURFACE);
+		settle(context, 40);
+		context.takeScreenshot("xaero-icons-02-map-no-pack");
+		context.setScreen(() -> null);
+
+		String id = "file/diorama-test-xaero-icons";
+		java.nio.file.Path pack = context.computeOnClient(mc -> mc.getResourcePackDirectory().resolve("diorama-test-xaero-icons"));
+		context.runOnClient(mc -> {
+			try {
+				java.nio.file.Files.createDirectories(pack);
+				//? if >=1.21.9 {
+				int format = net.minecraft.SharedConstants.getCurrentVersion().packVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES).major();
+				String formats = "\"pack_format\": " + format + ", \"min_format\": " + format + ", \"max_format\": " + format;
+				//?} else {
+				/*int format = net.minecraft.SharedConstants.getCurrentVersion().getPackVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+				String formats = "\"pack_format\": " + format;
+				*///?}
+				java.nio.file.Files.writeString(pack.resolve("pack.mcmeta"), "{\"pack\": {" + formats + ", \"description\": \"Diorama test: Xaero icon files\"}}");
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+			String icon = "assets/xaerominimap/entity/icon/";
+			for (String file : new String[] {
+				"definition/minecraft/creeper.json", "definition/minecraft/slime.json", "definition/minecraft/sheep.json",
+				"definition/minecraft/cow.json", "definition/minecraft/fox.json", "definition/minecraft/rabbit.json",
+				"definition/minecraft/zombie.json", "definition/minecraft/skeleton.json", "definition/minecraft/witch.json",
+				"definition/minecraft/spider.json", "definition/minecraft/chicken.json", "definition/example_mod/example_entity.json",
+				"definition/minecraft/goat.json", "definition/minecraft/cat.json", "definition/minecraft/mooshroom.json",
+				"sprite/diorama_test/heart.png", "sprite/diorama_test/star.png", "sprite/diorama_test/arrow.png", "sprite/diorama_test/ring.png"}) {
+				packFixture("/xaero-icons-pack/" + icon + file, pack.resolve(icon + file));
+			}
+		});
+		reloadPacks(context, mc -> {
+			mc.getResourcePackRepository().reload();
+			if (!mc.getResourcePackRepository().addPack(id)) {
+				throw new AssertionError("The Xaero icons test pack didn't load");
+			}
+		});
+		assertIcons(context, x, z, mobs, 5, "with the pack");
+		Settings.RadarStyle[] styles = {Settings.RadarStyle.HEADS, Settings.RadarStyle.FRAMED, Settings.RadarStyle.DOTS};
+		for (int i = 0; i < styles.length; i++) {
+			Settings.RadarStyle style = styles[i];
+			String name = style.name().toLowerCase(java.util.Locale.ROOT);
+			context.runOnClient(mc -> Settings.get().radarStyle = style);
+			settle(context, 20);
+			context.takeScreenshot("xaero-icons-" + String.format("%02d", 3 + 2 * i) + "-minimap-" + name);
+			context.setScreen(MapScreen::new);
+			lookAtPlayer(context, 9.0, TileKey.SURFACE);
+			settle(context, 40);
+			context.takeScreenshot("xaero-icons-" + String.format("%02d", 4 + 2 * i) + "-map-" + name);
+			context.setScreen(() -> null);
+		}
+		context.runOnClient(mc -> Settings.get().radarStyle = Settings.RadarStyle.HEADS);
+		// The round minimap leaves off icons that would cross its rim, images and items too.
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+		settle(context, 20);
+		context.takeScreenshot("xaero-icons-08b-round-minimap");
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.SQUARE);
+
+		reloadPacks(context, mc -> mc.getResourcePackRepository().removePack(id));
+		assertIcons(context, x, z, mobs, 4, "with the pack off again");
+		settle(context, 20);
+		context.takeScreenshot("xaero-icons-09-pack-off");
+		context.runOnClient(mc -> {
+			try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(pack)) {
+				files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		});
+		world.getServer().runCommand("time set noon");
+		world.getServer().runCommand("kill @e[type=!player]");
+		context.waitTicks(10);
+	}
+
+	/** Each mob in {@code mobs} (see xaeroIcons) has the icon in column {@code column}, as XaeroRadarIcons.describe gives it. */
+	private static void assertIcons(ClientGameTestContext context, int x, int z, String[][] mobs, int column, String when) {
+		String wrong = context.computeOnClient(mc -> {
+			StringBuilder out = new StringBuilder();
+			for (String[] mob : mobs) {
+				String got = "missing";
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType().toShortString().equals(mob[0]) && entity.blockPosition().getX() == x + Integer.parseInt(mob[1])
+						&& entity.blockPosition().getZ() == z + Integer.parseInt(mob[2])) {
+						String icon = dev.diorama.render.XaeroRadarIcons.describe(entity);
+						got = icon == null ? "own" : icon;
+					}
+				}
+				if (!got.equals(mob[column])) {
+					out.append("\n  ").append(mob[0]).append(mob[3]).append(": expected ").append(mob[column]).append(", got ").append(got);
+				}
+			}
+			return out.toString();
+		});
+		if (!wrong.isEmpty()) {
+			throw new AssertionError("Radar icons " + when + ":" + wrong);
+		}
+	}
+
+	/** Changes the resource packs and reloads them, as F3+T does, and waits until the game is back. */
+	private static void reloadPacks(ClientGameTestContext context, java.util.function.Consumer<Minecraft> change) {
+		java.util.concurrent.CompletableFuture<Void> done = context.computeOnClient(mc -> {
+			change.accept(mc);
+			return mc.reloadResourcePacks();
+		});
+		context.waitFor(mc -> done.isDone() && mc.gui.overlay() == null, 2400);
+		context.waitTicks(10);
+	}
+
+	private static void packFixture(String resource, java.nio.file.Path to) {
+		try (java.io.InputStream in = DioramaClientTest.class.getResourceAsStream(resource)) {
+			if (in == null) {
+				throw new AssertionError("Missing fixture " + resource);
+			}
+			java.nio.file.Files.createDirectories(to.getParent());
+			java.nio.file.Files.copy(in, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
 	}
 
 	/**
@@ -3889,10 +4074,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "xaero-icons", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
 			*///?}
 		}
 		return Set.of(env.split(","));

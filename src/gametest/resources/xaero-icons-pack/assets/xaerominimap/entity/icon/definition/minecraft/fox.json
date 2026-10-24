@@ -1,0 +1,6 @@
+{
+	"variants": {
+		"minecraft:textures/entity/fox/fox.png": "item:minecraft:sweet_berries",
+		"default": "dot"
+	}
+}

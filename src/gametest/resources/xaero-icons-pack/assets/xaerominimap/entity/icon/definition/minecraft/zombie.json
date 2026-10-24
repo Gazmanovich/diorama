@@ -1,0 +1,10 @@
+{
+	"modelConfigs": [
+		{
+			"baseScale": 0.7
+		}
+	],
+	"variants": {
+		"default": "model:0"
+	}
+}

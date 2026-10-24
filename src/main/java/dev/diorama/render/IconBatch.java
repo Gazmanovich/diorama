@@ -11,6 +11,7 @@ import java.util.Map;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
 //? if >=1.21.6 {
 import org.joml.Vector2f;
 //?} else {
@@ -29,7 +30,8 @@ import org.joml.Vector3f;
  * icon it overlaps, so no two icons in a layer overlap. Within a layer, the icons' pieces draw in
  * runs (an icon's first run of pieces of one texture, then its second, and so on), and pieces of
  * the same run and texture from different icons draw together, which only reorders pieces that
- * don't overlap.
+ * don't overlap. Items, which only the game's item renderer draws, are a run of their own: they
+ * draw after the runs before them in their layer and before the runs after.
  *
  * <p>A measuring batch draws nothing: it only records where an icon's pieces would go, so the
  * round minimap can leave off icons that would cross its rim.
@@ -66,6 +68,13 @@ public final class IconBatch {
 
 	private record SampledTexture(MapTexture texture, Sampling sampling) {
 	}
+
+	/** An item, its 16-pixel square at (x, y) scaled by {@code scale}; its icon, run, and the quads before it. */
+	private record ItemDraw(ItemStack stack, float x, float y, float scale, int icon, int run, int quadsBefore) {
+	}
+
+	private final List<ItemDraw> items = new ArrayList<>();
+	private int itemsDrawn;
 
 	private IconBatch(GuiGraphicsExtractor graphics, boolean batched, boolean measuring) {
 		this.graphics = graphics;
@@ -146,6 +155,48 @@ public final class IconBatch {
 		this.iconStarts.add(0);
 		this.run = 0;
 		this.lastTexture = -1;
+		this.items.clear();
+	}
+
+	/**
+	 * An item, its 16-pixel square at (x, y) scaled by {@code scale}, through the game's item
+	 * renderer. Unlike the other pieces, (x, y) is in the pose the batch is drawn in, not the
+	 * current one: pop back to it before calling.
+	 */
+	public void item(ItemStack stack, float x, float y, float scale) {
+		if (this.measuring) {
+			// Inside its slot, whose frame is measured.
+			return;
+		}
+		if (!this.batched) {
+			this.drawItem(stack, x, y, scale);
+			return;
+		}
+		// A run of its own, and whatever comes after it in this icon (a caret) another.
+		this.run++;
+		this.items.add(new ItemDraw(stack, x, y, scale, this.iconStarts.size() - 1, this.run, this.quads));
+		this.run++;
+		this.lastTexture = -1;
+	}
+
+	private void drawItem(ItemStack stack, float x, float y, float scale) {
+		GuiGraphicsExtractor graphics = this.graphics;
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x, y);
+		graphics.pose().scale(scale);
+		//? if <1.21.6 {
+		/*// Every item drew at the same depth, and items test and write depth: each later one goes a
+		// step nearer, so an earlier block item doesn't hide part of a later item over it. (The
+		// icons' own pieces don't test depth, so they cover items in their order anyway.)
+		com.mojang.blaze3d.vertex.PoseStack pose = graphics.pose();
+		pose.translate(0, 0, 10 * Math.min(this.itemsDrawn++, 800));
+		*///?}
+		//? if >=26.1 {
+		graphics.item(stack, 0, 0);
+		//?} else {
+		/*graphics.renderItem(stack, 0, 0);
+		*///?}
+		graphics.pose().popMatrix();
 	}
 
 	/** Ends an icon: everything since the last call is one icon. */
@@ -211,7 +262,14 @@ public final class IconBatch {
 	public void draw() {
 		this.endIcon();
 		int icons = this.iconStarts.size() - 1;
-		if (!this.batched || this.measuring || icons == 0) {
+		if (this.measuring) {
+			return;
+		}
+		if (!this.batched || icons == 0) {
+			for (ItemDraw item : this.items) {
+				this.drawItem(item.stack(), item.x(), item.y(), item.scale());
+			}
+			this.items.clear();
 			return;
 		}
 		int[] layers = this.layers(icons);
@@ -230,15 +288,32 @@ public final class IconBatch {
 		if (sorted) {
 			Arrays.sort(order);
 		}
+		// Each item's place among the quads: before the first quad of a later layer and run, or, unsorted, of a later quad.
+		long[] itemKeys = new long[this.items.size()];
+		Integer[] itemOrder = new Integer[this.items.size()];
+		for (int i = 0; i < itemKeys.length; i++) {
+			ItemDraw item = this.items.get(i);
+			itemKeys[i] = sorted ? (long) layers[item.icon()] << 8 | item.run() : item.quadsBefore();
+			itemOrder[i] = i;
+		}
+		Arrays.sort(itemOrder, (a, b) -> Long.compare(itemKeys[a], itemKeys[b]));
+		int nextItem = 0;
 		MapCanvas canvas = MapCanvas.of(this.graphics);
 		float[] groupXyz = new float[this.quads * 12];
 		float[] groupUvs = new float[this.quads * 8];
 		int[] groupColors = new int[this.quads];
 		int start = 0;
 		while (start < order.length) {
+			long place = sorted ? order[start] >>> 40 : order[start];
+			while (nextItem < itemOrder.length && (sorted ? itemKeys[itemOrder[nextItem]] < place : itemKeys[itemOrder[nextItem]] <= place)) {
+				ItemDraw item = this.items.get(itemOrder[nextItem++]);
+				this.drawItem(item.stack(), item.x(), item.y(), item.scale());
+			}
+			// Unsorted, a group of quads stops where the next item goes.
+			long stop = !sorted && nextItem < itemOrder.length ? itemKeys[itemOrder[nextItem]] : Long.MAX_VALUE;
 			int texture0 = this.textureIds[quad(order[start], sorted)];
 			int count = 0;
-			for (int i = start; i < order.length && (sorted ? order[i] >>> 24 == order[start] >>> 24 : this.textureIds[(int) order[i]] == texture0); i++) {
+			for (int i = start; i < order.length && (sorted ? order[i] >>> 24 == order[start] >>> 24 : this.textureIds[(int) order[i]] == texture0 && order[i] < stop); i++) {
 				int q = quad(order[i], sorted);
 				System.arraycopy(this.xyz, q * 12, groupXyz, count * 12, 12);
 				System.arraycopy(this.uvs, q * 8, groupUvs, count * 8, 8);
@@ -255,6 +330,11 @@ public final class IconBatch {
 			}
 			start += count;
 		}
+		while (nextItem < itemOrder.length) {
+			ItemDraw item = this.items.get(itemOrder[nextItem++]);
+			this.drawItem(item.stack(), item.x(), item.y(), item.scale());
+		}
+		this.items.clear();
 	}
 
 	private static int quad(long key, boolean sorted) {

@@ -1,0 +1,13 @@
+{
+	"_comment-01": "Comments and Xaero-only settings are ignored.",
+	"modelConfigs": [
+		{
+			"baseScale": 0.5,
+			"offsetX": 5
+		}
+	],
+	"variantMethod": "xaero.hud.minimap.radar.icon.definition.BuiltInRadarIconDefinitions.getVariant",
+	"variants": {
+		"default": "outlined_sprite:diorama_test/heart.png"
+	}
+}

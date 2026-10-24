@@ -10,6 +10,7 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.render.XaeroRadarIcons;
 //? if >=1.21.6 {
 import dev.diorama.render.DioramaPipelines;
 //?}
@@ -102,6 +103,12 @@ public final class DioramaNeoForge {
 			Waystones.clear();
 		});
 		modBus.addListener(RegisterPayloadHandlersEvent.class, XaeroChannels::register);
+		// Radar icons from Xaero's Minimap's icon files, read again on every resource reload.
+		//? if >=1.21.4 {
+		modBus.addListener(net.neoforged.neoforge.client.event.AddClientReloadListenersEvent.class, event -> event.addListener(XaeroRadarIcons.ID, XaeroRadarIcons.LISTENER));
+		//?} else {
+		/*modBus.addListener(net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent.class, event -> event.registerReloadListener(XaeroRadarIcons.LISTENER));
+		*///?}
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking. This
 		// fires as the window is asked to close, before the last frame, so from then on nothing may
 		// start the map again (Minecraft.isRunning() is false).

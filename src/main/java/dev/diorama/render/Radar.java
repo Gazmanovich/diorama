@@ -25,7 +25,8 @@ import org.jspecify.annotations.Nullable;
  * Other players and mobs on the map. Players show as their skin's face, including players
  * beyond the loaded chunks whose position the server reports (see {@link TrackedPlayers}). Mobs
  * show as their own face (see {@link MobFaces}) framed in a colour by how they treat you, or as a
- * dot of that colour when they have no face icon. Anything well above or below you gets a caret
+ * dot of that colour when they have no face icon. Xaero's Minimap's icon files can give a mob an
+ * image, an item or a dot instead (see {@link XaeroRadarIcons}). Anything well above or below you gets a caret
  * and fades a little, since the map is a top view and can't otherwise show height.
  */
 public final class Radar {
@@ -193,13 +194,20 @@ public final class Radar {
 			graphics.pose().scale(s / 8);
 			icons.playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
-		} else if (MobFaces.has(blip.entity())) {
+			return;
+		}
+		XaeroRadarIcons.Icon icon = XaeroRadarIcons.of(blip.entity());
+		if (icon != XaeroRadarIcons.Basic.DOT && (icon != null || MobFaces.has(blip.entity()))) {
 			int box = Math.round(s * 1.6F);
 			int x0 = Math.round(blip.x() - box / 2.0F);
 			int y0 = Math.round(blip.y() - box / 2.0F);
 			icons.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
 			icons.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
-			if (!MobFaces.draw(icons, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
+			if (icon instanceof XaeroRadarIcons.Sprite sprite) {
+				sprite.drawFitted(icons, x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha));
+			} else if (icon instanceof XaeroRadarIcons.ItemIcon item) {
+				icons.item(item.stack(), x0 + 1, y0 + 1, (box - 2) / 16.0F);
+			} else if (!MobFaces.draw(icons, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
 				MapIcons.dot(icons, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
 			}
 		} else {
@@ -221,7 +229,21 @@ public final class Radar {
 			pixelFrame(icons, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
 			icons.playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
-		} else if (!MobFaces.drawPixel(icons, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
+			return;
+		}
+		XaeroRadarIcons.Icon icon = XaeroRadarIcons.of(blip.entity());
+		if (icon instanceof XaeroRadarIcons.Sprite sprite) {
+			sprite.drawPixel(icons, blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha);
+		} else if (icon instanceof XaeroRadarIcons.ItemIcon item) {
+			// The item in a slot framed like an 8-pixel face, so it's as big as the heads and has
+			// their outline, in the kind's colour. Items can't fade with height: the game's item
+			// renderer takes no colour.
+			float texel = texel(s * 1.6F, 8);
+			pixelFrame(icons, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
+			graphics.pose().popMatrix();
+			icons.item(item.stack(), snap(blip.x() - 4 * texel), snap(blip.y() - 4 * texel), texel / 2);
+		} else if (icon == XaeroRadarIcons.Basic.DOT
+			|| !MobFaces.drawPixel(icons, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
 			dot(icons, blip, alpha);
 		}
 	}
