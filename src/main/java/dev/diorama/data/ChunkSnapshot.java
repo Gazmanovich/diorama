@@ -3,6 +3,7 @@ package dev.diorama.data;
 import dev.diorama.mixin.BiomeManagerAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
@@ -10,6 +11,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
@@ -62,6 +64,8 @@ public final class ChunkSnapshot {
 	public final int maxY;
 	/** A conservative low point of the visible surface, used to bound tile invalidation. */
 	public final int floorY;
+	/** Per section, the filled copycats in it; null when the chunk has none, as nearly every chunk. */
+	private final @Nullable SectionCopycats @Nullable [] copycats;
 
 	@SuppressWarnings("unchecked")
 	private ChunkSnapshot(LevelChunk chunk, ClientLevel level) {
@@ -128,6 +132,72 @@ public final class ChunkSnapshot {
 		this.maxY = top <= chunk.getMinY() ? Integer.MIN_VALUE : top;
 		// Water and shallow overhangs can hide blocks below the motion-blocking height.
 		this.floorY = floor == Integer.MAX_VALUE ? chunk.getMinY() : floor - 24;
+		this.copycats = Copycats.INSTALLED ? copycats(chunk, sections.length) : null;
+	}
+
+	/** What the chunk's copycats are filled with, by section, or null if none are filled. */
+	@SuppressWarnings("unchecked")
+	private static @Nullable SectionCopycats @Nullable [] copycats(LevelChunk chunk, int sectionCount) {
+		java.util.List<Integer>[] at = null;
+		java.util.List<BlockState>[] materials = null;
+		for (BlockEntity entity : chunk.getBlockEntities().values()) {
+			BlockState material = Copycats.material(entity);
+			if (material == null) {
+				continue;
+			}
+			BlockPos pos = entity.getBlockPos();
+			int section = (pos.getY() >> 4) - chunk.getMinSectionY();
+			if (section < 0 || section >= sectionCount) {
+				continue;
+			}
+			if (at == null) {
+				at = new java.util.List[sectionCount];
+				materials = new java.util.List[sectionCount];
+			}
+			if (at[section] == null) {
+				at[section] = new java.util.ArrayList<>();
+				materials[section] = new java.util.ArrayList<>();
+			}
+			at[section].add(((pos.getY() & 15) << 8) | ((pos.getZ() & 15) << 4) | (pos.getX() & 15));
+			materials[section].add(material);
+		}
+		if (at == null) {
+			return null;
+		}
+		SectionCopycats[] out = new SectionCopycats[sectionCount];
+		for (int i = 0; i < sectionCount; i++) {
+			if (at[i] != null) {
+				out[i] = new SectionCopycats(at[i].stream().mapToInt(Integer::intValue).toArray(), materials[i].toArray(new BlockState[0]));
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The filled copycats in one section: where each is, indexed {@code (y << 8) | (z << 4) | x}
+	 * like the section's ids, and the block it's filled with.
+	 */
+	public record SectionCopycats(int[] at, BlockState[] material) {
+	}
+
+	/** The filled copycats in a section, or null if it has none. */
+	public @Nullable SectionCopycats copycats(int index) {
+		return this.copycats == null ? null : this.copycats[index];
+	}
+
+	/** What the copycat at this position in the chunk was filled with, or null if there's none filled. */
+	public @Nullable BlockState copycatMaterial(int x, int y, int z) {
+		int section = (y >> 4) - this.minSectionY;
+		SectionCopycats in = this.copycats == null || section < 0 || section >= this.copycats.length ? null : this.copycats[section];
+		if (in != null) {
+			int at = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+			for (int i = 0; i < in.at.length; i++) {
+				if (in.at[i] == at) {
+					return in.material[i];
+				}
+			}
+		}
+		return null;
 	}
 
 	public static ChunkSnapshot take(LevelChunk chunk, ClientLevel level) {

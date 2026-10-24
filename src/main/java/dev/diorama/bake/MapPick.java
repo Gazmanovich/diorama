@@ -36,7 +36,7 @@ public final class MapPick {
 	public MapPick(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar) {
 		this.source = source;
 		this.looks = looks;
-		this.reader = new VoxelReader(source, looks.kind);
+		this.reader = new VoxelReader(source, looks);
 		this.fogOfWar = fogOfWar;
 		this.underRoof = source.roof() != ChunkSource.NO_ROOF;
 		this.cave = tile.isCave();
