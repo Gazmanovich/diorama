@@ -652,8 +652,56 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			return new int[] {tu, tv, cx, cy};
 		});
+		// Where the right-click menu puts the player around spawn while its chunks are loaded, to
+		// compare with after the restart. Several places, as a waypoint may cover one by then.
+		double cellUnits = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+		// The middle of a block column and of a pixel row.
+		double u0 = cell[0] * Projection.TILE_UNITS + cell[2] * cellUnits + 0.5;
+		double v0 = cell[1] * Projection.TILE_UNITS + cell[3] * cellUnits + 2.5 / Projection.PIXELS_PER_UNIT;
+		spawnProbes = context.computeOnClient(mc -> {
+			List<double[]> probes = new java.util.ArrayList<>();
+			for (int[] offset : new int[][] {{0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {12, 12}, {-12, -12}}) {
+				double u = u0 + offset[0];
+				double v = v0 + offset[1];
+				BlockPos spot = dev.diorama.bake.MapPick.standingSpot(MapSession.get().map(), dev.diorama.bake.BlockLooks.get(),
+					u, v, TileKey.SURFACE, false);
+				if (spot != null) {
+					probes.add(new double[] {u, v, spot.getX(), spot.getY(), spot.getZ()});
+				}
+			}
+			if (probes.isEmpty()) {
+				throw new AssertionError("Nothing to stand on around spawn while its chunks are loaded");
+			}
+			return probes;
+		});
 		context.setScreen(() -> null);
 		return cell;
+	}
+
+	/** Map points around spawn and where the right-click menu put the player there before the restart: {u, v, x, y, z}. */
+	private static List<double[]> spawnProbes = List.of();
+
+	/**
+	 * Looks at spawn and returns the first of {@link #spawnProbes} with no waypoint pin over it,
+	 * and where it is in the window: {u, v, x, y, z, windowX, windowY}.
+	 */
+	private static double[] freeSpawnProbe(ClientGameTestContext context) {
+		double[] first = spawnProbes.get(0);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(first[0], first[1], 4.0, TileKey.SURFACE));
+		settle(context, 20);
+		return context.computeOnClient(mc -> {
+			MapScreen map = (MapScreen) mc.gui.screen();
+			MapViewport.View view = map.view();
+			double scale = mc.getWindow().getGuiScale();
+			for (double[] probe : spawnProbes) {
+				double x = view.screenX(probe[0]);
+				double y = view.screenY(probe[1]);
+				if (WaypointOverlay.under(map.pins(), x, y) == null) {
+					return new double[] {probe[0], probe[1], probe[2], probe[3], probe[4], x * scale, y * scale};
+				}
+			}
+			throw new AssertionError("Waypoint pins cover every place the test looked at around spawn");
+		});
 	}
 
 	/**
@@ -683,6 +731,27 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (known < 0.9F) {
 			throw new AssertionError("The spawn tile didn't come back from disk (known share " + known + ")");
 		}
+
+		// The right-click menu still knows where to stand there, from disk alone.
+		double[] probe = freeSpawnProbe(context);
+		int[] spot = {(int) probe[2], (int) probe[3], (int) probe[4]};
+		rightClickAt(context, probe[5], probe[6]);
+		context.takeScreenshot("saved-map-01b-menu-after-restart");
+		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (labels.equals(List.of("Nothing mapped here"))) {
+			throw new AssertionError("After the restart, the menu says nothing is mapped at spawn, which the map shows");
+		}
+		int[] savedSpot = menuSpot(context);
+		if (!java.util.Arrays.equals(savedSpot, spot)) {
+			throw new AssertionError("After the restart, the menu offers " + java.util.Arrays.toString(savedSpot)
+				+ " at spawn; before it, " + java.util.Arrays.toString(spot));
+		}
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			double u = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			double v = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			((MapScreen) mc.gui.screen()).lookAt(u, v, 1.0, TileKey.SURFACE);
+		});
 
 		// Zoom far out: overview tiles shrunk from the saved ones show both spawn and here.
 		// Travel back toward spawn, so there's a trail of explored land to zoom out over. The
@@ -737,6 +806,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
+
+		// Teleport here, from far away, lands on the ground at spawn.
+		context.setScreen(MapScreen::new);
+		double[] teleportAt = freeSpawnProbe(context);
+		rightClickAt(context, teleportAt[5], teleportAt[6]);
+		clickMenu(context, "Teleport here");
+		int[] landing = {(int) teleportAt[2], (int) teleportAt[3], (int) teleportAt[4]};
+		context.waitFor(mc -> mc.player.distanceToSqr(landing[0] + 0.5, landing[1], landing[2] + 0.5) < 0.5, 200);
+		// The chunks there arrive after the player does.
+		BlockPos below = new BlockPos(landing[0], landing[1] - 1, landing[2]);
+		for (int tick = 0; tick < 400 && context.computeOnClient(mc -> mc.level.getBlockState(below).isAir()); tick += 10) {
+			context.waitTicks(10);
+		}
+		context.takeScreenshot("saved-map-03-teleported-to-spawn");
+		context.runOnClient(mc -> {
+			if (mc.level.getBlockState(below).isAir()) {
+				throw new AssertionError("Teleport here from the saved map put the player over air at " + java.util.Arrays.toString(landing)
+					+ " (chunk loaded: " + mc.level.hasChunk(landing[0] >> 4, landing[2] >> 4) + ", player at " + mc.player.position() + ")");
+			}
+		});
 	}
 
 	private static java.util.Properties serverProperties() {
@@ -1935,11 +2024,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("Expected 3 waypoints after saving the picked one, found " + count);
 		}
 		Waypoint picked = context.computeOnClient(mc -> WaypointStore.get().all().get(2));
-		// The hit block sits under the waypoint; the ray crosses its top or south face.
+		// The hit block sits under the waypoint; the ray through the middle of the pixel row clicked
+		// crosses its top or south face.
 		int hitY = picked.y - 1;
 		double vTop = Projection.v(hitY + 1, picked.z);
 		double vBottom = Projection.v(hitY, picked.z + 1);
-		boolean onRay = picked.x == (int) Math.floor(click[0]) && click[1] >= vTop - 1e-6 && click[1] <= vBottom + 1e-6;
+		double pickedRow = dev.diorama.bake.TileSpots.rowMiddle(click[1]);
+		boolean onRay = picked.x == (int) Math.floor(click[0]) && pickedRow >= vTop - 1e-6 && pickedRow <= vBottom + 1e-6;
 		boolean solid = context.computeOnClient(mc -> !mc.level.getBlockState(new BlockPos(picked.x, hitY, picked.z)).isAir());
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
@@ -2303,13 +2394,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 		openMapOnPlayer(context);
 
 		// Teleport here: the player lands standing on the block the map shows at the click, which
-		// is the first solid block on the camera ray through that point.
+		// is the first solid block on the camera ray through the middle of the pixel row clicked.
 		double[] click = rightClickMap(context, 24, 0);
 		context.takeScreenshot("map-menu-01-spot");
 		int[] spot = menuSpot(context);
 		int hitY = spot[1] - 1;
+		double row = dev.diorama.bake.TileSpots.rowMiddle(click[1]);
 		boolean onRay = spot[0] == (int) Math.floor(click[0])
-			&& click[1] >= Projection.v(hitY + 1, spot[2]) - 1e-6 && click[1] <= Projection.v(hitY, spot[2] + 1) + 1e-6;
+			&& row >= Projection.v(hitY + 1, spot[2]) - 1e-6 && row <= Projection.v(hitY, spot[2] + 1) + 1e-6;
 		if (!onRay) {
 			throw new AssertionError("The menu offers " + spot[0] + "," + spot[1] + "," + spot[2] + ", which isn't the block shown at the click");
 		}
@@ -2825,6 +2917,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!open) {
 			throw new AssertionError("Right-clicking the map didn't open its menu");
 		}
+		// Where the spot comes from a saved tile on a slow disk, a placeholder shows first.
+		context.waitFor(mc -> !(mc.gui.screen() instanceof MapScreen map && map.menu() != null
+			&& map.menu().labels().equals(List.of("Finding the ground…"))), 200);
 	}
 
 	/** Right-clicks the pin of the waypoint at a position. */
