@@ -652,8 +652,30 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			return new int[] {tu, tv, cx, cy};
 		});
+		// Where the right-click menu puts the player at spawn while its chunks are loaded, to
+		// compare with after the restart.
+		double[] probe = spawnProbe(cell);
+		spawnSpot = context.computeOnClient(mc -> {
+			BlockPos spot = dev.diorama.bake.MapPick.standingSpot(MapSession.get().map(), dev.diorama.bake.BlockLooks.get(),
+				probe[0], probe[1], TileKey.SURFACE, false);
+			if (spot == null) {
+				throw new AssertionError("Nothing to stand on at spawn while its chunks are loaded");
+			}
+			return new int[] {spot.getX(), spot.getY(), spot.getZ()};
+		});
 		context.setScreen(() -> null);
 		return cell;
+	}
+
+	/** Where the right-click menu put the player at {@link #spawnProbe} before the restart. */
+	private static int @Nullable [] spawnSpot;
+
+	/** A map point in the spawn cell: the middle of a block column and of a pixel row. */
+	private static double[] spawnProbe(int[] cell) {
+		double cellUnits = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+		double u = cell[0] * Projection.TILE_UNITS + cell[2] * cellUnits + 0.5;
+		double v = cell[1] * Projection.TILE_UNITS + cell[3] * cellUnits + 2.5 / Projection.PIXELS_PER_UNIT;
+		return new double[] {u, v};
 	}
 
 	/**
@@ -683,6 +705,33 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (known < 0.9F) {
 			throw new AssertionError("The spawn tile didn't come back from disk (known share " + known + ")");
 		}
+
+		// The right-click menu still knows where to stand there, from disk alone.
+		double[] probe = spawnProbe(spawnCell);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(probe[0], probe[1], 4.0, TileKey.SURFACE));
+		settle(context, 20);
+		double[] probeAt = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {view.screenX(probe[0]) * scale, view.screenY(probe[1]) * scale};
+		});
+		rightClickAt(context, probeAt[0], probeAt[1]);
+		context.takeScreenshot("saved-map-01b-menu-after-restart");
+		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (labels.equals(List.of("Nothing mapped here"))) {
+			throw new AssertionError("After the restart, the menu says nothing is mapped at spawn, which the map shows");
+		}
+		int[] savedSpot = menuSpot(context);
+		if (!java.util.Arrays.equals(savedSpot, spawnSpot)) {
+			throw new AssertionError("After the restart, the menu offers " + java.util.Arrays.toString(savedSpot)
+				+ " at spawn; before it, " + java.util.Arrays.toString(spawnSpot));
+		}
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			double u = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			double v = (spawnCell[1] + (spawnCell[3] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
+			((MapScreen) mc.gui.screen()).lookAt(u, v, 1.0, TileKey.SURFACE);
+		});
 
 		// Zoom far out: overview tiles shrunk from the saved ones show both spawn and here.
 		// Travel back toward spawn, so there's a trail of explored land to zoom out over. The
@@ -737,6 +786,28 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Fog-of-war progress was lost across the restart");
 			}
 		}
+
+		// Teleport here, from far away, lands on the ground at spawn.
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(probe[0], probe[1], 4.0, TileKey.SURFACE));
+		settle(context, 20);
+		double[] teleportAt = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {view.screenX(probe[0]) * scale, view.screenY(probe[1]) * scale};
+		});
+		rightClickAt(context, teleportAt[0], teleportAt[1]);
+		clickMenu(context, "Teleport here");
+		int[] spot = spawnSpot;
+		context.waitFor(mc -> mc.player.distanceToSqr(spot[0] + 0.5, spot[1], spot[2] + 0.5) < 0.5, 200);
+		context.waitFor(mc -> mc.level.hasChunk(spot[0] >> 4, spot[2] >> 4), 200);
+		context.runOnClient(mc -> {
+			BlockPos below = new BlockPos(spot[0], spot[1] - 1, spot[2]);
+			if (mc.level.getBlockState(below).isAir()) {
+				throw new AssertionError("Teleport here from the saved map put the player over air at " + java.util.Arrays.toString(spot));
+			}
+		});
+		context.takeScreenshot("saved-map-03-teleported-to-spawn");
 	}
 
 	private static java.util.Properties serverProperties() {
