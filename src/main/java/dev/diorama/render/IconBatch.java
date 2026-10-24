@@ -31,8 +31,14 @@ import org.joml.Vector3f;
  * don't overlap.
  */
 public final class IconBatch {
-	/** The grid that finds overlaps, in GUI pixels per cell. Coarser is cheaper and only adds layers. */
+	/**
+	 * The grid that finds overlaps, in GUI pixels per cell, and about the most cells it has; icons
+	 * spread over a big screen get bigger cells. Coarser is cheaper and only adds layers.
+	 */
 	private static final float CELL = 2;
+	private static final int MAX_CELLS = 1 << 16;
+	/** The grid's storage, kept between frames. Render thread only. */
+	private static int[] grid = new int[0];
 
 	private final GuiGraphicsExtractor graphics;
 	private final boolean batched;
@@ -241,16 +247,22 @@ public final class IconBatch {
 			maxX = Math.max(maxX, x1);
 			maxY = Math.max(maxY, y1);
 		}
-		int columns = (int) ((maxX - minX) / CELL) + 1;
-		int rows = (int) ((maxY - minY) / CELL) + 1;
+		float cell = Math.max(CELL, (float) Math.sqrt((maxX - minX) * (maxY - minY) / MAX_CELLS));
+		int columns = (int) ((maxX - minX) / cell) + 1;
+		int rows = (int) ((maxY - minY) / cell) + 1;
+		if (grid.length < columns * rows) {
+			grid = new int[columns * rows];
+		} else {
+			Arrays.fill(grid, 0, columns * rows, 0);
+		}
 		// The layer above the highest icon touching each cell so far, so 0 where none has.
-		int[] above = new int[columns * rows];
+		int[] above = grid;
 		int[] layers = new int[icons];
 		for (int icon = 0; icon < icons; icon++) {
-			int c0 = (int) ((bounds[icon * 4] - minX) / CELL);
-			int r0 = (int) ((bounds[icon * 4 + 1] - minY) / CELL);
-			int c1 = (int) ((bounds[icon * 4 + 2] - minX) / CELL);
-			int r1 = (int) ((bounds[icon * 4 + 3] - minY) / CELL);
+			int c0 = (int) ((bounds[icon * 4] - minX) / cell);
+			int r0 = (int) ((bounds[icon * 4 + 1] - minY) / cell);
+			int c1 = (int) ((bounds[icon * 4 + 2] - minX) / cell);
+			int r1 = (int) ((bounds[icon * 4 + 3] - minY) / cell);
 			int layer = 0;
 			for (int r = r0; r <= r1; r++) {
 				for (int c = c0; c <= c1; c++) {
