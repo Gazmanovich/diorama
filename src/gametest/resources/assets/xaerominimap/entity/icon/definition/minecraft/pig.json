@@ -1,0 +1,6 @@
+{
+	"variantMethod": "xaero.hud.minimap.radar.icon.definition.BuiltInRadarIconDefinitions.getVariant",
+	"variants": {
+		"default": "model"
+	}
+}

@@ -237,8 +237,11 @@ public final class MobFaces {
 		*///?}
 	}
 
-	/** The texture the game draws this entity with, from its renderer. */
-	private static @Nullable Identifier texture(Entity entity) {
+	/**
+	 * The texture the game draws this entity with, from its renderer. Also what Xaero's icon files
+	 * name a mob's variants by ({@link XaeroRadarIcons}).
+	 */
+	static @Nullable Identifier texture(Entity entity) {
 		Looked looked = TEXTURES.get(entity);
 		int age = entity.tickCount;
 		boolean baby = entity instanceof LivingEntity living && living.isBaby();
@@ -252,23 +255,26 @@ public final class MobFaces {
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	private static @Nullable Identifier lookUp(Entity entity) {
 		//? if >=1.21.2 {
+		// Only living-entity renderers say which texture they use; others, such as GeckoLib's, don't.
 		EntityRenderer<?, ?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
-		//?} else {
-		/*EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
-		*///?}
 		if (!(renderer instanceof LivingEntityRenderer living)) {
 			return null;
 		}
 		try {
-			//? if >=1.21.2 {
 			LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
 			return ((LivingEntityRenderer) living).getTextureLocation(state);
-			//?} else {
-			/*// Renderers had no render state yet and asked the entity directly.
-			return ((LivingEntityRenderer) living).getTextureLocation((LivingEntity) entity);
-			*///?}
 		} catch (RuntimeException e) {
 			return null;
 		}
+		//?} else {
+		/*// Renderers had no render state yet, and every one, GeckoLib's too, said which texture it
+		// draws an entity with.
+		EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
+		try {
+			return ((EntityRenderer) renderer).getTextureLocation(entity);
+		} catch (RuntimeException e) {
+			return null;
+		}
+		*///?}
 	}
 }
