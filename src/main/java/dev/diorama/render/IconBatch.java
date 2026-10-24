@@ -16,7 +16,6 @@ import org.joml.Vector2f;
 /*import org.joml.Matrix4f;
 import org.joml.Vector3f;
 *///?}
-import org.jspecify.annotations.Nullable;
 
 /**
  * Where the radar draws its icons: fills, game texture blits and the mod's own textures, each in
@@ -38,11 +37,11 @@ public final class IconBatch {
 	private final GuiGraphicsExtractor graphics;
 	private final boolean batched;
 	// Per quad: its four corners (x y z, already in GUI coordinates), UVs, colour, texture and run.
-	private float[] xyz = new float[4 * 3 * 64];
-	private float[] uvs = new float[4 * 2 * 64];
-	private int[] colors = new int[64];
-	private int[] textureIds = new int[64];
-	private int[] runs = new int[64];
+	private float[] xyz = new float[0];
+	private float[] uvs = new float[0];
+	private int[] colors = new int[0];
+	private int[] textureIds = new int[0];
+	private int[] runs = new int[0];
 	private int quads;
 	/** Index 0 is "no texture"; each texture is an Identifier or a MapTexture with its sampling. */
 	private final List<Object> textures = new ArrayList<>();
@@ -122,7 +121,7 @@ public final class IconBatch {
 	// own fills and blits put them through it.
 	private void add(int texture, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int argb) {
 		if (this.quads == this.colors.length) {
-			int n = this.quads * 2;
+			int n = Math.max(64, this.quads * 2);
 			this.xyz = Arrays.copyOf(this.xyz, n * 12);
 			this.uvs = Arrays.copyOf(this.uvs, n * 8);
 			this.colors = Arrays.copyOf(this.colors, n);
@@ -169,29 +168,36 @@ public final class IconBatch {
 			return;
 		}
 		int[] layers = this.layers(icons);
-		// Sort the quads by layer, run and texture, keeping their order otherwise.
+		int maxLayer = Arrays.stream(layers).max().orElse(0);
+		int maxRun = Arrays.stream(this.runs, 0, this.quads).max().orElse(0);
+		// Sort the quads by layer, run and texture, keeping their order otherwise, as one long each:
+		// layer, run, texture and quad in 15, 8, 16 and 24 bits. A crowd too big for that (tens of
+		// thousands of icons stacked on one spot) draws in its own order, a draw per texture change.
+		boolean sorted = maxLayer <= 0x7FFF && maxRun <= 0xFF && this.textures.size() <= 0x10000 && this.quads <= 0x1000000;
 		long[] order = new long[this.quads];
 		for (int icon = 0; icon < icons; icon++) {
 			for (int q = this.iconStarts.get(icon); q < this.iconStarts.get(icon + 1); q++) {
-				order[q] = (long) layers[icon] << 48 | (long) Math.min(this.runs[q], 0xFF) << 40 | (long) this.textureIds[q] << 24 | q;
+				order[q] = sorted ? (long) layers[icon] << 48 | (long) this.runs[q] << 40 | (long) this.textureIds[q] << 24 | q : q;
 			}
 		}
-		Arrays.sort(order);
+		if (sorted) {
+			Arrays.sort(order);
+		}
 		MapCanvas canvas = MapCanvas.of(this.graphics);
 		float[] groupXyz = new float[this.quads * 12];
 		float[] groupUvs = new float[this.quads * 8];
 		int[] groupColors = new int[this.quads];
 		int start = 0;
 		while (start < order.length) {
-			long group = order[start] >>> 24;
+			int texture0 = this.textureIds[quad(order[start], sorted)];
 			int count = 0;
-			for (int i = start; i < order.length && order[i] >>> 24 == group; i++) {
-				int q = (int) (order[i] & 0xFFFFFF);
+			for (int i = start; i < order.length && (sorted ? order[i] >>> 24 == order[start] >>> 24 : this.textureIds[(int) order[i]] == texture0); i++) {
+				int q = quad(order[i], sorted);
 				System.arraycopy(this.xyz, q * 12, groupXyz, count * 12, 12);
 				System.arraycopy(this.uvs, q * 8, groupUvs, count * 8, 8);
 				groupColors[count++] = this.colors[q];
 			}
-			Object texture = this.textures.get((int) (group & 0xFFFF));
+			Object texture = this.textures.get(texture0);
 			if (texture == null) {
 				canvas.solids(groupXyz, groupColors, count);
 			} else if (texture instanceof Identifier id) {
@@ -202,6 +208,10 @@ public final class IconBatch {
 			}
 			start += count;
 		}
+	}
+
+	private static int quad(long key, boolean sorted) {
+		return sorted ? (int) (key & 0xFFFFFF) : (int) key;
 	}
 
 	/** Each icon's layer: one above the highest earlier icon it overlaps, found on a grid over the icons' bounds. */
