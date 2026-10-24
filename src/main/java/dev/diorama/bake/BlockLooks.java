@@ -25,7 +25,6 @@ import net.minecraft.client.renderer.block.model.BlockStateModel;
 *///?} else {
 /*import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.resources.model.BakedModel;
-import org.jspecify.annotations.Nullable;
 *///?}
 //? if <26.1 && fabric {
 /*import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
@@ -35,11 +34,11 @@ import net.fabricmc.loader.api.FabricLoader;
 /*import net.minecraft.data.AtlasIds;
 import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?} else if <26.1 {
-/*import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
+/*import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 *///?}
 import net.minecraft.client.renderer.texture.MissingTextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 //? if >=26.1 {
 import net.minecraft.client.resources.model.geometry.BakedQuad;
@@ -61,6 +60,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.material.Fluid;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What each block state looks like on the map: how rays treat it, and its average top and
@@ -193,6 +193,7 @@ public final class BlockLooks {
 		int size = Block.BLOCK_STATE_REGISTRY.size();
 		BlockLooks looks = new BlockLooks(size);
 		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
+		warnedFreed = false;
 		RandomSource random = RandomSource.create(42L);
 		TintProbe probe = new TintProbe();
 		Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
@@ -569,22 +570,61 @@ public final class BlockLooks {
 	/** Returns {r, g, b, coverage} averaged over the sprite's visible pixels, colors in 0..1. */
 	private static float[] spriteAverage(TextureAtlasSprite sprite, Map<TextureAtlasSprite, float[]> cache) {
 		return cache.computeIfAbsent(sprite, s -> {
-			SpriteContents contents = s.contents();
-			NativeImage image = null;
-			try {
-				image = ORIGINAL_IMAGE == null ? null : (NativeImage) ORIGINAL_IMAGE.get(contents);
-			} catch (IllegalAccessException ignored) {
+			float[] avg = average(s);
+			if (avg != null) {
+				return avg;
 			}
-			if (image == null) {
-				return new float[] {1.0F, 0.0F, 1.0F, 1.0F};
+			// The sprite is from the atlas before the last resource reload, which freed its image: a
+			// model that outlived the reload still points at it (issue 94, a big NeoForge pack). Read
+			// the texture of that name in the atlas now; if the atlas has none, it adds no colour.
+			TextureAtlasSprite current = currentSprite(s);
+			avg = current == null ? null : average(current);
+			if (!warnedFreed) {
+				warnedFreed = true;
+				Diorama.LOGGER.warn("A block model holds texture {} from before the last resource reload; {}", s.contents().name(),
+					avg != null ? "using the reloaded texture" : "it adds no colour");
 			}
-			int w = Math.min(contents.width(), image.getWidth());
-			int h = Math.min(contents.height(), image.getHeight());
-			double r = 0;
-			double g = 0;
-			double b = 0;
-			double weight = 0;
-			int visible = 0;
+			return avg != null ? avg : new float[] {0.0F, 0.0F, 0.0F, 0.0F};
+		});
+	}
+
+	/** Set once per build, so a mod that keeps many old models is named once in the log. */
+	private static boolean warnedFreed;
+
+	/** The sprite with the same name in its atlas as the atlas is now, or null if there's none. */
+	private static @Nullable TextureAtlasSprite currentSprite(TextureAtlasSprite old) {
+		try {
+			// Atlases are registered once at startup and filled again by each reload, so this finds
+			// the existing atlas rather than adding a texture.
+			if (Minecraft.getInstance().getTextureManager().getTexture(old.atlasLocation()) instanceof TextureAtlas atlas) {
+				TextureAtlasSprite sprite = atlas.getSprite(old.contents().name());
+				return sprite == old || sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation()) ? null : sprite;
+			}
+		} catch (RuntimeException e) {
+			// The atlas isn't filled, or a mod's atlas isn't a TextureAtlas.
+		}
+		return null;
+	}
+
+	/** {@link #spriteAverage} for one sprite, or null if its image has been freed. */
+	private static float @Nullable [] average(TextureAtlasSprite s) {
+		SpriteContents contents = s.contents();
+		NativeImage image = null;
+		try {
+			image = ORIGINAL_IMAGE == null ? null : (NativeImage) ORIGINAL_IMAGE.get(contents);
+		} catch (IllegalAccessException ignored) {
+		}
+		if (image == null) {
+			return new float[] {1.0F, 0.0F, 1.0F, 1.0F};
+		}
+		int w = Math.min(contents.width(), image.getWidth());
+		int h = Math.min(contents.height(), image.getHeight());
+		double r = 0;
+		double g = 0;
+		double b = 0;
+		double weight = 0;
+		int visible = 0;
+		try {
 			for (int y = 0; y < h; y++) {
 				for (int x = 0; x < w; x++) {
 					//? if >=1.21.2 {
@@ -607,14 +647,17 @@ public final class BlockLooks {
 					visible++;
 				}
 			}
-			if (weight == 0) {
-				return new float[] {0.0F, 0.0F, 0.0F, 0.0F};
-			}
-			return new float[] {
-				(float) linearToSrgb(r / weight), (float) linearToSrgb(g / weight), (float) linearToSrgb(b / weight),
-				(float) visible / (w * h)
-			};
-		});
+		} catch (IllegalStateException freed) {
+			// "Image is not allocated": NativeImage checks before every read.
+			return null;
+		}
+		if (weight == 0) {
+			return new float[] {0.0F, 0.0F, 0.0F, 0.0F};
+		}
+		return new float[] {
+			(float) linearToSrgb(r / weight), (float) linearToSrgb(g / weight), (float) linearToSrgb(b / weight),
+			(float) visible / (w * h)
+		};
 	}
 
 	private static double srgbToLinear(int c) {
