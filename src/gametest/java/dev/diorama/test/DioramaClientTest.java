@@ -2089,6 +2089,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return mc.reloadResourcePacks();
 		});
 		context.waitFor(mc -> done.isDone() && mc.gui.overlay() == null, 2400);
+		// A reload that failed fails the test, rather than leaving whatever loaded before it failed.
+		done.join();
 		context.waitTicks(10);
 	}
 

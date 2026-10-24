@@ -202,6 +202,11 @@ public final class XaeroRadarIcons {
 	private static @Nullable Icon icon(String value, ResourceManager manager, List<String> problems) {
 		// Xaero splits on every colon, so "item:minecraft:diamond" is three parts.
 		String[] parts = value.split(":");
+		if (parts.length == 0) {
+			// Only colons: nothing Xaero's can read, so skip the entry, not the file.
+			problems.add("\"" + value + "\" isn't a form Xaero's reads");
+			return null;
+		}
 		switch (parts[0]) {
 			case "dot":
 				return Basic.DOT;
