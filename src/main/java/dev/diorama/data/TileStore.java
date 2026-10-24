@@ -5,6 +5,7 @@ import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
+import dev.diorama.bake.TileSpots;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -50,10 +51,15 @@ import org.jspecify.annotations.Nullable;
  * children changed, so zooming out shows everything explored without baking anything. Only the
  * writer builds them: a missing overview tile means nothing under it was ever mapped.
  *
- * <p>File format: {@code OMT1}, the edge length, then the ABGR pixels deflated.
+ * <p>A level-0 tile also keeps its {@link TileSpots}, so the right-click menu still works there
+ * once the chunks are gone.
+ *
+ * <p>File format: {@code OMT1}, the edge length, then deflated: the ABGR pixels, and on level-0
+ * tiles {@code SPT1} and the spots. Versions from before spots read the pixels and stop there.
  */
 public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
+	private static final int SPOTS_MAGIC = 0x53505431;
 	private static final int CACHED_TILES = 24;
 	private static final long WRITE_DELAY_SECONDS = 3;
 	/** After a failed write (a full disk, say), try again this much later. */
@@ -85,10 +91,17 @@ public final class TileStore {
 	private final Map<TileKey, ArrayDeque<TileImage>> handedOver = new HashMap<>();
 	/** Tiles with a merge waiting on the writer thread, so a run of bakes queues one. Guarded by {@code this}. */
 	private final Set<TileKey> mergeQueued = new HashSet<>();
+	/** A saved tile: its pixels, and its spots where it has any. Never modified. */
+	private record Tile(int[] pixels, int @Nullable [] spots) {
+		boolean same(Tile other) {
+			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.spots, other.spots);
+		}
+	}
+
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
-	private final LinkedHashMap<TileKey, int[]> cache = new LinkedHashMap<>(16, 0.75F, true) {
+	private final LinkedHashMap<TileKey, Tile> cache = new LinkedHashMap<>(16, 0.75F, true) {
 		@Override
-		protected boolean removeEldestEntry(Map.Entry<TileKey, int[]> eldest) {
+		protected boolean removeEldestEntry(Map.Entry<TileKey, Tile> eldest) {
 			return this.size() > CACHED_TILES && !TileStore.this.unwritten.containsKey(eldest.getKey());
 		}
 	};
@@ -96,7 +109,7 @@ public final class TileStore {
 	 * Tiles changed since they were last written, kept until a write of exactly these pixels
 	 * succeeds. They're never evicted from the cache meanwhile. Guarded by {@code this}.
 	 */
-	private final Map<TileKey, int[]> unwritten = new HashMap<>();
+	private final Map<TileKey, Tile> unwritten = new HashMap<>();
 
 	/** Level-1 overview tiles above tiles written since the last rebuild. Guarded by {@code this}. */
 	private final Set<TileKey> staleOverviews = new HashSet<>();
@@ -167,17 +180,18 @@ public final class TileStore {
 				if (pixels == null) {
 					continue;
 				}
+				Tile tile = new Tile(pixels, null);
 				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
 				synchronized (this.io) {
 					synchronized (this) {
-						this.cache.put(key, pixels);
+						this.cache.put(key, tile);
 						// Pending until written, like a bake.
-						this.unwritten.put(key, pixels);
+						this.unwritten.put(key, tile);
 					}
 				}
-				boolean saved = this.store(key, pixels);
+				boolean saved = this.store(key, tile);
 				synchronized (this) {
-					if (this.unwritten.get(key) == pixels) {
+					if (this.unwritten.get(key) == tile) {
 						if (saved) {
 							this.unwritten.remove(key);
 						} else if (!this.closed) {
@@ -204,14 +218,24 @@ public final class TileStore {
 	public int @Nullable [] read(TileKey key) {
 		synchronized (this.io) {
 			this.merge(key);
-			return this.saved(key);
+			Tile tile = this.saved(key);
+			return tile == null ? null : tile.pixels;
 		}
 	}
 
-	/** The tile's pixels in memory, else on disk, leaving out bakes not merged yet. Hold {@link #io}. */
-	private int @Nullable [] saved(TileKey key) {
+	/** The saved {@link TileSpots} of a level-0 tile, or null if there are none. Like {@link #read}. */
+	public int @Nullable [] spots(TileKey key) {
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			return tile == null ? null : tile.spots;
+		}
+	}
+
+	/** The tile in memory, else on disk, leaving out bakes not merged yet. Hold {@link #io}. */
+	private @Nullable Tile saved(TileKey key) {
 		synchronized (this) {
-			int[] pending = this.unwritten.get(key);
+			Tile pending = this.unwritten.get(key);
 			if (pending != null) {
 				return pending;
 			}
@@ -219,11 +243,11 @@ public final class TileStore {
 				return this.cache.get(key);
 			}
 		}
-		int[] pixels = this.load(key);
+		Tile tile = this.load(key);
 		synchronized (this) {
-			this.cache.put(key, pixels);
+			this.cache.put(key, tile);
 		}
-		return pixels;
+		return tile;
 	}
 
 	/**
@@ -264,14 +288,14 @@ public final class TileStore {
 				images = List.copyOf(queue);
 			}
 			int size = Projection.TILE_PIXELS;
-			int[] saved = this.saved(key);
+			Tile saved = this.saved(key);
 			boolean changed = false;
 			for (TileImage image : images) {
 				int[] pixels;
 				if (image.isFull()) {
 					pixels = image.mips()[0].clone();
 				} else {
-					pixels = saved == null ? new int[size * size] : saved.clone();
+					pixels = saved == null ? new int[size * size] : saved.pixels.clone();
 					for (TileImage.Patch patch : image.patches()) {
 						int[] block = patch.mips()[0];
 						int edge = TileImage.BLOCK;
@@ -280,12 +304,13 @@ public final class TileStore {
 						}
 					}
 				}
-				if (saved != null ? java.util.Arrays.equals(saved, pixels) : nothingKnown(pixels)) {
+				Tile merged = new Tile(pixels, mergeSpots(saved == null ? null : saved.spots, image));
+				if (saved != null ? saved.same(merged) : nothingKnown(pixels)) {
 					count(true);
 					continue;
 				}
 				count(false);
-				saved = pixels;
+				saved = merged;
 				changed = true;
 			}
 			synchronized (this) {
@@ -309,6 +334,25 @@ public final class TileStore {
 		}
 	}
 
+	/** The spots after a bake: its own where it has them, the saved ones elsewhere. */
+	private static int @Nullable [] mergeSpots(int @Nullable [] saved, TileImage image) {
+		int[] fresh = image.spots();
+		if (fresh == null) {
+			return saved;
+		}
+		if (image.isFull()) {
+			return fresh.clone();
+		}
+		int[] spots = saved == null ? new int[fresh.length] : saved.clone();
+		for (TileImage.Patch patch : image.patches()) {
+			for (int row = patch.blockY() * TileImage.BLOCK; row < (patch.blockY() + 1) * TileImage.BLOCK; row++) {
+				int i = row * TileSpots.COLUMNS + TileSpots.patchColumn(patch);
+				System.arraycopy(fresh, i, spots, i, TileSpots.PATCH_COLUMNS);
+			}
+		}
+		return spots;
+	}
+
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {
@@ -323,11 +367,11 @@ public final class TileStore {
 			for (TileKey key : handed) {
 				this.merge(key);
 			}
-			Map<TileKey, int[]> pending;
+			Map<TileKey, Tile> pending;
 			synchronized (this) {
 				pending = new HashMap<>(this.unwritten);
 			}
-			for (Map.Entry<TileKey, int[]> entry : pending.entrySet()) {
+			for (Map.Entry<TileKey, Tile> entry : pending.entrySet()) {
 				// Nothing to retry with once the world is closed; store() has logged the failure.
 				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0) {
 					synchronized (this) {
@@ -355,19 +399,19 @@ public final class TileStore {
 		if (this.closed) {
 			return;
 		}
-		int[] pixels;
+		Tile tile;
 		synchronized (this) {
-			pixels = this.unwritten.get(key);
+			tile = this.unwritten.get(key);
 		}
-		if (pixels == null) {
+		if (tile == null) {
 			return;
 		}
-		boolean saved = this.store(key, pixels);
+		boolean saved = this.store(key, tile);
 		if (saved && key.lod() == 0) {
 			this.overviewsStale(key);
 		}
 		synchronized (this) {
-			if (this.unwritten.get(key) != pixels) {
+			if (this.unwritten.get(key) != tile) {
 				// A newer bake arrived while this one was being written: write that too.
 				WRITER.schedule(() -> this.write(key), WRITE_DELAY_SECONDS, TimeUnit.SECONDS);
 			} else if (saved) {
@@ -418,7 +462,7 @@ public final class TileStore {
 		return dir.resolve(key.tileU() + "_" + key.tileV() + ".omt");
 	}
 
-	private int @Nullable [] load(TileKey key) {
+	private @Nullable Tile load(TileKey key) {
 		Path file = this.file(key);
 		if (!Files.isRegularFile(file)) {
 			return null;
@@ -428,13 +472,22 @@ public final class TileStore {
 				return null;
 			}
 			int size = Projection.TILE_PIXELS;
-			byte[] bytes = new InflaterInputStream(in).readNBytes(size * size * 4);
+			InflaterInputStream inflated = new InflaterInputStream(in);
+			byte[] bytes = inflated.readNBytes(size * size * 4);
 			if (bytes.length != size * size * 4) {
 				return null;
 			}
 			int[] pixels = new int[size * size];
 			ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-			return pixels;
+			// Tiles saved before spots, and overview tiles, end here.
+			int[] spots = null;
+			byte[] more = inflated.readNBytes(4 + TileSpots.COLUMNS * TileSpots.ROWS * 4);
+			ByteBuffer rest = ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN);
+			if (more.length == 4 + TileSpots.COLUMNS * TileSpots.ROWS * 4 && rest.getInt() == SPOTS_MAGIC) {
+				spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
+				rest.asIntBuffer().get(spots);
+			}
+			return new Tile(pixels, spots);
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read saved tile {}", file, e);
 			return null;
@@ -445,12 +498,19 @@ public final class TileStore {
 	 * Writes to a temporary file and moves it over the old one, so a crash can't leave half a tile.
 	 * Returns whether it worked.
 	 */
-	private boolean store(TileKey key, int[] pixels) {
+	private boolean store(TileKey key, Tile tile) {
 		Path file = this.file(key);
+		int[] pixels = tile.pixels;
+		int[] spots = tile.spots;
 		try {
 			Files.createDirectories(file.getParent());
-			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + (spots == null ? 0 : 4 + spots.length * 4)).order(ByteOrder.LITTLE_ENDIAN);
 			buffer.asIntBuffer().put(pixels);
+			if (spots != null) {
+				buffer.position(pixels.length * 4);
+				buffer.putInt(SPOTS_MAGIC);
+				buffer.asIntBuffer().put(spots);
+			}
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(pixels.length);
 			try (DataOutputStream data = new DataOutputStream(bytes)) {
 				data.writeInt(MAGIC);

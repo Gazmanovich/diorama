@@ -18,6 +18,10 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
@@ -107,6 +111,8 @@ public final class MapScreen extends Screen {
 	private int spotLayer;
 	private int spotAge;
 	private @Nullable BlockPos spot;
+	/** The latest look-up of {@link #spot} from a saved tile; an older one's answer is dropped. */
+	private @Nullable Object spotRequest;
 
 	public MapScreen() {
 		super(Component.translatable("diorama.screen.title"));
@@ -438,21 +444,56 @@ public final class MapScreen extends Screen {
 	/** Opens the menu for what's under a screen point: a waypoint's, or the spot's. */
 	private void openMenu(double screenX, double screenY) {
 		WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, screenX, screenY);
-		List<MapMenu.Item> items = pin != null ? this.waypointItems(pin.waypoint()) : this.spotItems(this.spotAt(screenX, screenY));
-		this.menu = new MapMenu(items, this.font, screenX, screenY, this.width, this.height);
+		if (pin != null) {
+			this.menu = new MapMenu(this.waypointItems(pin.waypoint()), this.font, screenX, screenY, this.width, this.height);
+			return;
+		}
+		CompletableFuture<@Nullable BlockPos> spot = this.spotAt(screenX, screenY);
+		try {
+			// Where the chunks are gone, the spot comes off the disk, usually in a few milliseconds.
+			BlockPos found = spot.get(SPOT_WAIT_MS, TimeUnit.MILLISECONDS);
+			this.menu = new MapMenu(this.spotItems(found), this.font, screenX, screenY, this.width, this.height);
+		} catch (TimeoutException e) {
+			// A slow disk: say so until it answers, unless the menu has been closed or replaced by then.
+			MapMenu waiting = new MapMenu(List.of(MapMenu.Item.info(Component.translatable("diorama.menu.finding"))),
+				this.font, screenX, screenY, this.width, this.height);
+			this.menu = waiting;
+			spot.thenAcceptAsync(found -> {
+				if (this.menu == waiting) {
+					this.menu = new MapMenu(this.spotItems(found), this.font, screenX, screenY, this.width, this.height);
+				}
+			}, this.minecraft);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		} catch (ExecutionException e) {
+			this.menu = new MapMenu(this.spotItems(null), this.font, screenX, screenY, this.width, this.height);
+		}
 	}
 
-	/** Where a player would stand on the block shown under a screen point; null where the map has nothing. */
-	private @Nullable BlockPos spotAt(double screenX, double screenY) {
+	/** How long a right-click waits for a spot from a saved tile before opening the menu without it. */
+	private static final long SPOT_WAIT_MS = 50;
+
+	/**
+	 * Where a player would stand on the block shown under a screen point; null where the map has
+	 * nothing. Answered at once from the map's chunks; where they're gone, from the spots saved
+	 * with the tile, which takes a read off the render thread.
+	 */
+	private CompletableFuture<@Nullable BlockPos> spotAt(double screenX, double screenY) {
 		MapSession session = MapSession.get();
 		BlockLooks looks = BlockLooks.get();
 		MapViewport.View view = this.lastView;
 		if (session == null || looks == null || view == null) {
-			return null;
+			return CompletableFuture.completedFuture(null);
 		}
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
 		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
-		return MapPick.standingSpot(session.map(), looks, u, v, this.layer, session.map().fogOfWar());
+		TileKey tile = new TileKey(this.layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
+		MapPick pick = new MapPick(session.map(), looks, tile, session.map().fogOfWar());
+		return switch (pick.pick(u, v)) {
+			case MapPick.FOUND -> CompletableFuture.completedFuture(new BlockPos((int) Math.floor(u), pick.y, pick.z));
+			case MapPick.NOTHING -> CompletableFuture.completedFuture(null);
+			default -> session.map().savedSpot(this.layer, u, v);
+		};
 	}
 
 	private List<MapMenu.Item> spotItems(@Nullable BlockPos spot) {
@@ -819,12 +860,28 @@ public final class MapScreen extends Screen {
 		double v = view.centerV() + (mouseY - view.y() - view.height() / 2.0) / view.zoom();
 		int blockU = (int) Math.floor(u);
 		int blockV = (int) Math.floor(v);
-		if (blockU != this.spotU || blockV != this.spotV || this.layer != this.spotLayer || ++this.spotAge > 10) {
+		boolean moved = blockU != this.spotU || blockV != this.spotV || this.layer != this.spotLayer;
+		if (moved || ++this.spotAge > 10) {
 			this.spotU = blockU;
 			this.spotV = blockV;
 			this.spotLayer = this.layer;
 			this.spotAge = 0;
-			this.spot = this.spotAt(mouseX, mouseY);
+			CompletableFuture<@Nullable BlockPos> found = this.spotAt(mouseX, mouseY);
+			Object request = new Object();
+			this.spotRequest = request;
+			if (found.isDone()) {
+				this.spot = found.getNow(null);
+			} else {
+				// From a saved tile: the old answer stands meanwhile if the mouse is still on its block.
+				if (moved) {
+					this.spot = null;
+				}
+				found.thenAcceptAsync(spot -> {
+					if (this.spotRequest == request) {
+						this.spot = spot;
+					}
+				}, this.minecraft);
+			}
 		}
 		BlockPos spot = this.spot;
 		if (spot == null) {

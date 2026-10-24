@@ -8,6 +8,7 @@ import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
+import dev.diorama.bake.TileSpots;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.SeenBlocks;
 import dev.diorama.data.TileStore;
@@ -21,11 +22,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.core.BlockPos;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -680,8 +683,10 @@ public final class MapLevel implements ChunkSource {
 			try {
 				long start = System.nanoTime();
 				int[] saved = store == null ? null : store.read(key);
-				this.finished.add(TileBaker.bake(key, this, looks, blocks, fog, saved, overlays).withGeneration(generation));
-				logBakeTime(System.nanoTime() - start, blocks == null);
+				TileImage image = TileBaker.bake(key, this, looks, blocks, fog, saved, overlays);
+				long spots = System.nanoTime();
+				this.finished.add(this.withSpots(image, looks, fog, store).withGeneration(generation));
+				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to bake tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
@@ -704,7 +709,7 @@ public final class MapLevel implements ChunkSource {
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, this, looks, null, fog, saved, overlays)
 							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
-						this.finished.add(image.withGeneration(generation));
+						this.finished.add(this.withSpots(image, looks, fog, store).withGeneration(generation));
 					} catch (Throwable t) {
 						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
@@ -757,6 +762,33 @@ public final class MapLevel implements ChunkSource {
 		});
 	}
 
+	/**
+	 * A bake of a tile to be saved, with its {@link TileSpots} worked out from the same chunks, so
+	 * the right-click menu still works there once they're gone. Baker threads.
+	 */
+	private TileImage withSpots(TileImage image, BlockLooks looks, boolean fog, @Nullable TileStore store) {
+		if (store == null) {
+			return image;
+		}
+		return image.withSpots(TileSpots.pick(image, this, looks, fog, store.spots(image.key())));
+	}
+
+	/**
+	 * Where a player would stand at a map point by the spots saved with its tile, for where the
+	 * chunks are gone. Reads the disk off the render thread; null if nothing was saved there.
+	 */
+	public CompletableFuture<@Nullable BlockPos> savedSpot(int layer, double u, double v) {
+		TileStore store = this.store;
+		if (store == null || layer != TileKey.SURFACE) {
+			return CompletableFuture.completedFuture(null);
+		}
+		TileKey key = new TileKey(layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
+		return CompletableFuture.supplyAsync(() -> TileSpots.spot(key, store.spots(key), u, v)).exceptionally(t -> {
+			Diorama.LOGGER.warn("Couldn't read the saved spots of tile {}", key, t);
+			return null;
+		});
+	}
+
 	private void loadOverview(TileKey key, TileStore store) {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
@@ -798,10 +830,12 @@ public final class MapLevel implements ChunkSource {
 
 	private static final java.util.concurrent.atomic.AtomicLong BAKE_NANOS = new java.util.concurrent.atomic.AtomicLong();
 	private static final AtomicInteger BAKE_COUNT = new AtomicInteger();
+	/** The part of {@link #BAKE_NANOS} spent in {@link #withSpots}. */
+	private static final java.util.concurrent.atomic.AtomicLong SPOT_NANOS = new java.util.concurrent.atomic.AtomicLong();
 
 	private static final AtomicInteger PARTIAL_COUNT = new AtomicInteger();
 
-	private static void logBakeTime(long nanos, boolean full) {
+	private static void logBakeTime(long nanos, long spotNanos, boolean full) {
 		if (!full) {
 			if (PARTIAL_COUNT.incrementAndGet() % 50 == 0) {
 				Diorama.LOGGER.info("Re-baked {} partial tiles", PARTIAL_COUNT.get());
@@ -809,9 +843,10 @@ public final class MapLevel implements ChunkSource {
 			return;
 		}
 		long total = BAKE_NANOS.addAndGet(nanos);
+		long spots = SPOT_NANOS.addAndGet(spotNanos);
 		int count = BAKE_COUNT.incrementAndGet();
 		if (count % 25 == 0) {
-			Diorama.LOGGER.info("Baked {} full tiles, {} ms average", count, total / count / 1_000_000);
+			Diorama.LOGGER.info("Baked {} full tiles, {} ms average, {} ms of it finding spots", count, total / count / 1_000_000, spots / count / 1_000_000);
 		}
 	}
 

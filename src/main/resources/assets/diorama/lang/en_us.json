@@ -56,6 +56,7 @@
 	"diorama.waypoint.temporary": "Temporary",
 	"diorama.menu.where": "%s, %s, %s · %s m",
 	"diorama.menu.not_mapped": "Nothing mapped here",
+	"diorama.menu.finding": "Finding the ground…",
 	"diorama.menu.teleport_here": "Teleport here",
 	"diorama.menu.add_waypoint": "Add waypoint here",
 	"diorama.menu.add_temporary": "Add temporary waypoint",
