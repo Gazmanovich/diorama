@@ -42,9 +42,10 @@ public final class ModelFaces {
 	/**
 	 * The face of a model as it's drawn for one mob, or null if it has no head this can read.
 	 * {@code state} is the mob's render state, which says which parts it shows; before 1.21.2 there
-	 * was none, and the parts are as the model was last drawn. Render thread only.
+	 * was none, and the parts are as the model was last drawn. The model is left as it was found.
+	 * Render thread only; public for tests.
 	 */
-	static MobFaces.@Nullable Face of(Model model, @Nullable Object state) {
+	public static MobFaces.@Nullable Face of(Model model, @Nullable Object state) {
 		try {
 			return read(model, state);
 		} catch (RuntimeException e) {
@@ -103,9 +104,10 @@ public final class ModelFaces {
 			}
 			//?}
 			List<ModelPart> headParts = parts(head);
-			BitSet shown = new BitSet(headParts.size());
+			BitSet shown = new BitSet(headParts.size() * 2);
 			for (int i = 0; i < headParts.size(); i++) {
-				shown.set(i, headParts.get(i).visible && !headParts.get(i).skipDraw);
+				shown.set(i * 2, headParts.get(i).visible);
+				shown.set(i * 2 + 1, headParts.get(i).skipDraw);
 			}
 			Map<BitSet, Optional<MobFaces.Face>> faces = FACES.computeIfAbsent(model, m -> new HashMap<>());
 			Optional<MobFaces.Face> face = faces.get(shown);
@@ -231,10 +233,13 @@ public final class ModelFaces {
 		return part;
 	}
 
-	/** Whether every part on the way from the head to this one is shown. */
+	/**
+	 * Whether a part's boxes are drawn: it and every part on the way from the head to it are
+	 * visible, and it doesn't skip its own boxes (which, unlike hiding, leaves its children drawn).
+	 */
 	private static boolean shown(ModelPart head, String path) {
 		ModelPart part = head;
-		if (!part.visible || part.skipDraw) {
+		if (!part.visible) {
 			return false;
 		}
 		for (String name : path.split("/")) {
@@ -245,11 +250,11 @@ public final class ModelFaces {
 				return false;
 			}
 			part = part.getChild(name);
-			if (!part.visible || part.skipDraw) {
+			if (!part.visible) {
 				return false;
 			}
 		}
-		return true;
+		return !part.skipDraw;
 	}
 
 	/** A part and every part below it. */

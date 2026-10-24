@@ -305,14 +305,12 @@ public final class MobFaces {
 	private static boolean ageableModelsLooked;
 
 	/**
-	 * The model a renderer draws a mob with. Renderers that keep an adult's and a baby's model
-	 * only switch between them as they draw, so their current model is whichever they drew last.
+	 * The model an ageable mob's renderer draws it with. Renderers that keep an adult's and a
+	 * baby's model only switch between them as they draw, so their current model is whichever
+	 * they drew last.
 	 */
 	@SuppressWarnings("rawtypes")
-	private static @Nullable Model model(LivingEntityRenderer renderer, boolean baby) {
-		if (!(renderer instanceof net.minecraft.client.renderer.entity.AgeableMobRenderer)) {
-			return renderer.getModel();
-		}
+	private static @Nullable Model ageableModel(LivingEntityRenderer renderer, boolean baby) {
 		if (!ageableModelsLooked) {
 			ageableModelsLooked = true;
 			// Its two model fields, adult then baby as declared; their names depend on the mappings, their order doesn't.
@@ -343,6 +341,56 @@ public final class MobFaces {
 	}
 	//?}
 
+	/** Each renderer class's own model fields, beyond the one every living-entity renderer has. */
+	private static final Map<Class<?>, List<java.lang.reflect.Field>> MODEL_FIELDS = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/**
+	 * The face read off the model a renderer draws a mob with. A renderer can keep other models
+	 * it switches to as it draws (a sulfur cube's small one, a mule's), and which one is this
+	 * mob's isn't known until then: the face is only used if all of them give the same one.
+	 */
+	@SuppressWarnings("rawtypes")
+	private static @Nullable Face modelFace(LivingEntityRenderer renderer, boolean baby, @Nullable Object state) {
+		//? if >=1.21.2 {
+		if (renderer instanceof net.minecraft.client.renderer.entity.AgeableMobRenderer) {
+			Model model = ageableModel(renderer, baby);
+			return model == null ? null : ModelFaces.of(model, state);
+		}
+		//?}
+		Face face = ModelFaces.of(renderer.getModel(), state);
+		for (java.lang.reflect.Field field : MODEL_FIELDS.computeIfAbsent(renderer.getClass(), MobFaces::modelFields)) {
+			try {
+				Object other = field.get(renderer);
+				if (other instanceof Model model && other != renderer.getModel()) {
+					Face otherFace = ModelFaces.of(model, state);
+					if (otherFace != null && !otherFace.equals(face)) {
+						return null;
+					}
+				}
+			} catch (ReflectiveOperationException | RuntimeException e) {
+				return null;
+			}
+		}
+		return face;
+	}
+
+	private static List<java.lang.reflect.Field> modelFields(Class<?> type) {
+		List<java.lang.reflect.Field> fields = new java.util.ArrayList<>();
+		for (Class<?> c = type; c != null && c != LivingEntityRenderer.class; c = c.getSuperclass()) {
+			for (java.lang.reflect.Field field : c.getDeclaredFields()) {
+				if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) && Model.class.isAssignableFrom(field.getType())) {
+					try {
+						field.setAccessible(true);
+						fields.add(field);
+					} catch (RuntimeException e) {
+						// Unreadable: left out.
+					}
+				}
+			}
+		}
+		return List.copyOf(fields);
+	}
+
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	private static Looked lookUp(Entity entity, int age, boolean baby) {
 		//? if >=1.21.2 {
@@ -353,9 +401,7 @@ public final class MobFaces {
 		}
 		try {
 			LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
-			Model model = model(living, baby);
-			Face face = model == null ? null : ModelFaces.of(model, state);
-			return new Looked(((LivingEntityRenderer) living).getTextureLocation(state), face, age, baby);
+			return new Looked(((LivingEntityRenderer) living).getTextureLocation(state), modelFace(living, baby, state), age, baby);
 		} catch (RuntimeException e) {
 			return new Looked(null, null, age, baby);
 		}
@@ -365,7 +411,7 @@ public final class MobFaces {
 		EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
 		try {
 			Identifier texture = ((EntityRenderer) renderer).getTextureLocation(entity);
-			Face face = renderer instanceof LivingEntityRenderer living ? ModelFaces.of(living.getModel(), null) : null;
+			Face face = renderer instanceof LivingEntityRenderer living ? modelFace(living, baby, null) : null;
 			return new Looked(texture, face, age, baby);
 		} catch (RuntimeException e) {
 			return new Looked(null, null, age, baby);

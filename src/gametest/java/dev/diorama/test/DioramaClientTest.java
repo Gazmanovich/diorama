@@ -1786,7 +1786,44 @@ public class DioramaClientTest implements FabricClientGameTest {
 			int mz = z - 18 + (i / columns) * 3;
 			world.getServer().runCommand("summon " + names.get(i) + " " + mx + " " + y + " " + mz + " " + still);
 		}
+		// A baby camel beside the adult: on versions where babies have a model of their own, each gets its own face.
+		world.getServer().runCommand("summon camel " + (x + 18) + " " + y + " " + (z + 18) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,Age:-24000}");
 		context.waitTicks(40);
+		//? if >=1.21.2 {
+		context.runOnClient(mc -> {
+			// Reading a face runs the model's animation and moves its parts; it must leave the model as it found it.
+			net.minecraft.world.entity.Entity creeper = null;
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CREEPER) {
+					creeper = entity;
+				}
+			}
+			if (creeper == null) {
+				throw new AssertionError("No creeper to read a face off");
+			}
+			@SuppressWarnings({"unchecked", "rawtypes"})
+			net.minecraft.client.renderer.entity.LivingEntityRenderer renderer =
+				(net.minecraft.client.renderer.entity.LivingEntityRenderer) mc.getEntityRenderDispatcher().getRenderer(creeper);
+			net.minecraft.client.model.Model model = renderer.getModel();
+			net.minecraft.client.model.geom.ModelPart head = model.root().getChild("head");
+			net.minecraft.client.model.geom.PartPose pose = head.storePose();
+			float scale = head.xScale;
+			boolean skip = head.skipDraw;
+			head.yRot = 0.7F;
+			head.xScale = 1.5F;
+			head.skipDraw = true;
+			@SuppressWarnings("unchecked")
+			Object state = renderer.createRenderState((net.minecraft.world.entity.LivingEntity) creeper, 1.0F);
+			dev.diorama.render.ModelFaces.of(model, state);
+			boolean kept = head.yRot == 0.7F && head.xScale == 1.5F && head.skipDraw;
+			head.loadPose(pose);
+			head.xScale = scale;
+			head.skipDraw = skip;
+			if (!kept) {
+				throw new AssertionError("Reading a face changed the creeper model's head");
+			}
+		});
+		//?}
 		context.runOnClient(mc -> {
 			int listed = 0;
 			int same = 0;
@@ -1830,6 +1867,22 @@ public class DioramaClientTest implements FabricClientGameTest {
 					wrong.append("\n  ").append(name).append(": not in the world");
 				}
 			}
+			//? if >=26.1 {
+			String adultCamel = null;
+			String babyCamel = null;
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CAMEL && entity instanceof net.minecraft.world.entity.LivingEntity living) {
+					if (living.isBaby()) {
+						babyCamel = dev.diorama.render.MobFaces.describeFromModel(entity);
+					} else {
+						adultCamel = dev.diorama.render.MobFaces.describeFromModel(entity);
+					}
+				}
+			}
+			if (adultCamel == null || babyCamel == null || adultCamel.equals(babyCamel)) {
+				wrong.append("\n  camel: adult ").append(adultCamel).append(", baby ").append(babyCamel).append(" (each should have its own model's face)");
+			}
+			//?}
 			if (!wrong.isEmpty()) {
 				throw new AssertionError("Faces read off the model differ from the hand-made ones:" + wrong);
 			}
