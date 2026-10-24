@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.resources.Identifier;
 //? if >=1.21.6 {
 import org.joml.Vector2f;
@@ -29,6 +30,9 @@ import org.joml.Vector3f;
  * runs (an icon's first run of pieces of one texture, then its second, and so on), and pieces of
  * the same run and texture from different icons draw together, which only reorders pieces that
  * don't overlap.
+ *
+ * <p>A measuring batch draws nothing: it only records where an icon's pieces would go, so the
+ * round minimap can leave off icons that would cross its rim.
  */
 public final class IconBatch {
 	/**
@@ -41,7 +45,10 @@ public final class IconBatch {
 	private static int[] grid = new int[0];
 
 	private final GuiGraphicsExtractor graphics;
+	/** Whether pieces are recorded rather than drawn as they come. */
 	private final boolean batched;
+	/** Whether recorded pieces are never drawn. */
+	private final boolean measuring;
 	// Per quad: its four corners (x y z, already in GUI coordinates), UVs, colour, texture and run.
 	private float[] xyz = new float[0];
 	private float[] uvs = new float[0];
@@ -60,20 +67,26 @@ public final class IconBatch {
 	private record SampledTexture(MapTexture texture, Sampling sampling) {
 	}
 
-	private IconBatch(GuiGraphicsExtractor graphics, boolean batched) {
+	private IconBatch(GuiGraphicsExtractor graphics, boolean batched, boolean measuring) {
 		this.graphics = graphics;
 		this.batched = batched;
+		this.measuring = measuring;
 		this.textures.add(null);
 	}
 
 	/** Draws everything as it comes. */
 	public static IconBatch direct(GuiGraphicsExtractor graphics) {
-		return new IconBatch(graphics, false);
+		return new IconBatch(graphics, false, false);
 	}
 
 	/** Collects icons until {@link #draw()}. */
 	public static IconBatch batched(GuiGraphicsExtractor graphics) {
-		return new IconBatch(graphics, true);
+		return new IconBatch(graphics, true, false);
+	}
+
+	/** Draws nothing; see {@link #inside} and {@link #clear}. */
+	public static IconBatch measuring(GuiGraphicsExtractor graphics) {
+		return new IconBatch(graphics, true, true);
 	}
 
 	public GuiGraphicsExtractor graphics() {
@@ -105,6 +118,34 @@ public final class IconBatch {
 			return;
 		}
 		this.add(this.textureId(new SampledTexture(texture, sampling)), x0, y0, x1, y1, u0, v0, u1, v1, argb);
+	}
+
+	/** {@link MapCanvas#playerFace}. Batched icons never carry faces, so a batch draws one straight away. */
+	public void playerFace(AbstractClientPlayer player, int x, int y, int size, int argb) {
+		if (this.measuring) {
+			this.add(0, x, y, x + size, y + size, 0, 0, 0, 0, argb);
+			return;
+		}
+		MapCanvas.of(this.graphics).playerFace(player, x, y, size, argb);
+	}
+
+	/** Whether every corner of every piece recorded since {@link #clear} is inside the circle. */
+	public boolean inside(Circle circle) {
+		for (int p = 0; p < this.quads * 4; p++) {
+			if (!circle.contains(this.xyz[p * 3], this.xyz[p * 3 + 1])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Forgets everything recorded, to measure the next icon. */
+	public void clear() {
+		this.quads = 0;
+		this.iconStarts.clear();
+		this.iconStarts.add(0);
+		this.run = 0;
+		this.lastTexture = -1;
 	}
 
 	/** Ends an icon: everything since the last call is one icon. */
@@ -170,7 +211,7 @@ public final class IconBatch {
 	public void draw() {
 		this.endIcon();
 		int icons = this.iconStarts.size() - 1;
-		if (!this.batched || icons == 0) {
+		if (!this.batched || this.measuring || icons == 0) {
 			return;
 		}
 		int[] layers = this.layers(icons);

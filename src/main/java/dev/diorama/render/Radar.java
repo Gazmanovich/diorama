@@ -4,7 +4,6 @@ import com.google.common.collect.Iterables;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.TrackedPlayers;
-import dev.diorama.render.gpu.MapCanvas;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -85,8 +84,6 @@ public final class Radar {
 		// the surface view.
 		double range = settings.radarRange;
 		float margin = 12;
-		// A round view can't cut icons to its circle, so it shows only those wholly inside it.
-		Circle circle = view.round() ? Circle.in(view) : null;
 		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
 			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
 				continue;
@@ -104,12 +101,7 @@ public final class Radar {
 			if (x < view.x() - margin || y < view.y() - margin || x > view.x() + view.width() + margin || y > view.y() + view.height() + margin) {
 				continue;
 			}
-			float size = size(kind, view.zoom(), fullscreen);
-			// Half the widest icon (a mob's box is 1.6 times its size) with its outline, out to its corner.
-			if (circle != null && Math.hypot(x - circle.cx, y - circle.cy) > circle.r - (size * 0.8F + 1) * 1.42F) {
-				continue;
-			}
-			blips.add(new Blip(entity, kind, x, y, pos.y - selfY, size));
+			blips.add(new Blip(entity, kind, x, y, pos.y - selfY, size(kind, view.zoom(), fullscreen)));
 		}
 		blips.sort(Comparator.comparingInt(b -> b.kind().ordinal()));
 		return blips;
@@ -142,36 +134,52 @@ public final class Radar {
 		IconBatch icons = players ? IconBatch.direct(graphics) : IconBatch.batched(graphics);
 		Settings settings = Settings.get();
 		boolean names = settings.playerNames == Settings.NameTags.ALWAYS || settings.playerNames == Settings.NameTags.FULLSCREEN && fullscreen;
+		// A round view can't cut icons to its circle, so it shows only those wholly inside it, as drawn:
+		// pixel heads snap to whole screen pixels and can come out bigger than their size.
+		Circle circle = view.round() ? Circle.in(view) : null;
+		IconBatch measure = circle == null ? null : IconBatch.measuring(graphics);
 		for (Blip blip : blips) {
 			if ((blip.kind() == Kind.PLAYER) != players) {
 				continue;
 			}
 			int alpha = alphaFor(blip.dy());
-			switch (settings.radarStyle) {
-				case FRAMED -> framed(icons, blip, alpha);
-				case DOTS -> dot(icons, blip, alpha);
-				default -> pixelHead(icons, blip, alpha, settings.radarTypeOutline);
+			if (measure != null) {
+				measure.clear();
+				icon(measure, blip, alpha, settings);
+				if (!measure.inside(circle)) {
+					continue;
+				}
 			}
+			icon(icons, blip, alpha, settings);
 			if (names && blip.kind() == Kind.PLAYER) {
 				nameTag(graphics, blip, alpha);
-			}
-			if (Math.abs(blip.dy()) > CARET_HEIGHT) {
-				boolean below = blip.dy() < 0;
-				float s = blip.size();
-				if (settings.radarStyle == Settings.RadarStyle.FRAMED) {
-					float caret = Math.max(4, s * 0.7F);
-					float cx = blip.x() + s * 0.55F + caret * 0.3F;
-					float cy = blip.y() - s * 0.45F;
-					MapIcons.caret(icons, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
-					MapIcons.caret(icons, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
-				} else {
-					pixelCaret(icons, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
-				}
 			}
 			icons.endIcon();
 		}
 		icons.draw();
 		graphics.disableScissor();
+	}
+
+	/** One blip's icon in the radar style, with a caret if it's well above or below. */
+	private static void icon(IconBatch icons, Blip blip, int alpha, Settings settings) {
+		switch (settings.radarStyle) {
+			case FRAMED -> framed(icons, blip, alpha);
+			case DOTS -> dot(icons, blip, alpha);
+			default -> pixelHead(icons, blip, alpha, settings.radarTypeOutline);
+		}
+		if (Math.abs(blip.dy()) > CARET_HEIGHT) {
+			boolean below = blip.dy() < 0;
+			float s = blip.size();
+			if (settings.radarStyle == Settings.RadarStyle.FRAMED) {
+				float caret = Math.max(4, s * 0.7F);
+				float cx = blip.x() + s * 0.55F + caret * 0.3F;
+				float cy = blip.y() - s * 0.45F;
+				MapIcons.caret(icons, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
+				MapIcons.caret(icons, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
+			} else {
+				pixelCaret(icons, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
+			}
+		}
 	}
 
 	/** Master's look: a player's face on a dark disc, a mob's face in a dark box framed in its kind's colour. */
@@ -183,7 +191,7 @@ public final class Radar {
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(blip.x() - s / 2, blip.y() - s / 2);
 			graphics.pose().scale(s / 8);
-			MapCanvas.of(graphics).playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
+			icons.playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
 		} else if (MobFaces.has(blip.entity())) {
 			int box = Math.round(s * 1.6F);
@@ -211,7 +219,7 @@ public final class Radar {
 		if (blip.kind() == Kind.PLAYER && blip.entity() instanceof AbstractClientPlayer player) {
 			float texel = texel(s, 8);
 			pixelFrame(icons, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
-			MapCanvas.of(graphics).playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
+			icons.playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
 		} else if (!MobFaces.drawPixel(icons, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
 			dot(icons, blip, alpha);

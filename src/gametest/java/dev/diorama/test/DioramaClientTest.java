@@ -1778,6 +1778,28 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
 		context.waitTicks(5);
 		context.takeScreenshot("radar-01c-round-minimap");
+		// Two pigs on each diagonal near the rim, at GUI scale 2, where a pig's head snaps to 8 pixels,
+		// more than its size asks for. The inner one's head fits inside the ring and shows; the
+		// outer one's would cross it, so it's left off. They're off the cleared patch, so they hang in
+		// the air at the player's height.
+		int radarScale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		setGuiScale(context, 2);
+		Vec3 feet = context.computeOnClient(mc -> mc.player.position());
+		double zoom = context.computeOnClient(mc -> Settings.get().zoom());
+		String pig = "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b}";
+		for (double radius : new double[] {37, 41.5}) {
+			for (int corner = 0; corner < 4; corner++) {
+				double dx = (corner % 2 == 0 ? 1 : -1) * radius / Math.sqrt(2) / zoom;
+				double dz = (corner < 2 ? 1 : -1) * radius / Math.sqrt(2) / zoom / Projection.sin();
+				int bx = (int) Math.floor(feet.x + dx);
+				int bz = (int) Math.floor(feet.z + dz);
+				world.getServer().runCommand("fill " + bx + " " + y + " " + bz + " " + bx + " " + (y + 1) + " " + bz + " air");
+				world.getServer().runCommand("summon pig " + (feet.x + dx) + " " + feet.y + " " + (feet.z + dz) + " " + pig);
+			}
+		}
+		settle(context, 10);
+		context.takeScreenshot("radar-01d-round-rim");
+		setGuiScale(context, radarScale);
 		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.SQUARE);
 		world.getServer().runCommand("kill @e[type=pig]");
 
