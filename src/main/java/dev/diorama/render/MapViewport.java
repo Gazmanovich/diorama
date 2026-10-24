@@ -34,8 +34,15 @@ public final class MapViewport {
 	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast) {
 	}
 
-	/** Where and how big a map is drawn, and what part of the map it shows. */
-	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
+	/**
+	 * Where and how big a map is drawn, and what part of the map it shows. A {@code round} view
+	 * shows only the circle filling it (the round minimap).
+	 */
+	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round) {
+		public View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
+			this(x, y, width, height, centerU, centerV, zoom, layer, false);
+		}
+
 		public double minU() {
 			return this.centerU - this.width / 2.0 / this.zoom;
 		}
@@ -67,7 +74,12 @@ public final class MapViewport {
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
 		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
 		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
-		graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
+		if (view.round()) {
+			MapCanvas canvas = MapCanvas.of(graphics);
+			Circle.in(view).fill((corners, uvs) -> canvas.solid(corners, background));
+		} else {
+			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
+		}
 
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0);
 		this.drawFog(graphics, level, view);
@@ -150,6 +162,7 @@ public final class MapViewport {
 		Sampling sampling = view.zoom() >= Projection.PIXELS_PER_UNIT ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
 		MapCanvas canvas = MapCanvas.of(graphics);
 		float size = (float) (units * view.zoom());
+		Circle circle = view.round() ? Circle.in(view) : null;
 		for (int tu = tu0 - 1; tu <= tu1 + 1; tu++) {
 			for (int tv = tv0 - 1; tv <= tv1 + 1; tv++) {
 				TileKey key = new TileKey(view.layer(), tu, tv, lod);
@@ -163,8 +176,17 @@ public final class MapViewport {
 				}
 				float sx = view.screenX(tu * units);
 				float sy = view.screenY(tv * units);
-				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
 				MapTexture overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
+				if (circle != null) {
+					circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1, (corners, uvs) -> {
+						canvas.quad(tile.texture(), sampling, corners, uvs, -1);
+						if (overlay != null) {
+							canvas.quad(overlay, sampling, corners, uvs, -1);
+						}
+					});
+					continue;
+				}
+				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
 				if (overlay != null) {
 					canvas.rect(overlay, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
 				}
@@ -209,7 +231,14 @@ public final class MapViewport {
 		int quality = (fast ? 4 : 0) | (level.roofless() ? 1 : 0);
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32) << 16 | (noiseV * 32) << 8 | fogCode;
 
-		MapCanvas.of(graphics).fog(
+		MapCanvas canvas = MapCanvas.of(graphics);
+		if (view.round()) {
+			MapTexture mask = this.maskTexture;
+			Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1,
+				(corners, uvs) -> canvas.fog(mask, FogTextures.noise(), corners, uvs, view.x(), view.y(), view.width(), view.height(), params));
+			return;
+		}
+		canvas.fog(
 			this.maskTexture, FogTextures.noise(),
 			view.x(), view.y(), view.width(), view.height(),
 			mu0, mv0, mu1, mv1,

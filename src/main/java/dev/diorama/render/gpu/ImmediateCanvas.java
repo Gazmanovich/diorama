@@ -99,12 +99,15 @@ final class ImmediateCanvas implements MapCanvas {
 	}
 
 	@Override
-	public void fog(MapTexture mask, MapTexture noise, int x, int y, int width, int height, float u0, float v0, float u1, float v1, int params) {
+	public void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
 		if (!LegacyShaders.fogReady()) {
 			return;
 		}
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
-		this.rect(mesh, x, y, x + width, y + height, u0, v0, u1, v1, params);
+		Matrix4f pose = this.graphics.pose().last().pose();
+		for (int i = 0; i < 4; i++) {
+			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(params);
+		}
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
 		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
 		LegacyShaders.drawFog(mesh.buildOrThrow());

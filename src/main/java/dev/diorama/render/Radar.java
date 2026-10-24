@@ -85,6 +85,8 @@ public final class Radar {
 		// the surface view.
 		double range = settings.radarRange;
 		float margin = 12;
+		// A round view shows what's inside its circle; icons can't be cut to it, so ones outside are left off.
+		Circle circle = view.round() ? Circle.in(view) : null;
 		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
 			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
 				continue;
@@ -100,6 +102,9 @@ public final class Radar {
 			float x = view.screenX(pos.x);
 			float y = view.screenY(Projection.v(pos.y, pos.z));
 			if (x < view.x() - margin || y < view.y() - margin || x > view.x() + view.width() + margin || y > view.y() + view.height() + margin) {
+				continue;
+			}
+			if (circle != null && !circle.contains(x, y)) {
 				continue;
 			}
 			blips.add(new Blip(entity, kind, x, y, pos.y - selfY, size(kind, view.zoom(), fullscreen)));

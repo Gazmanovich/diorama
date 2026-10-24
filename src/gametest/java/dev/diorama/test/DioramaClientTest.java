@@ -1769,6 +1769,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		settle(context, 60);
 		context.takeScreenshot("radar-01-minimap");
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+		context.waitTicks(5);
+		context.takeScreenshot("radar-01b-round-minimap");
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.SQUARE);
 
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 6.0, TileKey.SURFACE);
@@ -1935,6 +1939,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-01-minimap");
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-01b-round-minimap");
+		context.runOnClient(mc -> Settings.get().minimapFrame = Settings.Frame.MINECRAFT);
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-01c-round-minecraft-frame");
+		context.runOnClient(mc -> {
+			Settings.get().minimapShape = Settings.Shape.SQUARE;
+			Settings.get().minimapFrame = Settings.Frame.CLASSIC;
+		});
 
 		// Face Home: its label shows in the world with its name and distance.
 		BlockPos home = context.computeOnClient(mc -> {
@@ -3626,6 +3640,23 @@ public class DioramaClientTest implements FabricClientGameTest {
 		click(context, "Compass");
 		if (!context.computeOnClient(mc -> Settings.get().compass)) {
 			throw new AssertionError("Clicking Compass again didn't switch it on");
+		}
+		// Shape switches the preview to a circle; switched off, only the circle and its lines dim.
+		click(context, "Shape: ");
+		if (context.computeOnClient(mc -> Settings.get().minimapShape) != Settings.Shape.ROUND) {
+			throw new AssertionError("Clicking Shape didn't make the minimap round");
+		}
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-round");
+		click(context, "Minimap", 0.05);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-round-off");
+		click(context, "Minimap", 0.05);
+		click(context, "Shape: ");
+		if (context.computeOnClient(mc -> Settings.get().minimapShape) != Settings.Shape.SQUARE) {
+			throw new AssertionError("Clicking Shape again didn't make the minimap square");
 		}
 		clickAt(context, "Size: ", 1.0);
 		int clickedSize = context.computeOnClient(mc -> Settings.get().minimapSize);

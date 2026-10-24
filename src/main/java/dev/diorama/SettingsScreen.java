@@ -86,7 +86,10 @@ public final class SettingsScreen extends Screen {
 		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
 			i -> s.minimapSize = Settings.MIN_SIZE + i * Settings.SIZE_STEP, i -> Component.literal(Integer.toString(Settings.MIN_SIZE + i * Settings.SIZE_STEP)));
 		minimap.slider("zoom", s.minimapZoom, Settings.ZOOMS.length, i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
+		// Side by side, so the tab stays short enough for a small screen.
+		minimap.choice("shape", Settings.Shape.values(), () -> s.minimapShape, v -> s.minimapShape = v);
 		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
+		minimap.lastTwoSideBySide();
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
@@ -174,10 +177,12 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
-	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width. */
+	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width, or two to a row. */
 	private final class SettingsTab extends GridLayoutTab {
 		private final List<AbstractWidget> checkboxes = new ArrayList<>();
 		private final List<AbstractWidget> wide = new ArrayList<>();
+		/** Wide widgets that share a row with the one after them. */
+		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
@@ -222,6 +227,10 @@ public final class SettingsScreen extends Screen {
 			this.wide.add(slider);
 		}
 
+		void lastTwoSideBySide() {
+			this.pairedWithNext.add(this.wide.get(this.wide.size() - 2));
+		}
+
 		@Override
 		public void visitChildren(Consumer<AbstractWidget> consumer) {
 			this.checkboxes.forEach(consumer);
@@ -240,9 +249,19 @@ public final class SettingsScreen extends Screen {
 			if (!this.checkboxes.isEmpty()) {
 				y += (this.checkboxes.size() + 1) / 2 * 22 + 10;
 			}
-			for (AbstractWidget widget : this.wide) {
-				widget.setPosition(left, y);
-				widget.setWidth(content);
+			for (int i = 0; i < this.wide.size(); i++) {
+				AbstractWidget widget = this.wide.get(i);
+				if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
+					int half = (content - 4) / 2;
+					widget.setPosition(left, y);
+					widget.setWidth(half);
+					AbstractWidget next = this.wide.get(++i);
+					next.setPosition(left + content - half, y);
+					next.setWidth(half);
+				} else {
+					widget.setPosition(left, y);
+					widget.setWidth(content);
+				}
 				y += 24;
 			}
 		}

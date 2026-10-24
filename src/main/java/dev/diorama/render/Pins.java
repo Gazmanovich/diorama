@@ -65,10 +65,22 @@ public final class Pins {
 
 	/** Whether a standing pin marking (x, y) shows whole inside the box x0..x1, y0..y1: its head above, its shadow below. */
 	public static boolean fitsStanding(int size, float x, float y, float x0, float y0, float x1, float y1) {
+		float[] box = standingBox(size, x, y);
+		return box[0] >= x0 && box[2] <= x1 && box[1] >= y0 && box[3] <= y1;
+	}
+
+	/** Whether a standing pin with its point at (x, y) is wholly inside a circle. */
+	public static boolean fitsStanding(int size, float x, float y, Circle circle) {
+		float[] box = standingBox(size, x, y);
+		return circle.contains(box[0], box[1]) && circle.contains(box[2], box[1]) && circle.contains(box[0], box[3]) && circle.contains(box[2], box[3]);
+	}
+
+	/** What a standing pin with its point at (x, y) covers: x0, y0, x1, y1. */
+	private static float[] standingBox(int size, float x, float y) {
 		int head = PinArt.standingHead(size);
 		float above = head + (head == SMALL ? 5 : 6);
 		float side = (head + 4) / 2.0F;
-		return x - side >= x0 && x + side <= x1 && y - above >= y0 && y + 3 <= y1;
+		return new float[] {x - side, y - above, x + side, y + 3};
 	}
 
 	/** How far a badge with a caret reaches from its centre, so a view can keep it inside. */
