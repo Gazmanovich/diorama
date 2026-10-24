@@ -8,8 +8,8 @@ import org.jspecify.annotations.Nullable;
  * that follow it, smooth at any GUI scale, on every version, with no stencil or shader.
  *
  * <p>Each clipped shape comes out as one set of quads, for one draw: drawn quad by quad, a disc
- * was dozens of draws before 1.21.6, and dozens of GUI layers after it, since each quad overlaps
- * the one before.
+ * was dozens of draws before 1.21.6, and dozens of GUI layers after it, since each quad's bounds
+ * overlap the one before's.
  */
 public final class Circle {
 	/** Sides of the polygon. At the largest minimap a side bows less than a tenth of a GUI pixel from the circle. */
