@@ -53,10 +53,11 @@ public final class MinimapHud implements HudElement {
 		/*if (!settings.minimap || mc.options.hideGui
 		*///?}
 			|| mc.gui.screen() instanceof MapScreen || mc.gui.screen() instanceof AbstractContainerScreen<?>
-			|| mc.gui.screen() instanceof SettingsScreen || !this.canDraw(mc)) {
+			|| mc.gui.screen() instanceof SettingsScreen || debugScreenOpen(mc) || !this.canDraw(mc)) {
 			// Not drawn. Inventories and chests count, because the item lists other mods (JEI, REI,
 			// EMI) put beside them run into the minimap's corner. The settings screen draws its own
-			// copy, sharp over the blur, as a preview.
+			// copy, sharp over the blur, as a preview. The F3 screen fills both top corners with text
+			// people open it to read.
 			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
 			return;
@@ -97,6 +98,18 @@ public final class MinimapHud implements HudElement {
 	/** Frees the GPU texture the minimap's fog uses. For a copy that's done drawing, like the settings preview. */
 	public void close() {
 		this.viewport.close();
+	}
+
+	/**
+	 * Whether F3 is showing the debug screen. From 1.21.9 single lines can be set to show without
+	 * it, like the FPS; those alone don't hide the minimap.
+	 */
+	private static boolean debugScreenOpen(Minecraft mc) {
+		//? if >=1.21.9 {
+		return mc.debugEntries.isOverlayVisible();
+		//?} else {
+		/*return mc.getDebugOverlay().showDebugScreen();
+		*///?}
 	}
 
 	private boolean canDraw(Minecraft mc) {
