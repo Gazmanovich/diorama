@@ -128,10 +128,11 @@ public final class Radar {
 	/**
 	 * Draws either the players or everything else. Maps draw mobs, then waypoints, then players,
 	 * so a player standing at a waypoint shows on top of its marker and a crowd of mobs doesn't
-	 * hide one.
+	 * hide one. Mobs draw batched, since a farm can put hundreds on screen.
 	 */
 	public static void draw(GuiGraphicsExtractor graphics, MapViewport.View view, List<Blip> blips, boolean fullscreen, boolean players) {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
+		IconBatch icons = players ? IconBatch.direct(graphics) : IconBatch.batched(graphics);
 		Settings settings = Settings.get();
 		boolean names = settings.playerNames == Settings.NameTags.ALWAYS || settings.playerNames == Settings.NameTags.FULLSCREEN && fullscreen;
 		for (Blip blip : blips) {
@@ -140,9 +141,9 @@ public final class Radar {
 			}
 			int alpha = alphaFor(blip.dy());
 			switch (settings.radarStyle) {
-				case FRAMED -> framed(graphics, blip, alpha);
-				case DOTS -> dot(graphics, blip, alpha);
-				default -> pixelHead(graphics, blip, alpha, settings.radarTypeOutline);
+				case FRAMED -> framed(icons, blip, alpha);
+				case DOTS -> dot(icons, blip, alpha);
+				default -> pixelHead(icons, blip, alpha, settings.radarTypeOutline);
 			}
 			if (names && blip.kind() == Kind.PLAYER) {
 				nameTag(graphics, blip, alpha);
@@ -154,21 +155,24 @@ public final class Radar {
 					float caret = Math.max(4, s * 0.7F);
 					float cx = blip.x() + s * 0.55F + caret * 0.3F;
 					float cy = blip.y() - s * 0.45F;
-					MapIcons.caret(graphics, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
-					MapIcons.caret(graphics, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
+					MapIcons.caret(icons, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
+					MapIcons.caret(icons, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
 				} else {
-					pixelCaret(graphics, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
+					pixelCaret(icons, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
 				}
 			}
+			icons.endIcon();
 		}
+		icons.draw();
 		graphics.disableScissor();
 	}
 
 	/** Master's look: a player's face on a dark disc, a mob's face in a dark box framed in its kind's colour. */
-	private static void framed(GuiGraphicsExtractor graphics, Blip blip, int alpha) {
+	private static void framed(IconBatch icons, Blip blip, int alpha) {
+		GuiGraphicsExtractor graphics = icons.graphics();
 		float s = blip.size();
 		if (blip.kind() == Kind.PLAYER && blip.entity() instanceof AbstractClientPlayer player) {
-			MapIcons.dot(graphics, blip.x(), blip.y(), s * 1.55F, withAlpha(0xFF101418, alpha));
+			MapIcons.dot(icons, blip.x(), blip.y(), s * 1.55F, withAlpha(0xFF101418, alpha));
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(blip.x() - s / 2, blip.y() - s / 2);
 			graphics.pose().scale(s / 8);
@@ -178,14 +182,14 @@ public final class Radar {
 			int box = Math.round(s * 1.6F);
 			int x0 = Math.round(blip.x() - box / 2.0F);
 			int y0 = Math.round(blip.y() - box / 2.0F);
-			graphics.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
-			graphics.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
-			if (!MobFaces.draw(graphics, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
-				MapIcons.dot(graphics, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
+			icons.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
+			icons.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
+			if (!MobFaces.draw(icons, blip.entity(), x0 + box / 2.0F, y0 + box / 2.0F, box - 2, withAlpha(0xFFFFFFFF, alpha))) {
+				MapIcons.dot(icons, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
 			}
 		} else {
-			MapIcons.dot(graphics, blip.x(), blip.y(), s + 2, withAlpha(0xE0101418, alpha));
-			MapIcons.dot(graphics, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
+			MapIcons.dot(icons, blip.x(), blip.y(), s + 2, withAlpha(0xE0101418, alpha));
+			MapIcons.dot(icons, blip.x(), blip.y(), s, withAlpha(blip.kind().color, alpha));
 		}
 	}
 
@@ -193,16 +197,17 @@ public final class Radar {
 	 * The head as pixel art, like a player head item: each texel a whole number of screen pixels,
 	 * on the screen's pixel grid, with a one-texel black outline and a drop shadow.
 	 */
-	private static void pixelHead(GuiGraphicsExtractor graphics, Blip blip, int alpha, boolean typeOutline) {
+	private static void pixelHead(IconBatch icons, Blip blip, int alpha, boolean typeOutline) {
+		GuiGraphicsExtractor graphics = icons.graphics();
 		float s = blip.size();
 		int outline = typeOutline && blip.kind() != Kind.PLAYER ? blip.kind().color : 0xFF000000;
 		if (blip.kind() == Kind.PLAYER && blip.entity() instanceof AbstractClientPlayer player) {
 			float texel = texel(s, 8);
-			pixelFrame(graphics, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
+			pixelFrame(icons, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
 			MapCanvas.of(graphics).playerFace(player, 0, 0, 8, withAlpha(0xFFFFFFFF, alpha));
 			graphics.pose().popMatrix();
-		} else if (!MobFaces.drawPixel(graphics, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
-			dot(graphics, blip, alpha);
+		} else if (!MobFaces.drawPixel(icons, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
+			dot(icons, blip, alpha);
 		}
 	}
 
@@ -231,37 +236,38 @@ public final class Radar {
 	 * (x, y), and draws the shadow and outline of a w x h icon there. The caller draws the icon at
 	 * (0, 0) and pops the pose.
 	 */
-	static void pixelFrame(GuiGraphicsExtractor graphics, float x, float y, int w, int h, float texel, int outline, int alpha) {
+	static void pixelFrame(IconBatch icons, float x, float y, int w, int h, float texel, int outline, int alpha) {
+		GuiGraphicsExtractor graphics = icons.graphics();
 		float x0 = snap(x - w * texel / 2);
 		float y0 = snap(y - h * texel / 2);
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x0, y0);
 		graphics.pose().scale(texel);
-		graphics.fill(0, 0, w + 2, h + 2, withAlpha(0x60000000, alpha));
-		graphics.fill(-1, -1, w + 1, h + 1, outline);
+		icons.fill(0, 0, w + 2, h + 2, withAlpha(0x60000000, alpha));
+		icons.fill(-1, -1, w + 1, h + 1, outline);
 		// Dark under the face, as the framed faces had: an enderman's face has see-through rows at the
 		// bottom, which would otherwise show the outline colour as a block.
-		graphics.fill(0, 0, w, h, withAlpha(0xFF101418, alpha));
+		icons.fill(0, 0, w, h, withAlpha(0xFF101418, alpha));
 	}
 
 	/** A square dot in the kind's colour with a black outline, on the GUI pixel grid. */
-	private static void dot(GuiGraphicsExtractor graphics, Blip blip, int alpha) {
+	private static void dot(IconBatch icons, Blip blip, int alpha) {
 		int d = Math.max(2, Math.round(blip.size() * (blip.kind() == Kind.PLAYER ? 0.6F : 0.8F)));
 		int x0 = Math.round(blip.x() - d / 2.0F);
 		int y0 = Math.round(blip.y() - d / 2.0F);
-		graphics.fill(x0, y0, x0 + d + 2, y0 + d + 2, withAlpha(0x60000000, alpha));
-		graphics.fill(x0 - 1, y0 - 1, x0 + d + 1, y0 + d + 1, withAlpha(0xFF000000, alpha));
-		graphics.fill(x0, y0, x0 + d, y0 + d, withAlpha(blip.kind().color, alpha));
+		icons.fill(x0, y0, x0 + d + 2, y0 + d + 2, withAlpha(0x60000000, alpha));
+		icons.fill(x0 - 1, y0 - 1, x0 + d + 1, y0 + d + 1, withAlpha(0xFF000000, alpha));
+		icons.fill(x0, y0, x0 + d, y0 + d, withAlpha(blip.kind().color, alpha));
 		// A one-pixel highlight on the top left, the way Minecraft's GUI bevels its buttons.
 		if (d >= 3) {
 			int light = withAlpha(0x50FFFFFF, alpha);
-			graphics.fill(x0, y0, x0 + d - 1, y0 + 1, light);
-			graphics.fill(x0, y0 + 1, x0 + 1, y0 + d - 1, light);
+			icons.fill(x0, y0, x0 + d - 1, y0 + 1, light);
+			icons.fill(x0, y0 + 1, x0 + 1, y0 + d - 1, light);
 		}
 	}
 
 	/** A small pixel arrow, up or down, white with a black outline, its centre at (cx, cy). */
-	private static void pixelCaret(GuiGraphicsExtractor graphics, int cx, int cy, boolean down, int alpha) {
+	private static void pixelCaret(IconBatch icons, int cx, int cy, boolean down, int alpha) {
 		int black = withAlpha(0xFF000000, alpha);
 		int white = withAlpha(0xFFFFFFFF, alpha);
 		// Three rows, 1, 3 and 5 pixels wide, tip first.
@@ -270,7 +276,7 @@ public final class Radar {
 			for (int row = 0; row < 3; row++) {
 				int half = row;
 				int y = down ? cy + 1 - row : cy - 1 + row;
-				graphics.fill(cx - half - grow, y - grow, cx + half + 1 + grow, y + 1 + grow, pass == 0 ? black : white);
+				icons.fill(cx - half - grow, y - grow, cx + half + 1 + grow, y + 1 + grow, pass == 0 ? black : white);
 			}
 		}
 	}

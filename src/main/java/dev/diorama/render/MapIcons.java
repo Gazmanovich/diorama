@@ -1,9 +1,7 @@
 package dev.diorama.render;
 
-import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import org.jspecify.annotations.Nullable;
 
 /** Small white shapes drawn tinted on the map: dots for mobs, carets for "above" and "below". */
@@ -16,23 +14,23 @@ public final class MapIcons {
 	}
 
 	/** A round dot of diameter {@code size} centred on the point. */
-	public static void dot(GuiGraphicsExtractor graphics, float x, float y, float size, int argb) {
+	public static void dot(IconBatch icons, float x, float y, float size, int argb) {
 		if (dot == null) {
 			dot = create("diorama dot", MapIcons::circle);
 		}
-		draw(graphics, dot, x - size / 2, y - size / 2, size, argb, false);
+		draw(icons, dot, x - size / 2, y - size / 2, size, argb, false);
 	}
 
 	/** A small caret centred on the point, pointing up, or down when {@code down}. */
-	public static void caret(GuiGraphicsExtractor graphics, float x, float y, float size, int argb, boolean down) {
+	public static void caret(IconBatch icons, float x, float y, float size, int argb, boolean down) {
 		if (caret == null) {
 			caret = create("diorama caret", MapIcons::triangle);
 		}
-		draw(graphics, caret, x - size / 2, y - size / 2, size, argb, down);
+		draw(icons, caret, x - size / 2, y - size / 2, size, argb, down);
 	}
 
-	private static void draw(GuiGraphicsExtractor graphics, MapTexture texture, float x, float y, float size, int argb, boolean flip) {
-		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_LINEAR, x, y, x + size, y + size, 0, flip ? 1 : 0, 1, flip ? 0 : 1, argb);
+	private static void draw(IconBatch icons, MapTexture texture, float x, float y, float size, int argb, boolean flip) {
+		icons.rect(texture, Sampling.CLAMP_LINEAR, x, y, x + size, y + size, 0, flip ? 1 : 0, 1, flip ? 0 : 1, argb);
 	}
 
 	private interface Shape {
