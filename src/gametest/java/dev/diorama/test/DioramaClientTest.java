@@ -71,6 +71,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> mc.options.renderDistance().set(12));
 		String seed = System.getProperty("diorama.seed", "diorama");
 		Set<String> tests = selectedTests();
+		if (tests.contains("stale-gl-error")) {
+			// An OpenGL error another mod raised and nobody read, still flagged when GPU baking sets
+			// up: with gpu-bake, the comparison shows the setup didn't take it for its own. OpenGL only.
+			context.runOnClient(mc -> org.lwjgl.opengl.GL11C.glBindTexture(org.lwjgl.opengl.GL11C.GL_TEXTURE_2D, Integer.MAX_VALUE));
+		}
 		if (tests.contains("showcase") && tests.size() > 1) {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
