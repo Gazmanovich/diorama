@@ -1,9 +1,11 @@
 package dev.diorama.render;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.model.Model;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 //? if >=1.21.2 {
@@ -18,19 +20,38 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Mob faces for the radar, cut from each mob's own texture, so variants and resource packs show.
- * Only mobs whose face is one clean rectangle of their texture are listed; the rest stay dots.
+ * Vanilla mobs whose face is one clean rectangle of their texture are listed here; every other
+ * mob, modded ones included, gets the face {@link ModelFaces} reads off its model, or stays a dot.
  * Rectangles are read from the 26.3 models: a head box at texOffs(u, v) with size w x h x d has
  * its front face at (u + d, v + d), w x h.
  */
 public final class MobFaces {
 	/**
-	 * Where a face is in a texture of the given size. {@code hat} is an outer layer drawn over the
-	 * face (zombie and skeleton hats, villager hoods); {@code feature} is a nose or snout that
-	 * sticks out of the face, drawn at {@code (dx, dy)} in face pixels.
+	 * A face {@code w} x {@code h} pixels, drawn as rectangles of a texture of the given size, in
+	 * order, each at {@code (dx, dy)} in face pixels.
 	 */
-	record Face(int texW, int texH, int u, int v, int w, int h, @Nullable Piece hat, @Nullable Piece feature) {
+	record Face(int texW, int texH, int w, int h, List<Piece> pieces) {
 		Face(int texW, int texH, int u, int v, int w, int h) {
 			this(texW, texH, u, v, w, h, null, null);
+		}
+
+		/**
+		 * A face that's one rectangle at (u, v), with a {@code feature} that sticks out of it (a nose
+		 * or snout) and over both a {@code hat}, an outer layer (zombie and skeleton hats, villager hoods).
+		 */
+		Face(int texW, int texH, int u, int v, int w, int h, @Nullable Piece hat, @Nullable Piece feature) {
+			this(texW, texH, w, h, layers(new Piece(u, v, w, h, 0, 0), feature, hat));
+		}
+
+		private static List<Piece> layers(Piece face, @Nullable Piece feature, @Nullable Piece hat) {
+			List<Piece> pieces = new java.util.ArrayList<>(List.of(face));
+			if (feature != null) {
+				pieces.add(feature);
+			}
+			if (hat != null) {
+				pieces.add(hat);
+			}
+			return List.copyOf(pieces);
 		}
 	}
 
@@ -52,7 +73,8 @@ public final class MobFaces {
 	private static final Map<Entity, Looked> TEXTURES = new com.google.common.collect.MapMaker().weakKeys().makeMap();
 	private static final int REFRESH_TICKS = 40;
 
-	private record Looked(@Nullable Identifier texture, int age, boolean baby) {
+	/** {@code modelFace} is the face {@link ModelFaces} read off the model the entity is drawn with. */
+	private record Looked(@Nullable Identifier texture, MobFaces.@Nullable Face modelFace, int age, boolean baby) {
 	}
 
 	private static final Piece HUMANOID_HAT = new Piece(40, 8, 8, 8, 0, 0);
@@ -67,7 +89,7 @@ public final class MobFaces {
 	private static final Face COW = new Face(64, 32, 6, 6, 8, 8);
 	*///?}
 	/** Cold cows keep their muzzle elsewhere in the texture: their model moves its texture origin. */
-	private static final Piece COLD_COW_MUZZLE = new Piece(10, 34, 6, 3, 1, 5);
+	private static final Face COLD_COW = new Face(64, 64, 6, 6, 8, 8, null, new Piece(10, 34, 6, 3, 1, 5));
 
 	static {
 		Face zombie = new Face(64, 64, 8, 8, 8, 8, HUMANOID_HAT, null);
@@ -151,21 +173,52 @@ public final class MobFaces {
 
 	/** Whether this entity's face can be drawn now: it has one, and its renderer gives a texture. For tests. */
 	public static boolean canDraw(Entity entity) {
-		return face(entity) != null && texture(entity) != null;
+		return face(entity) != null && looked(entity).texture() != null;
 	}
+
+	/**
+	 * The face this entity is drawn with, as {@code "<texture width>x<texture height> <w>x<h>"} and
+	 * then {@code " | u,v wxh at x,y"} for each rectangle, or null if it has none. For tests.
+	 */
+	public static @Nullable String describe(Entity entity) {
+		return describe(face(entity));
+	}
+
+	/** The face {@link ModelFaces} reads off this entity's model, described as {@link #describe(Entity)} does. For tests. */
+	public static @Nullable String describeFromModel(Entity entity) {
+		return describe(looked(entity).modelFace());
+	}
+
+	private static @Nullable String describe(@Nullable Face face) {
+		if (face == null) {
+			return null;
+		}
+		StringBuilder out = new StringBuilder().append(face.texW()).append('x').append(face.texH()).append(' ').append(face.w()).append('x').append(face.h());
+		for (Piece p : face.pieces()) {
+			out.append(" | ").append(p.u()).append(',').append(p.v()).append(' ').append(p.w()).append('x').append(p.h())
+				.append(" at ").append(p.dx()).append(',').append(p.dy());
+		}
+		return out.toString();
+	}
+
+	/** Draws every mob with the face read off its model, the listed ones too, to compare them. For tests. */
+	public static volatile boolean modelOnly;
+	/** Off, mobs that aren't listed are dots, as before faces were read off models. For tests. */
+	public static volatile boolean fromModels = true;
 
 	private static @Nullable Face face(Entity entity) {
 		Faces faces = FACES.get(entity.getType());
-		if (faces == null) {
-			return null;
+		if (faces == null || modelOnly) {
+			return fromModels ? looked(entity).modelFace() : null;
 		}
 		//? if >=26.1 {
-		return entity instanceof LivingEntity living && living.isBaby() ? faces.baby() : faces.adult();
+		Face face = entity instanceof LivingEntity living && living.isBaby() ? faces.baby() : faces.adult();
 		//?} else {
 		/*// Before 26.1 a baby is its adult model scaled down, drawn with the adult texture, so it
 		// has the adult's face.
-		return faces.adult();
+		Face face = faces.adult();
 		*///?}
+		return face == COW && coldCow(entity) ? COLD_COW : face;
 	}
 
 	/**
@@ -174,7 +227,7 @@ public final class MobFaces {
 	 */
 	public static boolean draw(IconBatch icons, Entity entity, float x, float y, float size, int color) {
 		Face face = face(entity);
-		Identifier texture = face == null ? null : texture(entity);
+		Identifier texture = face == null ? null : looked(entity).texture();
 		if (face == null || texture == null) {
 			return false;
 		}
@@ -185,16 +238,7 @@ public final class MobFaces {
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x - w / 2, y - h / 2);
 		graphics.pose().scale(scale);
-		icons.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
-		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
-		if (feature != null) {
-			Piece p = feature;
-			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
-		}
-		if (face.hat() != null) {
-			Piece p = face.hat();
-			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
-		}
+		blitFace(icons, texture, face, color);
 		graphics.pose().popMatrix();
 		return true;
 	}
@@ -206,24 +250,22 @@ public final class MobFaces {
 	 */
 	public static boolean drawPixel(IconBatch icons, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
 		Face face = face(entity);
-		Identifier texture = face == null ? null : texture(entity);
+		Identifier texture = face == null ? null : looked(entity).texture();
 		if (face == null || texture == null) {
 			return false;
 		}
 		float texel = Radar.texel(size, Math.max(face.w(), face.h()));
 		Radar.pixelFrame(icons, x, y, face.w(), face.h(), texel, outline, alpha);
-		icons.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
-		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
-		if (feature != null) {
-			icons.blit(texture, feature.dx(), feature.dy(), feature.u(), feature.v(), feature.w(), feature.h(), face.texW(), face.texH(), color);
-		}
-		if (face.hat() != null) {
-			Piece p = face.hat();
-			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
-		}
+		blitFace(icons, texture, face, color);
 		GuiGraphicsExtractor graphics = icons.graphics();
 		graphics.pose().popMatrix();
 		return true;
+	}
+
+	private static void blitFace(IconBatch icons, Identifier texture, Face face, int color) {
+		for (Piece p : face.pieces()) {
+			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
+		}
 	}
 
 	/** Cold cows use a different model, with the muzzle elsewhere in the texture. */
@@ -242,38 +284,91 @@ public final class MobFaces {
 	 * name a mob's variants by ({@link XaeroRadarIcons}).
 	 */
 	static @Nullable Identifier texture(Entity entity) {
+		return looked(entity).texture();
+	}
+
+	/** The texture the game draws this entity with, and the face read off its model. */
+	private static Looked looked(Entity entity) {
 		Looked looked = TEXTURES.get(entity);
 		int age = entity.tickCount;
 		boolean baby = entity instanceof LivingEntity living && living.isBaby();
 		if (looked == null || age - looked.age() >= REFRESH_TICKS || age < looked.age() || baby != looked.baby()) {
-			looked = new Looked(lookUp(entity), age, baby);
+			looked = lookUp(entity, age, baby);
 			TEXTURES.put(entity, looked);
 		}
-		return looked.texture();
+		return looked;
 	}
 
+	//? if >=1.21.2 {
+	/** AgeableMobRenderer's adult and baby models, or null if they can't be read. */
+	private static java.lang.reflect.@Nullable Field @Nullable [] ageableModels;
+	private static boolean ageableModelsLooked;
+
+	/**
+	 * The model a renderer draws a mob with. Renderers that keep an adult's and a baby's model
+	 * only switch between them as they draw, so their current model is whichever they drew last.
+	 */
+	@SuppressWarnings("rawtypes")
+	private static @Nullable Model model(LivingEntityRenderer renderer, boolean baby) {
+		if (!(renderer instanceof net.minecraft.client.renderer.entity.AgeableMobRenderer)) {
+			return renderer.getModel();
+		}
+		if (!ageableModelsLooked) {
+			ageableModelsLooked = true;
+			// Its two model fields, adult then baby as declared; their names depend on the mappings, their order doesn't.
+			List<java.lang.reflect.Field> fields = new java.util.ArrayList<>();
+			for (java.lang.reflect.Field field : net.minecraft.client.renderer.entity.AgeableMobRenderer.class.getDeclaredFields()) {
+				if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) && Model.class.isAssignableFrom(field.getType())) {
+					fields.add(field);
+				}
+			}
+			try {
+				for (java.lang.reflect.Field field : fields) {
+					field.setAccessible(true);
+				}
+				ageableModels = fields.size() == 2 ? fields.toArray(new java.lang.reflect.Field[0]) : null;
+			} catch (RuntimeException e) {
+				ageableModels = null;
+			}
+		}
+		if (ageableModels == null) {
+			// A face off the wrong age's model would be cut from the wrong places: a dot instead.
+			return null;
+		}
+		try {
+			return (Model) ageableModels[baby ? 1 : 0].get(renderer);
+		} catch (ReflectiveOperationException e) {
+			return null;
+		}
+	}
+	//?}
+
 	@SuppressWarnings({"unchecked", "rawtypes"})
-	private static @Nullable Identifier lookUp(Entity entity) {
+	private static Looked lookUp(Entity entity, int age, boolean baby) {
 		//? if >=1.21.2 {
 		// Only living-entity renderers say which texture they use; others, such as GeckoLib's, don't.
 		EntityRenderer<?, ?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
 		if (!(renderer instanceof LivingEntityRenderer living)) {
-			return null;
+			return new Looked(null, null, age, baby);
 		}
 		try {
 			LivingEntityRenderState state = (LivingEntityRenderState) ((LivingEntityRenderer) living).createRenderState((LivingEntity) entity, 1.0F);
-			return ((LivingEntityRenderer) living).getTextureLocation(state);
+			Model model = model(living, baby);
+			Face face = model == null ? null : ModelFaces.of(model, state);
+			return new Looked(((LivingEntityRenderer) living).getTextureLocation(state), face, age, baby);
 		} catch (RuntimeException e) {
-			return null;
+			return new Looked(null, null, age, baby);
 		}
 		//?} else {
 		/*// Renderers had no render state yet, and every one, GeckoLib's too, said which texture it
-		// draws an entity with.
+		// draws an entity with. Only living-entity renderers have a model to read a face off.
 		EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(entity);
 		try {
-			return ((EntityRenderer) renderer).getTextureLocation(entity);
+			Identifier texture = ((EntityRenderer) renderer).getTextureLocation(entity);
+			Face face = renderer instanceof LivingEntityRenderer living ? ModelFaces.of(living.getModel(), null) : null;
+			return new Looked(texture, face, age, baby);
 		} catch (RuntimeException e) {
-			return null;
+			return new Looked(null, null, age, baby);
 		}
 		*///?}
 	}
