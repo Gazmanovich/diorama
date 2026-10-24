@@ -67,11 +67,12 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What each block state looks like on the map: how rays treat it, and its average top and
- * front colors taken from the game's own textures. Built once on the client thread, then
- * read-only, so bake threads can use it freely.
+ * front colors taken from the game's own textures. Built once on the client thread; after that
+ * the registry's looks never change, so bake threads can read them freely.
  *
  * <p>When a mod with copycats is installed, ids past the block state registry are looks for
- * filled copycats ({@link #copycat}), added as bakes first meet them.
+ * filled copycats ({@link #copycat}), added by bake threads as they first meet them. Each is
+ * written before its id is handed out, and never changes after.
  */
 public final class BlockLooks {
 	public static final byte AIR = 0;
@@ -191,7 +192,8 @@ public final class BlockLooks {
 	/**
 	 * The look of a copycat filled with a material, both given as state ids: the copycat's outline,
 	 * spawn rules and water, with the material's colours, tint and light. Rays pass through it if
-	 * they pass through the material, as through a copycat filled with glass. Any thread: a bake
+	 * they pass through the material, as through a copycat filled with glass, and pass through a
+	 * copycat without collision (a button, a pressure plate) as they do empty. Any thread: a bake
 	 * calls this when it reads a snapshot's copycats, and the look is filled in before its id is
 	 * handed out, so a bake only ever reads looks that are done. Returns the copycat's own id when
 	 * there's nothing to copy, or no room left.
@@ -201,24 +203,37 @@ public final class BlockLooks {
 			return copycat;
 		}
 		byte frame = this.kind[copycat];
-		if (frame != SOLID && frame != GLASS || this.kind[material] == AIR) {
+		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR) {
 			return copycat;
 		}
 		Long key = (long) copycat << 32 | material;
 		Integer id = this.copycatIds.get(key);
-		return id != null ? id : this.copycatIds.computeIfAbsent(key, unused -> this.addCopycat(copycat, material));
+		if (id != null) {
+			return id;
+		}
+		if (this.copycatCount.get() >= this.kind.length - this.registrySize) {
+			// Full: don't grow the table with pairs that would all draw empty anyway.
+			this.warnFull();
+			return copycat;
+		}
+		return this.copycatIds.computeIfAbsent(key, unused -> this.addCopycat(copycat, material));
+	}
+
+	private void warnFull() {
+		if (!this.warnedCopycats) {
+			this.warnedCopycats = true;
+			Diorama.LOGGER.warn("More than {} kinds of filled copycat; the rest draw as they do empty", COPYCAT_LOOKS);
+		}
 	}
 
 	private int addCopycat(int copycat, int material) {
 		int id = this.registrySize + this.copycatCount.getAndIncrement();
 		if (id >= this.kind.length) {
-			if (!this.warnedCopycats) {
-				this.warnedCopycats = true;
-				Diorama.LOGGER.warn("More than {} kinds of filled copycat; the rest draw as they do empty", COPYCAT_LOOKS);
-			}
+			// Bake threads that passed the check above together.
+			this.warnFull();
 			return copycat;
 		}
-		this.kind[id] = this.kind[material] == GLASS ? GLASS : SOLID;
+		this.kind[id] = this.kind[copycat] == PLANT ? PLANT : this.kind[material] == GLASS ? GLASS : SOLID;
 		this.shape[id] = this.shape[copycat];
 		this.spawnOn[id] = this.spawnOn[copycat];
 		this.spawnIn[id] = this.spawnIn[copycat];

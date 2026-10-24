@@ -33,6 +33,11 @@ public final class VoxelReaderChecks {
 				int wx = (chunkX << 4) + x;
 				int wy = ((snapshot.minSectionY + section) << 4) + y;
 				int wz = (chunkZ << 4) + z;
+				// A filled copycat reads as its look in its material.
+				var material = snapshot.copycatMaterial(wx, wy, wz);
+				if (material != null) {
+					expected = looks.copycat(expected, Block.BLOCK_STATE_REGISTRY.getId(material));
+				}
 				if (reader.state(wx, wy, wz) != expected
 					|| reader.solid(wx, wy, wz) != (kinds[expected] == BlockLooks.SOLID ? 1 : 0)) {
 					throw new AssertionError("Decoded block state " + expected + " incorrectly at " + wx + "," + wy + "," + wz);

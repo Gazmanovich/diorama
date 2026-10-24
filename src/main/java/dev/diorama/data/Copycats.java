@@ -137,8 +137,12 @@ public final class Copycats {
 	private static @Nullable BlockState topPart(BlockEntity entity, Map<?, ?> parts) throws ReflectiveOperationException {
 		BlockState state = entity.getBlockState();
 		Method[] getters = PART_GETTERS.get(state.getBlock().getClass());
-		Method exists = getters == null ? null : getters[0];
-		Method vector = getters == null ? null : getters[1];
+		if (getters == null) {
+			// Without them there's no telling which parts are there, or which is on top.
+			return null;
+		}
+		Method exists = getters[0];
+		Method vector = getters[1];
 		int topY = Integer.MIN_VALUE;
 		// In part name order, so ties go to the first part by name.
 		Map<BlockState, Integer> atTop = new LinkedHashMap<>();
@@ -146,10 +150,10 @@ public final class Copycats {
 			if (!(part.getKey() instanceof String name) || !(part.getValue() instanceof BlockState material) || isEmpty(material)) {
 				continue;
 			}
-			if (exists != null && !Boolean.TRUE.equals(exists.invoke(state.getBlock(), state, name))) {
+			if (!Boolean.TRUE.equals(exists.invoke(state.getBlock(), state, name))) {
 				continue;
 			}
-			int y = vector != null && vector.invoke(state.getBlock(), state, name) instanceof Vec3i v ? v.getY() : 0;
+			int y = vector.invoke(state.getBlock(), state, name) instanceof Vec3i v ? v.getY() : 0;
 			if (y > topY) {
 				topY = y;
 				atTop.clear();
