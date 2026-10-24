@@ -32,7 +32,8 @@ public final class TileSpots {
 	/**
 	 * The answers for a bake of a surface tile: every sample of a full image, or those under its
 	 * patches (the rest stay {@link #UNKNOWN}). Where the chunks are missing, the answer saved
-	 * before stays, as the bake keeps saved pixels. Null for a partial image with no patches.
+	 * before stays, as the bake keeps saved pixels. Null when that leaves nothing known, so a tile
+	 * saved before spots isn't written again for no gain.
 	 */
 	public static int @Nullable [] pick(TileImage image, ChunkSource source, BlockLooks looks, boolean fogOfWar, int @Nullable [] saved) {
 		if (!image.isFull() && image.patches().isEmpty()) {
@@ -41,14 +42,15 @@ public final class TileSpots {
 		TileKey key = image.key();
 		MapPick pick = new MapPick(source, looks, key, fogOfWar);
 		int[] spots = new int[COLUMNS * ROWS];
+		boolean known = false;
 		if (image.isFull()) {
-			pick(key, pick, spots, saved, 0, 0, COLUMNS, ROWS);
+			known = pick(key, pick, spots, saved, 0, 0, COLUMNS, ROWS);
 		} else {
 			for (TileImage.Patch patch : image.patches()) {
-				pick(key, pick, spots, saved, patchColumn(patch), patch.blockY() * TileImage.BLOCK, PATCH_COLUMNS, TileImage.BLOCK);
+				known |= pick(key, pick, spots, saved, patchColumn(patch), patch.blockY() * TileImage.BLOCK, PATCH_COLUMNS, TileImage.BLOCK);
 			}
 		}
-		return spots;
+		return known ? spots : null;
 	}
 
 	/** The first column under a patch. */
@@ -56,7 +58,9 @@ public final class TileSpots {
 		return patch.blockX() * PATCH_COLUMNS;
 	}
 
-	private static void pick(TileKey key, MapPick pick, int[] spots, int @Nullable [] saved, int column0, int row0, int columns, int rows) {
+	/** Fills in a rectangle of samples; returns whether any is known. */
+	private static boolean pick(TileKey key, MapPick pick, int[] spots, int @Nullable [] saved, int column0, int row0, int columns, int rows) {
+		boolean known = false;
 		for (int row = row0; row < row0 + rows; row++) {
 			double v = v(key, row);
 			for (int column = column0; column < column0 + columns; column++) {
@@ -66,8 +70,10 @@ public final class TileSpots {
 					case MapPick.NOTHING -> NOTHING;
 					default -> saved == null ? UNKNOWN : saved[i];
 				};
+				known |= spots[i] != UNKNOWN;
 			}
 		}
+		return known;
 	}
 
 	/**
