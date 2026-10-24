@@ -18,8 +18,9 @@ public final class VoxelReaderChecks {
 		if (snapshot == null) {
 			throw new AssertionError("No snapshot to check");
 		}
-		byte[] kinds = BlockLooks.get().kind;
-		VoxelReader reader = new VoxelReader(source, kinds);
+		BlockLooks looks = BlockLooks.get();
+		byte[] kinds = looks.kind;
+		VoxelReader reader = new VoxelReader(source, looks);
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
 			var uniform = snapshot.uniformSection(section);
 			var palette = snapshot.section(section);

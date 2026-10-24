@@ -178,7 +178,7 @@ public final class TileBaker {
 		this.key = key;
 		this.overlays = overlays;
 		this.looks = looks;
-		this.reader = new VoxelReader(source, looks.kind, looks.shape);
+		this.reader = new VoxelReader(source, looks, true);
 		this.cave = key.isCave();
 		this.roofless = !this.cave && source.roof() != ChunkSource.NO_ROOF;
 		this.lit = this.cave || this.roofless;
@@ -603,7 +603,7 @@ public final class TileBaker {
 			if (partial) {
 				double tIn = t;
 				boolean hit = this.enterShape(this.looks.shapes[shape], fx, y0, z0, by, bz, t, Math.min(tMaxY, tMaxZ), enteredTop);
-				int wet = this.looks.wetShapes.get(id);
+				int wet = this.looks.wetShape[id];
 				// Waterlogged: the ray is in water from where it came into the cell, unless it met
 				// the block right there, as on a fence top level with the water.
 				if (wet >= 0 && waterId < 0 && (!hit || this.shapeT > tIn)) {

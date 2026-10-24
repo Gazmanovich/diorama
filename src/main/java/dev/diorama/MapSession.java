@@ -4,6 +4,7 @@ import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
+import dev.diorama.data.Copycats;
 import dev.diorama.render.MapLevel;
 import java.nio.file.Path;
 import java.util.Iterator;
@@ -202,6 +203,23 @@ public final class MapSession {
 				}
 			}
 		}
+	}
+
+	/**
+	 * A block entity got new data from the server. Filling or emptying a copycat changes only its
+	 * block entity, not its block, so it comes this way: re-bake there if the copycat's material
+	 * isn't what the map last saw. A chunk the map hasn't seen yet gets it in its first snapshot.
+	 */
+	public static void blockEntityChanged(ClientLevel level, BlockPos pos) {
+		if (!Copycats.INSTALLED || current == null || current.level != level) {
+			return;
+		}
+		ChunkSnapshot snapshot = current.map.chunk(pos.getX() >> 4, pos.getZ() >> 4);
+		if (snapshot == null || Copycats.material(level.getBlockEntity(pos)) == snapshot.copycatMaterial(pos.getX(), pos.getY(), pos.getZ())) {
+			return;
+		}
+		int surface = current.visibleFromSky(pos) ? MapLevel.CHANGED_SURFACE : 0;
+		current.schedule(pos.getX() >> 4, pos.getZ() >> 4, CHANGE_DELAY_MS, new int[] {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface});
 	}
 
 	/**

@@ -371,7 +371,7 @@ public final class GpuMesher {
 						}
 					} else if (shape != 0) {
 						ShapeFaces sh = ShapeFaces.of(looks.shapes[shape]);
-						int wet = looks.wetShapes.get(id);
+						int wet = looks.wetShape[id];
 						boolean passes = false;
 						boolean reached;
 						boolean traced = false;
@@ -671,7 +671,7 @@ public final class GpuMesher {
 	/** Whether the cell holds water, as water or waterlogged. */
 	private static boolean wet(VoxelReader reader, BlockLooks looks, int x, int y, int z) {
 		int id = reader.state(x, y, z);
-		return id != VoxelReader.UNKNOWN && (looks.kind[id] == BlockLooks.WATER || looks.wetShapes.get(id) >= 0);
+		return id != VoxelReader.UNKNOWN && (looks.kind[id] == BlockLooks.WATER || looks.wetShape[id] >= 0);
 	}
 
 	/** {@code faces}' parts the rays that aren't in the rock meet, as lo, hi pairs. */

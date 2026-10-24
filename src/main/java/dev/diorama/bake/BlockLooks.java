@@ -4,12 +4,15 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.NaturalSpawner;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
+import dev.diorama.data.Copycats;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntSupplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColors;
@@ -66,6 +69,9 @@ import org.jspecify.annotations.Nullable;
  * What each block state looks like on the map: how rays treat it, and its average top and
  * front colors taken from the game's own textures. Built once on the client thread, then
  * read-only, so bake threads can use it freely.
+ *
+ * <p>When a mod with copycats is installed, ids past the block state registry are looks for
+ * filled copycats ({@link #copycat}), added as bakes first meet them.
  */
 public final class BlockLooks {
 	public static final byte AIR = 0;
@@ -119,11 +125,24 @@ public final class BlockLooks {
 	public float[][] shapes;
 	/**
 	 * For a waterlogged block smaller than a cube, the state id of the fluid around it: rays that
-	 * pass beside the block, or reach it from above, go through that fluid.
+	 * pass beside the block, or reach it from above, go through that fluid. -1 for every other block.
 	 */
-	public final it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap wetShapes = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
+	public final int[] wetShape;
 
-	private BlockLooks(int size) {
+	/**
+	 * How many filled-copycat looks fit past the registry. Each pairing of a copycat state with a
+	 * material takes one; past this many, more copycats draw as they do empty.
+	 */
+	private static final int COPYCAT_LOOKS = 1 << 14;
+	/** The block state registry's size: ids from here on are filled copycats. */
+	private final int registrySize;
+	/** Filled-copycat look ids, by copycat state id in the high half and material state id in the low half. */
+	private final Map<Long, Integer> copycatIds = new ConcurrentHashMap<>();
+	private final AtomicInteger copycatCount = new AtomicInteger();
+	private volatile boolean warnedCopycats;
+
+	private BlockLooks(int registrySize, int size) {
+		this.registrySize = registrySize;
 		this.kind = new byte[size];
 		this.tint = new byte[size];
 		this.emission = new byte[size];
@@ -137,6 +156,8 @@ public final class BlockLooks {
 		this.spawnOn = new boolean[size];
 		this.spawnIn = new boolean[size];
 		this.shape = new int[size];
+		this.wetShape = new int[size];
+		java.util.Arrays.fill(this.wetShape, -1);
 	}
 
 	public static BlockLooks get() {
@@ -164,7 +185,54 @@ public final class BlockLooks {
 			// Same index, same boxes: outlines are stored once each.
 			&& this.shape[a] == this.shape[b]
 			// Filling or draining a waterlogged slab changes nothing else.
-			&& this.wetShapes.get(a) == this.wetShapes.get(b);
+			&& this.wetShape[a] == this.wetShape[b];
+	}
+
+	/**
+	 * The look of a copycat filled with a material, both given as state ids: the copycat's outline,
+	 * spawn rules and water, with the material's colours, tint and light. Rays pass through it if
+	 * they pass through the material, as through a copycat filled with glass. Any thread: a bake
+	 * calls this when it reads a snapshot's copycats, and the look is filled in before its id is
+	 * handed out, so a bake only ever reads looks that are done. Returns the copycat's own id when
+	 * there's nothing to copy, or no room left.
+	 */
+	public int copycat(int copycat, int material) {
+		if (copycat < 0 || copycat >= this.registrySize || material < 0 || material >= this.registrySize || this.kind.length == this.registrySize) {
+			return copycat;
+		}
+		byte frame = this.kind[copycat];
+		if (frame != SOLID && frame != GLASS || this.kind[material] == AIR) {
+			return copycat;
+		}
+		Long key = (long) copycat << 32 | material;
+		Integer id = this.copycatIds.get(key);
+		return id != null ? id : this.copycatIds.computeIfAbsent(key, unused -> this.addCopycat(copycat, material));
+	}
+
+	private int addCopycat(int copycat, int material) {
+		int id = this.registrySize + this.copycatCount.getAndIncrement();
+		if (id >= this.kind.length) {
+			if (!this.warnedCopycats) {
+				this.warnedCopycats = true;
+				Diorama.LOGGER.warn("More than {} kinds of filled copycat; the rest draw as they do empty", COPYCAT_LOOKS);
+			}
+			return copycat;
+		}
+		this.kind[id] = this.kind[material] == GLASS ? GLASS : SOLID;
+		this.shape[id] = this.shape[copycat];
+		this.spawnOn[id] = this.spawnOn[copycat];
+		this.spawnIn[id] = this.spawnIn[copycat];
+		this.wetShape[id] = this.wetShape[copycat];
+		this.top[id] = this.top[material];
+		this.topTinted[id] = this.topTinted[material];
+		this.topTintWeight[id] = this.topTintWeight[material];
+		this.side[id] = this.side[material];
+		this.sideTinted[id] = this.sideTinted[material];
+		this.sideTintWeight[id] = this.sideTintWeight[material];
+		this.tint[id] = this.tint[material];
+		this.constantTint[id] = this.constantTint[material];
+		this.emission[id] = this.emission[material];
+		return id;
 	}
 
 	public static void invalidate() {
@@ -191,7 +259,7 @@ public final class BlockLooks {
 		*///?}
 		BlockColors colors = mc.getBlockColors();
 		int size = Block.BLOCK_STATE_REGISTRY.size();
-		BlockLooks looks = new BlockLooks(size);
+		BlockLooks looks = new BlockLooks(size, Copycats.INSTALLED ? size + COPYCAT_LOOKS : size);
 		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
 		warnedFreed = false;
 		RandomSource random = RandomSource.create(42L);
@@ -344,13 +412,12 @@ public final class BlockLooks {
 			looks.constantTint[id] = look.tint().constant();
 		}
 		looks.shapes = shapes.toArray(new float[0][]);
-		looks.wetShapes.defaultReturnValue(-1);
 		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
 			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
 			if (id >= 0 && id < size && looks.shape[id] != 0 && !state.getFluidState().isEmpty()) {
 				int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
 				if (fluid >= 0 && fluid < size && looks.kind[fluid] == WATER) {
-					looks.wetShapes.put(id, fluid);
+					looks.wetShape[id] = fluid;
 				}
 			}
 		}

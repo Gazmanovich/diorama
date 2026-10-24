@@ -39,6 +39,8 @@ public final class VoxelReader {
 	private static final int TABLE_MASK = (1 << TABLE_BITS) - 1;
 
 	private final ChunkSource source;
+	/** The looks the ids are for, which also holds filled copycats' looks; null when only {@link #state} is used. */
+	private final @Nullable BlockLooks looks;
 	/** {@link BlockLooks#kind}, for {@link #solid}; null when only {@link #state} is used. */
 	private final byte @Nullable [] kinds;
 	/** {@link BlockLooks#shape}, so {@link #solid} can tell blocks smaller than a cube; may be null. */
@@ -71,14 +73,16 @@ public final class VoxelReader {
 		this(source, null);
 	}
 
-	public VoxelReader(ChunkSource source, byte @Nullable [] kinds) {
-		this(source, kinds, null);
+	public VoxelReader(ChunkSource source, @Nullable BlockLooks looks) {
+		this(source, looks, false);
 	}
 
-	VoxelReader(ChunkSource source, byte @Nullable [] kinds, int @Nullable [] shapes) {
+	/** With {@code shapes}, {@link #solid} tells blocks smaller than a cube apart. */
+	VoxelReader(ChunkSource source, @Nullable BlockLooks looks, boolean shapes) {
 		this.source = source;
-		this.kinds = kinds;
-		this.shapes = shapes;
+		this.looks = looks;
+		this.kinds = looks == null ? null : looks.kind;
+		this.shapes = looks == null || !shapes ? null : looks.shape;
 		this.minY = source.minY();
 		this.maxY = source.maxY();
 		// No chunk has this x, so every slot starts empty.
@@ -297,7 +301,7 @@ public final class VoxelReader {
 		Decoded decoded = this.cache.get(key);
 		if (decoded == null && !this.cache.containsKey(key)) {
 			ChunkSnapshot snapshot = this.source.chunk(chunkX, chunkZ);
-			decoded = snapshot == null ? null : new Decoded(snapshot);
+			decoded = snapshot == null ? null : new Decoded(snapshot, this.looks);
 			this.cache.put(key, decoded);
 		}
 		this.tableX[slot] = chunkX;
@@ -308,6 +312,7 @@ public final class VoxelReader {
 
 	private static final class Decoded {
 		final ChunkSnapshot snapshot;
+		final @Nullable BlockLooks looks;
 		final int[][] sections;
 		final boolean[] decoded;
 		/** Per section, one bit per block, set where it is {@link BlockLooks#SOLID}; built when first read. */
@@ -317,8 +322,9 @@ public final class VoxelReader {
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
-		Decoded(ChunkSnapshot snapshot) {
+		Decoded(ChunkSnapshot snapshot, @Nullable BlockLooks looks) {
 			this.snapshot = snapshot;
+			this.looks = looks;
 			this.sections = new int[snapshot.sectionCount()][];
 			this.decoded = new boolean[snapshot.sectionCount()];
 			this.solid = new long[snapshot.sectionCount()][];
@@ -409,6 +415,15 @@ public final class VoxelReader {
 						}
 					}
 					this.sections[index] = ids;
+				}
+				ChunkSnapshot.SectionCopycats copycats = this.snapshot.copycats(index);
+				int[] ids = this.sections[index];
+				if (copycats != null && ids != null && this.looks != null) {
+					// Filled copycats take their material's look, keeping their own outline.
+					for (int i = 0; i < copycats.at().length; i++) {
+						int at = copycats.at()[i];
+						ids[at] = this.looks.copycat(ids[at], Block.BLOCK_STATE_REGISTRY.getId(copycats.material()[i]));
+					}
 				}
 			}
 			return this.sections[index];
