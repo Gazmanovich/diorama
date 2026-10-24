@@ -48,6 +48,19 @@ public interface MapCanvas {
 	 */
 	void blit(Identifier texture, int x, int y, int u, int v, int w, int h, int texW, int texH, int argb);
 
+	/**
+	 * Many untextured quads in one draw. Unlike the other calls these take their corners already
+	 * in GUI coordinates, without the current pose: x y z for each of four corners per quad, in
+	 * {@link #rect}'s order, and one colour per quad.
+	 */
+	void solids(float[] xyz, int[] colors, int quads);
+
+	/** Many quads of one game texture in one draw, like {@link #solids}, with u v for each corner. */
+	void blits(Identifier texture, float[] xyz, float[] uvs, int[] colors, int quads);
+
+	/** Many quads of one of the mod's textures in one draw, like {@link #blits}. */
+	void rects(MapTexture texture, Sampling sampling, float[] xyz, float[] uvs, int[] colors, int quads);
+
 	/** A player's face with its hat layer, {@code size} across, at (x, y). */
 	void playerFace(AbstractClientPlayer player, int x, int y, int size, int argb);
 

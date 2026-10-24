@@ -1,6 +1,5 @@
 package dev.diorama.render;
 
-import dev.diorama.render.gpu.MapCanvas;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
@@ -173,7 +172,7 @@ public final class MobFaces {
 	 * Draws an entity's face centred on (x, y), fitted in a square {@code size} across, keeping
 	 * the face's proportions. Returns false if it has no face icon.
 	 */
-	public static boolean draw(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color) {
+	public static boolean draw(IconBatch icons, Entity entity, float x, float y, float size, int color) {
 		Face face = face(entity);
 		Identifier texture = face == null ? null : texture(entity);
 		if (face == null || texture == null) {
@@ -182,19 +181,19 @@ public final class MobFaces {
 		float scale = size / Math.max(face.w(), face.h());
 		float w = face.w() * scale;
 		float h = face.h() * scale;
+		GuiGraphicsExtractor graphics = icons.graphics();
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x - w / 2, y - h / 2);
 		graphics.pose().scale(scale);
-		MapCanvas canvas = MapCanvas.of(graphics);
-		canvas.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
+		icons.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
 		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
 		if (feature != null) {
 			Piece p = feature;
-			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
+			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
 		}
 		if (face.hat() != null) {
 			Piece p = face.hat();
-			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
+			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
 		}
 		graphics.pose().popMatrix();
 		return true;
@@ -205,24 +204,24 @@ public final class MobFaces {
 	 * each texel a whole number of screen pixels, with a one-texel outline and a drop shadow.
 	 * Returns false if it has no face icon.
 	 */
-	public static boolean drawPixel(GuiGraphicsExtractor graphics, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
+	public static boolean drawPixel(IconBatch icons, Entity entity, float x, float y, float size, int color, int outline, int alpha) {
 		Face face = face(entity);
 		Identifier texture = face == null ? null : texture(entity);
 		if (face == null || texture == null) {
 			return false;
 		}
 		float texel = Radar.texel(size, Math.max(face.w(), face.h()));
-		Radar.pixelFrame(graphics, x, y, face.w(), face.h(), texel, outline, alpha);
-		MapCanvas canvas = MapCanvas.of(graphics);
-		canvas.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
+		Radar.pixelFrame(icons, x, y, face.w(), face.h(), texel, outline, alpha);
+		icons.blit(texture, 0, 0, face.u(), face.v(), face.w(), face.h(), face.texW(), face.texH(), color);
 		Piece feature = face == COW && coldCow(entity) ? COLD_COW_MUZZLE : face.feature();
 		if (feature != null) {
-			canvas.blit(texture, feature.dx(), feature.dy(), feature.u(), feature.v(), feature.w(), feature.h(), face.texW(), face.texH(), color);
+			icons.blit(texture, feature.dx(), feature.dy(), feature.u(), feature.v(), feature.w(), feature.h(), face.texW(), face.texH(), color);
 		}
 		if (face.hat() != null) {
 			Piece p = face.hat();
-			canvas.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
+			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);
 		}
+		GuiGraphicsExtractor graphics = icons.graphics();
 		graphics.pose().popMatrix();
 		return true;
 	}
