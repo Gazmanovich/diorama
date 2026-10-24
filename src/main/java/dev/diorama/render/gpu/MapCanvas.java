@@ -20,9 +20,9 @@ public interface MapCanvas {
 	}
 
 	/**
-	 * A textured quad multiplied by {@code argb}.
+	 * A textured quad multiplied by {@code argb}, or several in one draw.
 	 *
-	 * @param corners x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left
+	 * @param corners x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left, then the next quad's
 	 * @param uvs u0 v0 u1 v1 u2 v2 u3 v3, matching the corners
 	 */
 	void quad(MapTexture texture, Sampling sampling, float[] corners, float[] uvs, int argb);
@@ -39,7 +39,7 @@ public interface MapCanvas {
 		);
 	}
 
-	/** An untextured quad in one colour, corners counter-clockwise (the other winding is culled). */
+	/** An untextured quad in one colour, corners counter-clockwise (the other winding is culled), or several, like {@link #quad}. */
 	void solid(float[] corners, int argb);
 
 	/**
@@ -77,6 +77,6 @@ public interface MapCanvas {
 		);
 	}
 
-	/** The same over one quad of a view (a piece of the round minimap), still clipped to the view. */
+	/** The same over quads in a view, like {@link #quad} (the round minimap's disc), still clipped to the view. */
 	void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params);
 }

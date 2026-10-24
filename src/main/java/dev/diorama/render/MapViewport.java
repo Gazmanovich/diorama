@@ -75,8 +75,7 @@ public final class MapViewport {
 		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
 		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
 		if (view.round()) {
-			MapCanvas canvas = MapCanvas.of(graphics);
-			Circle.in(view).fill((corners, uvs) -> canvas.solid(corners, background));
+			MapCanvas.of(graphics).solid(Circle.in(view).disc(), background);
 		} else {
 			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 		}
@@ -178,12 +177,13 @@ public final class MapViewport {
 				float sy = view.screenY(tv * units);
 				MapTexture overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
 				if (circle != null) {
-					circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1, (corners, uvs) -> {
-						canvas.quad(tile.texture(), sampling, corners, uvs, -1);
+					Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
+					if (inside != null) {
+						canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), -1);
 						if (overlay != null) {
-							canvas.quad(overlay, sampling, corners, uvs, -1);
+							canvas.quad(overlay, sampling, inside.corners(), inside.uvs(), -1);
 						}
-					});
+					}
 					continue;
 				}
 				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
@@ -233,9 +233,10 @@ public final class MapViewport {
 
 		MapCanvas canvas = MapCanvas.of(graphics);
 		if (view.round()) {
-			MapTexture mask = this.maskTexture;
-			Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1,
-				(corners, uvs) -> canvas.fog(mask, FogTextures.noise(), corners, uvs, view.x(), view.y(), view.width(), view.height(), params));
+			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1);
+			if (disc != null) {
+				canvas.fog(this.maskTexture, FogTextures.noise(), disc.corners(), disc.uvs(), view.x(), view.y(), view.width(), view.height(), params);
+			}
 			return;
 		}
 		canvas.fog(

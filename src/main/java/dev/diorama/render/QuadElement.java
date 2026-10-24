@@ -11,8 +11,9 @@ import org.jspecify.annotations.Nullable;
 
 // A GUI quad with float corners, optional UVs and one colour, as GUI render state (1.21.6 on).
 // Vanilla GUI draws take whole-pixel positions; the map pans smoothly, so it needs this.
-// corners: x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left.
-// uvs: u0 v0 u1 v1 u2 v2 u3 v3, or null for untextured pipelines.
+// corners: x0 y0 x1 y1 x2 y2 x3 y3, counter-clockwise from the top left; more quads follow in
+// the same element, which draws as one (the round minimap's clipped shapes).
+// uvs: u0 v0 u1 v1 u2 v2 u3 v3, matching the corners, or null for untextured pipelines.
 public record QuadElement(
 	RenderPipeline pipeline,
 	TextureSetup textureSetup,
@@ -31,7 +32,7 @@ public record QuadElement(
 		float minY = Float.MAX_VALUE;
 		float maxX = -Float.MAX_VALUE;
 		float maxY = -Float.MAX_VALUE;
-		for (int i = 0; i < 8; i += 2) {
+		for (int i = 0; i < corners.length; i += 2) {
 			minX = Math.min(minX, corners[i]);
 			maxX = Math.max(maxX, corners[i]);
 			minY = Math.min(minY, corners[i + 1]);
@@ -61,7 +62,7 @@ public record QuadElement(
 	//? if >=1.21.9 {
 	@Override
 	public void buildVertices(VertexConsumer consumer) {
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < this.corners.length / 2; i++) {
 			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1]), i);
 		}
 	}
@@ -69,7 +70,7 @@ public record QuadElement(
 	/*// GUI elements were drawn at a depth the renderer handed in.
 	@Override
 	public void buildVertices(VertexConsumer consumer, float z) {
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < this.corners.length / 2; i++) {
 			this.vertex(consumer.addVertexWith2DPose(this.pose, this.corners[i * 2], this.corners[i * 2 + 1], z), i);
 		}
 	}
