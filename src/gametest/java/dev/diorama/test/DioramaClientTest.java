@@ -814,14 +814,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		clickMenu(context, "Teleport here");
 		int[] landing = {(int) teleportAt[2], (int) teleportAt[3], (int) teleportAt[4]};
 		context.waitFor(mc -> mc.player.distanceToSqr(landing[0] + 0.5, landing[1], landing[2] + 0.5) < 0.5, 200);
-		context.waitFor(mc -> mc.level.hasChunk(landing[0] >> 4, landing[2] >> 4), 200);
+		// The chunks there arrive after the player does.
+		BlockPos below = new BlockPos(landing[0], landing[1] - 1, landing[2]);
+		for (int tick = 0; tick < 400 && context.computeOnClient(mc -> mc.level.getBlockState(below).isAir()); tick += 10) {
+			context.waitTicks(10);
+		}
+		context.takeScreenshot("saved-map-03-teleported-to-spawn");
 		context.runOnClient(mc -> {
-			BlockPos below = new BlockPos(landing[0], landing[1] - 1, landing[2]);
 			if (mc.level.getBlockState(below).isAir()) {
-				throw new AssertionError("Teleport here from the saved map put the player over air at " + java.util.Arrays.toString(landing));
+				throw new AssertionError("Teleport here from the saved map put the player over air at " + java.util.Arrays.toString(landing)
+					+ " (chunk loaded: " + mc.level.hasChunk(landing[0] >> 4, landing[2] >> 4) + ", player at " + mc.player.position() + ")");
 			}
 		});
-		context.takeScreenshot("saved-map-03-teleported-to-spawn");
 	}
 
 	private static java.util.Properties serverProperties() {
