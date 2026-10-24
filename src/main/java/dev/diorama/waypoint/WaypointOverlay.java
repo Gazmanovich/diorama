@@ -1,6 +1,7 @@
 package dev.diorama.waypoint;
 
 import dev.diorama.Projection;
+import dev.diorama.render.Circle;
 import dev.diorama.render.Pins;
 import dev.diorama.render.MapViewport;
 import java.util.ArrayList;
@@ -41,6 +42,8 @@ public final class WaypointOverlay {
 		// At least a pixel, so a view smaller than a badge still gets finite positions.
 		float halfW = Math.max(1, view.width() / 2.0F - inset);
 		float halfH = Math.max(1, view.height() / 2.0F - inset);
+		Circle circle = view.round() ? Circle.in(view) : null;
+		float radius = circle == null ? 0 : Math.max(1, circle.r - inset);
 		for (Waypoint waypoint : waypoints) {
 			if (!WaypointStore.isShown(waypoint)) {
 				continue;
@@ -49,7 +52,15 @@ public final class WaypointOverlay {
 			float y = view.screenY(Projection.v(waypoint.y, waypoint.z + 0.5));
 			float dx = x - cx;
 			float dy = y - cy;
-			if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
+			if (circle != null) {
+				if (Pins.fitsStanding(size, x, y, circle)) {
+					pins.add(new Pin(waypoint, x, y, size, false));
+				} else {
+					// On a round view the badge goes round the rim.
+					float reach = Math.max(1, (float) Math.hypot(dx, dy) / radius);
+					pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
+				}
+			} else if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
 			} else {
 				// Too near the edge for the whole pin to show: a badge pointing the way, pulled in to

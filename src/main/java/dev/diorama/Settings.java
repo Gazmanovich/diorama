@@ -52,6 +52,7 @@ public final class Settings {
 	public boolean biome = true;
 	public boolean autoCaves = true;
 	public Frame minimapFrame = Frame.CLASSIC;
+	public Shape minimapShape = Shape.SQUARE;
 
 	public boolean radarPlayers = true;
 	public boolean radarHostile = true;
@@ -101,6 +102,12 @@ public final class Settings {
 		CLASSIC,
 		MINECRAFT,
 		NONE
+	}
+
+	/** The minimap's outline: a square, or a circle like other minimap mods offer. */
+	public enum Shape {
+		SQUARE,
+		ROUND
 	}
 
 	public enum RadarStyle {
@@ -229,6 +236,9 @@ public final class Settings {
 		}
 		if (settings.minimapFrame == null) {
 			settings.minimapFrame = Frame.CLASSIC;
+		}
+		if (settings.minimapShape == null) {
+			settings.minimapShape = Shape.SQUARE;
 		}
 		if (settings.radarStyle == null) {
 			settings.radarStyle = RadarStyle.HEADS;

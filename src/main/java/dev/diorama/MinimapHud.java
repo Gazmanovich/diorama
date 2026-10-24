@@ -1,10 +1,12 @@
 package dev.diorama;
 
 import dev.diorama.bake.TileKey;
+import dev.diorama.render.Circle;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
+import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
@@ -22,8 +24,8 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The minimap, centred on the player, in the corner the settings pick. Compass letters sit on its
- * edges, and coordinates and the biome sit on the side away from the screen edge.
+ * The minimap, centred on the player, in the corner the settings pick, square or round. Compass
+ * letters sit on its edges, and coordinates and the biome sit on the side away from the screen edge.
  */
 public final class MinimapHud implements HudElement {
 	private static final int MARGIN = 6;
@@ -82,15 +84,25 @@ public final class MinimapHud implements HudElement {
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
 		int[] bounds = this.draw(graphics, partialTick, true, top, 0);
 		if (!settings.minimap) {
-			//? if >=1.21.6 {
-			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
-			//?} else {
+			//? if <1.21.6 {
 			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
 			var pose = graphics.pose();
 			pose.pushPose();
 			pose.translate(0, 0, 1);
-			graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
-			pose.popPose();
+			*///?}
+			if (settings.minimapShape == Settings.Shape.ROUND) {
+				// The disc with its frame, then the lines under it, so the corners beside it stay undimmed.
+				MapCanvas canvas = MapCanvas.of(graphics);
+				new Circle(bounds[4] + bounds[6] / 2.0F, bounds[5] + bounds[6] / 2.0F, bounds[6] / 2.0F + 2)
+					.fill((corners, uvs) -> canvas.solid(corners, 0xB0101418));
+				if (bounds[3] > bounds[5] + bounds[6] + 2) {
+					graphics.fill(bounds[0], bounds[5] + bounds[6] + 2, bounds[2], bounds[3], 0xB0101418);
+				}
+			} else {
+				graphics.fill(bounds[0], bounds[1], bounds[2], bounds[3], 0xB0101418);
+			}
+			//? if <1.21.6 {
+			/*pose.popPose();
 			*///?}
 		}
 	}
@@ -116,7 +128,10 @@ public final class MinimapHud implements HudElement {
 		return MapSession.get() != null && mc.player != null && mc.level != null && ServerRules.minimapAllowed();
 	}
 
-	/** Draws the minimap in a corner, {@code effects} pixels lower for status effect icons. Returns what it covers: x0, y0, x1, y1. */
+	/**
+	 * Draws the minimap in a corner, {@code effects} pixels lower for status effect icons. Returns
+	 * what it covers, x0, y0, x1, y1, then the map's own x, y and size.
+	 */
 	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
@@ -131,9 +146,14 @@ public final class MinimapHud implements HudElement {
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
+		boolean round = settings.minimapShape == Settings.Shape.ROUND;
 
-		this.frame(graphics, settings.minimapFrame, x, y, size);
-		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer);
+		if (round) {
+			this.roundFrame(graphics, settings.minimapFrame, x, y, size);
+		} else {
+			this.frame(graphics, settings.minimapFrame, x, y, size);
+		}
+		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer, round);
 		this.viewport.draw(graphics, session.map(), view);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() ? Radar.collect(view, partialTick, false) : List.of();
 		Radar.draw(graphics, view, blips, false, false);
@@ -157,7 +177,7 @@ public final class MinimapHud implements HudElement {
 			textRight = Math.max(textRight, tx + w + 1);
 			textY += 10;
 		}
-		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY};
+		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY, x, y, size};
 	}
 
 	/**
@@ -221,6 +241,23 @@ public final class MinimapHud implements HudElement {
 			case NONE -> {
 			}
 		}
+	}
+
+	/**
+	 * The same borders around a round minimap: discs the map then covers all but the rim of. The
+	 * Minecraft edge's cut corners have nothing to cut on a circle, so it's a black ring around a
+	 * light grey one.
+	 */
+	private void roundFrame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size) {
+		if (frame == Settings.Frame.NONE) {
+			return;
+		}
+		MapCanvas canvas = MapCanvas.of(graphics);
+		float cx = x + size / 2.0F;
+		float cy = y + size / 2.0F;
+		boolean classic = frame == Settings.Frame.CLASSIC;
+		new Circle(cx, cy, size / 2.0F + 2).fill((corners, uvs) -> canvas.solid(corners, classic ? 0xC0101418 : 0xFF000000));
+		new Circle(cx, cy, size / 2.0F + 1).fill((corners, uvs) -> canvas.solid(corners, classic ? 0x60FFFFFF : 0xFFA0A0A0));
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */

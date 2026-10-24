@@ -68,5 +68,15 @@ public interface MapCanvas {
 	 * The fog over a view: the known-area mask in sampler 0 (clamped), the noise in sampler 1
 	 * (repeating), and the shader's parameters packed into the vertex colour. Clipped to the view.
 	 */
-	void fog(MapTexture mask, MapTexture noise, int x, int y, int width, int height, float u0, float v0, float u1, float v1, int params);
+	default void fog(MapTexture mask, MapTexture noise, int x, int y, int width, int height, float u0, float v0, float u1, float v1, int params) {
+		this.fog(
+			mask, noise,
+			new float[] {x, y, x, y + height, x + width, y + height, x + width, y},
+			new float[] {u0, v0, u0, v1, u1, v1, u1, v0},
+			x, y, width, height, params
+		);
+	}
+
+	/** The same over one quad of a view (a piece of the round minimap), still clipped to the view. */
+	void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params);
 }
