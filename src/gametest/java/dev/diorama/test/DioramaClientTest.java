@@ -1769,10 +1769,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		settle(context, 60);
 		context.takeScreenshot("radar-01-minimap");
+		// A pig in the square's corner, outside the circle: the round minimap leaves it off.
+		world.getServer().runCommand("fill " + (x + 19) + " " + y + " " + (z - 25) + " " + (x + 21) + " " + (y + 3) + " " + (z - 23) + " air");
+		world.getServer().runCommand("fill " + (x + 19) + " " + (y - 1) + " " + (z - 25) + " " + (x + 21) + " " + (y - 1) + " " + (z - 23) + " grass_block");
+		world.getServer().runCommand("summon pig " + (x + 20) + " " + y + " " + (z - 24) + " " + still);
+		settle(context, 10);
+		context.takeScreenshot("radar-01b-corner-pig");
 		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
 		context.waitTicks(5);
-		context.takeScreenshot("radar-01b-round-minimap");
+		context.takeScreenshot("radar-01c-round-minimap");
 		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.SQUARE);
+		world.getServer().runCommand("kill @e[type=pig]");
 
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 6.0, TileKey.SURFACE);

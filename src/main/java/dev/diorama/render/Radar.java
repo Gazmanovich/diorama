@@ -85,7 +85,7 @@ public final class Radar {
 		// the surface view.
 		double range = settings.radarRange;
 		float margin = 12;
-		// A round view shows what's inside its circle; icons can't be cut to it, so ones outside are left off.
+		// A round view can't cut icons to its circle, so it shows only those wholly inside it.
 		Circle circle = view.round() ? Circle.in(view) : null;
 		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
 			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
@@ -104,10 +104,12 @@ public final class Radar {
 			if (x < view.x() - margin || y < view.y() - margin || x > view.x() + view.width() + margin || y > view.y() + view.height() + margin) {
 				continue;
 			}
-			if (circle != null && !circle.contains(x, y)) {
+			float size = size(kind, view.zoom(), fullscreen);
+			// Half the widest icon (a mob's box is 1.6 times its size) with its outline, out to its corner.
+			if (circle != null && Math.hypot(x - circle.cx, y - circle.cy) > circle.r - (size * 0.8F + 1) * 1.42F) {
 				continue;
 			}
-			blips.add(new Blip(entity, kind, x, y, pos.y - selfY, size(kind, view.zoom(), fullscreen)));
+			blips.add(new Blip(entity, kind, x, y, pos.y - selfY, size));
 		}
 		blips.sort(Comparator.comparingInt(b -> b.kind().ordinal()));
 		return blips;
