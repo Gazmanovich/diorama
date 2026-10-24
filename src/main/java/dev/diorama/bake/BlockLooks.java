@@ -268,12 +268,31 @@ public final class BlockLooks {
 			if (topFace.isEmpty() && sideFace.isEmpty()) {
 				// Block entities (chests, signs, beds) have no block model; use the particle texture.
 				//? if >=26.1 {
-				float[] avg = spriteAverage(model.particleMaterial().sprite(), spriteCache);
+				TextureAtlasSprite particle = model.particleMaterial().sprite();
 				//?} else {
-				/*float[] avg = spriteAverage(model.particleIcon(), spriteCache);
+				/*TextureAtlasSprite particle = model.particleIcon();
 				*///?}
-				topFace.add(avg, -1);
-				sideFace.add(avg, -1);
+				if (!isMissing(particle)) {
+					float[] avg = spriteAverage(particle, spriteCache);
+					topFace.add(avg, -1);
+					sideFace.add(avg, -1);
+				}
+			}
+			if (topFace.isEmpty() && sideFace.isEmpty()) {
+				// No texture to go by: a model that draws only from its block entity's data, which this
+				// table can't see (Copycats+ copycats take the look of the block they're filled with), a
+				// texture the game can't find, or one a reload freed with nothing in its place. Use the
+				// block's colour on Minecraft's own maps instead of the missing texture's purple, and see
+				// through it where those maps do.
+				int mapColor = mapColor(state);
+				if (mapColor == 0) {
+					looks.kind[id] = AIR;
+					looks.shape[id] = 0;
+					continue;
+				}
+				float[] flat = {(mapColor >> 16 & 0xFF) / 255.0F, (mapColor >> 8 & 0xFF) / 255.0F, (mapColor & 0xFF) / 255.0F, 1.0F};
+				topFace.add(flat, -1);
+				sideFace.add(flat, -1);
 			}
 			if (topFace.isEmpty()) {
 				topFace = sideFace;
@@ -446,7 +465,7 @@ public final class BlockLooks {
 		} catch (RuntimeException e) {
 			sprite = null;
 		}
-		if (sprite != null && sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation())) {
+		if (sprite != null && isMissing(sprite)) {
 			// An unregistered fluid or a missing texture: better the block's particle colour than purple.
 			sprite = null;
 		}
@@ -521,28 +540,51 @@ public final class BlockLooks {
 	private static void accumulate(FaceColor face, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
-			face.add(spriteAverage(quad.materialInfo().sprite(), cache), quad.materialInfo().tintIndex());
+			TextureAtlasSprite sprite = quad.materialInfo().sprite();
+			int tintIndex = quad.materialInfo().tintIndex();
 			//?} else {
-			/*face.add(spriteAverage(quad.sprite(), cache), quad.tintIndex());
+			/*TextureAtlasSprite sprite = quad.sprite();
+			int tintIndex = quad.tintIndex();
 			*///?}
+			if (!isMissing(sprite)) {
+				face.add(spriteAverage(sprite, cache), tintIndex);
+			}
 		}
 	}
 
 	private static void accumulateLoose(FaceColor top, FaceColor side, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
-			float[] avg = spriteAverage(quad.materialInfo().sprite(), cache);
+			TextureAtlasSprite sprite = quad.materialInfo().sprite();
 			int tintIndex = quad.materialInfo().tintIndex();
 			//?} else {
-			/*float[] avg = spriteAverage(quad.sprite(), cache);
+			/*TextureAtlasSprite sprite = quad.sprite();
 			int tintIndex = quad.tintIndex();
 			*///?}
+			if (isMissing(sprite)) {
+				continue;
+			}
+			float[] avg = spriteAverage(sprite, cache);
 			if (quad.direction() == Direction.UP || quad.direction() == Direction.DOWN) {
 				top.add(avg, tintIndex);
 			} else {
 				top.add(avg, tintIndex);
 				side.add(avg, tintIndex);
 			}
+		}
+	}
+
+	/** The game's magenta and black stand-in for a texture it can't find. */
+	private static boolean isMissing(TextureAtlasSprite sprite) {
+		return sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation());
+	}
+
+	/** The block's colour on Minecraft's own maps as 0xRRGGBB, or 0 where those maps see through it. */
+	private static int mapColor(BlockState state) {
+		try {
+			return state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col;
+		} catch (RuntimeException e) {
+			return 0;
 		}
 	}
 
