@@ -381,6 +381,13 @@ final class GlBakeBackend implements BakeBackend {
 				this.timestamps = caps.glQueryCounter != 0 && caps.glGetQueryObjecti64v != 0;
 				this.device = glGetString(GL_RENDERER) + " (" + glGetString(GL_VENDOR) + ", OpenGL " + glGetString(GL_VERSION) + ")";
 				Diorama.LOGGER.info("GPU baking on {}", this.device);
+				// An error stays flagged until someone reads it, and on Windows nothing in the game
+				// does, so one another mod raised minutes ago would be blamed on this setup. Read
+				// them away first; GL keeps one per kind, so a few reads clear them all.
+				int error;
+				for (int i = 0; i < 16 && (error = glGetError()) != GL_NO_ERROR; i++) {
+					Diorama.LOGGER.debug("OpenGL error {} was flagged before GPU baking set up; not counting it", error);
+				}
 				Saved saved = Saved.take();
 				try {
 					this.create(caps);
