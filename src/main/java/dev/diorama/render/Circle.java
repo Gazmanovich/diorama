@@ -1,28 +1,49 @@
 package dev.diorama.render;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A circle on screen, for the round minimap: a many-sided polygon that rectangles are clipped to.
  * The map draws in quads with float corners, so a tile on the circle's edge becomes a few quads
  * that follow it, smooth at any GUI scale, on every version, with no stencil or shader.
+ *
+ * <p>Each clipped shape comes out as one set of quads, for one draw: drawn quad by quad, a disc
+ * was dozens of draws before 1.21.6, and dozens of GUI layers after it, since each quad overlaps
+ * the one before.
  */
 public final class Circle {
 	/** Sides of the polygon. At the largest minimap a side bows less than a tenth of a GUI pixel from the circle. */
 	private static final int SIDES = 96;
+	/** The unit circle's corners, x then y, in the same turning order as the quads' corners: top left, bottom left, bottom right, top right. */
+	private static final float[] UNIT = new float[SIDES * 2];
+	/**
+	 * The shape being clipped and the next one, kept between calls: clipping by each side adds at
+	 * most one corner to the rectangle's four. Render thread only.
+	 */
+	private static float[] shape = new float[(SIDES + 5) * 2];
+	private static float[] kept = new float[(SIDES + 5) * 2];
+
+	static {
+		for (int i = 0; i < SIDES; i++) {
+			double a = Math.PI * 2 * i / SIDES;
+			UNIT[i * 2] = (float) Math.cos(a);
+			UNIT[i * 2 + 1] = (float) -Math.sin(a);
+		}
+	}
 
 	public final float cx;
 	public final float cy;
 	public final float r;
-	/** x, y pairs, in the same turning order as the quads' corners: top left, bottom left, bottom right, top right. */
 	private final float[] points = new float[SIDES * 2];
+	private float @Nullable [] disc;
 
 	public Circle(float cx, float cy, float r) {
 		this.cx = cx;
 		this.cy = cy;
 		this.r = r;
 		for (int i = 0; i < SIDES; i++) {
-			double a = Math.PI * 2 * i / SIDES;
-			this.points[i * 2] = (float) (cx + r * Math.cos(a));
-			this.points[i * 2 + 1] = (float) (cy - r * Math.sin(a));
+			this.points[i * 2] = cx + r * UNIT[i * 2];
+			this.points[i * 2 + 1] = cy + r * UNIT[i * 2 + 1];
 		}
 	}
 
@@ -37,27 +58,59 @@ public final class Circle {
 		return dx * dx + dy * dy <= this.r * this.r;
 	}
 
-	/** Receives one quad of a clipped shape: corners and their texture coordinates, as {@link dev.diorama.render.gpu.MapCanvas#quad} takes them. */
-	public interface QuadSink {
-		void quad(float[] corners, float[] uvs);
+	/**
+	 * Quads, as {@link dev.diorama.render.gpu.MapCanvas#quad} takes them: four corners each, and
+	 * their texture coordinates.
+	 */
+	public record Quads(float[] corners, float[] uvs) {
 	}
 
 	/**
-	 * The part of a rectangle inside the circle, as quads, with texture coordinates carried along
-	 * from (u0, v0) at the top left to (u1, v1) at the bottom right. A rectangle wholly inside
-	 * comes out as itself; one wholly outside as nothing.
+	 * The part of a rectangle inside the circle, with texture coordinates carried along from
+	 * (u0, v0) at the top left to (u1, v1) at the bottom right, or null when none of it is. A
+	 * rectangle wholly inside comes out as itself; one around the whole circle as the disc.
 	 */
-	public void clip(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, QuadSink sink) {
+	public @Nullable Quads clip(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1) {
 		float nearX = Math.max(x0, Math.min(this.cx, x1)) - this.cx;
 		float nearY = Math.max(y0, Math.min(this.cy, y1)) - this.cy;
 		if (nearX * nearX + nearY * nearY >= this.r * this.r) {
-			return;
+			return null;
 		}
 		if (this.contains(x0, y0) && this.contains(x1, y0) && this.contains(x0, y1) && this.contains(x1, y1)) {
-			sink.quad(new float[] {x0, y0, x0, y1, x1, y1, x1, y0}, new float[] {u0, v0, u0, v1, u1, v1, u1, v0});
-			return;
+			return new Quads(new float[] {x0, y0, x0, y1, x1, y1, x1, y0}, new float[] {u0, v0, u0, v1, u1, v1, u1, v0});
 		}
-		float[] shape = {x0, y0, x0, y1, x1, y1, x1, y0};
+		float[] corners;
+		if (x0 <= this.cx - this.r && y0 <= this.cy - this.r && x1 >= this.cx + this.r && y1 >= this.cy + this.r) {
+			corners = this.disc();
+		} else {
+			int count = this.cut(x0, y0, x1, y1);
+			if (count < 3) {
+				return null;
+			}
+			corners = fan(shape, count);
+		}
+		float du = (u1 - u0) / (x1 - x0);
+		float dv = (v1 - v0) / (y1 - y0);
+		float[] uvs = new float[corners.length];
+		for (int i = 0; i < corners.length; i += 2) {
+			uvs[i] = u0 + (corners[i] - x0) * du;
+			uvs[i + 1] = v0 + (corners[i + 1] - y0) * dv;
+		}
+		return new Quads(corners, uvs);
+	}
+
+	/** The whole disc, as the corners of its quads. The same array each time: don't change it. */
+	public float[] disc() {
+		if (this.disc == null) {
+			this.disc = fan(this.points, SIDES);
+		}
+		return this.disc;
+	}
+
+	/** Cuts the rectangle by each side of the polygon it crosses, into {@link #shape}. Returns its corner count. */
+	private int cut(float x0, float y0, float x1, float y1) {
+		float[] rect = {x0, y0, x0, y1, x1, y1, x1, y0};
+		System.arraycopy(rect, 0, shape, 0, 8);
 		int count = 4;
 		for (int i = 0; i < SIDES && count > 0; i++) {
 			int j = (i + 1) % SIDES;
@@ -67,7 +120,14 @@ public final class Circle {
 			float ey = this.points[j * 2 + 1] - ay;
 			// Which side of this edge the centre is on is the inside.
 			float inside = Math.signum(ex * (this.cy - ay) - ey * (this.cx - ax));
-			float[] kept = new float[(count + 1) * 2];
+			// The shape stays inside the rectangle, so a side the whole rectangle is inside of cuts nothing.
+			boolean cuts = false;
+			for (int k = 0; k < 8 && !cuts; k += 2) {
+				cuts = inside * (ex * (rect[k + 1] - ay) - ey * (rect[k] - ax)) < 0;
+			}
+			if (!cuts) {
+				continue;
+			}
 			int keptCount = 0;
 			for (int k = 0; k < count; k++) {
 				int n = (k + 1) % count;
@@ -89,34 +149,30 @@ public final class Circle {
 					keptCount++;
 				}
 			}
+			float[] swap = shape;
 			shape = kept;
+			kept = swap;
 			count = keptCount;
 		}
-		if (count < 3) {
-			return;
-		}
-		float du = (u1 - u0) / (x1 - x0);
-		float dv = (v1 - v0) / (y1 - y0);
-		// A fan from the first corner, two triangles to a quad; an odd one left over repeats its last corner.
-		for (int k = 1; k + 1 < count; k += 2) {
-			int c = Math.min(k + 2, count - 1);
-			int[] at = {0, k, k + 1, c};
-			float[] corners = new float[8];
-			float[] uvs = new float[8];
-			for (int m = 0; m < 4; m++) {
-				float x = shape[at[m] * 2];
-				float y = shape[at[m] * 2 + 1];
-				corners[m * 2] = x;
-				corners[m * 2 + 1] = y;
-				uvs[m * 2] = u0 + (x - x0) * du;
-				uvs[m * 2 + 1] = v0 + (y - y0) * dv;
-			}
-			sink.quad(corners, uvs);
-		}
+		return count;
 	}
 
-	/** The whole disc, as quads (texture coordinates unused). */
-	public void fill(QuadSink sink) {
-		this.clip(this.cx - this.r, this.cy - this.r, this.cx + this.r, this.cy + this.r, 0, 0, 1, 1, sink);
+	/** A convex polygon as quads: a fan from its first corner, two triangles to a quad; an odd one left over repeats its last corner. */
+	private static float[] fan(float[] polygon, int count) {
+		float[] corners = new float[(count - 1) / 2 * 8];
+		int out = 0;
+		for (int k = 1; k + 1 < count; k += 2) {
+			out = corner(polygon, 0, corners, out);
+			out = corner(polygon, k, corners, out);
+			out = corner(polygon, k + 1, corners, out);
+			out = corner(polygon, Math.min(k + 2, count - 1), corners, out);
+		}
+		return corners;
+	}
+
+	private static int corner(float[] polygon, int at, float[] corners, int out) {
+		corners[out] = polygon[at * 2];
+		corners[out + 1] = polygon[at * 2 + 1];
+		return out + 2;
 	}
 }

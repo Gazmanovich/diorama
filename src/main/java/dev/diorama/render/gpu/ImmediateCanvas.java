@@ -29,7 +29,7 @@ final class ImmediateCanvas implements MapCanvas {
 	public void quad(MapTexture texture, Sampling sampling, float[] corners, float[] uvs, int argb) {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < corners.length / 2; i++) {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(argb);
 		}
 		((LegacyTexture) texture).bind(0, sampling);
@@ -41,7 +41,7 @@ final class ImmediateCanvas implements MapCanvas {
 	public void solid(float[] corners, int argb) {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < corners.length / 2; i++) {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setColor(argb);
 		}
 		LegacyShaders.draw(LegacyShaders.SOLID, mesh.buildOrThrow());
@@ -105,7 +105,7 @@ final class ImmediateCanvas implements MapCanvas {
 		}
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < corners.length / 2; i++) {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(params);
 		}
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);

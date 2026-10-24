@@ -92,9 +92,7 @@ public final class MinimapHud implements HudElement {
 			*///?}
 			if (settings.minimapShape == Settings.Shape.ROUND) {
 				// The disc with its frame, then the lines under it, so the corners beside it stay undimmed.
-				MapCanvas canvas = MapCanvas.of(graphics);
-				new Circle(bounds[4] + bounds[6] / 2.0F, bounds[5] + bounds[6] / 2.0F, bounds[6] / 2.0F + 2)
-					.fill((corners, uvs) -> canvas.solid(corners, 0xB0101418));
+				MapCanvas.of(graphics).solid(new Circle(bounds[4] + bounds[6] / 2.0F, bounds[5] + bounds[6] / 2.0F, bounds[6] / 2.0F + 2).disc(), 0xB0101418);
 				if (bounds[3] > bounds[5] + bounds[6] + 2) {
 					graphics.fill(bounds[0], bounds[5] + bounds[6] + 2, bounds[2], bounds[3], 0xB0101418);
 				}
@@ -256,8 +254,8 @@ public final class MinimapHud implements HudElement {
 		float cx = x + size / 2.0F;
 		float cy = y + size / 2.0F;
 		boolean classic = frame == Settings.Frame.CLASSIC;
-		new Circle(cx, cy, size / 2.0F + 2).fill((corners, uvs) -> canvas.solid(corners, classic ? 0xC0101418 : 0xFF000000));
-		new Circle(cx, cy, size / 2.0F + 1).fill((corners, uvs) -> canvas.solid(corners, classic ? 0x60FFFFFF : 0xFFA0A0A0));
+		canvas.solid(new Circle(cx, cy, size / 2.0F + 2).disc(), classic ? 0xC0101418 : 0xFF000000);
+		canvas.solid(new Circle(cx, cy, size / 2.0F + 1).disc(), classic ? 0x60FFFFFF : 0xFFA0A0A0);
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */
