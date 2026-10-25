@@ -264,15 +264,10 @@ public final class MapScreen extends Screen {
 		// The bars: tabs and status on top with the buttons, the mouse's ways in at the bottom.
 		graphics.fill(0, 0, this.width, BAR, 0x90000000);
 		this.drawTabs(graphics, mouseX, mouseY);
-		String mode = !caves && session.map().roofless() ? "Under the roof   ·   " : "";
-		String status = String.format(
-			"%s%d, %d, %d   ·   %d chunks%s",
-			mode, player.getBlockX(), player.getBlockY(), player.getBlockZ(), session.map().chunkCount(),
-			session.map().bakingCount() > 0 ? "   ·   baking" : ""
-		);
-		graphics.text(this.font, status, this.tabsEnd + 8, 4, 0xFFFFFFFF, false);
+		Component status = this.statusText(session, player, caves);
+		graphics.text(this.font, status.getString(), this.tabsEnd + 8, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
-		graphics.text(this.font, HELP, 6, this.height - 11, 0xFFC8D0DA, false);
+		graphics.text(this.font, HELP.getString(), 6, this.height - 11, 0xFFC8D0DA, false);
 		// Widgets (the buttons) draw over the map, then the icons on them.
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		Markers.player(graphics, this.recenter.getX() + 10, this.recenter.getY() + 10.5F, 180, 5);
@@ -294,6 +289,21 @@ public final class MapScreen extends Screen {
 			pose.popPose();
 			*///?}
 		}
+	}
+
+	/** The status line: the player's position, the chunks mapped and whether baking is running. */
+	private static Component statusText(MapSession session, LocalPlayer player, boolean caves) {
+		Component mode = !caves && session.map().roofless()
+			? Component.translatable("diorama.map.under_roof").append("   ·   ")
+			: Component.empty();
+		Component chunks = Component.translatable("diorama.map.chunks", session.map().chunkCount());
+		Component baking = session.map().bakingCount() > 0
+			? Component.literal("   ·   ").append(Component.translatable("diorama.map.baking"))
+			: Component.empty();
+		return mode.copy()
+			.append(Component.literal(String.format("%d, %d, %d   ·   ", player.getBlockX(), player.getBlockY(), player.getBlockZ())))
+			.append(chunks)
+			.append(baking);
 	}
 
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
@@ -661,22 +671,22 @@ public final class MapScreen extends Screen {
 			case InputConstants.KEY_C -> {
 				this.toggleCaves();
 				return true;
-			}
+				}
 			case InputConstants.KEY_PAGEUP -> {
 				this.menu = null;
 				this.shiftSlice(4, player);
 				return true;
-			}
+				}
 			case InputConstants.KEY_PAGEDOWN -> {
 				this.menu = null;
 				this.shiftSlice(-4, player);
 				return true;
-			}
+				}
 			case InputConstants.KEY_SPACE -> {
 				this.menu = null;
 				this.following = true;
 				return true;
-			}
+				}
 			default -> {
 			}
 		}

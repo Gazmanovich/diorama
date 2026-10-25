@@ -217,5 +217,8 @@
 	"diorama.settings.radar_style.framed": "Framed",
 	"diorama.settings.radar_style.dots": "Dots",
 	"diorama.settings.radar_style.tooltip": "How players and mobs show: their heads as pixel art, faces in boxes framed by mob type, or plain coloured dots.",
-    "diorama.map.help": "Drag to pan · Scroll to zoom · Right-click for options"
+    "diorama.map.help": "Drag to pan · Scroll to zoom · Right-click for options",
+    "diorama.map.under_roof": "Under the roof",
+    "diorama.map.chunks": "%s chunks",
+    "diorama.map.baking": "baking"
 }
