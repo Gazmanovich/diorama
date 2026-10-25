@@ -345,9 +345,10 @@ public final class MobFaces {
 	private static final Map<Class<?>, List<java.lang.reflect.Field>> MODEL_FIELDS = new java.util.concurrent.ConcurrentHashMap<>();
 
 	/**
-	 * The face read off the model a renderer draws a mob with. A renderer can keep other models
-	 * it switches to as it draws (a sulfur cube's small one, a mule's), and which one is this
-	 * mob's isn't known until then: the face is only used if all of them give the same one.
+	 * The face read off the model a renderer draws a mob with. A renderer can keep other models it
+	 * switches to as it draws (a sulfur cube's small one, a mod's baby model), and which one is this
+	 * mob's isn't known until then. Those named for babies (baby, small, child) count for babies,
+	 * the rest for adults, and the face is only used if all of this mob's age's models agree.
 	 */
 	@SuppressWarnings("rawtypes")
 	private static @Nullable Face modelFace(LivingEntityRenderer renderer, boolean baby, @Nullable Object state) {
@@ -357,21 +358,48 @@ public final class MobFaces {
 			return model == null ? null : ModelFaces.of(model, state);
 		}
 		//?}
-		Face face = ModelFaces.of(renderer.getModel(), state);
+		Model current = renderer.getModel();
+		List<Model> models = new java.util.ArrayList<>(List.of(current));
+		List<Boolean> forBabies = new java.util.ArrayList<>(List.of(babyName(current.getClass().getSimpleName())));
 		for (java.lang.reflect.Field field : MODEL_FIELDS.computeIfAbsent(renderer.getClass(), MobFaces::modelFields)) {
+			Object other;
 			try {
-				Object other = field.get(renderer);
-				if (other instanceof Model model && other != renderer.getModel()) {
-					Face otherFace = ModelFaces.of(model, state);
-					if (otherFace != null && !otherFace.equals(face)) {
-						return null;
-					}
-				}
+				other = field.get(renderer);
 			} catch (ReflectiveOperationException | RuntimeException e) {
 				return null;
 			}
+			if (!(other instanceof Model model)) {
+				continue;
+			}
+			boolean babyField = babyName(field.getName()) || babyName(model.getClass().getSimpleName());
+			int at = models.indexOf(model);
+			if (at >= 0) {
+				forBabies.set(at, forBabies.get(at) || babyField);
+			} else {
+				models.add(model);
+				forBabies.add(babyField);
+			}
+		}
+		boolean sorted = forBabies.contains(baby);
+		Face face = null;
+		for (int i = 0; i < models.size(); i++) {
+			if (sorted && forBabies.get(i) != baby) {
+				continue;
+			}
+			Face read = ModelFaces.of(models.get(i), state);
+			if (read != null) {
+				if (face != null && !face.equals(read)) {
+					return null;
+				}
+				face = read;
+			}
 		}
 		return face;
+	}
+
+	private static boolean babyName(String name) {
+		String lower = name.toLowerCase(java.util.Locale.ROOT);
+		return lower.contains("baby") || lower.contains("small") || lower.contains("child");
 	}
 
 	private static List<java.lang.reflect.Field> modelFields(Class<?> type) {

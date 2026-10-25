@@ -1879,7 +1879,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 					}
 				}
 			}
-			if (adultCamel == null || babyCamel == null || adultCamel.equals(babyCamel)) {
+			// The adult's model is laid out on a 128 x 128 texture, the baby's on 64 x 64.
+			if (adultCamel == null || babyCamel == null || !adultCamel.startsWith("128x128 ") || !babyCamel.startsWith("64x64 ")) {
 				wrong.append("\n  camel: adult ").append(adultCamel).append(", baby ").append(babyCamel).append(" (each should have its own model's face)");
 			}
 			//?}
