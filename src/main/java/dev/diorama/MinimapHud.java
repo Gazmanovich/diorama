@@ -12,7 +12,9 @@ import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
+//? if >=1.21 {
 import net.minecraft.client.DeltaTracker;
+//?}
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -46,7 +48,12 @@ public final class MinimapHud implements HudElement {
 	private long holdStart = -1;
 
 	@Override
+	//? if >=1.21 {
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
+		float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
+	//?} else {
+	/*public void extractRenderState(GuiGraphicsExtractor graphics, float partialTick) {
+	*///?}
 		Minecraft mc = Minecraft.getInstance();
 		Settings settings = Settings.get();
 		//? if >=26.2 {
@@ -67,7 +74,7 @@ public final class MinimapHud implements HudElement {
 		Settings.Corner corner = settings.minimapCorner;
 		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
 		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
-		this.draw(graphics, deltaTracker.getGameTimeDeltaPartialTick(true), right, top, top ? this.effectRows(mc.player, right) : 0);
+		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0);
 	}
 
 	/**
@@ -117,8 +124,10 @@ public final class MinimapHud implements HudElement {
 	private static boolean debugScreenOpen(Minecraft mc) {
 		//? if >=1.21.9 {
 		return mc.debugEntries.isOverlayVisible();
-		//?} else {
+		//?} else if >=1.21 {
 		/*return mc.getDebugOverlay().showDebugScreen();
+		*///?} else {
+		/*return mc.options.renderDebug;
 		*///?}
 	}
 

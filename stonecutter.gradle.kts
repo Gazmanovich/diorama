@@ -174,6 +174,8 @@ stonecutter parameters {
 		"\\b(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new ResourceLocation(",
 		// Chunk statuses had no package of their own.
 		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
+		// A status effect instance held its effect itself, not a registry holder of it.
+		"\\.getEffect\\(\\)\\.value\\(\\)" to ".getEffect()",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {

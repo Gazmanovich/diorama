@@ -5,7 +5,9 @@ import dev.diorama.Settings;
 import dev.diorama.render.Pins;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
+//? if >=1.21 {
 import net.minecraft.client.DeltaTracker;
+//?}
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -24,7 +26,11 @@ public final class WaypointHud implements HudElement {
 	private static final double NAME_DISTANCE = 48;
 
 	@Override
+	//? if >=1.21 {
 	public void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
+	//?} else {
+	/*public void extractRenderState(GuiGraphicsExtractor graphics, float partialTick) {
+	*///?}
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
 		WaypointStore store = WaypointStore.get();
