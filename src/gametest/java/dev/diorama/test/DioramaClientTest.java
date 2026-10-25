@@ -126,6 +126,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("xaero-icons")) {
 				xaeroIcons(context, world);
 			}
+			if (tests.contains("model-faces")) {
+				modelFaces(context, world);
+			}
 			if (tests.contains("waypoints")) {
 				waypoints(context, world);
 			}
@@ -1743,6 +1746,180 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * underground. Then the server's fair-play code must hide the radar, and its no-minimap code
 	 * must hide the minimap.
 	 */
+	/**
+	 * Every mob in the game on a platform, each with the face {@link dev.diorama.render.ModelFaces}
+	 * reads off its model, logged as MODEL-FACE lines beside the face it's drawn with, and on the
+	 * fullscreen map with the hand-made faces and then with the model's for every mob. Mobs from
+	 * other mods come first: load some (on 26.x, -Dfabric.addMods=<folder>) to see theirs. Faces read off
+	 * these vanilla models must come out exactly as the hand-made ones, on every version.
+	 */
+	private static void modelFaces(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("time set noon");
+		int x = 3000;
+		int y = 200;
+		int z = 3000;
+		// Go there first: a fill in chunks that aren't loaded does nothing.
+		world.getServer().runCommand("tp @a " + x + " " + (y + 5) + " " + (z + 15));
+		context.waitTicks(100);
+		world.getServer().runCommand("fill " + (x - 20) + " " + (y - 1) + " " + (z - 20) + " " + (x + 20) + " " + (y - 1) + " " + (z + 20) + " smooth_stone");
+		world.getServer().runCommand("tp @a " + x + " " + y + " " + (z + 20));
+		context.waitTicks(40);
+		java.util.List<String> names = world.getServer().computeOnServer(server -> {
+			java.util.List<String> found = new java.util.ArrayList<>();
+			java.util.Set<String> skipped = java.util.Set.of("ender_dragon", "wither", "giant", "player");
+			java.util.Set<String> misc = java.util.Set.of("villager", "iron_golem", "snow_golem", "wandering_trader");
+			for (net.minecraft.world.entity.EntityType<?> type : net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE) {
+				net.minecraft.resources.Identifier id = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(type);
+				String name = id.getNamespace().equals("minecraft") ? id.getPath() : id.toString();
+				if (!skipped.contains(name) && (type.getCategory() != net.minecraft.world.entity.MobCategory.MISC || misc.contains(name))) {
+					found.add(name);
+				}
+			}
+			// Other mods' mobs first, so the first rows show them.
+			found.sort(java.util.Comparator.comparing((String name) -> !name.contains(":")).thenComparing(name -> name));
+			return found;
+		});
+		String still = "{NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,IsImmuneToZombification:1b}";
+		int columns = 13;
+		for (int i = 0; i < names.size(); i++) {
+			int mx = x - 18 + (i % columns) * 3;
+			int mz = z - 18 + (i / columns) * 3;
+			world.getServer().runCommand("summon " + names.get(i) + " " + mx + " " + y + " " + mz + " " + still);
+		}
+		// A baby camel beside the adult: on versions where babies have a model of their own, each gets its own face.
+		world.getServer().runCommand("summon camel " + (x + 18) + " " + y + " " + (z + 18) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,Age:-24000}");
+		context.waitTicks(40);
+		//? if >=1.21.2 {
+		context.runOnClient(mc -> {
+			// Reading a face runs the model's animation and moves its parts; it must leave the model as it found it.
+			net.minecraft.world.entity.Entity creeper = null;
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CREEPER) {
+					creeper = entity;
+				}
+			}
+			if (creeper == null) {
+				throw new AssertionError("No creeper to read a face off");
+			}
+			@SuppressWarnings({"unchecked", "rawtypes"})
+			net.minecraft.client.renderer.entity.LivingEntityRenderer renderer =
+				(net.minecraft.client.renderer.entity.LivingEntityRenderer) mc.getEntityRenderDispatcher().getRenderer(creeper);
+			net.minecraft.client.model.Model model = renderer.getModel();
+			net.minecraft.client.model.geom.ModelPart head = model.root().getChild("head");
+			net.minecraft.client.model.geom.PartPose pose = head.storePose();
+			float scale = head.xScale;
+			boolean skip = head.skipDraw;
+			head.yRot = 0.7F;
+			head.xScale = 1.5F;
+			head.skipDraw = true;
+			@SuppressWarnings("unchecked")
+			Object state = renderer.createRenderState((net.minecraft.world.entity.LivingEntity) creeper, 1.0F);
+			dev.diorama.render.ModelFaces.of(model, state);
+			boolean kept = head.yRot == 0.7F && head.xScale == 1.5F && head.skipDraw;
+			head.loadPose(pose);
+			head.xScale = scale;
+			head.skipDraw = skip;
+			if (!kept) {
+				throw new AssertionError("Reading a face changed the creeper model's head");
+			}
+		});
+		//?}
+		context.runOnClient(mc -> {
+			int listed = 0;
+			int same = 0;
+			int fromModel = 0;
+			for (String name : names) {
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					net.minecraft.resources.Identifier id = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+					if (!(id.getNamespace().equals("minecraft") ? id.getPath() : id.toString()).equals(name)) {
+						continue;
+					}
+					String listedFace = dev.diorama.render.MobFaces.modelOnly ? null : dev.diorama.render.MobFaces.describe(entity);
+					String modelFace = dev.diorama.render.MobFaces.describeFromModel(entity);
+					dev.diorama.Diorama.LOGGER.info("MODEL-FACE {} | listed: {} | model: {}", name, listedFace, modelFace);
+					if (listedFace != null) {
+						listed++;
+						same += listedFace.equals(modelFace) ? 1 : 0;
+					} else if (modelFace != null) {
+						fromModel++;
+					}
+					break;
+				}
+			}
+			dev.diorama.Diorama.LOGGER.info("MODEL-FACE summary: {} mobs, {} drawn with a face ({} the same as the one read off the model), {} with only a model face",
+				names.size(), listed, same, fromModel);
+			StringBuilder wrong = new StringBuilder();
+			// Mobs with hand-made faces whose models give the same face on every version.
+			for (String name : new String[] {"creeper", "spider", "cave_spider", "blaze", "allay", "pig", "sheep"}) {
+				boolean found = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					if (entity.getType().toShortString().equals(name)) {
+						found = true;
+						String listedFace = dev.diorama.render.MobFaces.describe(entity);
+						String modelFace = dev.diorama.render.MobFaces.describeFromModel(entity);
+						if (listedFace == null || !listedFace.equals(modelFace)) {
+							wrong.append("\n  ").append(name).append(": listed ").append(listedFace).append(", model ").append(modelFace);
+						}
+						break;
+					}
+				}
+				if (!found) {
+					wrong.append("\n  ").append(name).append(": not in the world");
+				}
+			}
+			// A mob with no hand-made face is drawn with the one read off its model.
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CAMEL && entity instanceof net.minecraft.world.entity.LivingEntity living && !living.isBaby()) {
+					String drawn = dev.diorama.render.MobFaces.describe(entity);
+					if (drawn == null || !drawn.equals(dev.diorama.render.MobFaces.describeFromModel(entity))) {
+						wrong.append("\n  camel: drawn with ").append(drawn).append(", read off its model ")
+							.append(dev.diorama.render.MobFaces.describeFromModel(entity));
+					}
+				}
+			}
+			//? if >=26.1 {
+			String adultCamel = null;
+			String babyCamel = null;
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CAMEL && entity instanceof net.minecraft.world.entity.LivingEntity living) {
+					if (living.isBaby()) {
+						babyCamel = dev.diorama.render.MobFaces.describeFromModel(entity);
+					} else {
+						adultCamel = dev.diorama.render.MobFaces.describeFromModel(entity);
+					}
+				}
+			}
+			// The adult's model is laid out on a 128 x 128 texture, the baby's on 64 x 64.
+			if (adultCamel == null || babyCamel == null || !adultCamel.startsWith("128x128 ") || !babyCamel.startsWith("64x64 ")) {
+				wrong.append("\n  camel: adult ").append(adultCamel).append(", baby ").append(babyCamel).append(" (each should have its own model's face)");
+			}
+			//?}
+			if (!wrong.isEmpty()) {
+				throw new AssertionError("Faces read off the model differ from the hand-made ones:" + wrong);
+			}
+		});
+		context.setScreen(MapScreen::new);
+		for (int half = 0; half < 3; half++) {
+			int row = half;
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(x + 0.5, Projection.v(y, z - 12 + row * 13), 12.0, TileKey.SURFACE));
+			settle(context, 40);
+			if (half == 0) {
+				context.runOnClient(mc -> dev.diorama.render.MobFaces.fromModels = false);
+				context.waitTicks(5);
+				context.takeScreenshot("model-faces-01-before");
+				context.runOnClient(mc -> dev.diorama.render.MobFaces.fromModels = true);
+				context.waitTicks(5);
+			}
+			context.takeScreenshot("model-faces-0" + (half + 1) + "-listed");
+			context.runOnClient(mc -> dev.diorama.render.MobFaces.modelOnly = true);
+			context.waitTicks(5);
+			context.takeScreenshot("model-faces-0" + (half + 1) + "-model");
+			context.runOnClient(mc -> dev.diorama.render.MobFaces.modelOnly = false);
+		}
+		context.setScreen(() -> null);
+		world.getServer().runCommand("kill @e[type=!player]");
+	}
+
 	private static void radar(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set midnight");
 		// Summon relative to where the player actually stands, not mid-fall after spawning, on a
@@ -4076,10 +4253,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
 			*///?}
 		}
 		return Set.of(env.split(","));
