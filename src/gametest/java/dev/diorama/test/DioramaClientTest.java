@@ -174,6 +174,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
+		if (tests.contains("recreated-world")) {
+			recreatedWorld(context);
+		}
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
@@ -219,6 +222,85 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (!first.equals(again)) {
 			throw new AssertionError("Coming back to a world opened another folder: " + first + " then " + again);
+		}
+	}
+
+	/**
+	 * A world made after deleting one of the same name gets the same save folder, but not the old
+	 * world's map and waypoints (#116), even with the same seed. Reopened, it finds its own again,
+	 * also once the old world's folder is gone.
+	 */
+	private static void recreatedWorld(ClientGameTestContext context) {
+		String name = "Diorama Recreated";
+		String oldKey;
+		java.nio.file.Path saveDirectory;
+		try (TestSingleplayerContext old = context.worldBuilder()
+			.adjustSettings(s -> {
+				s.setName(name);
+				s.setSeed("recreated");
+			})
+			.create()) {
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
+			saveDirectory = old.getWorldSave().getSaveDirectory();
+			oldKey = context.computeOnClient(mc -> {
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("Old Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+				return WorldKey.current();
+			});
+		}
+		// What the world list's Delete button does.
+		context.runOnClient(mc -> {
+			try (net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess access = mc.getLevelSource().createAccess(saveDirectory.getFileName().toString())) {
+				access.deleteLevel();
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		String newKey;
+		TestWorldSave save;
+		try (TestSingleplayerContext recreated = context.worldBuilder()
+			.adjustSettings(s -> {
+				s.setName(name);
+				s.setSeed("recreated");
+			})
+			.create()) {
+			save = recreated.getWorldSave();
+			if (!save.getSaveDirectory().equals(saveDirectory)) {
+				throw new AssertionError("The new world didn't get the deleted world's save folder: " + saveDirectory + " then " + save.getSaveDirectory());
+			}
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
+			newKey = context.computeOnClient(mc -> WorldKey.current());
+			if (newKey.equals(oldKey)) {
+				throw new AssertionError("The new world opened the deleted world's folder " + oldKey);
+			}
+			if (context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("Old Camp")))) {
+				throw new AssertionError("The deleted world's waypoint is in the new world");
+			}
+			context.runOnClient(mc -> {
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("New Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+			});
+			context.setScreen(MapScreen::new);
+			settle(context, 60);
+			context.takeScreenshot("recreated-world-map");
+			context.setScreen(() -> null);
+		}
+		// A player tidying up deletes the old world's map.
+		context.runOnClient(mc -> {
+			try {
+				org.apache.commons.io.FileUtils.deleteDirectory(WorldKey.folder(oldKey).toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
+		try (TestSingleplayerContext reopened = save.open()) {
+			String again = context.computeOnClient(mc -> WorldKey.current());
+			if (!again.equals(newKey)) {
+				throw new AssertionError("Reopening the new world opened another folder: " + newKey + " then " + again);
+			}
+			if (!context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("New Camp")))) {
+				throw new AssertionError("Reopening the new world lost its waypoint");
+			}
 		}
 	}
 
@@ -4253,10 +4335,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world");
 			*///?}
 		}
 		return Set.of(env.split(","));

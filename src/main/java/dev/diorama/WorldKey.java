@@ -13,6 +13,7 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
@@ -24,9 +25,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Names the world the client is in, so per-world data (waypoints, the saved map) lands in its
- * own folder: the save folder for singleplayer; for multiplayer, the server address and the
- * server's name for the world, since one address can lead to several worlds (a network's lobby
- * and survival servers, or a map reset). A realm is named by its ID instead of its address: one
+ * own folder: the save folder for singleplayer (see {@link #singleplayerKey}); for multiplayer,
+ * the server address and the server's name for the world, since one address can lead to several
+ * worlds (a network's lobby and survival servers, or a map reset). A realm is named by its ID instead of its address: one
  * that went to sleep wakes up at another address.
  *
  * <p>Servers built around Xaero's mods name their worlds with a level ID (see
@@ -54,6 +55,10 @@ public final class WorldKey {
 	 * next as it arrives, or not at all: some only send an ID when the player changes worlds.
 	 */
 	private static final long LATER_WAIT_MS = 1000;
+	/** In a singleplayer save: the ID that tells it from a world saved under the same name before. */
+	private static final String SAVE_ID = "diorama-world-id.txt";
+	/** In a singleplayer world's folder: the ID of the save it was made for. */
+	private static final String FOLDER_ID = "save-id.txt";
 
 	/** What's known about a server's level. Kept per level object, which a respawn keeps. */
 	private static final class Naming {
@@ -98,7 +103,7 @@ public final class WorldKey {
 			if (seen != null && seen.matches(server, null, null, false, null)) {
 				return seen.key;
 			}
-			String key = key("singleplayer", server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+			String key = singleplayerKey(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize());
 			last = new Last(new WeakReference<>(server), null, null, false, null, key);
 			return key;
 		}
@@ -135,6 +140,58 @@ public final class WorldKey {
 		}
 		last = new Last(new WeakReference<>(data), new WeakReference<>(level), data.ip, realm, id, key);
 		return key;
+	}
+
+	/**
+	 * A save by its folder name, unless the folder was made for another world. A world made after
+	 * deleting one of the same name gets the same save folder, and would open the old world's map
+	 * and waypoints. So each save keeps an ID of its own ({@link #SAVE_ID}), and the folder notes
+	 * the ID it was made for ({@link #FOLDER_ID}). A world whose ID isn't the folder's gets a
+	 * folder named by its ID as well; the old one stays as it was. Once that folder exists, the
+	 * world goes there without looking at the old one, which may since have been deleted.
+	 *
+	 * <p>A folder from before IDs is taken by the first world to open it, since nothing tells
+	 * whose it was, and nearly always it's the world's own. A backup from before then, restored
+	 * after its world was opened, has no ID and so isn't that world: its map stays in the folder.
+	 */
+	private static String singleplayerKey(Path save) {
+		String key = key("singleplayer", save.getFileName().toString());
+		Path folder = folder(key);
+		try {
+			String id = saveId(save);
+			String own = key + "-" + hash("save:" + id);
+			if (Files.isDirectory(folder(own))) {
+				return own;
+			}
+			Path claim = folder.resolve(FOLDER_ID);
+			if (Files.isRegularFile(claim)) {
+				String owner = Files.readString(claim, StandardCharsets.UTF_8).strip();
+				if (owner.equals(id)) {
+					return key;
+				}
+				Files.createDirectories(folder(own));
+				return own;
+			}
+			Files.createDirectories(folder);
+			Files.writeString(claim, id, StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't tell whether this save's map folder {} was made for it; using it", key, e);
+		}
+		return key;
+	}
+
+	/** The save's ID, given one if it has none. */
+	private static String saveId(Path save) throws IOException {
+		Path file = save.resolve(SAVE_ID);
+		if (Files.isRegularFile(file)) {
+			String id = Files.readString(file, StandardCharsets.UTF_8).strip();
+			if (!id.isEmpty()) {
+				return id;
+			}
+		}
+		String id = UUID.randomUUID().toString();
+		Files.writeString(file, id, StandardCharsets.UTF_8);
+		return id;
 	}
 
 	/**
