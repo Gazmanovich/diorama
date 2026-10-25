@@ -129,7 +129,11 @@ public final class SettingsScreen extends Screen {
 		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
 		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 		look.cycle("arrow_color", () -> s.arrowColor, Settings.ARROW_COLORS.length, i -> s.arrowColor = i,
+			//? if >=1.21 {
 			i -> Component.translatable("diorama.settings.arrow_color." + Settings.ARROW_COLOR_NAMES[i]).withColor(Settings.ARROW_COLORS[i]));
+			//?} else {
+			/*i -> Component.translatable("diorama.settings.arrow_color." + Settings.ARROW_COLOR_NAMES[i]).withStyle(style -> style.withColor(Settings.ARROW_COLORS[i])));
+			*///?}
 
 		// Vanilla's tab bar, over the settings side instead of the whole screen. It's drawn by hand
 		// (extractRenderState), clipped to the side: its separator line runs on past the last tab.
@@ -190,6 +194,7 @@ public final class SettingsScreen extends Screen {
 
 		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set) {
 			int column = (CONTENT - COLUMN_GAP) / 2;
+			//? if >=1.21 {
 			Checkbox checkbox = Checkbox.builder(Component.translatable("diorama.settings." + key), SettingsScreen.this.font)
 				.selected(get.getAsBoolean())
 				.maxWidth(column)
@@ -198,6 +203,19 @@ public final class SettingsScreen extends Screen {
 					Settings.get().save();
 				})
 				.build();
+			//?} else {
+			/*// 1.20.1's checkbox has no builder and tells no one it changed. It's a 20 pixel box with
+			// the label 4 pixels right of it, as wide as both, and no wider than the column.
+			Component label = Component.translatable("diorama.settings." + key);
+			Checkbox checkbox = new Checkbox(0, 0, Math.min(24 + SettingsScreen.this.font.width(label), column), 20, label, get.getAsBoolean()) {
+				@Override
+				public void onPress() {
+					super.onPress();
+					set.accept(this.selected());
+					Settings.get().save();
+				}
+			};
+			*///?}
 			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
 			checkbox.setTooltip(tooltip(key));
 			this.checkboxes.add(checkbox);
@@ -321,16 +339,25 @@ public final class SettingsScreen extends Screen {
 		return 1;
 	}
 
+	//? if >=1.21 {
 	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		super.extractBackground(graphics, mouseX, mouseY, a);
+	//?} else {
+	/*// A 1.20.1 screen draws its own background, from its render method below.
+	private void drawBackground(GuiGraphics graphics) {
+		this.renderBackground(graphics);
+	*///?}
 		// After the blur, so the preview stays sharp. A big minimap would reach under the settings:
 		// it's cut off at their edge, which also keeps its depth (before 1.21.6) clear of them.
 		graphics.enableScissor(this.side, 0, this.width, this.height);
 		//? if >=1.21.2 {
 		this.preview.preview(graphics, this.minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(true));
-		//?} else {
+		//?} else if >=1.21 {
 		/*this.preview.preview(graphics, this.minecraft.getTimer().getGameTimeDeltaPartialTick(true));
+		*///?} else {
+		/*// The partial tick the frame is drawn with, the paused one while the game is paused.
+		this.preview.preview(graphics, this.minecraft.getFrameTime());
 		*///?}
 		graphics.disableScissor();
 		// The settings side, as vanilla draws a list in a world.
@@ -341,17 +368,25 @@ public final class SettingsScreen extends Screen {
 		//?} else if >=1.21.2 {
 		/*graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, LIST_BACKGROUND, 0, TAB_BAR_HEIGHT, 0, 0, this.side, this.listBottom() - TAB_BAR_HEIGHT, 32, 32);
 		graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, Screen.INWORLD_FOOTER_SEPARATOR, 0, this.listBottom(), 0, 0, this.side, 2, 32, 2);
-		*///?} else {
+		*///?} else if >=1.21 {
 		/*com.mojang.blaze3d.systems.RenderSystem.enableBlend();
 		graphics.blit(LIST_BACKGROUND, 0, TAB_BAR_HEIGHT, 0, 0, this.side, this.listBottom() - TAB_BAR_HEIGHT, 32, 32);
 		graphics.blit(Screen.INWORLD_FOOTER_SEPARATOR, 0, this.listBottom(), 0, 0, this.side, 2, 32, 2);
 		com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+		*///?} else {
+		/*// 1.20.1 has neither texture. Each is a flat colour per row, the same as ScreenArt fills.
+		graphics.fill(0, TAB_BAR_HEIGHT, this.side, this.listBottom(), 0x70000000);
+		graphics.fill(0, this.listBottom(), this.side, this.listBottom() + 1, 0xBF000000);
+		graphics.fill(0, this.listBottom() + 1, this.side, this.listBottom() + 2, 0x33FFFFFF);
 		*///?}
 	}
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		// Before 1.21.6 this draws the background too, so the tab bar goes after it.
+		//? if <1.21 {
+		/*this.drawBackground(graphics);
+		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		if (this.tabBar != null) {
 			graphics.enableScissor(0, 0, this.side, TAB_BAR_HEIGHT);

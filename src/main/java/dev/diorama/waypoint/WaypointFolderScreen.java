@@ -90,6 +90,10 @@ public final class WaypointFolderScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		// A 1.20.1 screen draws its own background.
+		//? if <1.21 {
+		/*this.renderBackground(graphics);
+		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		int left = this.left();
 		int top = this.top();

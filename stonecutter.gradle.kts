@@ -182,6 +182,8 @@ stonecutter parameters {
 		"\\.buildOrThrow\\(\\)" to ".end()",
 		// A player's skin texture had a getter of its own.
 		"\\.getSkin\\(\\)\\.texture\\(\\)" to ".getSkinTextureLocation()",
+		// A status effect instance held its effect itself, not a registry holder of it.
+		"\\.getEffect\\(\\)\\.value\\(\\)" to ".getEffect()",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {
