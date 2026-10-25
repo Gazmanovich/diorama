@@ -64,7 +64,7 @@ public final class MapScreen extends Screen {
 	/** Height of the top bar, which holds the tabs and buttons. */
 	private static final int BAR = 16;
 	private static final int BOTTOM_BAR = 14;
-	private static final String HELP = "Drag to pan · Scroll to zoom · Right-click for options";
+	private static final Component HELP = Component.translatable("diorama.map.help");
 	/** One press of a zoom button: two notches of the mouse wheel. */
 	private static final int ZOOM_BUTTON_STEPS = 2;
 	private static final Identifier TAB = Identifier.withDefaultNamespace("widget/tab");
