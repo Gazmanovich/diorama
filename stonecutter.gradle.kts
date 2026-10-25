@@ -176,6 +176,12 @@ stonecutter parameters {
 		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
 		// The death packet had a getter for whose death it was.
 		"\\bpacket\\.playerId\\(\\)" to "packet.getPlayerId()",
+		// A built mesh was a RenderedBuffer, nested in BufferBuilder, which built it with end().
+		"import com\\.mojang\\.blaze3d\\.vertex\\.MeshData;" to "import com.mojang.blaze3d.vertex.BufferBuilder.RenderedBuffer;",
+		"\\bMeshData\\b" to "RenderedBuffer",
+		"\\.buildOrThrow\\(\\)" to ".end()",
+		// A player's skin texture had a getter of its own.
+		"\\.getSkin\\(\\)\\.texture\\(\\)" to ".getSkinTextureLocation()",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {

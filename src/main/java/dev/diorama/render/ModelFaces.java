@@ -277,7 +277,11 @@ public final class ModelFaces {
 			return null;
 		}
 		Corners corners = new Corners();
+		//? if >=1.21 {
 		cube.compile(pose, corners, 0, 0, -1);
+		//?} else {
+		/*cube.compile(pose, corners, 0, 0, 1, 1, 1, 1);
+		*///?}
 		for (int q = 0; q + 4 <= corners.count; q += 4) {
 			if (corners.at[q * Corners.SIZE + 7] > -FACING) {
 				continue;
@@ -331,7 +335,19 @@ public final class ModelFaces {
 		int count;
 
 		@Override
+		//? if >=1.21 {
 		public void addVertex(float x, float y, float z, int color, float u, float v, int overlay, int light, float nx, float ny, float nz) {
+		//?} else {
+		/*public void vertex(float x, float y, float z, float red, float green, float blue, float alpha, float u, float v, int overlay, int light, float nx, float ny, float nz) {
+			// From 1.21 the game hands a box's normals over at unit length; before, a part scaled
+			// unevenly left them longer or shorter, and its front could fail the FACING test.
+			float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+			if (length > 0) {
+				nx /= length;
+				ny /= length;
+				nz /= length;
+			}
+		*///?}
 			if ((this.count + 1) * SIZE > this.at.length) {
 				this.at = java.util.Arrays.copyOf(this.at, this.at.length * 2);
 			}
@@ -347,6 +363,7 @@ public final class ModelFaces {
 		}
 
 		// The rest of what a vertex consumer takes, none of which a box's shape needs.
+		//? if >=1.21 {
 		@Override
 		public VertexConsumer addVertex(float x, float y, float z) {
 			return this;
@@ -388,6 +405,49 @@ public final class ModelFaces {
 		public VertexConsumer setLineWidth(float width) {
 			return this;
 		}
+		//?} else {
+		/*@Override
+		public VertexConsumer vertex(double x, double y, double z) {
+			return this;
+		}
+
+		@Override
+		public VertexConsumer color(int r, int g, int b, int a) {
+			return this;
+		}
+
+		@Override
+		public VertexConsumer uv(float u, float v) {
+			return this;
+		}
+
+		@Override
+		public VertexConsumer overlayCoords(int u, int v) {
+			return this;
+		}
+
+		@Override
+		public VertexConsumer uv2(int u, int v) {
+			return this;
+		}
+
+		@Override
+		public VertexConsumer normal(float x, float y, float z) {
+			return this;
+		}
+
+		@Override
+		public void endVertex() {
+		}
+
+		@Override
+		public void defaultColor(int r, int g, int b, int a) {
+		}
+
+		@Override
+		public void unsetDefaultColor() {
+		}
+		*///?}
 	}
 
 	/**

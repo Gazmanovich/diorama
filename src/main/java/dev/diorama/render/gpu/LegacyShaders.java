@@ -32,6 +32,9 @@ import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.ShaderInstance;
 import org.lwjgl.opengl.GL11;
 //?}
+//? if <1.21 {
+import com.mojang.blaze3d.vertex.BufferUploader;
+//?}
 
 // How ImmediateCanvas draws before 1.21.6: three render types without depth testing, so the map
 // draws in painter's order like the GUI render state of later versions. Textures are bound by
@@ -41,7 +44,13 @@ import org.lwjgl.opengl.GL11;
 // packs (1.21.2-1.21.4) or the whole resource reload (1.21.1, 1.21.5) down with it, so the fog's
 // program only ever comes through a side door; fogReady() says whether it may be drawn. A resource
 // reload can change the shader's sources, so the fog is checked again after each one.
+//? if >=1.21 {
 final class LegacyShaders {
+//?} else {
+// Before 1.21 shader shards and render type states were protected, so only a subclass of
+// RenderType can build these. It's never made.
+final class LegacyShaders extends RenderType {
+//?}
 	private static final Logger LOGGER = LoggerFactory.getLogger("diorama");
 
 	//? if >=1.21.5 {
@@ -172,7 +181,10 @@ final class LegacyShaders {
 		// Built by hand rather than through Fabric's core shader callback, whose failure would fail
 		// the whole resource reload. The json lives in the minecraft namespace, where the vanilla
 		// constructor looks; its stages name diorama:fog, which Fabric API resolves. The game doesn't
-		// know about it, so it's closed and built again here after a reload.
+		// know about it, so it's closed and built again here after a reload. The json also has the
+		// blend and attributes 1.20.1 reads, as vanilla's position_tex_color does there: without
+		// them the program turns blending off, and its inputs aren't bound to the vertex format's
+		// slots. 1.21 ignores both.
 		if (fogShader == null && !fogFailed) {
 			try {
 				fogShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "diorama_fog", DefaultVertexFormat.POSITION_TEX_COLOR);
@@ -191,7 +203,14 @@ final class LegacyShaders {
 	static void draw(RenderType type, MeshData mesh) {
 		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
 		RenderSystem.disableDepthTest();
+		//? if >=1.21 {
 		type.draw(mesh);
+		//?} else {
+		// What RenderType.draw does from 1.21.
+		type.setupRenderState();
+		BufferUploader.drawWithShader(mesh);
+		type.clearRenderState();
+		//?}
 		if (depth) {
 			RenderSystem.enableDepthTest();
 		}
@@ -215,6 +234,9 @@ final class LegacyShaders {
 	//?}
 
 	private LegacyShaders() {
+		//? if <1.21 {
+		super("diorama", DefaultVertexFormat.POSITION, VertexFormat.Mode.QUADS, 0, false, false, () -> {}, () -> {});
+		//?}
 	}
 }
 *///?}
