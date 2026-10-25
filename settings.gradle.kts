@@ -20,7 +20,7 @@ plugins {
 // named <minecraft>-neoforge build for NeoForge instead of Fabric; NeoForge runs on Mojang's names.
 stonecutter {
 	create(rootProject) {
-		versions("1.21.1", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.9", "1.21.11").buildscript("build.obfuscated.gradle.kts")
+		versions("1.20.1", "1.21.1", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.9", "1.21.11").buildscript("build.obfuscated.gradle.kts")
 		versions("26.1", "26.2", "26.3").buildscript("build.unobfuscated.gradle.kts")
 		version("1.21-neoforge", "1.21").buildscript("build.neoforge.gradle.kts")
 		version("1.21.1-neoforge", "1.21.1").buildscript("build.neoforge.gradle.kts")

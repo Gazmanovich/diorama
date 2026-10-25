@@ -165,6 +165,21 @@ stonecutter parameters {
 			replace(pattern, older, "(?!)", "never")
 		}
 	}
+
+	// From the 1.21 spelling to the 1.20.1 one (changed somewhere from 1.20.2 to 1.21; 1.20.1 is
+	// the only version before 1.21).
+	val before1_21 = listOf(
+		// Resource ids were built with constructors. Either spelling: the Identifier rename above
+		// may run first.
+		"\\b(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new ResourceLocation(",
+		// Chunk statuses had no package of their own.
+		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
+	)
+	for ((pattern, older) in before1_21) {
+		replacements.regex(current.parsed < "1.21") {
+			replace(pattern, older, "(?!)", "never")
+		}
+	}
 }
 
 // gradle.properties turns on configure-on-demand, but Stonecutter's switch and refresh tasks read
