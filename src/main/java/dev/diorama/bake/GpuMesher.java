@@ -972,9 +972,17 @@ public final class GpuMesher {
 			double z0 = (lo >> 16 & 255) / (double) ShapeFaces.UNIT;
 			double y1 = (hi >> 8 & 255) / (double) ShapeFaces.UNIT;
 			double z1 = (hi >> 16 & 255) / (double) ShapeFaces.UNIT;
-			boolean top = quads.data[i + 3] == TOP;
-			double y = quads.data[i + 1] + (top ? y1 : (y0 + y1) / 2);
-			double z = quads.data[i + 2] + (top ? (z0 + z1) / 2 : z1);
+			double y = quads.data[i + 1];
+			double z = quads.data[i + 2];
+			// A branch, not a boolean: Java 21.0.8 and older can crash compiling `face == TOP` kept as
+			// a value (JDK-8358534), and Minecraft's launcher gives 1.20.5 to 1.21.11 Java 21.0.7.
+			if (quads.data[i + 3] == TOP) {
+				y += y1;
+				z += (z0 + z1) / 2;
+			} else {
+				y += (y0 + y1) / 2;
+				z += z1;
+			}
 			double depth = -(sin * y + cos * z);
 			long d = (long) (depth * 1024);
 			order[q] = (d << 24) | q;
