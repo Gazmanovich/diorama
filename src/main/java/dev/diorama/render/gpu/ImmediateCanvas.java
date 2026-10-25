@@ -30,7 +30,12 @@ final class ImmediateCanvas implements MapCanvas {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
 		for (int i = 0; i < corners.length / 2; i++) {
+			//? if >=1.21 {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(argb);
+			//?} else {
+			// Before 1.21 the vertex setters had other names, and each vertex was ended by hand.
+			mesh.vertex(pose, corners[i * 2], corners[i * 2 + 1], 0).uv(uvs[i * 2], uvs[i * 2 + 1]).color(argb).endVertex();
+			//?}
 		}
 		((LegacyTexture) texture).bind(0, sampling);
 		LegacyShaders.draw(LegacyShaders.TEXTURED, mesh.buildOrThrow());
@@ -42,7 +47,11 @@ final class ImmediateCanvas implements MapCanvas {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
 		for (int i = 0; i < corners.length / 2; i++) {
+			//? if >=1.21 {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setColor(argb);
+			//?} else {
+			mesh.vertex(pose, corners[i * 2], corners[i * 2 + 1], 0).color(argb).endVertex();
+			//?}
 		}
 		LegacyShaders.draw(LegacyShaders.SOLID, mesh.buildOrThrow());
 	}
@@ -56,7 +65,11 @@ final class ImmediateCanvas implements MapCanvas {
 	public void solids(float[] xyz, int[] colors, int quads) {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_COLOR);
 		for (int i = 0; i < quads * 4; i++) {
+			//? if >=1.21 {
 			mesh.addVertex(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]).setColor(colors[i / 4]);
+			//?} else {
+			mesh.vertex(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]).color(colors[i / 4]).endVertex();
+			//?}
 		}
 		LegacyShaders.draw(LegacyShaders.SOLID, mesh.buildOrThrow());
 	}
@@ -85,7 +98,11 @@ final class ImmediateCanvas implements MapCanvas {
 	private BufferBuilder mesh(float[] xyz, float[] uvs, int[] colors, int quads) {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
 		for (int i = 0; i < quads * 4; i++) {
+			//? if >=1.21 {
 			mesh.addVertex(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(colors[i / 4]);
+			//?} else {
+			mesh.vertex(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]).uv(uvs[i * 2], uvs[i * 2 + 1]).color(colors[i / 4]).endVertex();
+			//?}
 		}
 		return mesh;
 	}
@@ -106,7 +123,11 @@ final class ImmediateCanvas implements MapCanvas {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();
 		for (int i = 0; i < corners.length / 2; i++) {
+			//? if >=1.21 {
 			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(params);
+			//?} else {
+			mesh.vertex(pose, corners[i * 2], corners[i * 2 + 1], 0).uv(uvs[i * 2], uvs[i * 2 + 1]).color(params).endVertex();
+			//?}
 		}
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
 		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
@@ -130,16 +151,30 @@ final class ImmediateCanvas implements MapCanvas {
 
 	private void rect(BufferBuilder mesh, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int argb) {
 		Matrix4f pose = this.graphics.pose().last().pose();
+		//? if >=1.21 {
 		mesh.addVertex(pose, x0, y0, 0).setUv(u0, v0).setColor(argb);
 		mesh.addVertex(pose, x0, y1, 0).setUv(u0, v1).setColor(argb);
 		mesh.addVertex(pose, x1, y1, 0).setUv(u1, v1).setColor(argb);
 		mesh.addVertex(pose, x1, y0, 0).setUv(u1, v0).setColor(argb);
+		//?} else {
+		mesh.vertex(pose, x0, y0, 0).uv(u0, v0).color(argb).endVertex();
+		mesh.vertex(pose, x0, y1, 0).uv(u0, v1).color(argb).endVertex();
+		mesh.vertex(pose, x1, y1, 0).uv(u1, v1).color(argb).endVertex();
+		mesh.vertex(pose, x1, y0, 0).uv(u1, v0).color(argb).endVertex();
+		//?}
 	}
 
 	private BufferBuilder begin(VertexFormat format) {
 		// Draws the fills and text the GUI has batched so far first, so they stay underneath.
 		this.graphics.flush();
+		//? if >=1.21 {
 		return Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, format);
+		//?} else {
+		// Before 1.21 the tesselator had one builder, begun again for each mesh.
+		BufferBuilder mesh = Tesselator.getInstance().getBuilder();
+		mesh.begin(VertexFormat.Mode.QUADS, format);
+		return mesh;
+		//?}
 	}
 
 	// Clears a texture slot after a draw, so a later vanilla draw doesn't pick up our texture.
