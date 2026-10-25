@@ -227,7 +227,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/**
 	 * A world made after deleting one of the same name gets the same save folder, but not the old
-	 * world's map and waypoints (#116). Reopened, it finds its own again.
+	 * world's map and waypoints (#116), even with the same seed. Reopened, it finds its own again,
+	 * also once the old world's folder is gone.
 	 */
 	private static void recreatedWorld(ClientGameTestContext context) {
 		String name = "Diorama Recreated";
@@ -236,7 +237,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		try (TestSingleplayerContext old = context.worldBuilder()
 			.adjustSettings(s -> {
 				s.setName(name);
-				s.setSeed("old world");
+				s.setSeed("recreated");
 			})
 			.create()) {
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
@@ -260,7 +261,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		try (TestSingleplayerContext recreated = context.worldBuilder()
 			.adjustSettings(s -> {
 				s.setName(name);
-				s.setSeed("new world");
+				s.setSeed("recreated");
 			})
 			.create()) {
 			save = recreated.getWorldSave();
@@ -275,15 +276,30 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("Old Camp")))) {
 				throw new AssertionError("The deleted world's waypoint is in the new world");
 			}
+			context.runOnClient(mc -> {
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("New Camp", at.getX(), at.getY(), at.getZ(), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]));
+			});
 			context.setScreen(MapScreen::new);
 			settle(context, 60);
 			context.takeScreenshot("recreated-world-map");
 			context.setScreen(() -> null);
 		}
+		// A player tidying up deletes the old world's map.
+		context.runOnClient(mc -> {
+			try {
+				org.apache.commons.io.FileUtils.deleteDirectory(WorldKey.folder(oldKey).toFile());
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+		});
 		try (TestSingleplayerContext reopened = save.open()) {
 			String again = context.computeOnClient(mc -> WorldKey.current());
 			if (!again.equals(newKey)) {
 				throw new AssertionError("Reopening the new world opened another folder: " + newKey + " then " + again);
+			}
+			if (!context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("New Camp")))) {
+				throw new AssertionError("Reopening the new world lost its waypoint");
 			}
 		}
 	}

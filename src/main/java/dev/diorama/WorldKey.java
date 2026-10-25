@@ -104,7 +104,7 @@ public final class WorldKey {
 				return seen.key;
 			}
 			String key = singleplayerKey(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize());
-			last =new Last(new WeakReference<>(server), null, null, false, null, key);
+			last = new Last(new WeakReference<>(server), null, null, false, null, key);
 			return key;
 		}
 		ServerData data = mc.getCurrentServer();
@@ -147,20 +147,30 @@ public final class WorldKey {
 	 * deleting one of the same name gets the same save folder, and would open the old world's map
 	 * and waypoints. So each save keeps an ID of its own ({@link #SAVE_ID}), and the folder notes
 	 * the ID it was made for ({@link #FOLDER_ID}). A world whose ID isn't the folder's gets a
-	 * folder named by its ID as well; the old one stays as it was.
+	 * folder named by its ID as well; the old one stays as it was. Once that folder exists, the
+	 * world goes there without looking at the old one, which may since have been deleted.
 	 *
 	 * <p>A folder from before IDs is taken by the first world to open it, since nothing tells
-	 * whose it was, and nearly always it's the world's own.
+	 * whose it was, and nearly always it's the world's own. A backup from before then, restored
+	 * after its world was opened, has no ID and so isn't that world: its map stays in the folder.
 	 */
 	private static String singleplayerKey(Path save) {
 		String key = key("singleplayer", save.getFileName().toString());
 		Path folder = folder(key);
 		try {
 			String id = saveId(save);
+			String own = key + "-" + hash("save:" + id);
+			if (Files.isDirectory(folder(own))) {
+				return own;
+			}
 			Path claim = folder.resolve(FOLDER_ID);
 			if (Files.isRegularFile(claim)) {
 				String owner = Files.readString(claim, StandardCharsets.UTF_8).strip();
-				return owner.equals(id) ? key : key + "-" + hash("save:" + id);
+				if (owner.equals(id)) {
+					return key;
+				}
+				Files.createDirectories(folder(own));
+				return own;
 			}
 			Files.createDirectories(folder);
 			Files.writeString(claim, id, StandardCharsets.UTF_8);
