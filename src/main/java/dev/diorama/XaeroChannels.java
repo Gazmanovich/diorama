@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 //? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 //?} else {
 /*import net.minecraft.client.Minecraft;
@@ -16,10 +15,17 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 *///?}
+//? if fabric && >=1.21 {
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+//?} else if fabric {
+/*import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+*///?}
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+//? if >=1.21 {
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+//?}
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
@@ -69,6 +75,16 @@ public final class XaeroChannels {
 	private XaeroChannels() {
 	}
 
+	//? if <1.21 {
+	/*// Payload types came after 1.20.1. There a channel is only its id, and its messages are read
+	// and written by hand (see read and write). This stands in for the game's payload interface,
+	// so the rest of the class is the same on every version.
+	public interface CustomPacketPayload {
+		record Type<T>(ResourceLocation id) {
+		}
+	}
+	*///?}
+
 	/** One message: its kind, then its body as sent. */
 	public record Message(CustomPacketPayload.Type<Message> type, int kind, byte[] body) implements CustomPacketPayload {
 		/** The level ID this message carries, or null if it's another kind. */
@@ -77,7 +93,7 @@ public final class XaeroChannels {
 		}
 	}
 
-	//? if fabric {
+	//? if fabric && >=1.21 {
 	/** Listens on the channels no Xaero mod has. Call once, at startup. */
 	public static void register() {
 		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
@@ -88,7 +104,27 @@ public final class XaeroChannels {
 			ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
 		}
 	}
-	//?} else if >=1.21.6 {
+	//?} else if fabric {
+	/*// Listens on the channels no Xaero mod has. Call once, at startup.
+	public static void register() {
+		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
+			// Registering a handler also tells the server Diorama listens here. Plugins need that:
+			// Paper drops messages on channels the client hasn't registered. A channel that already
+			// has a handler isn't taken over: here Fabric returns false instead of throwing.
+			ClientPlayNetworking.registerGlobalReceiver(type.id(), (client, handler, buf, sender) -> {
+				// The handler runs on the network thread, and the buffer is only good until it
+				// returns. So the message is read here and handled on the client thread, as later
+				// versions do, unless the player has left by then.
+				Message message = read(type, buf);
+				client.execute(() -> {
+					if (handler.getConnection().isConnected()) {
+						receive(message);
+					}
+				});
+			});
+		}
+	}
+	*///?} else if >=1.21.6 {
 	/*// Listens on the channels no Xaero mod has. NeoForge calls it once, at startup.
 	public static void register(RegisterPayloadHandlersEvent event) {
 		// Registered the way Xaero's mods register theirs: a NeoForge server with Xaero's mod on it
@@ -156,17 +192,25 @@ public final class XaeroChannels {
 		*///?}
 	}
 
-	/** The whole message is read, as the game rejects packets with bytes left over. Public for tests. */
+	//? if >=1.21 {
+	/** Public for tests. */
 	public static StreamCodec<FriendlyByteBuf, Message> codec(CustomPacketPayload.Type<Message> type) {
-		return StreamCodec.of((buf, message) -> {
-			buf.writeByte(message.kind());
-			buf.writeBytes(message.body());
-		}, buf -> {
-			int kind = buf.isReadable() ? buf.readByte() : -1;
-			byte[] body = new byte[buf.readableBytes()];
-			buf.readBytes(body);
-			return new Message(type, kind, body);
-		});
+		return StreamCodec.of(XaeroChannels::write, buf -> read(type, buf));
+	}
+	//?}
+
+	/** Public for tests. */
+	public static void write(FriendlyByteBuf buf, Message message) {
+		buf.writeByte(message.kind());
+		buf.writeBytes(message.body());
+	}
+
+	/** The whole message is read, as the game rejects packets with bytes left over. Public for tests. */
+	public static Message read(CustomPacketPayload.Type<Message> type, FriendlyByteBuf buf) {
+		int kind = buf.isReadable() ? buf.readByte() : -1;
+		byte[] body = new byte[buf.readableBytes()];
+		buf.readBytes(body);
+		return new Message(type, kind, body);
 	}
 
 	private static void receive(Message message) {
@@ -214,9 +258,13 @@ public final class XaeroChannels {
 			TrackedPlayers.clear();
 		}
 		Message answer = new Message(channel, HANDSHAKE, ByteBuffer.allocate(4).putInt(PROTOCOL).array());
-		//? if fabric {
+		//? if fabric && >=1.21 {
 		ClientPlayNetworking.send(answer);
-		//?} else {
+		//?} else if fabric {
+		/*FriendlyByteBuf buf = PacketByteBufs.create();
+		write(buf, answer);
+		ClientPlayNetworking.send(channel.id(), buf);
+		*///?} else {
 		/*connection.send(answer);
 		*///?}
 	}

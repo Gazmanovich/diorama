@@ -174,6 +174,8 @@ stonecutter parameters {
 		"\\b(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new ResourceLocation(",
 		// Chunk statuses had no package of their own.
 		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
+		// The death packet had a getter for whose death it was.
+		"\\bpacket\\.playerId\\(\\)" to "packet.getPlayerId()",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {
