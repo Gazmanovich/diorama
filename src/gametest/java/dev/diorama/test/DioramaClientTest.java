@@ -1846,7 +1846,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 					break;
 				}
 			}
-			dev.diorama.Diorama.LOGGER.info("MODEL-FACE summary: {} mobs, {} listed ({} read the same off the model), {} more with a face from the model",
+			dev.diorama.Diorama.LOGGER.info("MODEL-FACE summary: {} mobs, {} drawn with a face ({} the same as the one read off the model), {} with only a model face",
 				names.size(), listed, same, fromModel);
 			StringBuilder wrong = new StringBuilder();
 			// Mobs with hand-made faces whose models give the same face on every version.
@@ -1865,6 +1865,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (!found) {
 					wrong.append("\n  ").append(name).append(": not in the world");
+				}
+			}
+			// A mob with no hand-made face is drawn with the one read off its model.
+			for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+				if (entity.getType() == EntityTypes.CAMEL && entity instanceof net.minecraft.world.entity.LivingEntity living && !living.isBaby()) {
+					String drawn = dev.diorama.render.MobFaces.describe(entity);
+					if (drawn == null || !drawn.equals(dev.diorama.render.MobFaces.describeFromModel(entity))) {
+						wrong.append("\n  camel: drawn with ").append(drawn).append(", read off its model ")
+							.append(dev.diorama.render.MobFaces.describeFromModel(entity));
+					}
 				}
 			}
 			//? if >=26.1 {
