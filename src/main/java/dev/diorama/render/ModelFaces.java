@@ -152,8 +152,10 @@ public final class ModelFaces {
 		//?} else {
 		/*// Models had no root of their own yet. A mod's model keeps its field names in the game, so
 		// its head is the field named head, or a part with a head below it. Minecraft's own fields
-		// are numbered in a release jar, so there its head is the field shaped like a head.
+		// are numbered in a release jar, so there, failing both, its head is the field shaped like
+		// a head.
 		ModelPart root = model instanceof net.minecraft.client.model.HierarchicalModel<?> hierarchical ? hierarchical.root() : null;
+		ModelPart shaped = null;
 		if (root == null) {
 			for (Class<?> c = model.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
 				for (java.lang.reflect.Field field : c.getDeclaredFields()) {
@@ -163,11 +165,14 @@ public final class ModelFaces {
 					try {
 						field.setAccessible(true);
 						ModelPart part = (ModelPart) field.get(model);
-						if (part != null && (field.getName().equalsIgnoreCase("head") || headShapes().contains(shape(part)))) {
+						if (part != null && field.getName().equalsIgnoreCase("head")) {
 							return part;
 						}
 						if (part != null && root == null && part.hasChild("head")) {
 							root = part;
+						}
+						if (part != null && shaped == null && headShapes().contains(shape(part))) {
+							shaped = part;
 						}
 					} catch (ReflectiveOperationException | RuntimeException e) {
 						// Not readable; try the next.
@@ -175,7 +180,7 @@ public final class ModelFaces {
 				}
 			}
 			if (root == null) {
-				return null;
+				return shaped;
 			}
 		}
 		*///?}
