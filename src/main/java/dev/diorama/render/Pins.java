@@ -22,7 +22,7 @@ public final class Pins {
 	private static final int CARET_STEPS = 32;
 	private static final Map<String, Sprite> SPRITES = new HashMap<>();
 	/** How waypoints with an icon stand. A prototype's switch, set by the game test to compare looks. */
-	public static PinArt.IconStyle iconStyle = PinArt.IconStyle.STICKER;
+	public static PinArt.IconStyle iconStyle = PinArt.IconStyle.COLOUR_POINTER;
 
 	private record Sprite(MapTexture texture, int edge, PinArt.Art art) {
 	}

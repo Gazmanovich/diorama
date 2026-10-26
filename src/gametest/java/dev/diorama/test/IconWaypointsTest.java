@@ -128,7 +128,7 @@ final class IconWaypointsTest {
 					default -> "";
 				};
 			}
-			Pins.iconStyle = PinArt.IconStyle.STICKER;
+			Pins.iconStyle = PinArt.IconStyle.COLOUR_POINTER;
 		});
 
 		// Beside the radar: live villagers and cows in the courtyard, faces without a pointer.
