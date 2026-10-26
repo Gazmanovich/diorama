@@ -2291,7 +2291,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				//? if >=1.21.9 {
 				int format = net.minecraft.SharedConstants.getCurrentVersion().packVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES).major();
 				String formats = "\"pack_format\": " + format + ", \"min_format\": " + format + ", \"max_format\": " + format;
-				//?} else {
+				//?} else if >=1.21.6 {
+				/*int format = net.minecraft.SharedConstants.getCurrentVersion().packVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+				String formats = "\"pack_format\": " + format;
+				*///?} else {
 				/*int format = net.minecraft.SharedConstants.getCurrentVersion().getPackVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
 				String formats = "\"pack_format\": " + format;
 				*///?}
