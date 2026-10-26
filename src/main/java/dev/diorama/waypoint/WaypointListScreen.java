@@ -20,9 +20,6 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-//? if >=1.21.11 {
-import net.minecraft.server.permissions.Permissions;
-//?}
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -225,12 +222,7 @@ public final class WaypointListScreen extends Screen {
 			this.xaeroRead = true;
 			this.xaero = XaeroImport.find();
 		}
-		//? if >=1.21.11 {
-		this.canTeleport = player != null && player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
-		//?} else {
-		/*// Permission level 2 is the game master level /tp needs.
-		this.canTeleport = player != null && player.hasPermissions(2);
-		*///?}
+		this.canTeleport = Waypoints.canTeleport();
 		int cx = this.width / 2;
 		int left = cx - LIST_WIDTH / 2;
 
@@ -908,9 +900,8 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	private void teleport(@Nullable Waypoint waypoint) {
-		LocalPlayer player = this.minecraft.player;
-		if (player != null && waypoint != null) {
-			player.connection.sendCommand("tp @s " + waypoint.x + " " + waypoint.y + " " + waypoint.z);
+		if (waypoint != null) {
+			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
 		}
 		this.minecraft.gui.setScreen(null);
 	}
