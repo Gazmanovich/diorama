@@ -23,11 +23,12 @@ import org.jspecify.annotations.Nullable;
 public final class WaypointIcons {
 	public static final String MOB = "mob:";
 	private static final String FOLDER = "textures/waypoint_icons/";
-	/** The icons the picker offers, in order: Diorama's own, then mob faces. */
+	/** Every icon sits on a square tile this many pixels across, so a wide bed and a small face come out the same size. */
+	public static final int TILE = 11;
+	/** The short list the picker offers: kinds of places people mark. */
 	public static final List<String> OFFERED = List.of(
-		"diorama:bed", "diorama:house",
-		MOB + "minecraft:villager", MOB + "minecraft:cow", MOB + "minecraft:pig", MOB + "minecraft:sheep",
-		MOB + "minecraft:chicken", MOB + "minecraft:horse", MOB + "minecraft:wolf", MOB + "minecraft:cat", MOB + "minecraft:iron_golem", MOB + "minecraft:bee");
+		"diorama:home", "diorama:bed", "diorama:farm", "diorama:animals", "diorama:villagers",
+		"diorama:mine", "diorama:storage", "diorama:portal", "diorama:danger", "diorama:treasure");
 	private static final Map<String, Optional<PinArt.Image>> IMAGES = new HashMap<>();
 
 	private WaypointIcons() {
@@ -39,7 +40,8 @@ public final class WaypointIcons {
 		if (known != null) {
 			return known.orElse(null);
 		}
-		PinArt.Image image = load(id);
+		PinArt.Image loaded = load(id);
+		PinArt.Image image = loaded == null ? null : tiled(loaded);
 		// A mob face needs a world to make the mob in; try again once there is one.
 		if (image != null || !id.startsWith(MOB) || Minecraft.getInstance().level != null) {
 			IMAGES.put(id, Optional.ofNullable(image));
@@ -75,6 +77,22 @@ public final class WaypointIcons {
 		} catch (IOException | RuntimeException e) {
 			return null;
 		}
+	}
+
+	/** The icon centred on a {@link #TILE}, shrunk by a whole factor first if it's bigger. */
+	private static PinArt.Image tiled(PinArt.Image image) {
+		int factor = (Math.max(image.width, image.height) + TILE - 1) / TILE;
+		int w = image.width / factor;
+		int h = image.height / factor;
+		int x0 = (TILE - w) / 2;
+		int y0 = (TILE - h) / 2;
+		int[] argb = new int[TILE * TILE];
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				argb[(y0 + y) * TILE + x0 + x] = image.argb(x * factor, y * factor);
+			}
+		}
+		return PinArt.fromArgb(TILE, TILE, argb);
 	}
 
 	private static PinArt.Image twice(PinArt.Image image) {

@@ -78,16 +78,18 @@ final class IconWaypointsTest {
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
 			String overworld = "minecraft:overworld";
-			store.add(icon(new Waypoint("Keep", cx + 8, base + 1, cz - 8, overworld, Waypoint.PALETTE[1]), "diorama:house"));
-			store.add(icon(new Waypoint("Trader", cx - 9, base + 1, cz, overworld, Waypoint.PALETTE[3]), WaypointIcons.MOB + "minecraft:villager"));
-			store.add(icon(new Waypoint("Cows", cx + 8, base + 1, cz + 7, overworld, Waypoint.PALETTE[12]), WaypointIcons.MOB + "minecraft:cow"));
+			store.add(icon(new Waypoint("Keep", cx + 8, base + 1, cz - 8, overworld, Waypoint.PALETTE[1]), "diorama:home"));
+			store.add(icon(new Waypoint("Trader", cx - 9, base + 1, cz, overworld, Waypoint.PALETTE[3]), "diorama:villagers"));
+			// One without an icon, to see the two kinds side by side.
+			store.add(new Waypoint("Gate", cx, base + 1, cz + 20, overworld, Waypoint.PALETTE[5]));
+			store.add(icon(new Waypoint("Cows", cx + 8, base + 1, cz + 7, overworld, Waypoint.PALETTE[12]), "diorama:animals"));
 			for (String id : WaypointIcons.OFFERED) {
 				PinArt.Image image = WaypointIcons.image(id);
 				dev.diorama.Diorama.LOGGER.info("Icon {}: {}", id, image == null ? "missing" : image.width + "x" + image.height);
 			}
 			dev.diorama.Diorama.LOGGER.info("Icons shipped: {}", WaypointIcons.shipped());
 		});
-		for (String id : new String[] {"diorama:bed", "diorama:house", WaypointIcons.MOB + "minecraft:villager", WaypointIcons.MOB + "minecraft:cow"}) {
+		for (String id : new String[] {"diorama:bed", "diorama:home", "diorama:villagers", "diorama:animals"}) {
 			if (!context.computeOnClient(mc -> WaypointIcons.image(id) != null)) {
 				throw new AssertionError("No icon " + id);
 			}
@@ -122,13 +124,13 @@ final class IconWaypointsTest {
 			for (Waypoint w : WaypointStore.get().all()) {
 				w.icon = switch (w.name) {
 					case "Bed" -> "diorama:bed";
-					case "Keep" -> "diorama:house";
-					case "Trader" -> WaypointIcons.MOB + "minecraft:villager";
-					case "Cows" -> WaypointIcons.MOB + "minecraft:cow";
+					case "Keep" -> "diorama:home";
+					case "Trader" -> "diorama:villagers";
+					case "Cows" -> "diorama:animals";
 					default -> "";
 				};
 			}
-			Pins.iconStyle = PinArt.IconStyle.COLOUR_POINTER;
+			Pins.iconStyle = PinArt.IconStyle.ROUND;
 		});
 
 		// Beside the radar: live villagers and cows in the courtyard, faces without a pointer.
