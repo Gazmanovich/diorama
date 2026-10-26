@@ -151,8 +151,11 @@ public final class ModelFaces {
 		ModelPart root = model.root();
 		//?} else {
 		/*// Models had no root of their own yet. A mod's model keeps its field names in the game, so
-		// its head is the field named head, or a part with a head below it.
+		// its head is the field named head, or a part with a head below it. Minecraft's own fields
+		// are numbered in a release jar, so there, failing both, its head is the field shaped like
+		// a head.
 		ModelPart root = model instanceof net.minecraft.client.model.HierarchicalModel<?> hierarchical ? hierarchical.root() : null;
+		ModelPart shaped = null;
 		if (root == null) {
 			for (Class<?> c = model.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
 				for (java.lang.reflect.Field field : c.getDeclaredFields()) {
@@ -168,18 +171,57 @@ public final class ModelFaces {
 						if (part != null && root == null && part.hasChild("head")) {
 							root = part;
 						}
+						if (part != null && shaped == null && headShapes().contains(shape(part))) {
+							shaped = part;
+						}
 					} catch (ReflectiveOperationException | RuntimeException e) {
 						// Not readable; try the next.
 					}
 				}
 			}
 			if (root == null) {
-				return null;
+				return shaped;
 			}
 		}
 		*///?}
 		return headBelow(root);
 	}
+
+	//? if <1.21.2 {
+	/*private static java.util.@Nullable Set<String> headShapes;
+
+	// The shape of every head in Minecraft's own model layers, which still name their parts in a
+	// release jar. Read once: the layers are built in code, so a resource reload doesn't change them.
+	private static java.util.Set<String> headShapes() {
+		java.util.Set<String> shapes = headShapes;
+		if (shapes == null) {
+			shapes = new java.util.HashSet<>();
+			net.minecraft.client.model.geom.EntityModelSet models = net.minecraft.client.Minecraft.getInstance().getEntityModels();
+			for (java.util.Iterator<net.minecraft.client.model.geom.ModelLayerLocation> it = net.minecraft.client.model.geom.ModelLayers.getKnownLocations().iterator(); it.hasNext();) {
+				try {
+					ModelPart layer = models.bakeLayer(it.next());
+					String head = layer.hasChild("head") ? shape(layer.getChild("head")) : "";
+					if (!head.isEmpty()) {
+						shapes.add(head);
+					}
+				} catch (RuntimeException e) {
+					// A layer the game lists but doesn't build; no head to learn from it.
+				}
+			}
+			headShapes = shapes;
+		}
+		return shapes;
+	}
+
+	// A part's boxes and the parts below it, by their place in it: the same for any copy of a part.
+	private static String shape(ModelPart part) {
+		StringBuilder shape = new StringBuilder();
+		part.visit(new PoseStack(), (pose, path, index, cube) -> shape.append(path).append('#').append(index).append(':')
+			.append(cube.minX).append(',').append(cube.minY).append(',').append(cube.minZ).append(',')
+			.append(cube.maxX).append(',').append(cube.maxY).append(',').append(cube.maxZ).append(';'));
+		return shape.toString();
+	}
+	*///?}
 
 	/**
 	 * The head somewhere below a model's root, by the names models give it. Models exported from
