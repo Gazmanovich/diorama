@@ -156,6 +156,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			*///?}
 			if (spawnCell != null) {
+				spawnProbesBeforeLeaving(context, world, spawnCell);
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
@@ -748,13 +749,43 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			return new int[] {tu, tv, cx, cy};
 		});
-		// Where the right-click menu puts the player around spawn while its chunks are loaded, to
-		// compare with after the restart. Several places, as a waypoint may cover one by then.
+		spawnPosition = context.computeOnClient(mc -> new double[] {mc.player.getX(), mc.player.getY(), mc.player.getZ()});
+		spawnProbes = spawnProbes(context, cell);
+		context.setScreen(() -> null);
+		return cell;
+	}
+
+	/** Where the player stood when the spawn cell was found. */
+	private static double[] spawnPosition = new double[3];
+
+	/**
+	 * The scenarios before the restart build and dig around spawn, so where the menu puts the player
+	 * there is taken again just before leaving, from spawn's chunks as they are then. Taken at the
+	 * start, it compared the saved map with ground that had since changed, and failed whenever a
+	 * whole suite ran.
+	 */
+	private static void spawnProbesBeforeLeaving(ClientGameTestContext context, TestSingleplayerContext world, int[] cell) {
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + spawnPosition[0] + " " + spawnPosition[1] + " " + spawnPosition[2]);
+		int chunkX = (int) Math.floor(spawnPosition[0]) >> 4, chunkZ = (int) Math.floor(spawnPosition[2]) >> 4;
+		// The player there, not just the chunk: the map may still hold spawn's chunk from earlier. Not
+		// the height, as the ground they land on may have changed.
+		context.waitFor(mc -> mc.player != null && mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD
+			&& Math.abs(mc.player.getX() - spawnPosition[0]) < 0.5 && Math.abs(mc.player.getZ() - spawnPosition[2]) < 0.5
+			&& MapSession.get() != null && MapSession.get().map().chunk(chunkX, chunkZ) != null, 2400);
+		settle(context, 100);
+		spawnProbes = spawnProbes(context, cell);
+	}
+
+	/**
+	 * Where the right-click menu puts the player around spawn while its chunks are loaded, to
+	 * compare with after the restart. Several places, as a waypoint may cover one by then.
+	 */
+	private static List<double[]> spawnProbes(ClientGameTestContext context, int[] cell) {
 		double cellUnits = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
 		// The middle of a block column and of a pixel row.
 		double u0 = cell[0] * Projection.TILE_UNITS + cell[2] * cellUnits + 0.5;
 		double v0 = cell[1] * Projection.TILE_UNITS + cell[3] * cellUnits + 2.5 / Projection.PIXELS_PER_UNIT;
-		spawnProbes = context.computeOnClient(mc -> {
+		return context.computeOnClient(mc -> {
 			List<double[]> probes = new java.util.ArrayList<>();
 			for (int[] offset : new int[][] {{0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {12, 12}, {-12, -12}}) {
 				double u = u0 + offset[0];
@@ -770,8 +801,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			return probes;
 		});
-		context.setScreen(() -> null);
-		return cell;
 	}
 
 	/** Map points around spawn and where the right-click menu put the player there before the restart: {u, v, x, y, z}. */
