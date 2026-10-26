@@ -181,8 +181,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			multiplayer(context);
 		}
 		// The server's side of Xaero's channels goes through Fabric API networking, so these run on
-		// Fabric only. On NeoForge the shim can't start a dedicated server anyway.
-		//? if fabric {
+		// Fabric only, and from 1.21, whose networking has payload types. On NeoForge and on 1.20.1
+		// the shim can't start a dedicated server anyway.
+		//? if >=1.21 && fabric {
 		if (tests.contains("server-id")) {
 			serverLevelIds(context);
 		}
@@ -458,8 +459,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/** What the dedicated server sends a player a second after they join: a level ID message, or nothing. */
 	private static byte @Nullable [] levelIdOnJoin;
 	private static boolean joinHooked;
+	//? if >=1.21 {
 	private static final net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<dev.diorama.XaeroChannels.Message> WORLD_INFO =
 		new net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<>(net.minecraft.resources.Identifier.fromNamespaceAndPath("worldinfo", "world_id"));
+	//?}
 
 	/**
 	 * A network's two servers whose worlds share a seed, each naming its world with a level ID a
@@ -468,7 +471,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * on the first visit, and keeps it for that visit when the ID comes. From the next visit on,
 	 * the map waits for the ID, since the address named a world before.
 	 */
-	//? if fabric {
+	//? if >=1.21 && fabric {
 	private static void serverLevelIds(ClientGameTestContext context) {
 		String address = WorldKey.key("server", "localhost:" + SERVER_PORT);
 		context.runOnClient(mc -> {
@@ -538,7 +541,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * with their face and name, move when the server says they moved, hide under fair play, and
 	 * go when the server stops tracking them.
 	 */
-	//? if fabric {
+	//? if >=1.21 && fabric {
 	private static void trackedPlayers(ClientGameTestContext context) {
 		java.util.Properties properties = serverProperties();
 		java.util.concurrent.atomic.AtomicInteger answers = new java.util.concurrent.atomic.AtomicInteger();
@@ -2027,7 +2030,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			RemotePlayer other = new RemotePlayer(mc.level, new GameProfile(UUID.fromString("069a79f4-44e9-4726-a5be-fca90e38aaf5"), "Notch"));
 			other.setId(-424242);
 			other.snapTo(x - 3.5, y, z + 8.5);
+			//? if >=1.21 {
 			mc.level.addEntity(other);
+			//?} else {
+			/*mc.level.addPlayer(other.getId(), other);
+			*///?}
 		});
 		settle(context, 60);
 		context.takeScreenshot("radar-01-minimap");
@@ -3935,8 +3942,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void toggleDebugScreen(Minecraft mc) {
 		//? if >=1.21.9 {
 		mc.debugEntries.toggleDebugOverlay();
-		//?} else {
+		//?} else if >=1.21 {
 		/*mc.getDebugOverlay().toggleOverlay();
+		*///?} else {
+		/*mc.options.renderDebug = !mc.options.renderDebug;
 		*///?}
 	}
 

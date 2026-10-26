@@ -112,13 +112,18 @@ public final class XaeroRadarIcons {
 	 * {@code "normal_sprite ..."}; null for Diorama's own face.
 	 */
 	public static @Nullable String describe(Entity entity) {
+		// Not a pattern switch: the 1.20.1 jar is built for Java 17.
 		Icon icon = of(entity);
-		return switch (icon) {
-			case null -> null;
-			case Basic basic -> basic.name().toLowerCase(java.util.Locale.ROOT);
-			case ItemIcon item -> "item " + BuiltInRegistries.ITEM.getKey(item.stack().getItem());
-			case Sprite sprite -> (sprite.outlined ? "outlined_sprite " : sprite.flipped ? "sprite " : "normal_sprite ") + sprite.location + " " + sprite.w + "x" + sprite.h;
-		};
+		if (icon instanceof Basic basic) {
+			return basic.name().toLowerCase(java.util.Locale.ROOT);
+		}
+		if (icon instanceof ItemIcon item) {
+			return "item " + BuiltInRegistries.ITEM.getKey(item.stack().getItem());
+		}
+		if (icon instanceof Sprite sprite) {
+			return (sprite.outlined ? "outlined_sprite " : sprite.flipped ? "sprite " : "normal_sprite ") + sprite.location + " " + sprite.w + "x" + sprite.h;
+		}
+		return null;
 	}
 
 	/** Reads the files again; runs on the game thread at the end of each resource reload. */

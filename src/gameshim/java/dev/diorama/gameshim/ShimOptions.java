@@ -70,8 +70,15 @@ final class ShimOptions {
 	}
 
 	private static <T> void parseInto(OptionInstance<T> option, String value) {
+		// 1.20.1's DataFixerUpper has no ifSuccess/ifError; the result and the error are Optionals.
+		//? if <1.21 {
+		/*var parsed = option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(value));
+		parsed.result().ifPresent(option::set);
+		parsed.error().ifPresent(error -> GameShim.LOGGER.warn("Couldn't set option {} to {}: {}", option, value, error.message()));
+		*///?} else {
 		option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(value))
 			.ifSuccess(option::set)
 			.ifError(error -> GameShim.LOGGER.warn("Couldn't set option {} to {}: {}", option, value, error.message()));
+		//?}
 	}
 }

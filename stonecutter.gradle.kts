@@ -171,7 +171,7 @@ stonecutter parameters {
 	val before1_21 = listOf(
 		// Resource ids were built with constructors. Either spelling: the Identifier rename above
 		// may run first.
-		"\\b(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new ResourceLocation(",
+		"\\b(?:net\\.minecraft\\.resources\\.)?(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new net.minecraft.resources.ResourceLocation(",
 		// Chunk statuses had no package of their own.
 		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
 		// The death packet had a getter for whose death it was.
@@ -184,6 +184,20 @@ stonecutter parameters {
 		"\\.getSkin\\(\\)\\.texture\\(\\)" to ".getSkinTextureLocation()",
 		// A status effect instance held its effect itself, not a registry holder of it.
 		"\\.getEffect\\(\\)\\.value\\(\\)" to ".getEffect()",
+		// The test stand-in's names: the "saving world" screen had its dirt background in its name,
+		// and the renderer counted chunks, not sections.
+		"\\bGenericMessageScreen\\b" to "GenericDirtMessageScreen",
+		"\\.hasRenderedAllSections\\(\\)" to ".hasRenderedAllChunks()",
+		// Leaving a world was clearing the client's level.
+		"\\b(minecraft|mc)\\.disconnect\\(" to "$1.clearLevel(",
+		// The tests' checks: chat's allowed characters were in SharedConstants, and widgets had no
+		// right or bottom edge getters.
+		"\\bnet\\.minecraft\\.util\\.StringUtil\\.isAllowedChatCharacter\\(" to "net.minecraft.SharedConstants.isAllowedChatCharacter(",
+		"\\b(\\w+)\\.getRight\\(\\)" to "($1.getX() + $1.getWidth())",
+		"\\b(\\w+)\\.getBottom\\(\\)" to "($1.getY() + $1.getHeight())",
+		// Not a Minecraft change: the 1.20.1 jar is built for Java 17, which has no Math.clamp.
+		// Minecraft's own clamp has the int, float and double forms.
+		"\\bMath\\.clamp\\(" to "net.minecraft.util.Mth.clamp(",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {
