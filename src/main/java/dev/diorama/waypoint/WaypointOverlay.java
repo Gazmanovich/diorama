@@ -88,10 +88,11 @@ public final class WaypointOverlay {
 			}
 			if (fullscreen && !pin.clamped() && (pin == hovered || view.zoom() >= 2)) {
 				int w = font.width(waypoint.name);
-				int tx = Math.round(pin.x() - w / 2.0F);
-				int ty = Math.round(pin.y()) + 3;
-				graphics.fill(tx - 2, ty - 1, tx + w + 2, ty + 9, 0x90000000);
-				graphics.text(font, waypoint.name, tx, ty, 0xFFFFFFFF, false);
+				graphics.pose().pushMatrix();
+				graphics.pose().translate(pin.x() - w / 2.0F, pin.y() + 3);
+				graphics.fill(-2, -1, w + 2, 9, 0x90000000);
+				graphics.text(font, waypoint.name, 0, 0, 0xFFFFFFFF, false);
+				graphics.pose().popMatrix();
 			}
 		}
 		graphics.disableScissor();

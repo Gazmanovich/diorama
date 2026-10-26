@@ -364,8 +364,8 @@ public final class XaeroRadarIcons {
 			int factor = this.factor(size);
 			Baked b = this.baked(factor);
 			float texel = Radar.texel(size, Math.max(b.w(), b.h()));
-			float x0 = Radar.snap(x - b.w() * texel / 2);
-			float y0 = Radar.snap(y - b.h() * texel / 2);
+			float x0 = x - b.w() * texel / 2;
+			float y0 = y - b.h() * texel / 2;
 			GuiGraphicsExtractor graphics = icons.graphics();
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(x0, y0);

@@ -102,10 +102,10 @@ public final class IconBatch {
 		return this.graphics;
 	}
 
-	/** {@link GuiGraphicsExtractor#fill}. */
-	public void fill(int x0, int y0, int x1, int y1, int argb) {
+	/** A solid rectangle in the current pose, retaining fractional map positions. */
+	public void fill(float x0, float y0, float x1, float y1, int argb) {
 		if (!this.batched) {
-			this.graphics.fill(x0, y0, x1, y1, argb);
+			MapCanvas.of(this.graphics).solid(new float[] {x0, y0, x0, y1, x1, y1, x1, y0}, argb);
 			return;
 		}
 		this.add(0, x0, y0, x1, y1, 0, 0, 0, 0, argb);
