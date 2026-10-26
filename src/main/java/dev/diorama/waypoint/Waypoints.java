@@ -93,16 +93,18 @@ public final class Waypoints {
 		LocalPlayer player = mc.player;
 		boolean sleeping = player != null && player.isSleeping();
 		if (sleeping && !wasSleeping && Settings.get().bedMarkers) {
-			player.getSleepingPos().ifPresent(Waypoints::slept);
+			// On joining a server the world may not be known yet; until it is, try again each tick.
+			sleeping = player.getSleepingPos().map(Waypoints::slept).orElse(true);
 		}
 		wasSleeping = sleeping;
 	}
 
-	private static void slept(BlockPos pos) {
+	/** Puts the bed pin on a bed; false if there's no world to keep it in yet. */
+	private static boolean slept(BlockPos pos) {
 		WaypointStore store = WaypointStore.get();
 		String dimension = dimension();
 		if (store == null || dimension == null) {
-			return;
+			return false;
 		}
 		for (Waypoint waypoint : store.in(dimension)) {
 			if (waypoint.kind == Waypoint.Kind.BED) {
@@ -110,13 +112,14 @@ public final class Waypoints {
 				waypoint.y = pos.getY();
 				waypoint.z = pos.getZ();
 				store.changed();
-				return;
+				return true;
 			}
 		}
 		Waypoint bed = new Waypoint("Bed", pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFE5484D);
 		bed.kind = Waypoint.Kind.BED;
 		bed.icon = dev.diorama.render.WaypointIcons.BED;
 		store.add(bed);
+		return true;
 	}
 
 	/** Adds a death marker where the player stands. Called when the server reports their death. */

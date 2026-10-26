@@ -18,7 +18,8 @@ import net.minecraft.network.chat.Component;
  */
 public final class WaypointIconScreen extends Screen {
 	private static final int CELL = 30;
-	private static final int COLUMNS = 6;
+	/** Columns when the icons fit in the window's height; a resource pack's many icons get more. */
+	private static final int MIN_COLUMNS = 6;
 	private static final int LABEL = 0xFFA0A0A0;
 
 	private final Screen parent;
@@ -39,12 +40,18 @@ public final class WaypointIconScreen extends Screen {
 		this.icons.addAll(WaypointIcons.all());
 	}
 
+	private int columns() {
+		// Room for the title above and Cancel below.
+		int rows = Math.max(1, (this.height - 64) / CELL);
+		return Math.max(MIN_COLUMNS, (this.icons.size() + rows - 1) / rows);
+	}
+
 	private int rows() {
-		return (this.icons.size() + COLUMNS - 1) / COLUMNS;
+		return (this.icons.size() + this.columns() - 1) / this.columns();
 	}
 
 	private int left() {
-		return this.width / 2 - COLUMNS * CELL / 2;
+		return this.width / 2 - this.columns() * CELL / 2;
 	}
 
 	private int top() {
@@ -60,14 +67,14 @@ public final class WaypointIconScreen extends Screen {
 	private int cellAt(double mouseX, double mouseY) {
 		int col = (int) Math.floor((mouseX - this.left()) / CELL);
 		int row = (int) Math.floor((mouseY - this.top()) / CELL);
-		int i = row * COLUMNS + col;
-		return col < 0 || col >= COLUMNS || row < 0 || i >= this.icons.size() ? -1 : i;
+		int i = row * this.columns() + col;
+		return col < 0 || col >= this.columns() || row < 0 || i >= this.icons.size() ? -1 : i;
 	}
 
 	/** The centre of an icon's cell, in GUI pixels. For tests. */
 	public float[] cellCentre(String id) {
 		int i = this.icons.indexOf(id);
-		return new float[] {this.left() + (i % COLUMNS) * CELL + CELL / 2.0F, this.top() + (i / COLUMNS) * CELL + CELL / 2.0F};
+		return new float[] {this.left() + (i % this.columns()) * CELL + CELL / 2.0F, this.top() + (i / this.columns()) * CELL + CELL / 2.0F};
 	}
 
 	@Override
@@ -76,11 +83,11 @@ public final class WaypointIconScreen extends Screen {
 		int left = this.left();
 		int top = this.top();
 		graphics.centeredText(this.font, this.title, this.width / 2, top - 14, 0xFFFFFFFF);
-		ScreenArt.list(graphics, left - 2, top - 2, left + COLUMNS * CELL + 2, top + this.rows() * CELL + 2);
+		ScreenArt.list(graphics, left - 2, top - 2, left + this.columns() * CELL + 2, top + this.rows() * CELL + 2);
 		int hovered = this.cellAt(mouseX, mouseY);
 		for (int i = 0; i < this.icons.size(); i++) {
-			int x = left + (i % COLUMNS) * CELL;
-			int y = top + (i / COLUMNS) * CELL;
+			int x = left + (i % this.columns()) * CELL;
+			int y = top + (i / this.columns()) * CELL;
 			String id = this.icons.get(i);
 			if (id.equals(this.current)) {
 				ScreenArt.selection(graphics, x, y, x + CELL, y + CELL);

@@ -35,15 +35,11 @@ final class IconWaypointsTest {
 	}
 
 	static void checks(ClientGameTestContext context, TestSingleplayerContext world) {
-		for (String id : WaypointIcons.OFFERED) {
-			String size = context.computeOnClient(mc -> {
-				PinArt.Image image = WaypointIcons.image(id);
-				return image == null ? "missing" : image.width + "x" + image.height;
-			});
-			if (!size.equals(WaypointIcons.TILE + "x" + WaypointIcons.TILE)) {
-				throw new AssertionError("Icon " + id + ": expected an " + WaypointIcons.TILE + "-pixel tile, got " + size);
-			}
-		}
+		expectIcons(context, "on joining");
+		// A resource reload (F3+T, or changing packs) drops the icons and the pins drawn with them;
+		// they come back from the new resources.
+		DioramaClientTest.reloadPacks(context, mc -> { });
+		expectIcons(context, "after a resource reload");
 
 		// Lying down in a bed puts the Bed pin there; another bed moves it rather than adding one.
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
@@ -78,6 +74,36 @@ final class IconWaypointsTest {
 		}
 	}
 
+	/**
+	 * Every icon Diorama offers loads as a full tile, with pixels in it; the bed's are mostly red,
+	 * so the colours come through the right way round.
+	 */
+	private static void expectIcons(ClientGameTestContext context, String when) {
+		for (String id : WaypointIcons.OFFERED) {
+			String seen = context.computeOnClient(mc -> {
+				PinArt.Image image = WaypointIcons.image(id);
+				if (image == null) {
+					return "missing";
+				}
+				int opaque = 0;
+				int red = 0;
+				for (int y = 0; y < image.height; y++) {
+					for (int x = 0; x < image.width; x++) {
+						int argb = image.argb(x, y);
+						if (argb >>> 24 >= 128) {
+							opaque++;
+							red += ((argb >> 16) & 0xFF) > (argb & 0xFF) + 60 ? 1 : 0;
+						}
+					}
+				}
+				return image.width + "x" + image.height + (opaque < 30 ? " nearly empty" : "") + (id.equals(WaypointIcons.BED) && red < 10 ? " not red" : "");
+			});
+			if (!seen.equals(WaypointIcons.TILE + "x" + WaypointIcons.TILE)) {
+				throw new AssertionError("Icon " + id + " " + when + ": expected a full " + WaypointIcons.TILE + "-pixel tile, got " + seen);
+			}
+		}
+	}
+
 	/** Puts a bed with its head at {@code head} and has the player lie down in it, then get up. */
 	private static void sleep(ClientGameTestContext context, TestSingleplayerContext world, BlockPos head) {
 		world.getServer().runCommand("setblock " + head.getX() + " " + head.getY() + " " + (head.getZ() + 1) + " red_bed[facing=north,part=foot]");
@@ -85,7 +111,8 @@ final class IconWaypointsTest {
 		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).startSleeping(head));
 		context.waitFor(mc -> mc.player != null && mc.player.isSleeping(), 200);
 		context.waitTicks(5);
-		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).stopSleeping());
+		// As the game wakes a player, telling their client too.
+		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).stopSleepInBed(false, true));
 		context.waitFor(mc -> mc.player != null && !mc.player.isSleeping(), 200);
 	}
 

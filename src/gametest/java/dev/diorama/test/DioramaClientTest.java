@@ -2389,7 +2389,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Changes the resource packs and reloads them, as F3+T does, and waits until the game is back. */
-	private static void reloadPacks(ClientGameTestContext context, java.util.function.Consumer<Minecraft> change) {
+	static void reloadPacks(ClientGameTestContext context, java.util.function.Consumer<Minecraft> change) {
 		java.util.concurrent.CompletableFuture<Void> done = context.computeOnClient(mc -> {
 			change.accept(mc);
 			return mc.reloadResourcePacks();
