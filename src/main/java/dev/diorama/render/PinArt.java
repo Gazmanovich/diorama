@@ -313,15 +313,18 @@ public final class PinArt {
 	/** The tip under a round icon pin's head, as long as the large pin's. */
 	private static final int ROUND_TIP = 6;
 
-	/** A round icon pin's head: an icon's tile, a pixel of the colour round it, the bevel and the rim; odd so the tile centres. */
+	/**
+	 * A round icon pin's head: the icon's tile, its white edge, then room for the tile's corners to
+	 * clear the bevel and rim (21 for an 11-pixel tile; 19 let square icons touch the rim). Odd so the tile centres.
+	 */
 	private static int roundHead(Image icon) {
-		int d = Math.max(icon.width, icon.height) + 6;
+		int d = Math.max(icon.width, icon.height) + 10;
 		return d % 2 == 0 ? d + 1 : d;
 	}
 
 	/**
-	 * Today's standing pin, its head grown to hold the icon's tile, and a white edge round the
-	 * whole pin like a sticker. The icons draw their own dark outline, so they show on any colour.
+	 * Today's standing pin, its head grown to hold the icon's tile. The icon is a sticker on it:
+	 * its own dark outline (part of the art), then a white edge round its shape.
 	 */
 	private static Art roundIconPin(Image icon, int colour) {
 		int d = roundHead(icon);
@@ -329,21 +332,27 @@ public final class PinArt {
 		int h = d + ROUND_TIP + 3;
 		Image image = new Image(w, h);
 		float ax = 2 + d / 2.0F;
-		float top = 1;
-		float ay = top + d + ROUND_TIP;
-		boolean[] mask = disc(w, h, ax, top + d / 2.0F, d / 2.0F);
-		boolean[] point = polygon(w, h, new float[] {ax - d * 0.32F, top + d * 0.75F, ax + d * 0.32F, top + d * 0.75F, ax, ay});
+		float ay = d + ROUND_TIP;
+		image.over(ellipse(w, h, ax, ay - 0.5F, d * 0.26F + 0.6F, 1.3F), 0x000000, 0.28F);
+		boolean[] mask = disc(w, h, ax, d / 2.0F, d / 2.0F);
+		boolean[] point = polygon(w, h, new float[] {ax - d * 0.32F, d * 0.75F, ax + d * 0.32F, d * 0.75F, ax, ay});
 		for (int i = 0; i < mask.length; i++) {
 			mask[i] |= point[i];
 		}
-		boolean[] edge = grow4(mask, w, h);
-		for (int i = 0; i < edge.length; i++) {
-			edge[i] &= !mask[i];
-		}
-		image.put(edge, STICKER_WHITE, 1);
 		face(image, mask, w, h, colour);
 		int ix = Math.round(ax - icon.width / 2.0F);
-		int iy = Math.round(top + d / 2.0F - icon.height / 2.0F);
+		int iy = Math.round(d / 2.0F - icon.height / 2.0F);
+		boolean[] shape = new boolean[w * h];
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				shape[(iy + y) * w + ix + x] = icon.a[y * icon.width + x] >= 128;
+			}
+		}
+		boolean[] edge = grow4(shape, w, h);
+		for (int i = 0; i < edge.length; i++) {
+			edge[i] &= !shape[i];
+		}
+		image.put(edge, STICKER_WHITE, 1);
 		for (int y = 0; y < icon.height; y++) {
 			for (int x = 0; x < icon.width; x++) {
 				int s = y * icon.width + x;
