@@ -41,9 +41,11 @@ It only runs in your game. Servers don't need it.
 | `U` | List your waypoints |
 | `=` / `-` | Zoom the minimap in and out |
 
-On the fullscreen map, drag to move around, scroll to zoom and right-click for the menu. `C` switches between the surface and the cave view, `PgUp` and `PgDn` move the cave view up and down, and `Space` brings the map back to you.
+You can change these in Minecraft's **Controls** screen, under Diorama. Map settings and hiding the minimap have keys too, unbound until you set one.
 
-You can change any of these in Minecraft's **Controls** screen, under Diorama. Map settings and hiding the minimap have keys too, unbound until you set one.
+On the fullscreen map, drag to move around, scroll to zoom, click a waypoint to edit it and right-click anywhere else for the menu. `C` switches between the surface and the cave view, `PgUp` and `PgDn` move the cave view up and down, and `Space` brings the map back to you.
+
+The fullscreen map can also show the chunk grid, slime chunks (singleplayer only) and the spots where monsters can spawn. Turn them on in the settings.
 
 ## Settings
 
@@ -57,7 +59,7 @@ Your maps and waypoints are saved next to it, in `.minecraft/diorama/`, one fold
 
 ## On servers
 
-Each world on a server gets its own map and waypoints, even several worlds behind one address, like a network's lobby and survival worlds. Realms get their own too.
+Each world on a server gets its own map and waypoints. Diorama tells worlds behind one address apart by their seed, so a network's lobby and survival worlds, or a map reset, get separate maps. Worlds that share a seed share a map, unless the server sends a level ID for each world, as servers set up for Xaero's mods do. Realms get their own too.
 
 Servers can limit Diorama with the same chat codes Xaero's Minimap uses. "Fair play" turns off the radar and only shows caves you've actually seen. "No minimap" turns the map off.
 

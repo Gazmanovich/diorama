@@ -26,7 +26,7 @@ Everything but the entrypoints is shared: `dev.diorama.fabric` hooks the mod up 
 
 ## Game tests
 
-`./gradlew :26.3:runClientGameTest` (or `:1.21.11:runClientGameTest`) launches the game, creates a world and runs every test scenario. Each scenario asserts what it can measure and saves screenshots to `versions/<version>/build/run/clientGameTest/screenshots/` for the rest.
+`./gradlew :26.3:runClientGameTest` (or `:1.21.11:runClientGameTest`) launches the game, creates a world and runs the default test scenarios. Each scenario asserts what it can measure and saves screenshots to `versions/<version>/build/run/clientGameTest/screenshots/` for the rest.
 
 Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 
@@ -47,6 +47,8 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `recreated-world` | A new world under a deleted world's name |
 | `multiplayer` | Two worlds on one dedicated server |
 | `server-id`, `tracked-players`, `realms` | Telling server worlds apart, players tracked by Xaero's server plugin, Realms |
+
+Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod) and `showcase`.
 
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 

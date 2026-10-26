@@ -1,8 +1,8 @@
 # Custom radar icons
 
-Diorama's radar shows each mob as its face. Vanilla mobs have hand-drawn faces. For every other mob, modded ones included, Diorama tries to read a face off the mob's 3D model, and if that doesn't work the mob shows up as a coloured dot.
+Diorama's radar shows each mob as its face, cut from the mob's own texture, so texture packs change the faces too. For most vanilla mobs Diorama knows where the face sits on the texture. For every other mob, modded ones included, it tries to read the face off the mob's 3D model, and if that doesn't work the mob shows up as a coloured dot.
 
-You can pick the icon yourself: your own picture, an item, or a dot. It takes a resource pack with two small files per mob, and no code.
+You can pick the icon yourself: your own picture, an item, or a dot. It takes a resource pack with one small file per mob, plus a picture if you draw one. No code.
 
 ![A wolf, a glow squid and a bat on the minimap, before and after the example pack](images/radar-icons-before-after.png)
 
@@ -12,11 +12,11 @@ Diorama reads the icon files Xaero's Minimap uses, so any icon you make here wor
 
 ## Try the example pack
 
-1. Download [diorama-example-radar-icons.zip](radar-icons/diorama-example-radar-icons.zip).
+1. Download [diorama-example-radar-icons.zip](radar-icons/diorama-example-radar-icons.zip?raw=true).
 2. Put the zip in your `.minecraft/resourcepacks` folder. In the game, **Options > Resource Packs > Open Pack Folder** opens it for you.
 3. Turn the pack on in **Options > Resource Packs**.
 
-Find a wolf and it has a red heart on the radar. Glow squids show a glow ink sac, and bats become dots. The rest of this page builds that pack from scratch, so you can change it for the mobs you care about.
+Find a wolf and it has a red heart on the radar. Glow squids show a glow ink sac, and bats become dots. The rest of this page builds the same pack from scratch, so you can change it for the mobs you care about.
 
 ## Make your own
 
@@ -63,7 +63,7 @@ my-radar-icons/
 
 Draw a small PNG with a transparent background and save it under `sprite/`. You can make subfolders there to keep things tidy, like `my_icons/` above.
 
-A mob's face on the radar is 8 by 8 pixels, so draw your icon about that size, 8 to 12 pixels across. Diorama trims the empty space around it. Bigger images get shrunk to a half, a third and so on, so they stay sharp but lose detail.
+Most mob faces on the radar are about 8 pixels across, so 8 to 12 pixels is a good size for an icon. Diorama trims the empty space around it. Bigger images get shrunk to a half, a third and so on, so they stay sharp but lose detail.
 
 The example pack's heart is 9 by 8:
 
@@ -83,6 +83,26 @@ The definition file goes in `definition/<namespace>/<mob>.json`. For `minecraft:
 
 The path after `outlined_sprite:` starts inside the `sprite/` folder.
 
+An icon doesn't have to be a picture. The example pack's other two files need no PNG. `definition/minecraft/glow_squid.json` shows an item:
+
+```json
+{
+  "variants": {
+    "default": "item:minecraft:glow_ink_sac"
+  }
+}
+```
+
+and `definition/minecraft/bat.json` makes bats plain dots:
+
+```json
+{
+  "variants": {
+    "default": "dot"
+  }
+}
+```
+
 ### 5. Load it
 
 Turn the pack on in **Options > Resource Packs**. After you change a file, press `F3` + `T` to reload packs; you don't need to restart the game.
@@ -98,6 +118,8 @@ Turn the pack on in **Options > Resource Packs**. After you change a file, press
 | `model` | Diorama's own face for the mob, or a dot if it has none. |
 
 `sprite:<path>` also works. It's Xaero's older form and draws the image upside down.
+
+Xaero's Minimap can also draw part of a mob's 3D model (`model:<n>`, with settings under `modelConfigs`) or pick an item for the mob (`item` on its own). Diorama shows its own face for those instead, and ignores everything in the file except `variants`.
 
 Your icon replaces the face in the default **Pixel heads** style. In the **Framed** style it sits inside the coloured frame. In the **Dots** style every mob is a dot, whatever its file says.
 
@@ -127,5 +149,5 @@ Ship the same files in your mod, under `src/main/resources/assets/xaerominimap/e
 
 - Check the file names and folders against the layout above. The definition file has to be named exactly like the mob, `grizzly_bear.json` for `alexsmobs:grizzly_bear`.
 - Make sure the pack is turned on, and above any other pack that has an icon for the same mob. The top pack wins.
-- Look in `.minecraft/logs/latest.log`. Diorama writes `Radar icons from Xaero's Minimap icon files: N loaded` when it finds your files, and a line starting `Radar icon file` for each file it couldn't read, with the reason, like a missing image or a typo in the JSON.
+- Look in `.minecraft/logs/latest.log`. Diorama writes `Radar icons from Xaero's Minimap icon files: N loaded`, where N counts the files that change an icon; a file that only says `model` doesn't count. For each file it couldn't read, it writes a line starting `Radar icon file` with the reason, like a missing image or a typo in the JSON. A file with no `variants` at all is skipped without a word.
 - Check the radar style. In the **Dots** style every mob is a dot.
