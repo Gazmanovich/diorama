@@ -811,9 +811,11 @@ public final class MapScreen extends Screen {
 		*///?} else if >=1.21 {
 		/*graphics.blitSprite(sprite, x, y, w, h);
 		*///?} else {
-		/*// Nine-sliced as 1.20.1's tab buttons draw it: a 2 pixel border, none at the bottom.
+		/*// From 1.20.1's tab texture, one 24 pixel row per state. Its tabs are always 24 tall; these
+		// are shorter, so they take the top h rows and slice only the 2 pixel sides (1.20.1's
+		// nine-slice divides by the bottom border when the height differs, and the tabs have none).
 		int row = sprite == TAB_SELECTED ? 0 : sprite == TAB_SELECTED_HIGHLIGHTED ? 1 : sprite == TAB ? 2 : 3;
-		graphics.blitNineSliced(TAB_BUTTON, x, y, w, h, 2, 2, 2, 0, 130, 24, 0, row * 24);
+		graphics.blitNineSliced(TAB_BUTTON, x, y, w, h, 2, 2, 2, 0, 130, h, 0, row * 24);
 		*///?}
 	}
 

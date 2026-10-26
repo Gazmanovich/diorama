@@ -24,8 +24,10 @@ public abstract class GameRendererMixin {
 	// The GPU bake experiment draws its tiles before the frame opens any pass.
 	//? if >=26.3 {
 	@Inject(method = "render()V", at = @At("HEAD"))
-	//?} else {
+	//?} else if >=1.21 {
 	/*@Inject(method = "render(Lnet/minecraft/client/DeltaTracker;Z)V", at = @At("HEAD"))
+	*///?} else {
+	/*@Inject(method = "render(FJZ)V", at = @At("HEAD"))
 	*///?}
 	private void diorama$gpuBakes(CallbackInfo ci) {
 		dev.diorama.render.gpu.GpuTileBaker.frame();
@@ -60,10 +62,19 @@ public abstract class GameRendererMixin {
 		Camera camera = ((GameRenderer) (Object) this).getMainCamera();
 		WorldProjection.capture(projectionMatrix, new Matrix4f().rotation(camera.rotation().conjugate(new Quaternionf())), camera.getPosition());
 	}
-	*///?} else {
+	*///?} else if >=1.21 {
 	/*// renderLevel set the world's projection through resetProjectionMatrix, and it was the only
 	// Matrix4f local at that point.
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/GameRenderer;resetProjectionMatrix(Lorg/joml/Matrix4f;)V", ordinal = 0))
+	private void diorama$captureWorldProjection(CallbackInfo ci, @Local(ordinal = 0) Matrix4f projectionMatrix) {
+		Camera camera = ((GameRenderer) (Object) this).getMainCamera();
+		WorldProjection.capture(projectionMatrix, new Matrix4f().rotation(camera.rotation().conjugate(new Quaternionf())), camera.getPosition());
+	}
+	*///?} else {
+	/*// 1.20.1 sets the camera up after the world's projection, so this waits for the level
+	// renderer's call: by then the camera has this frame's rotation, where the projection's call
+	// would still see the last frame's. The projection is the first Matrix4f local there too.
+	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;renderLevel(Lcom/mojang/blaze3d/vertex/PoseStack;FJZLnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/GameRenderer;Lnet/minecraft/client/renderer/LightTexture;Lorg/joml/Matrix4f;)V", ordinal = 0))
 	private void diorama$captureWorldProjection(CallbackInfo ci, @Local(ordinal = 0) Matrix4f projectionMatrix) {
 		Camera camera = ((GameRenderer) (Object) this).getMainCamera();
 		WorldProjection.capture(projectionMatrix, new Matrix4f().rotation(camera.rotation().conjugate(new Quaternionf())), camera.getPosition());
