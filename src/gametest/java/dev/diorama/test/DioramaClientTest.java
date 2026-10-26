@@ -2266,13 +2266,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 			{"rabbit", "9", "-9", "", "own", "item minecraft:carrot"},
 			{"zombie", "9", "-8", "", "own", "own"},
 		};
+		// Invulnerable, as the radar's mobs are: it's night, and a zombie that spawns nearby kills the
+		// villager while the packs reload.
 		for (String[] mob : mobs) {
 			world.getServer().runCommand("summon " + mob[0] + " " + (x + Integer.parseInt(mob[1])) + " " + y + " " + (z + Integer.parseInt(mob[2]))
-				+ " {NoAI:1b,PersistenceRequired:1b,Silent:1b" + mob[3] + "}");
+				+ " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b" + mob[3] + "}");
 		}
 		// An item well above: its caret sits on its slot.
 		world.getServer().runCommand("fill " + (x - 8) + " " + y + " " + (z - 8) + " " + (x - 8) + " " + (y + 4) + " " + (z - 8) + " stone");
-		world.getServer().runCommand("summon rabbit " + (x - 8) + " " + (y + 5) + " " + (z - 8) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b}");
+		world.getServer().runCommand("summon rabbit " + (x - 8) + " " + (y + 5) + " " + (z - 8) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b}");
 		context.waitTicks(20);
 		assertIcons(context, x, z, mobs, 4, "without the pack");
 		settle(context, 40);
