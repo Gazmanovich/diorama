@@ -206,6 +206,119 @@ public final class PinArt {
 		return new Art(image, pad + d / 2.0F, pad + d / 2.0F, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
 	}
 
+	/**
+	 * How a waypoint with an icon stands on the map. {@code STICKER} is RickE_26's mock: the icon
+	 * cut out like a sticker, a dark line and then a white edge round its own shape, over a white
+	 * pointer. {@code COLOUR_STICKER} is the same with the edge and pointer in the waypoint's colour.
+	 * {@code BADGE} puts the icon on a square in the waypoint's colour, bevelled like the round pins.
+	 */
+	public enum IconStyle {
+		STICKER,
+		COLOUR_STICKER,
+		BADGE
+	}
+
+	/** White, a touch off so it doesn't glare on snow. */
+	private static final int STICKER_WHITE = 0xF6F6F6;
+
+	/**
+	 * An icon standing over a pointer whose tip touches the spot, in one of the {@link IconStyle}s.
+	 * The icon keeps its own pixels, one texel per GUI pixel.
+	 */
+	public static Art iconPin(Image icon, IconStyle style, int colour) {
+		int edge = style == IconStyle.STICKER ? STICKER_WHITE : colour;
+		// The body: the icon with two pixels of room all round, a square for the badge.
+		int bw = icon.width + 4;
+		int bh = icon.height + 4;
+		// Room for the pointer under even a tiny icon.
+		bw = Math.max(bw, 12);
+		if (style == IconStyle.BADGE) {
+			bw = bh = Math.max(bw, bh);
+		}
+		// The pointer's fill narrows by two a row to a one- or two-pixel tip; a dark line goes round it.
+		int fillW = bw % 2 == 1 ? 9 : 10;
+		int fillH = (fillW + 1) / 2;
+		int pointerH = fillH + 2;
+		int gap = 0;
+		int w = bw;
+		int h = bh + gap + pointerH;
+		Image image = new Image(w, h);
+		int ix = (bw - icon.width) / 2;
+		int iy = (bh - icon.height) / 2;
+		boolean[] shape = new boolean[w * h];
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				shape[(iy + y) * w + ix + x] = icon.a[y * icon.width + x] >= 128;
+			}
+		}
+		if (style == IconStyle.BADGE) {
+			boolean[] square = new boolean[w * h];
+			for (int y = 0; y < bh; y++) {
+				for (int x = 0; x < bw; x++) {
+					square[y * w + x] = true;
+				}
+			}
+			face(image, square, w, h, colour);
+		} else {
+			// A dark line hugging the icon, corners and all, then the edge outside it, rounded off.
+			boolean[] line = dilate(shape, w, h);
+			boolean[] grown = grow4(line, w, h);
+			for (int i = 0; i < shape.length; i++) {
+				grown[i] &= !line[i];
+				line[i] &= !shape[i];
+			}
+			image.put(grown, edge, 1);
+			image.put(line, INK, 1);
+		}
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				int s = y * icon.width + x;
+				if (icon.a[s] < 128) {
+					continue;
+				}
+				int d = (iy + y) * w + ix + x;
+				image.r[d] = icon.r[s];
+				image.g[d] = icon.g[s];
+				image.b[d] = icon.b[s];
+				image.a[d] = 255;
+			}
+		}
+		boolean[] fill = new boolean[w * h];
+		int fx0 = (w - fillW) / 2;
+		int top = bh + gap + 1;
+		for (int row = 0; row < fillH; row++) {
+			for (int x = fx0 + row; x < fx0 + fillW - row; x++) {
+				fill[(top + row) * w + x] = true;
+			}
+		}
+		boolean[] rim = dilate(fill, w, h);
+		for (int i = 0; i < fill.length; i++) {
+			// Where the pointer meets the body, the body's own edge stays on top.
+			rim[i] &= !fill[i] && image.a[i] == 0;
+		}
+		image.put(rim, INK, 1);
+		image.put(fill, edge, 1);
+		return new Art(image, w / 2.0F, h, 0, 0, 0, 0);
+	}
+
+	/** Height of an icon pin's body, above its pointer, for centring things on it. */
+	public static int iconBodyHeight(Image icon, IconStyle style) {
+		int bh = icon.height + 4;
+		return style == IconStyle.BADGE ? Math.max(Math.max(icon.width + 4, 12), bh) : bh;
+	}
+
+	/** An image from ARGB pixels, row by row. */
+	public static Image fromArgb(int width, int height, int[] argb) {
+		Image image = new Image(width, height);
+		for (int i = 0; i < argb.length; i++) {
+			image.r[i] = (argb[i] >> 16) & 0xFF;
+			image.g[i] = (argb[i] >> 8) & 0xFF;
+			image.b[i] = argb[i] & 0xFF;
+			image.a[i] = argb[i] >>> 24;
+		}
+		return image;
+	}
+
 	/** The designed standing pin nearest a head size: 15 or 13. */
 	public static int standingHead(int head) {
 		return head >= 14 ? 15 : 13;
@@ -365,6 +478,17 @@ public final class PinArt {
 					boolean edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
 					out[i] = edge || !m[i - 1] || !m[i + 1] || !m[i - w] || !m[i + w];
 				}
+			}
+		}
+		return out;
+	}
+
+	/** The shape grown by a pixel up, down, left and right, so its corners come out cut. */
+	private static boolean[] grow4(boolean[] m, int w, int h) {
+		boolean[] out = new boolean[m.length];
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				out[y * w + x] = at(m, w, h, x, y) || at(m, w, h, x - 1, y) || at(m, w, h, x + 1, y) || at(m, w, h, x, y - 1) || at(m, w, h, x, y + 1);
 			}
 		}
 		return out;

@@ -108,6 +108,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("showcase")) {
 				showcase(context, world);
 			}
+			if (tests.contains("icon-waypoints")) {
+				IconWaypointsTest.run(context, world);
+			}
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
 			}

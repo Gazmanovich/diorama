@@ -82,6 +82,43 @@ public final class Waypoints {
 		}
 	}
 
+	private static boolean wasSleeping;
+
+	/**
+	 * Keeps a bed waypoint where the player last lay down to sleep, one per dimension, moved when
+	 * they sleep somewhere else. Lying down is what the client sees of the server setting their
+	 * respawn point. Called every tick.
+	 */
+	public static void watchSleep(Minecraft mc) {
+		LocalPlayer player = mc.player;
+		boolean sleeping = player != null && player.isSleeping();
+		if (sleeping && !wasSleeping) {
+			player.getSleepingPos().ifPresent(Waypoints::slept);
+		}
+		wasSleeping = sleeping;
+	}
+
+	private static void slept(BlockPos pos) {
+		WaypointStore store = WaypointStore.get();
+		String dimension = dimension();
+		if (store == null || dimension == null) {
+			return;
+		}
+		for (Waypoint waypoint : store.in(dimension)) {
+			if (waypoint.kind == Waypoint.Kind.BED) {
+				waypoint.x = pos.getX();
+				waypoint.y = pos.getY();
+				waypoint.z = pos.getZ();
+				store.changed();
+				return;
+			}
+		}
+		Waypoint bed = new Waypoint("Bed", pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFE5484D);
+		bed.kind = Waypoint.Kind.BED;
+		bed.icon = "diorama:bed";
+		store.add(bed);
+	}
+
 	/** Adds a death marker where the player stands. Called when the server reports their death. */
 	public static void died(LocalPlayer player) {
 		if (!Settings.get().deathMarkers) {

@@ -356,6 +356,9 @@ public final class WaypointStore {
 		if (waypoint.initials == null) {
 			waypoint.initials = "";
 		}
+		if (waypoint.icon == null) {
+			waypoint.icon = "";
+		}
 		if (waypoint.kind == null) {
 			waypoint.kind = Waypoint.Kind.MANUAL;
 		}

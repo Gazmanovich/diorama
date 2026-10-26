@@ -26,7 +26,7 @@ public final class WaypointOverlay {
 	public record Pin(Waypoint waypoint, float x, float y, float size, boolean clamped) {
 		/** Where the head is centred: above the spot for a standing pin. */
 		public float headY() {
-			return this.clamped ? this.y : this.y - Pins.headAbove((int) this.size);
+			return this.clamped ? this.y : this.y - Pins.headAbove(this.waypoint, (int) this.size);
 		}
 	}
 
@@ -53,14 +53,14 @@ public final class WaypointOverlay {
 			float dx = x - cx;
 			float dy = y - cy;
 			if (circle != null) {
-				if (Pins.fitsStanding(size, x, y, circle)) {
+				if (Pins.fitsStanding(waypoint, size, x, y, circle)) {
 					pins.add(new Pin(waypoint, x, y, size, false));
 				} else {
 					// On a round view the badge goes round the rim.
 					float reach = Math.max(1, (float) Math.hypot(dx, dy) / radius);
 					pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
 				}
-			} else if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
+			} else if (Pins.fitsStanding(waypoint, size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
 			} else {
 				// Too near the edge for the whole pin to show: a badge pointing the way, pulled in to
@@ -86,7 +86,9 @@ public final class WaypointOverlay {
 			} else {
 				Pins.standing(graphics, waypoint, pin.x(), pin.y(), s);
 			}
-			if (fullscreen && !pin.clamped() && (pin == hovered || view.zoom() >= 2)) {
+			// Icons say what a place is, so their names wait for the cursor.
+			boolean named = pin == hovered || view.zoom() >= 2 && (waypoint.icon.isEmpty() || !Pins.showsIcon(waypoint));
+			if (fullscreen && !pin.clamped() && named) {
 				int w = font.width(waypoint.name);
 				int tx = Math.round(pin.x() - w / 2.0F);
 				int ty = Math.round(pin.y()) + 3;
@@ -106,7 +108,8 @@ public final class WaypointOverlay {
 			if (!pin.clamped()) {
 				d = Math.min(d, Math.hypot(pin.x() - mouseX, pin.y() - mouseY));
 			}
-			if (d <= pin.size() / 2 + 2 && d < bestDistance) {
+			float reach = pin.clamped() ? pin.size() / 2 + 2 : Pins.reach(pin.waypoint(), (int) pin.size());
+			if (d <= reach && d < bestDistance) {
 				best = pin;
 				bestDistance = d;
 			}
