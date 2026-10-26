@@ -211,9 +211,11 @@ public final class PinArt {
 	 * cut out like a sticker, a dark line and then a white edge round its own shape, over a white
 	 * pointer. {@code COLOUR_STICKER} is the same with the edge and pointer in the waypoint's colour.
 	 * {@code BADGE} puts the icon on a square in the waypoint's colour, bevelled like the round pins.
+	 * {@code COLOUR_POINTER} is the white sticker with only its pointer in the waypoint's colour.
 	 */
 	public enum IconStyle {
 		STICKER,
+		COLOUR_POINTER,
 		COLOUR_STICKER,
 		BADGE
 	}
@@ -226,7 +228,8 @@ public final class PinArt {
 	 * The icon keeps its own pixels, one texel per GUI pixel.
 	 */
 	public static Art iconPin(Image icon, IconStyle style, int colour) {
-		int edge = style == IconStyle.STICKER ? STICKER_WHITE : colour;
+		int edge = style == IconStyle.STICKER || style == IconStyle.COLOUR_POINTER ? STICKER_WHITE : colour;
+		int point = style == IconStyle.STICKER ? STICKER_WHITE : colour;
 		// The body: the icon with two pixels of room all round, a square for the badge.
 		int bw = icon.width + 4;
 		int bh = icon.height + 4;
@@ -297,7 +300,7 @@ public final class PinArt {
 			rim[i] &= !fill[i] && image.a[i] == 0;
 		}
 		image.put(rim, INK, 1);
-		image.put(fill, edge, 1);
+		image.put(fill, point, 1);
 		return new Art(image, w / 2.0F, h, 0, 0, 0, 0);
 	}
 
