@@ -3,7 +3,7 @@
 	"minVersion": "0.8",
 	"package": "dev.diorama.gameshim.mixin",
 	"plugin": "dev.diorama.gameshim.ShimMixinPlugin",
-	"compatibilityLevel": "JAVA_21",
+	"compatibilityLevel": "JAVA_17",
 	"client": [
 		"InputConstantsMixin",
 		"KeyboardHandlerAccessor",
