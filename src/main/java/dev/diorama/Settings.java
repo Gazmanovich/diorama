@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import net.minecraft.client.Minecraft;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Player settings, saved to {@code .minecraft/diorama/config.json}. Fields are public so Gson
@@ -37,6 +38,8 @@ public final class Settings {
 	public static final int MIN_SIZE = 64;
 	public static final int MAX_SIZE = 224;
 	public static final int SIZE_STEP = 8;
+
+	public static final String DEFAULT_TELEPORT_COMMAND = "tp @s {x} {y} {z}";
 
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static Settings current;
@@ -73,6 +76,11 @@ public final class Settings {
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
+	/**
+	 * The command sent to teleport, with {x}, {y} and {z} for the block. Servers that don't let
+	 * players use /tp often have their own teleport command.
+	 */
+	public String teleportCommand = DEFAULT_TELEPORT_COMMAND;
 
 	public boolean outlines = true;
 	public boolean roundedFog = true;
@@ -250,6 +258,7 @@ public final class Settings {
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
 		}
+		settings.teleportCommand = cleanCommand(settings.teleportCommand);
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
@@ -263,6 +272,18 @@ public final class Settings {
 		settings.radarRange = nearest;
 		settings.apply();
 		return settings;
+	}
+
+	/**
+	 * A typed teleport command without its slash, or the default for a blank one. Runs of spaces
+	 * become one, as chat does before sending a command: the server's parser wants just one.
+	 */
+	public static String cleanCommand(@Nullable String command) {
+		String trimmed = command == null ? "" : command.trim().replaceAll("\\s+", " ");
+		while (trimmed.startsWith("/")) {
+			trimmed = trimmed.substring(1).trim();
+		}
+		return trimmed.isEmpty() ? DEFAULT_TELEPORT_COMMAND : trimmed;
 	}
 
 	/** The nearest size the settings screen can show. */
