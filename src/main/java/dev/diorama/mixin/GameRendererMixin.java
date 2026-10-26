@@ -73,11 +73,13 @@ public abstract class GameRendererMixin {
 	*///?} else {
 	/*// 1.20.1 sets the camera up after the world's projection, so this waits for the level
 	// renderer's call: by then the camera has this frame's rotation, where the projection's call
-	// would still see the last frame's. The projection is the first Matrix4f local there too.
+	// would still see the last frame's. The projection is the first Matrix4f local there too. The
+	// view rotation is the pose stack renderLevel turned by the camera's pitch and yaw, as the
+	// level renderer gets it: 1.20.1's camera quaternion doesn't turn the same way as later ones'.
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;renderLevel(Lcom/mojang/blaze3d/vertex/PoseStack;FJZLnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/GameRenderer;Lnet/minecraft/client/renderer/LightTexture;Lorg/joml/Matrix4f;)V", ordinal = 0))
-	private void diorama$captureWorldProjection(CallbackInfo ci, @Local(ordinal = 0) Matrix4f projectionMatrix) {
+	private void diorama$captureWorldProjection(CallbackInfo ci, @Local(ordinal = 0) Matrix4f projectionMatrix, @Local(argsOnly = true) com.mojang.blaze3d.vertex.PoseStack view) {
 		Camera camera = ((GameRenderer) (Object) this).getMainCamera();
-		WorldProjection.capture(projectionMatrix, new Matrix4f().rotation(camera.rotation().conjugate(new Quaternionf())), camera.getPosition());
+		WorldProjection.capture(projectionMatrix, new Matrix4f(view.last().pose()), camera.getPosition());
 	}
 	*///?}
 }
