@@ -76,6 +76,11 @@ public final class Settings {
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
+	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
+	public boolean mapWaypointsButton = true;
+	public boolean mapSettingsButton = true;
+	/** Add waypoint and Add temporary waypoint in the map's right-click menu. */
+	public boolean mapAddWaypoints = true;
 	/**
 	 * The command sent to teleport, with {x}, {y} and {z} for the block. Servers that don't let
 	 * players use /tp often have their own teleport command.

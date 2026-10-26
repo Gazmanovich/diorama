@@ -136,10 +136,14 @@ public final class MapScreen extends Screen {
 		this.pressButton = -1;
 		this.pressOnMenu = false;
 		this.pressOnControl = false;
+		Settings settings = Settings.get();
+		// Either can be hidden; Waypoints takes the corner when Settings isn't there.
 		this.waypointsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.waypoints"), b ->
-			this.minecraft.gui.setScreen(new WaypointListScreen(this))).bounds(this.width - 130, 0, 64, BAR).build());
+			this.minecraft.gui.setScreen(new WaypointListScreen(this))).bounds(this.width - (settings.mapSettingsButton ? 130 : 64), 0, 64, BAR).build());
+		this.waypointsButton.visible = settings.mapWaypointsButton;
 		this.settingsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
 			this.minecraft.gui.setScreen(new SettingsScreen(this))).bounds(this.width - 64, 0, 64, BAR).build());
+		this.settingsButton.visible = settings.mapSettingsButton;
 		this.zoomIn = this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.zoomButton(ZOOM_BUTTON_STEPS))
 			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.zoom_in")).build());
 		this.zoomOut = this.addRenderableWidget(Button.builder(Component.literal("-"), b -> this.zoomButton(-ZOOM_BUTTON_STEPS))
@@ -529,29 +533,31 @@ public final class MapScreen extends Screen {
 		int x = spot.getX();
 		int y = spot.getY();
 		int z = spot.getZ();
-		return List.of(
-			MapMenu.Item.info(this.where(x, y, z)),
-			MapMenu.Item.action(Component.translatable("diorama.menu.teleport_here"), Waypoints.canTeleport(), () -> {
-				Waypoints.teleport(x, y, z);
-				this.minecraft.gui.setScreen(null);
-			}),
-			MapMenu.Item.action(Component.translatable("diorama.menu.add_waypoint"), true, () -> {
+		List<MapMenu.Item> items = new ArrayList<>();
+		items.add(MapMenu.Item.info(this.where(x, y, z)));
+		items.add(MapMenu.Item.action(Component.translatable("diorama.menu.teleport_here"), Waypoints.canTeleport(), () -> {
+			Waypoints.teleport(x, y, z);
+			this.minecraft.gui.setScreen(null);
+		}));
+		if (Settings.get().mapAddWaypoints) {
+			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.add_waypoint"), true, () -> {
 				Waypoint waypoint = Waypoints.at(spot);
 				if (waypoint != null) {
 					this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, true));
 				}
-			}),
-			MapMenu.Item.action(Component.translatable("diorama.menu.add_temporary"), true, () -> Waypoints.addTemporary(spot)),
-			// Chat can't take it back, so sharing asks twice.
-			MapMenu.Item.confirmed(Component.translatable("diorama.menu.share_location"), Component.translatable("diorama.menu.share_confirm"), () -> {
-				String dimension = Waypoints.dimension();
-				Waypoint location = new Waypoint(Component.translatable("diorama.menu.shared_location").getString(), x, y, z,
-					dimension != null ? dimension : "minecraft:overworld", Waypoint.PALETTE[0]);
-				if (WaypointShare.send(location)) {
-					this.minecraft.gui.setScreen(null);
-				}
-			})
-		);
+			}));
+			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.add_temporary"), true, () -> Waypoints.addTemporary(spot)));
+		}
+		// Chat can't take it back, so sharing asks twice.
+		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.menu.share_location"), Component.translatable("diorama.menu.share_confirm"), () -> {
+			String dimension = Waypoints.dimension();
+			Waypoint location = new Waypoint(Component.translatable("diorama.menu.shared_location").getString(), x, y, z,
+				dimension != null ? dimension : "minecraft:overworld", Waypoint.PALETTE[0]);
+			if (WaypointShare.send(location)) {
+				this.minecraft.gui.setScreen(null);
+			}
+		}));
+		return items;
 	}
 
 	private List<MapMenu.Item> waypointItems(Waypoint waypoint) {
