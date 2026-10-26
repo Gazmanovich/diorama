@@ -38,7 +38,8 @@ public final class TeleportCommandScreen extends Screen {
 		int top = this.top();
 		String typed = this.command != null ? this.command.getValue() : "/" + Settings.get().teleportCommand;
 		EditBox box = new EditBox(this.font, left, top + 16, WIDTH, 20, Component.translatable("diorama.settings.teleport_command"));
-		box.setMaxLength(256);
+		// A command can be 256 characters, and the box shows it with its slash.
+		box.setMaxLength(257);
 		box.setValue(typed);
 		box.setHint(Component.literal("/" + Settings.DEFAULT_TELEPORT_COMMAND));
 		this.command = this.addRenderableWidget(box);

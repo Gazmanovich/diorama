@@ -69,8 +69,8 @@ public final class Waypoints {
 	}
 
 	/**
-	 * The server only sends the commands a player may use, so the teleport command being there
-	 * means it's allowed.
+	 * The server only sends the commands a player may use, so teleporting is offered when it sent
+	 * the teleport command's first word.
 	 */
 	public static boolean canTeleport() {
 		var connection = Minecraft.getInstance().getConnection();
@@ -82,11 +82,13 @@ public final class Waypoints {
 	/** Sends the player's teleport command, {@code /tp} unless they changed it, to a block position. */
 	public static void teleport(int x, int y, int z) {
 		LocalPlayer player = Minecraft.getInstance().player;
-		if (player != null) {
-			player.connection.sendCommand(Settings.get().teleportCommand
-				.replace("{x}", Integer.toString(x))
-				.replace("{y}", Integer.toString(y))
-				.replace("{z}", Integer.toString(z)));
+		String command = Settings.get().teleportCommand
+			.replace("{x}", Integer.toString(x))
+			.replace("{y}", Integer.toString(y))
+			.replace("{z}", Integer.toString(z));
+		// The command packet holds 256 characters; a longer one throws instead of sending.
+		if (player != null && command.length() <= 256) {
+			player.connection.sendCommand(command);
 		}
 	}
 

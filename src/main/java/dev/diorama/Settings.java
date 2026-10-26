@@ -274,9 +274,12 @@ public final class Settings {
 		return settings;
 	}
 
-	/** A typed teleport command without its slash, or the default for a blank one. */
+	/**
+	 * A typed teleport command without its slash, or the default for a blank one. Runs of spaces
+	 * become one, as chat does before sending a command: the server's parser wants just one.
+	 */
 	public static String cleanCommand(@Nullable String command) {
-		String trimmed = command == null ? "" : command.trim();
+		String trimmed = command == null ? "" : command.trim().replaceAll("\\s+", " ");
 		while (trimmed.startsWith("/")) {
 			trimmed = trimmed.substring(1).trim();
 		}
