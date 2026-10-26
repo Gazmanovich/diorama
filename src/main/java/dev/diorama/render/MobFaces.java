@@ -270,66 +270,6 @@ public final class MobFaces {
 		return true;
 	}
 
-	/**
-	 * The face of a mob of this type as pixels, the one the radar draws for a freshly made one, for
-	 * a waypoint icon. Null if the type has none, or its texture can't be read.
-	 */
-	static PinArt.@Nullable Image faceImage(EntityType<?> type) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null) {
-			return null;
-		}
-		Entity entity;
-		try {
-			entity = type.create(mc.level, net.minecraft.world.entity.EntitySpawnReason.LOAD);
-		} catch (RuntimeException e) {
-			dev.diorama.Diorama.LOGGER.warn("Waypoint icon: can't make a {}", type, e);
-			return null;
-		}
-		if (entity == null) {
-			dev.diorama.Diorama.LOGGER.warn("Waypoint icon: made no {}", type);
-			return null;
-		}
-		// Renderers read the id; a negative one is never a real entity's.
-		entity.setId(-1000 - type.hashCode() % 1000);
-		Face face = face(entity);
-		Identifier texture = face == null ? null : looked(entity).texture();
-		if (texture == null) {
-			dev.diorama.Diorama.LOGGER.warn("Waypoint icon: no face or texture for {} (face {})", type, face != null);
-			return null;
-		}
-		var resource = mc.getResourceManager().getResource(texture);
-		if (resource.isEmpty()) {
-			dev.diorama.Diorama.LOGGER.warn("Waypoint icon: no texture file {}", texture);
-			return null;
-		}
-		try (java.io.InputStream in = resource.get().open(); com.mojang.blaze3d.platform.NativeImage image = com.mojang.blaze3d.platform.NativeImage.read(in)) {
-			// A resource pack's texture can be bigger than the model's layout: read every nth pixel.
-			int scale = Math.max(1, image.getWidth() / face.texW());
-			int[] argb = new int[face.w() * face.h()];
-			for (Piece p : face.pieces()) {
-				for (int y = 0; y < p.h(); y++) {
-					for (int x = 0; x < p.w(); x++) {
-						int fx = p.dx() + x;
-						int fy = p.dy() + y;
-						if (fx < 0 || fy < 0 || fx >= face.w() || fy >= face.h()) {
-							continue;
-						}
-						int pixel = image.getPixel((p.u() + x) * scale, (p.v() + y) * scale);
-						// Layers draw over what's under them where they aren't see-through.
-						if (pixel >>> 24 >= 128) {
-							argb[fy * face.w() + fx] = pixel | 0xFF000000;
-						}
-					}
-				}
-			}
-			return PinArt.fromArgb(face.w(), face.h(), argb);
-		} catch (java.io.IOException | RuntimeException e) {
-			dev.diorama.Diorama.LOGGER.warn("Waypoint icon: can't read {}", texture, e);
-			return null;
-		}
-	}
-
 	private static void blitFace(IconBatch icons, Identifier texture, Face face, int color) {
 		for (Piece p : face.pieces()) {
 			icons.blit(texture, p.dx(), p.dy(), p.u(), p.v(), p.w(), p.h(), face.texW(), face.texH(), color);

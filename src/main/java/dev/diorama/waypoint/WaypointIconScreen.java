@@ -12,8 +12,9 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
 /**
- * Picks the icon a waypoint's pin shows: a grid of pins as the map draws them, the first one
- * showing initials (no icon), then every icon on offer. Picking one goes back to the editor.
+ * Picks the icon a waypoint's pin shows: a grid of badges as the waypoint list draws them, the
+ * first one showing initials (no icon), then Diorama's icons and any a resource pack adds. Picking one goes
+ * back to the editor.
  */
 public final class WaypointIconScreen extends Screen {
 	private static final int CELL = 30;
@@ -35,12 +36,7 @@ public final class WaypointIconScreen extends Screen {
 		this.sample.initials = shown.initials;
 		this.sample.color = shown.color;
 		this.icons.add("");
-		this.icons.addAll(WaypointIcons.OFFERED);
-		for (String id : WaypointIcons.shipped()) {
-			if (!this.icons.contains(id)) {
-				this.icons.add(id);
-			}
-		}
+		this.icons.addAll(WaypointIcons.all());
 	}
 
 	private int rows() {
@@ -68,6 +64,12 @@ public final class WaypointIconScreen extends Screen {
 		return col < 0 || col >= COLUMNS || row < 0 || i >= this.icons.size() ? -1 : i;
 	}
 
+	/** The centre of an icon's cell, in GUI pixels. For tests. */
+	public float[] cellCentre(String id) {
+		int i = this.icons.indexOf(id);
+		return new float[] {this.left() + (i % COLUMNS) * CELL + CELL / 2.0F, this.top() + (i / COLUMNS) * CELL + CELL / 2.0F};
+	}
+
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		super.extractRenderState(graphics, mouseX, mouseY, a);
@@ -86,31 +88,26 @@ public final class WaypointIconScreen extends Screen {
 				graphics.fill(x, y, x + CELL, y + CELL, 0x30FFFFFF);
 			}
 			this.sample.icon = id;
-			// Centred on the pin's head or icon, its pointer below.
-			float cy = y + CELL / 2.0F - 3;
-			Pins.standing(graphics, this.sample, x + CELL / 2.0F, cy + Pins.headAbove(this.sample, Pins.LARGE), Pins.LARGE);
+			Pins.badge(graphics, this.sample, x + CELL / 2.0F, y + CELL / 2.0F, Pins.LARGE);
 		}
 		if (hovered >= 0) {
 			graphics.setTooltipForNextFrame(this.font, name(this.icons.get(hovered)), mouseX, mouseY);
 		}
 	}
 
-	/** What an icon is called: "Initials" for none, the mob's name for a face, else the file's name. */
+	/**
+	 * What an icon is called: "Initials" for none, Diorama's own by translation, and one a resource
+	 * pack adds by its file's name, or by {@code diorama.waypoint.icon.<namespace>.<name>} if the pack
+	 * translates it.
+	 */
 	public static Component name(String id) {
 		if (id.isEmpty()) {
 			return Component.translatable("diorama.waypoint.icon_none");
 		}
-		if (id.startsWith(WaypointIcons.MOB)) {
-			net.minecraft.resources.Identifier type = net.minecraft.resources.Identifier.tryParse(id.substring(WaypointIcons.MOB.length()));
-			if (type != null) {
-				var found = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getOptional(type);
-				if (found.isPresent()) {
-					return found.get().getDescription();
-				}
-			}
-		}
-		String path = id.substring(id.indexOf(':') + 1).replace('_', ' ');
-		return Component.literal(path.isEmpty() ? id : Character.toUpperCase(path.charAt(0)) + path.substring(1));
+		String path = id.substring(id.indexOf(':') + 1);
+		String fallback = path.replace('_', ' ');
+		fallback = fallback.isEmpty() ? id : Character.toUpperCase(fallback.charAt(0)) + fallback.substring(1);
+		return Component.translatableWithFallback("diorama.waypoint.icon." + id.replace(':', '.'), fallback);
 	}
 
 	private boolean clicked(double mouseX, double mouseY) {

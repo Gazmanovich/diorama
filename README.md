@@ -15,7 +15,7 @@ A minimap and world map for Minecraft that draws your world at an angle, like a 
 - **A map that remembers.** Everywhere you've been is saved, per world and dimension, so it's still there next time. Places you haven't seen yet sit under drifting fog.
 - **Caves and the Nether.** Underground, the map shows the cave you're in. In the Nether it looks in under the bedrock roof.
 - **A radar** that shows players and mobs as their own faces, outlined red, yellow or green for hostile, neutral or passive.
-- **Waypoints** on the map and floating in the world, a marker where you died, folders to sort them, and an [Add] link when someone shares one in chat.
+- **Waypoints** on the map and floating in the world, with an icon or your initials on each pin, a marker where you died, a pin on the bed you last slept in, folders to sort them, and an [Add] link when someone shares one in chat.
 - **A right-click menu** on the map to add a waypoint, drop a temporary one, share the spot in chat, or teleport there if you're allowed to use `/tp`.
 
 | | |
@@ -67,6 +67,7 @@ Servers can limit Diorama with the same chat codes Xaero's Minimap uses. "Fair p
 
 - **Xaero's Minimap.** The waypoint list can import your Xaero waypoints, shared Xaero waypoints get an [Add] link, and on servers with Xaero's player tracking you can see far-away players on the map.
 - **Radar icon packs** made for Xaero's Minimap work in Diorama too. You can also make your own: see [Custom radar icons](docs/radar-icons.md).
+- **Resource packs** can redraw the waypoint icons or add new ones: an 11x11 picture in `assets/<namespace>/textures/waypoint_icons/`, with a dark outline, like the ones Diorama ships in `assets/diorama/textures/waypoint_icons/`.
 - **Waystones.** Waystones you've found show on the map in a folder of their own.
 - **Create copycats** (and Copycats+) show on the map as the block they copy.
 

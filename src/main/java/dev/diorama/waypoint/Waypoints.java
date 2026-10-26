@@ -92,7 +92,7 @@ public final class Waypoints {
 	public static void watchSleep(Minecraft mc) {
 		LocalPlayer player = mc.player;
 		boolean sleeping = player != null && player.isSleeping();
-		if (sleeping && !wasSleeping) {
+		if (sleeping && !wasSleeping && Settings.get().bedMarkers) {
 			player.getSleepingPos().ifPresent(Waypoints::slept);
 		}
 		wasSleeping = sleeping;
@@ -115,7 +115,7 @@ public final class Waypoints {
 		}
 		Waypoint bed = new Waypoint("Bed", pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFE5484D);
 		bed.kind = Waypoint.Kind.BED;
-		bed.icon = "diorama:bed";
+		bed.icon = dev.diorama.render.WaypointIcons.BED;
 		store.add(bed);
 	}
 

@@ -9,10 +9,12 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Draws waypoint pins from {@link PinArt}: the pin's body is a small texture on the GUI pixel grid,
- * its initials are the game's own text drawn on top. Bodies are made once per shape and colour.
+ * its initials are the game's own text drawn on top. A waypoint with an icon ({@link WaypointIcons})
+ * shows the icon instead. Bodies are made once per shape, colour and icon.
  */
 public final class Pins {
 	/** Head sizes: the map and the world use the large pin, the minimap the small one. */
@@ -21,8 +23,8 @@ public final class Pins {
 	/** Directions a caret at the edge of a view can point, around the full turn. */
 	private static final int CARET_STEPS = 32;
 	private static final Map<String, Sprite> SPRITES = new HashMap<>();
-	/** How waypoints with an icon stand. A prototype's switch, set by the game test to compare looks. */
-	public static PinArt.IconStyle iconStyle = PinArt.IconStyle.ROUND;
+	/** Sprites showing an icon start with this, so a resource reload can drop them. */
+	private static final String ICON = "icon ";
 
 	private record Sprite(MapTexture texture, int edge, PinArt.Art art) {
 	}
@@ -32,22 +34,27 @@ public final class Pins {
 
 	/** A pin standing with its point on (x, y), the spot it marks. */
 	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int size) {
-		Sprite icon = iconSprite(waypoint);
+		PinArt.Image icon = icon(waypoint);
 		if (icon != null) {
-			draw(graphics, icon, waypoint, x, y, 0);
+			// Icon pins are one size everywhere: an icon can't shrink and stay pixel art.
+			Sprite sprite = sprite(ICON + "pin " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.iconPin(icon, rgb(waypoint)));
+			draw(graphics, sprite, waypoint, x, y);
 			return;
 		}
 		int head = PinArt.standingHead(size);
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
 		Sprite sprite = sprite("pin " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head));
-		draw(graphics, sprite, waypoint, x, y, head);
+		draw(graphics, sprite, waypoint, x, y);
 	}
 
 	/** A round badge centred on (x, y): the waypoint list's rows. */
 	public static void badge(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int head) {
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
-		Sprite sprite = sprite("badge " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.badge(rgb(waypoint), death, head, Double.NaN, 0));
-		draw(graphics, sprite, waypoint, x, y, head);
+		PinArt.Image icon = icon(waypoint);
+		Sprite sprite = icon != null
+			? sprite(ICON + "badge " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), Double.NaN, 0, icon))
+			: sprite("badge " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.badge(rgb(waypoint), death, head, Double.NaN, 0, null));
+		draw(graphics, sprite, waypoint, x, y);
 	}
 
 	/**
@@ -59,25 +66,23 @@ public final class Pins {
 		int step = Math.floorMod(Math.round((float) (angle / (Math.PI * 2) * CARET_STEPS)), CARET_STEPS);
 		double snapped = step * Math.PI * 2 / CARET_STEPS;
 		int caret = head >= LARGE ? 6 : 5;
-		Sprite sprite = sprite("edge " + head + " " + rgb(waypoint) + " " + death + " " + step,
-			() -> PinArt.badge(rgb(waypoint), death, head, snapped, caret));
-		draw(graphics, sprite, waypoint, x, y, head);
+		PinArt.Image icon = icon(waypoint);
+		Sprite sprite = icon != null
+			? sprite(ICON + "edge " + waypoint.icon + " " + rgb(waypoint) + " " + step, () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), snapped, 6, icon))
+			: sprite("edge " + head + " " + rgb(waypoint) + " " + death + " " + step, () -> PinArt.badge(rgb(waypoint), death, head, snapped, caret, null));
+		draw(graphics, sprite, waypoint, x, y);
 	}
 
-	/** How far above the marked spot this waypoint's standing pin is centred: its head, or its icon. */
+	/** How far above the marked spot this waypoint's standing pin has its head centred. */
 	public static float headAbove(Waypoint waypoint, int size) {
-		Sprite icon = iconSprite(waypoint);
-		if (icon == null) {
-			return headAbove(size);
-		}
-		PinArt.Image image = WaypointIcons.image(waypoint.icon);
-		return icon.art().anchorY() - PinArt.iconBodyHeight(image, iconStyle) / 2.0F;
+		PinArt.Image icon = icon(waypoint);
+		return icon != null ? PinArt.iconHeadAbove(icon) : headAbove(size);
 	}
 
-	/** How near the centre of this waypoint's pin the cursor has to be to point at it. */
+	/** How near the centre of this waypoint's head, or badge, the cursor has to be to point at it. */
 	public static float reach(Waypoint waypoint, int size) {
-		Sprite icon = iconSprite(waypoint);
-		return icon == null ? size / 2.0F + 2 : icon.art().image().width / 2.0F + 1;
+		PinArt.Image icon = icon(waypoint);
+		return (icon != null ? PinArt.iconHead(icon) : size) / 2.0F + 2;
 	}
 
 	/** How far above the marked spot a standing pin's head is centred, in GUI pixels. */
@@ -86,13 +91,13 @@ public final class Pins {
 		return (head == SMALL ? 5 : 6) + head / 2.0F;
 	}
 
-	/** Whether a standing pin marking (x, y) shows whole inside the box x0..x1, y0..y1: its head above, its shadow below. */
+	/** Whether this waypoint's standing pin marking (x, y) shows whole inside the box x0..x1, y0..y1: its head above, its shadow below. */
 	public static boolean fitsStanding(Waypoint waypoint, int size, float x, float y, float x0, float y0, float x1, float y1) {
 		float[] box = standingBox(waypoint, size, x, y);
 		return box[0] >= x0 && box[2] <= x1 && box[1] >= y0 && box[3] <= y1;
 	}
 
-	/** Whether a standing pin with its point at (x, y) is wholly inside a circle. */
+	/** Whether this waypoint's standing pin with its point at (x, y) is wholly inside a circle. */
 	public static boolean fitsStanding(Waypoint waypoint, int size, float x, float y, Circle circle) {
 		float[] box = standingBox(waypoint, size, x, y);
 		return circle.contains(box[0], box[1]) && circle.contains(box[2], box[1]) && circle.contains(box[0], box[3]) && circle.contains(box[2], box[3]);
@@ -100,40 +105,41 @@ public final class Pins {
 
 	/** What a standing pin with its point at (x, y) covers: x0, y0, x1, y1. */
 	private static float[] standingBox(Waypoint waypoint, int size, float x, float y) {
-		Sprite icon = iconSprite(waypoint);
-		if (icon != null) {
-			PinArt.Art art = icon.art();
-			float left = x - art.anchorX();
-			float top = y - art.anchorY();
-			return new float[] {left, top, left + art.image().width, top + art.image().height};
-		}
-		int head = PinArt.standingHead(size);
+		PinArt.Image icon = icon(waypoint);
+		int head = icon != null ? PinArt.iconHead(icon) : PinArt.standingHead(size);
 		float above = head + (head == SMALL ? 5 : 6);
 		float side = (head + 4) / 2.0F;
 		return new float[] {x - side, y - above, x + side, y + 3};
 	}
 
-	/** How far a badge with a caret reaches from its centre, so a view can keep it inside. */
-	public static float edgeReach(int head) {
-		return head / 2.0F + 6;
+	/** How far this waypoint's badge with a caret reaches from its centre, so a view can keep it inside. */
+	public static float edgeReach(Waypoint waypoint, int head) {
+		PinArt.Image icon = icon(waypoint);
+		return (icon != null ? PinArt.iconHead(icon) : head) / 2.0F + 6;
 	}
 
 	/** Whether this waypoint's pin shows an icon rather than initials. */
 	public static boolean showsIcon(Waypoint waypoint) {
-		return iconSprite(waypoint) != null;
+		return icon(waypoint) != null;
 	}
 
-	/** The pin for a waypoint that shows an icon, or null if it shows initials. */
-	private static @org.jspecify.annotations.Nullable Sprite iconSprite(Waypoint waypoint) {
+	/** The icon a waypoint's pin shows, or null for initials (and for deaths, which show a headstone). */
+	private static PinArt.@Nullable Image icon(Waypoint waypoint) {
 		if (waypoint.icon == null || waypoint.icon.isEmpty() || waypoint.kind == Waypoint.Kind.DEATH) {
 			return null;
 		}
-		PinArt.Image image = WaypointIcons.image(waypoint.icon);
-		if (image == null) {
-			return null;
-		}
-		PinArt.IconStyle style = iconStyle;
-		return sprite("icon " + waypoint.icon + " " + style + " " + rgb(waypoint), () -> PinArt.iconPin(image, style, rgb(waypoint)));
+		return WaypointIcons.image(waypoint.icon);
+	}
+
+	/** Drops the pins drawn with icons, for a resource reload that may have changed them. Render thread. */
+	static void forgetIcons() {
+		SPRITES.entrySet().removeIf(entry -> {
+			if (!entry.getKey().startsWith(ICON)) {
+				return false;
+			}
+			entry.getValue().texture().close();
+			return true;
+		});
 	}
 
 	private static int rgb(Waypoint waypoint) {
@@ -153,7 +159,7 @@ public final class Pins {
 		return sprite;
 	}
 
-	private static void draw(GuiGraphicsExtractor graphics, Sprite sprite, Waypoint waypoint, float x, float y, int head) {
+	private static void draw(GuiGraphicsExtractor graphics, Sprite sprite, Waypoint waypoint, float x, float y) {
 		PinArt.Art art = sprite.art();
 		// Pixel art sits on the GUI grid.
 		int left = Math.round(x - art.anchorX());

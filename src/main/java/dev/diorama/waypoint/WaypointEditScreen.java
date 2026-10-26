@@ -437,7 +437,8 @@ public final class WaypointEditScreen extends Screen {
 		this.preview.kind = this.waypoint.kind;
 		this.preview.icon = this.icon;
 		// At twice its size, the pin reaches this far above its tip: its head, its rim and its point.
-		float radius = Pins.showsIcon(this.preview) ? Pins.reach(this.preview, Pins.LARGE) : Pins.LARGE / 2.0F + 1;
+		// An icon's pin is bigger.
+		float radius = Pins.reach(this.preview, Pins.LARGE) - 1;
 		int rise = Math.round(2 * (Pins.headAbove(this.preview, Pins.LARGE) + radius)) - this.piece.tipY();
 		int total = rise + this.piece.outerHeight();
 		int pieceX = (x0 + x1) / 2 - this.piece.outerWidth() / 2;
