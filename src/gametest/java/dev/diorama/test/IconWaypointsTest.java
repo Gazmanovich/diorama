@@ -108,12 +108,15 @@ final class IconWaypointsTest {
 	private static void sleep(ClientGameTestContext context, TestSingleplayerContext world, BlockPos head) {
 		world.getServer().runCommand("setblock " + head.getX() + " " + head.getY() + " " + (head.getZ() + 1) + " red_bed[facing=north,part=foot]");
 		world.getServer().runCommand("setblock " + head.getX() + " " + head.getY() + " " + head.getZ() + " red_bed[facing=north,part=head]");
+		// The game wakes anyone asleep in daylight.
+		world.getServer().runCommand("time set midnight");
 		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).startSleeping(head));
 		context.waitFor(mc -> mc.player != null && mc.player.isSleeping(), 200);
 		context.waitTicks(5);
 		// As the game wakes a player, telling their client too.
 		world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().get(0).stopSleepInBed(false, true));
 		context.waitFor(mc -> mc.player != null && !mc.player.isSleeping(), 200);
+		world.getServer().runCommand("time set noon");
 	}
 
 	private static void expectBed(ClientGameTestContext context, BlockPos head, String when) {
