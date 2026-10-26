@@ -697,6 +697,16 @@ public final class WaypointListScreen extends Screen {
 		return true;
 	}
 
+	/**
+	 * The buttons the list itself clicks with. A click over a widget counts as the widget's whatever
+	 * the button, though widgets only act on the left one, so a middle or side button bound to add a
+	 * waypoint is checked before them, as a key is. A binding on these two waits until nothing else
+	 * takes the click.
+	 */
+	private static boolean usedByList(int button) {
+		return button == InputConstants.MOUSE_BUTTON_LEFT || button == InputConstants.MOUSE_BUTTON_RIGHT;
+	}
+
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
 	// method below that both versions share.
 	//? if >=1.21.9 {
@@ -712,6 +722,10 @@ public final class WaypointListScreen extends Screen {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		this.disarmUnless(event.x(), event.y());
+		if (!usedByList(event.button()) && DioramaClient.NEW_WAYPOINT.matchesMouse(event)) {
+			this.newWaypointPressed = true;
+			return true;
+		}
 		if (super.mouseClicked(event, doubleClick)) {
 			return true;
 		}
@@ -745,6 +759,10 @@ public final class WaypointListScreen extends Screen {
 	@Override
 	public boolean mouseClicked(double x, double y, int button) {
 		this.disarmUnless(x, y);
+		if (!usedByList(button) && DioramaClient.NEW_WAYPOINT.matchesMouse(button)) {
+			this.newWaypointPressed = true;
+			return true;
+		}
 		if (super.mouseClicked(x, y, button)) {
 			return true;
 		}

@@ -2427,6 +2427,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(3);
+		// Over a button, as a player's cursor may well be: the click still adds a waypoint.
+		double[] overButton = context.computeOnClient(mc -> {
+			net.minecraft.client.gui.components.Button button = mc.gui.screen().children().stream()
+				.filter(child -> child instanceof net.minecraft.client.gui.components.Button)
+				.map(child -> (net.minecraft.client.gui.components.Button) child).findFirst().orElseThrow();
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(button.getX() + button.getWidth() / 2.0) * scale, (button.getY() + button.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(overButton[0], overButton[1]);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT + 3);
 		context.waitTicks(3);
 		boolean mouseOpenedEditor = context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointEditScreen);
