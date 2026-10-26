@@ -764,8 +764,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static void spawnProbesBeforeLeaving(ClientGameTestContext context, TestSingleplayerContext world, int[] cell) {
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + spawnPosition[0] + " " + spawnPosition[1] + " " + spawnPosition[2]);
 		int chunkX = (int) Math.floor(spawnPosition[0]) >> 4, chunkZ = (int) Math.floor(spawnPosition[2]) >> 4;
-		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD
-			&& MapSession.get().map().chunk(chunkX, chunkZ) != null, 2400);
+		// The player there, not just the chunk: the map may still hold spawn's chunk from earlier. Not
+		// the height, as the ground they land on may have changed.
+		context.waitFor(mc -> mc.player != null && mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD
+			&& Math.abs(mc.player.getX() - spawnPosition[0]) < 0.5 && Math.abs(mc.player.getZ() - spawnPosition[2]) < 0.5
+			&& MapSession.get() != null && MapSession.get().map().chunk(chunkX, chunkZ) != null, 2400);
 		settle(context, 100);
 		spawnProbes = spawnProbes(context, cell);
 	}
