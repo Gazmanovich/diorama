@@ -118,6 +118,7 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
+		waypoints.open("teleport_command", Component.literal("/" + s.teleportCommand), () -> this.minecraft.gui.setScreen(new TeleportCommandScreen(this)));
 
 		SettingsTab look = new SettingsTab("diorama.settings.look");
 		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
@@ -238,6 +239,12 @@ public final class SettingsScreen extends Screen {
 		<E extends Enum<E>> Button choice(String key, E[] values, java.util.function.Supplier<E> get, Consumer<E> set) {
 			return this.cycle(key, () -> get.get().ordinal(), values.length, i -> set.accept(values[i]),
 				i -> Component.translatable("diorama.settings." + key + "." + values[i].name().toLowerCase(Locale.ROOT)));
+		}
+
+		/** A button showing the setting's value that opens a screen to change it. */
+		void open(String key, Component value, Runnable press) {
+			Component label = Component.translatable("diorama.settings." + key);
+			this.wide.add(Button.builder(label(label, value), b -> press.run()).size(CONTENT, 20).tooltip(tooltip(key)).build());
 		}
 
 		void slider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {
