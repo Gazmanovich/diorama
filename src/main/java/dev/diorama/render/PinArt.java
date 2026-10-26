@@ -212,10 +212,13 @@ public final class PinArt {
 	 * pointer. {@code COLOUR_STICKER} is the same with the edge and pointer in the waypoint's colour.
 	 * {@code BADGE} puts the icon on a square in the waypoint's colour, bevelled like the round pins.
 	 * {@code COLOUR_POINTER} is the white sticker with only its pointer in the waypoint's colour.
+	 * {@code ROUND} is today's round pin in the waypoint's colour with the icon where the initials go,
+	 * the head grown to fit it.
 	 */
 	public enum IconStyle {
 		STICKER,
 		COLOUR_POINTER,
+		ROUND,
 		COLOUR_STICKER,
 		BADGE
 	}
@@ -228,6 +231,9 @@ public final class PinArt {
 	 * The icon keeps its own pixels, one texel per GUI pixel.
 	 */
 	public static Art iconPin(Image icon, IconStyle style, int colour) {
+		if (style == IconStyle.ROUND) {
+			return roundIconPin(icon, colour);
+		}
 		int edge = style == IconStyle.STICKER || style == IconStyle.COLOUR_POINTER ? STICKER_WHITE : colour;
 		int point = style == IconStyle.STICKER ? STICKER_WHITE : colour;
 		// The body: the icon with two pixels of room all round, a square for the badge.
@@ -304,8 +310,65 @@ public final class PinArt {
 		return new Art(image, w / 2.0F, h, 0, 0, 0, 0);
 	}
 
+	/** The tip under a round icon pin's head, as long as the large pin's. */
+	private static final int ROUND_TIP = 6;
+
+	/** A round icon pin's head: odd, at least the large pin's 15, big enough that the icon's corners clear the rim. */
+	private static int roundHead(Image icon) {
+		// The icon and its outline, a pixel each side, inside the rim and bevel.
+		int d = (int) Math.ceil(Math.hypot(icon.width + 2, icon.height + 2)) + 2;
+		d = Math.max(15, d);
+		return d % 2 == 0 ? d + 1 : d;
+	}
+
+	/** Today's standing pin, its head grown to hold the icon, the icon outlined in the rim's dark so it shows on its own colour. */
+	private static Art roundIconPin(Image icon, int colour) {
+		int d = roundHead(icon);
+		int w = d + 4;
+		int h = d + ROUND_TIP + 3;
+		Image image = new Image(w, h);
+		float ax = 2 + d / 2.0F;
+		float ay = d + ROUND_TIP;
+		image.over(ellipse(w, h, ax, ay - 0.5F, d * 0.26F + 0.6F, 1.3F), 0x000000, 0.28F);
+		boolean[] mask = disc(w, h, ax, d / 2.0F, d / 2.0F);
+		boolean[] point = polygon(w, h, new float[] {ax - d * 0.32F, d * 0.75F, ax + d * 0.32F, d * 0.75F, ax, ay});
+		for (int i = 0; i < mask.length; i++) {
+			mask[i] |= point[i];
+		}
+		face(image, mask, w, h, colour);
+		int ix = Math.round(ax - icon.width / 2.0F);
+		int iy = Math.round(d / 2.0F - icon.height / 2.0F);
+		boolean[] shape = new boolean[w * h];
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				shape[(iy + y) * w + ix + x] = icon.a[y * icon.width + x] >= 128;
+			}
+		}
+		boolean[] line = grow4(shape, w, h);
+		for (int i = 0; i < line.length; i++) {
+			line[i] &= !shape[i];
+		}
+		image.put(line, INK, 0.85F);
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				int s = y * icon.width + x;
+				if (icon.a[s] >= 128) {
+					int t = (iy + y) * w + ix + x;
+					image.r[t] = icon.r[s];
+					image.g[t] = icon.g[s];
+					image.b[t] = icon.b[s];
+					image.a[t] = 255;
+				}
+			}
+		}
+		return new Art(image, ax, ay, 0, 0, 0, 0);
+	}
+
 	/** Height of an icon pin's body, above its pointer, for centring things on it. */
 	public static int iconBodyHeight(Image icon, IconStyle style) {
+		if (style == IconStyle.ROUND) {
+			return roundHead(icon) + 2 * ROUND_TIP;
+		}
 		int bh = icon.height + 4;
 		return style == IconStyle.BADGE ? Math.max(Math.max(icon.width + 4, 12), bh) : bh;
 	}
