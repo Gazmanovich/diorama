@@ -84,6 +84,10 @@ public final class WorldKey {
 	 * each connection, on a thread of its own.
 	 */
 	private static final Map<ServerData, Long> REALMS = Collections.synchronizedMap(new WeakHashMap<>());
+	//? if <1.21 {
+	/*// Server entries had no kind in 1.20.1, so the realm entries are noted here (see isRealm).
+	private static final java.util.Set<ServerData> REALM_ENTRIES = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+	*///?}
 
 	private WorldKey() {
 	}
@@ -122,7 +126,7 @@ public final class WorldKey {
 		Integer id = naming.named;
 		// A server list entry can be edited in place, so its address and kind are checked too. A
 		// level's seed never changes, and the ID its folder is named by is fixed once handed out.
-		boolean realm = data.isRealm();
+		boolean realm = isRealm(data);
 		Last seen = last;
 		if (seen != null && seen.matches(data, level, data.ip, realm, id)) {
 			return seen.key;
@@ -252,7 +256,7 @@ public final class WorldKey {
 		if (realm != null) {
 			return key("realm", Long.toString(realm));
 		}
-		return key(data.isRealm() ? "realms" : "server", data.ip);
+		return key(isRealm(data) ? "realms" : "server", data.ip);
 	}
 
 	/**
@@ -324,6 +328,19 @@ public final class WorldKey {
 	/** Realms made this server entry to connect to the realm with this ID. */
 	public static void realmEntry(ServerData data, long id) {
 		REALMS.put(data, id);
+		//? if <1.21 {
+		/*REALM_ENTRIES.add(data);
+		*///?}
+	}
+
+	/** Whether the server entry is for a realm rather than a server the player added or found on LAN. */
+	public static boolean isRealm(ServerData data) {
+		//? if >=1.21 {
+		return data.isRealm();
+		//?} else {
+		/*// Realms made the entry (see realmEntry), and that is the only place realm entries come from.
+		return REALM_ENTRIES.contains(data);
+		*///?}
 	}
 
 	/** Left the server, or a network moved the player to another of its servers. */

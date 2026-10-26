@@ -16,6 +16,14 @@ final class ScreenArt {
 	static final Identifier TEXT_FIELD_FOCUSED = Identifier.withDefaultNamespace("widget/text_field_highlighted");
 	static final Identifier SCROLLER = Identifier.withDefaultNamespace("widget/scroller");
 	static final Identifier SCROLLER_BACKGROUND = Identifier.withDefaultNamespace("widget/scroller_background");
+	//? if <1.21 {
+	/*private static final Identifier SOCIAL_INTERACTIONS = Identifier.withDefaultNamespace("textures/gui/social_interactions.png");
+	// The colours of 1.21's in-world list textures: the panel's shade, and the two rows of a
+	// separator, the dark one against the panel.
+	private static final int LIST_SHADE = 0x70000000;
+	private static final int SEPARATOR_DARK = 0xBF000000;
+	private static final int SEPARATOR_LIGHT = 0x33FFFFFF;
+	*///?}
 	/** Vanilla's scrollbar width and shortest handle. */
 	static final int SCROLLBAR_WIDTH = 6;
 	static final int SCROLLER_MIN = 32;
@@ -29,10 +37,30 @@ final class ScreenArt {
 		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, width, height);
 		//?} else if >=1.21.2 {
 		/*graphics.blitSprite(net.minecraft.client.renderer.RenderType::guiTextured, sprite, x, y, width, height);
-		*///?} else {
+		*///?} else if >=1.21 {
 		/*com.mojang.blaze3d.systems.RenderSystem.enableBlend();
 		graphics.blitSprite(sprite, x, y, width, height);
 		com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+		*///?} else {
+		/*// 1.20.1 has no GUI sprites: each is drawn the way 1.20.1 draws its widget. The search icon is
+		// the same picture, in the social interactions screen's texture.
+		if (sprite.equals(SEARCH)) {
+			com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+			graphics.blit(SOCIAL_INTERACTIONS, x, y, width, height, 243, 1, 12, 12, 256, 256);
+			com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+		} else if (sprite.equals(TEXT_FIELD) || sprite.equals(TEXT_FIELD_FOCUSED)) {
+			// EditBox's border: grey, or white with the focus, around black.
+			graphics.fill(x, y, x + width, y + height, sprite.equals(TEXT_FIELD_FOCUSED) ? 0xFFFFFFFF : 0xFFA0A0A0);
+			graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, 0xFF000000);
+		} else if (sprite.equals(SCROLLER)) {
+			// A list's scrollbar handle: light grey with a darker edge on the right and bottom.
+			graphics.fill(x, y, x + width, y + height, 0xFF808080);
+			graphics.fill(x, y, x + width - 1, y + height - 1, 0xFFC0C0C0);
+		} else if (sprite.equals(SCROLLER_BACKGROUND)) {
+			graphics.fill(x, y, x + width, y + height, 0xFF000000);
+		} else {
+			throw new IllegalArgumentException("No 1.20.1 drawing for sprite " + sprite);
+		}
 		*///?}
 	}
 
@@ -49,12 +77,19 @@ final class ScreenArt {
 		/*graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, LIST_BACKGROUND, x0, y0, x1, y1, w, h, 32, 32);
 		graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, Screen.INWORLD_HEADER_SEPARATOR, x0, y0 - 2, 0, 0, w, 2, 32, 2);
 		graphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, Screen.INWORLD_FOOTER_SEPARATOR, x0, y1, 0, 0, w, 2, 32, 2);
-		*///?} else {
+		*///?} else if >=1.21 {
 		/*com.mojang.blaze3d.systems.RenderSystem.enableBlend();
 		graphics.blit(LIST_BACKGROUND, x0, y0, x1, y1, w, h, 32, 32);
 		graphics.blit(Screen.INWORLD_HEADER_SEPARATOR, x0, y0 - 2, 0, 0, w, 2, 32, 2);
 		graphics.blit(Screen.INWORLD_FOOTER_SEPARATOR, x0, y1, 0, 0, w, 2, 32, 2);
 		com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+		*///?} else {
+		/*// 1.20.1 has none of these textures; each is a flat colour per row, so this fills those.
+		graphics.fill(x0, y0, x1, y1, LIST_SHADE);
+		graphics.fill(x0, y0 - 2, x1, y0 - 1, SEPARATOR_LIGHT);
+		graphics.fill(x0, y0 - 1, x1, y0, SEPARATOR_DARK);
+		graphics.fill(x0, y1, x1, y1 + 1, SEPARATOR_DARK);
+		graphics.fill(x0, y1 + 1, x1, y1 + 2, SEPARATOR_LIGHT);
 		*///?}
 	}
 

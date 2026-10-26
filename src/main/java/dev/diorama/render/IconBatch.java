@@ -201,7 +201,7 @@ public final class IconBatch {
 
 	/** Ends an icon: everything since the last call is one icon. */
 	public void endIcon() {
-		if (this.batched && this.quads > this.iconStarts.getLast()) {
+		if (this.batched && this.quads > this.iconStarts.get(this.iconStarts.size() - 1)) {
 			this.iconStarts.add(this.quads);
 		}
 		this.run = 0;

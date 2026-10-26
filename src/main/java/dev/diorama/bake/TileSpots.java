@@ -84,8 +84,9 @@ public final class TileSpots {
 		if (spots == null) {
 			return null;
 		}
-		int column = Math.clamp((long) Math.floor(u - key.minU()), 0, COLUMNS - 1);
-		int row = Math.clamp((long) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT), 0, ROWS - 1);
+		// Clamped as longs (Math.clamp is Java 21; the 1.20.1 jar is built for 17).
+		int column = (int) Math.max(0L, Math.min(COLUMNS - 1L, (long) Math.floor(u - key.minU())));
+		int row = (int) Math.max(0L, Math.min(ROWS - 1L, (long) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT)));
 		int value = spots[row * COLUMNS + column];
 		if ((value & ~0xFFFFFF) != SPOT) {
 			return null;

@@ -59,6 +59,10 @@ final class XaeroWorldScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		// A 1.20.1 screen draws its own background.
+		//? if <1.21 {
+		/*this.renderBackground(graphics);
+		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		graphics.centeredText(this.font, this.title, this.width / 2, 16, 0xFFFFFFFF);
 		graphics.centeredText(this.font, Component.translatable("diorama.xaero.pick_detail"), this.width / 2, 30, 0xFFA0A0A0);
@@ -88,8 +92,13 @@ final class XaeroWorldScreen extends Screen {
 		};
 	}
 
+	// The mouse wheel had only the one axis on 1.20.1.
 	@Override
+	//? if >=1.21 {
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+	//?} else {
+	/*public boolean mouseScrolled(double x, double y, double scrollY) {
+	*///?}
 		int next = Math.max(0, Math.min(this.scroll - (int) Math.signum(scrollY), this.worlds.size() - this.visibleRows));
 		if (next != this.scroll) {
 			this.scroll = next;

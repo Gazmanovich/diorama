@@ -368,7 +368,10 @@ public final class MapSession {
 			long key = entry.getKey();
 			int cx = (int) (key >> 32);
 			int cz = (int) key;
-			if (this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false) instanceof LevelChunk chunk) {
+			// Through Object: where getChunk already returns a LevelChunk, Java 17 (the 1.20.1 jar's)
+			// refuses an instanceof pattern that can't fail.
+			Object loaded = this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+			if (loaded instanceof LevelChunk chunk) {
 				boolean known = this.map.chunk(cx, cz) != null;
 				this.map.put(ChunkSnapshot.take(chunk, this.level), known ? p.box : null, playerChunkX, playerChunkZ);
 				budget--;

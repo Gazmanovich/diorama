@@ -116,11 +116,24 @@ public final class WaypointEditScreen extends Screen {
 		// Always a new colour, never close to the one shown.
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.random"), b -> this.pick(WaypointColours.random(this.color)))
 			.bounds(left + 98, top + 132, FORM - 98, 20).build());
+		//? if >=1.21 {
 		this.addRenderableWidget(Checkbox.builder(Component.translatable("diorama.waypoint.show_on_maps"), this.font)
 			.pos(left, top + 157)
 			.selected(this.visible)
 			.onValueChange((box, value) -> this.visible = value)
 			.build());
+		//?} else {
+		/*// 1.20.1's checkbox has no builder and tells no one it changed: a 20 pixel box with the
+		// label 4 pixels right of it.
+		Component showOnMaps = Component.translatable("diorama.waypoint.show_on_maps");
+		this.addRenderableWidget(new Checkbox(left, top + 157, 24 + this.font.width(showOnMaps), 20, showOnMaps, this.visible) {
+			@Override
+			public void onPress() {
+				super.onPress();
+				WaypointEditScreen.this.visible = this.selected();
+			}
+		});
+		*///?}
 
 		// What to do with this place, under its preview. A new waypoint has none until it's saved.
 		int previewLeft = left + PREVIEW_LEFT;
@@ -227,6 +240,10 @@ public final class WaypointEditScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		// A 1.20.1 screen draws its own background.
+		//? if <1.21 {
+		/*this.renderBackground(graphics);
+		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		int left = this.left();
 		int top = this.top();

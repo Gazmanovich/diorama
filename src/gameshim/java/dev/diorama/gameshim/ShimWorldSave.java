@@ -25,9 +25,14 @@ final class ShimWorldSave implements TestWorldSave {
 		ShimThreading.checkOnTestThread("open");
 		ShimWorldBuilder.checkNoWorld(context, "open a world");
 		// Opening the world blocks the client until the integrated server is up.
+		// 1.20.1 opens a save from a screen to go back to, instead of with a cancel callback.
+		//? if <1.21 {
+		/*context.runOnClient(minecraft -> minecraft.createWorldOpenFlows().loadLevel(minecraft.screen, saveDirectory.getFileName().toString()));
+		*///?} else {
 		context.runOnClient(minecraft -> minecraft.createWorldOpenFlows().openWorld(saveDirectory.getFileName().toString(), () -> {
 			throw new AssertionError("Level loading should not be canceled");
 		}));
+		//?}
 		return ShimWorldBuilder.joinLoadedWorld(context, this);
 	}
 }

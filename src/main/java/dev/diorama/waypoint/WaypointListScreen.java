@@ -242,7 +242,13 @@ public final class WaypointListScreen extends Screen {
 		if (importButton != null) {
 			above -= 24;
 			this.addRenderableWidget(importButton);
+			//? if >=1.21 {
 			importButton.setRectangle(204, 20, cx - 102, above);
+			//?} else {
+			/*// No setRectangle on 1.20.1; the button is already 20 tall.
+			importButton.setWidth(204);
+			importButton.setPosition(cx - 102, above);
+			*///?}
 		}
 		if (this.imported != null) {
 			above -= 12;
@@ -401,7 +407,12 @@ public final class WaypointListScreen extends Screen {
 		Button confirm = this.confirm;
 		if (confirm != null) {
 			show(confirm, shown && this.armed);
+			//? if >=1.21 {
 			confirm.setRectangle(span, 20, right - span, y);
+			//?} else {
+			/*confirm.setWidth(span);
+			confirm.setPosition(right - span, y);
+			*///?}
 		}
 	}
 
@@ -426,7 +437,12 @@ public final class WaypointListScreen extends Screen {
 		if (custom) {
 			Button confirm = this.folderActions.get(this.folderActions.size() - 1);
 			show(confirm, this.folderArmed);
+			//? if >=1.21 {
 			confirm.setRectangle(span, 20, right - span, FOLDER_Y);
+			//?} else {
+			/*confirm.setWidth(span);
+			confirm.setPosition(right - span, FOLDER_Y);
+			*///?}
 		}
 	}
 
@@ -481,9 +497,21 @@ public final class WaypointListScreen extends Screen {
 		return this.scroll + index;
 	}
 
+	//? if >=1.21 {
 	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		super.extractBackground(graphics, mouseX, mouseY, a);
+	//?} else {
+	/*// A 1.20.1 screen draws its own background, and its render method draws only the widgets.
+	@Override
+	public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+		this.drawBackground(graphics, mouseX, mouseY);
+		super.render(graphics, mouseX, mouseY, a);
+	}
+
+	private void drawBackground(GuiGraphics graphics, int mouseX, int mouseY) {
+		this.renderBackground(graphics);
+	*///?}
 		// Drawn with the background, so the buttons go on top of it: before 1.21.6 a screen's own
 		// drawing comes after its background, and the rows have to be under their buttons.
 		//? if >=1.21.6 {
@@ -658,8 +686,13 @@ public final class WaypointListScreen extends Screen {
 		return this.font.plainSubstrByWidth(text, Math.max(0, width - this.font.width(ellipsis))) + ellipsis;
 	}
 
+	// The mouse wheel had only the one axis on 1.20.1.
 	@Override
+	//? if >=1.21 {
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+	//?} else {
+	/*public boolean mouseScrolled(double x, double y, double scrollY) {
+	*///?}
 		this.scrollTo(this.scroll - (int) Math.signum(scrollY));
 		return true;
 	}

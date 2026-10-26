@@ -73,7 +73,12 @@ public final class BiomeTints {
 				}
 				int i = (z << 4) | x;
 				for (int r = 0; r < RESOLVERS.length; r++) {
+					//? if >=1.21 {
 					colors[r][i] = ARGB.color(red[r] / count, green[r] / count, blue[r] / count) & 0xFFFFFF;
+					//?} else {
+					/*// There was no colour without alpha yet; the alpha is masked off anyway.
+					colors[r][i] = ARGB.color(255, red[r] / count, green[r] / count, blue[r] / count) & 0xFFFFFF;
+					*///?}
 				}
 			}
 		}

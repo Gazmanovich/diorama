@@ -1,6 +1,7 @@
 package dev.diorama.waypoint;
 
 import dev.diorama.Diorama;
+import dev.diorama.WorldKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -103,7 +104,7 @@ public final class XaeroImport {
 			List<String> roots;
 			if (server != null) {
 				roots = singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
-			} else if (data != null && !data.isRealm()) {
+			} else if (data != null && !WorldKey.isRealm(data)) {
 				//? if fabric {
 				Path config = FabricLoader.getInstance().getConfigDir();
 				//?} else {

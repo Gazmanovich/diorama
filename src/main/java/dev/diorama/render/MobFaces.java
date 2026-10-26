@@ -101,7 +101,12 @@ public final class MobFaces {
 			new Face(64, 64, 8, 8, 8, 10, VILLAGER_HAT, VILLAGER_NOSE),
 			new Face(64, 64, 7, 7, 8, 8, new Piece(7, 38, 8, 8, 0, 0), null)));
 		Face skeleton = new Face(64, 32, 8, 8, 8, 8, HUMANOID_HAT, null);
+		//? if >=1.21 {
 		for (EntityType<?> type : new EntityType<?>[] {EntityTypes.SKELETON, EntityTypes.STRAY, EntityTypes.WITHER_SKELETON, EntityTypes.BOGGED}) {
+		//?} else {
+		/*// The bogged came in 1.21.
+		for (EntityType<?> type : new EntityType<?>[] {EntityTypes.SKELETON, EntityTypes.STRAY, EntityTypes.WITHER_SKELETON}) {
+		*///?}
 			FACES.put(type, new Faces(skeleton, null));
 		}
 		FACES.put(EntityTypes.CREEPER, new Faces(new Face(64, 32, 8, 8, 8, 8), null));
@@ -153,7 +158,10 @@ public final class MobFaces {
 		FACES.put(EntityTypes.POLAR_BEAR, new Faces(new Face(128, 64, 7, 7, 7, 7), new Face(64, 64, 4, 4, 6, 5)));
 		FACES.put(EntityTypes.PANDA, new Faces(new Face(64, 64, 9, 15, 13, 10, null, new Piece(47, 18, 7, 5, 3, 5)), new Face(64, 64, 5, 5, 7, 6)));
 		FACES.put(EntityTypes.ALLAY, new Faces(new Face(32, 32, 5, 5, 5, 5), null));
+		// The breeze came in 1.21.
+		//? if >=1.21 {
 		FACES.put(EntityTypes.BREEZE, new Faces(new Face(32, 32, 8, 8, 8, 8), null));
+		//?}
 		//? if >=1.21.2 {
 		FACES.put(EntityTypes.CREAKING, new Faces(new Face(64, 64, 6, 6, 6, 10), null));
 		//?}

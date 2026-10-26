@@ -71,6 +71,10 @@ public final class MapScreen extends Screen {
 	private static final Identifier TAB_HIGHLIGHTED = Identifier.withDefaultNamespace("widget/tab_highlighted");
 	private static final Identifier TAB_SELECTED = Identifier.withDefaultNamespace("widget/tab_selected");
 	private static final Identifier TAB_SELECTED_HIGHLIGHTED = Identifier.withDefaultNamespace("widget/tab_selected_highlighted");
+	//? if <1.21 {
+	/*// 1.20.1's tab buttons draw all four looks from rows of one texture.
+	private static final Identifier TAB_BUTTON = Identifier.withDefaultNamespace("textures/gui/tab_button.png");
+	*///?}
 	private static final Component[] TAB_NAMES = {Component.translatable("diorama.map.surface"), Component.translatable("diorama.map.caves")};
 
 	private final MapViewport viewport = new MapViewport();
@@ -174,9 +178,13 @@ public final class MapScreen extends Screen {
 		}
 	}
 
+	// No blurred, dimmed world behind the map. On 1.20.1 a screen draws no background unless it
+	// asks for one, so there's nothing to turn off.
+	//? if >=1.21 {
 	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 	}
+	//?}
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
@@ -243,8 +251,15 @@ public final class MapScreen extends Screen {
 					// Placed like a button's own tooltip: below the control, or above where there's no room.
 					//? if >=1.21.6 {
 					graphics.setTooltipForNextFrame(this.font, tip.lines(), new MenuTooltipPositioner(tip.control()), mouseX, mouseY, false);
-					//?} else {
+					//?} else if >=1.21 {
 					/*this.setTooltipForNextRenderPass(tip.lines(), new MenuTooltipPositioner(tip.control()), false);
+					*///?} else {
+					/*// 1.20.1's positioner takes a widget, of which it reads only the top and height, and
+					// the tabs aren't widgets: a button over the control stands in for it.
+					ScreenRectangle control = tip.control();
+					Button stand = Button.builder(Component.empty(), b -> {
+					}).bounds(control.left(), control.top(), control.width(), control.height()).build();
+					this.setTooltipForNextRenderPass(tip.lines(), new MenuTooltipPositioner(stand), false);
 					*///?}
 				}
 			} else if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
@@ -625,8 +640,13 @@ public final class MapScreen extends Screen {
 		return false;
 	}
 
+	// The mouse wheel had only the one axis on 1.20.1.
 	@Override
+	//? if >=1.21 {
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+	//?} else {
+	/*public boolean mouseScrolled(double x, double y, double scrollY) {
+	*///?}
 		this.menu = null;
 		double before = this.zoom;
 		double after = Math.max(this.minZoom(), Math.min(MAX_ZOOM, before * Math.pow(1.25, scrollY)));
@@ -758,7 +778,10 @@ public final class MapScreen extends Screen {
 			sprite(graphics, selected ? (hovered ? TAB_SELECTED_HIGHLIGHTED : TAB_SELECTED) : (hovered ? TAB_HIGHLIGHTED : TAB), x, 0, w, h);
 			if (selected) {
 				// The selected tab's sprite is open in the middle; the game puts its menu backdrop there.
+				// 1.20.1's tab texture is filled in, so it needs none.
+				//? if >=1.21 {
 				graphics.fill(x + 2, 2, x + w - 2, h, 0x40000000);
+				//?}
 				int underline = nameWidth - 1;
 				graphics.fill(x + (w - underline) / 2, h - 3, x + (w - underline) / 2 + underline, h - 2, 0xFFFFFFFF);
 			}
@@ -785,8 +808,14 @@ public final class MapScreen extends Screen {
 		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h);
 		//?} else if >=1.21.2 {
 		/*graphics.blitSprite(RenderType::guiTextured, sprite, x, y, w, h);
-		*///?} else {
+		*///?} else if >=1.21 {
 		/*graphics.blitSprite(sprite, x, y, w, h);
+		*///?} else {
+		/*// From 1.20.1's tab texture, one 24 pixel row per state. Its tabs are always 24 tall; these
+		// are shorter, so they take the top h rows and slice only the 2 pixel sides (1.20.1's
+		// nine-slice divides by the bottom border when the height differs, and the tabs have none).
+		int row = sprite == TAB_SELECTED ? 0 : sprite == TAB_SELECTED_HIGHLIGHTED ? 1 : sprite == TAB ? 2 : 3;
+		graphics.blitNineSliced(TAB_BUTTON, x, y, w, h, 2, 2, 2, 0, 130, h, 0, row * 24);
 		*///?}
 	}
 
