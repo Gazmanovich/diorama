@@ -57,6 +57,9 @@ public final class Settings {
 	public Frame minimapFrame = Frame.CLASSIC;
 	public Shape minimapShape = Shape.SQUARE;
 
+	/** Which maps show the radar at all; what it shows is the same on both. */
+	public boolean radarOnMinimap = true;
+	public boolean radarOnMap = true;
 	public boolean radarPlayers = true;
 	public boolean radarHostile = true;
 	public boolean radarNeutral = true;

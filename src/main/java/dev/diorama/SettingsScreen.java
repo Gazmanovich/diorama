@@ -92,6 +92,8 @@ public final class SettingsScreen extends Screen {
 		minimap.lastTwoSideBySide();
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
+		radar.toggle("radar_minimap", () -> s.radarOnMinimap, v -> s.radarOnMinimap = v);
+		radar.toggle("radar_map", () -> s.radarOnMap, v -> s.radarOnMap = v);
 		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
 		radar.toggle("hostile", () -> s.radarHostile, v -> s.radarHostile = v);
 		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);

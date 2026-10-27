@@ -217,7 +217,7 @@ public final class MapScreen extends Screen {
 		this.placeControls();
 		Radar.Blip hovered = null;
 		this.blips = List.of();
-		if (ServerRules.radarAllowed()) {
+		if (ServerRules.radarAllowed() && Settings.get().radarOnMap) {
 			this.blips = Radar.collect(view, a, true);
 			Radar.draw(graphics, view, this.blips, true, false);
 			hovered = Radar.under(this.blips, mouseX, mouseY);
