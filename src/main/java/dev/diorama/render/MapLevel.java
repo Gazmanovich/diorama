@@ -824,7 +824,7 @@ public final class MapLevel implements ChunkSource {
 	 *
 	 * <p>A tile saved before tiles kept their spots (Diorama 0.3.0 and older) has none. Where it
 	 * shows something, {@code readWorld} works the spot out from the world's chunks in
-	 * singleplayer; elsewhere the answer is {@code unsaved}.
+	 * singleplayer; elsewhere, or where the save has nothing either, the answer is {@code unsaved}.
 	 */
 	public CompletableFuture<Spot> savedSpot(int layer, double u, double v, BlockLooks looks, boolean readWorld) {
 		TileStore store = this.store;
@@ -845,7 +845,8 @@ public final class MapLevel implements ChunkSource {
 			if (world == null) {
 				return CompletableFuture.completedFuture(new Spot(null, true));
 			}
-			return world.pick(this, looks, u, v, fog).thenApply(pos -> new Spot(pos, false));
+			// Nothing found in the save, where the map shows something: say to come back, not that nothing's there.
+			return world.pick(this, looks, u, v, fog).thenApply(pos -> new Spot(pos, pos == null));
 		}).thenCompose(spot -> spot).exceptionally(t -> {
 			Diorama.LOGGER.warn("Couldn't read the saved spots of tile {}", key, t);
 			return Spot.NOTHING;

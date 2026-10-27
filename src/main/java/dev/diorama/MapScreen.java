@@ -530,7 +530,7 @@ public final class MapScreen extends Screen {
 	private List<MapMenu.Item> spotItems(MapLevel.Spot found) {
 		BlockPos spot = found.pos();
 		if (spot == null) {
-			// Drawn by Diorama 0.3.0 or older, on a server: its ground comes back when the player does.
+			// Drawn by Diorama 0.3.0 or older, with no save to read the ground from: it comes back when the player does.
 			return List.of(MapMenu.Item.info(Component.translatable(found.unsaved() ? "diorama.menu.not_saved" : "diorama.menu.not_mapped")));
 		}
 		int x = spot.getX();
