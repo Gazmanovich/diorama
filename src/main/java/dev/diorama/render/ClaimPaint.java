@@ -18,9 +18,11 @@ import org.jspecify.annotations.Nullable;
  * edge where it meets the owner's other chunks.
  */
 final class ClaimPaint {
-	static final int FILL_ALPHA = 0x50;
-	static final int FORCE_LOADED_ALPHA = 0x78;
-	static final int EDGE_ALPHA = 0xD0;
+	// Light enough that the ground still reads through a claim (Dara's pick, 2026-10-26): 20%, 32%
+	// force loaded, 80% edges.
+	static final int FILL_ALPHA = 0x33;
+	static final int FORCE_LOADED_ALPHA = 0x52;
+	static final int EDGE_ALPHA = 0xCC;
 
 	private ClaimPaint() {
 	}
