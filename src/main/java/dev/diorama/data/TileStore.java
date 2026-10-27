@@ -123,8 +123,13 @@ public final class TileStore {
 	 */
 	private final Map<TileKey, Tile> unwritten = new HashMap<>();
 
-	/** Level-1 overview tiles above tiles written since the last rebuild. Guarded by {@code this}. */
+	/**
+	 * Overview tiles to rebuild: level 1 above tiles written since the last rebuild, and the level-1
+	 * tiles under an overview saved before chunks were kept. Guarded by {@code this}.
+	 */
 	private final Set<TileKey> staleOverviews = new HashSet<>();
+	/** Overview tiles saved without chunks whose rebuild has been asked for. Guarded by {@code this}. */
+	private final Set<TileKey> chunksAsked = new HashSet<>();
 	private boolean rebuildScheduled;
 	/** Told about overview tiles the writer rebuilt. Called on the writer thread. */
 	private volatile Consumer<TileKey> overviewChanged = key -> {
@@ -177,15 +182,21 @@ public final class TileStore {
 		}
 	}
 
-	/** Rebuilds and writes every out-of-date overview tile, one level at a time. Writer thread. */
+	/**
+	 * Rebuilds and writes every out-of-date overview tile, one level at a time from the most
+	 * detailed up, each once, so a tile's children are rebuilt before it. Writer thread.
+	 */
 	private void rebuildOverviews() {
-		Set<TileKey> level;
+		java.util.TreeMap<Integer, Set<TileKey>> levels = new java.util.TreeMap<>();
 		synchronized (this) {
-			level = new HashSet<>(this.staleOverviews);
+			for (TileKey key : this.staleOverviews) {
+				levels.computeIfAbsent(key.lod(), lod -> new HashSet<>()).add(key);
+			}
 			this.staleOverviews.clear();
 			this.rebuildScheduled = false;
 		}
-		while (!level.isEmpty()) {
+		while (!levels.isEmpty()) {
+			Set<TileKey> level = levels.pollFirstEntry().getValue();
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
 				int[] pixels = this.shrinkChildren(key);
@@ -219,7 +230,9 @@ public final class TileStore {
 					this.trimCache();
 				}
 			}
-			level = above;
+			if (!above.isEmpty()) {
+				levels.computeIfAbsent(above.iterator().next().lod(), lod -> new HashSet<>()).addAll(above);
+			}
 		}
 	}
 
@@ -235,12 +248,20 @@ public final class TileStore {
 		}
 	}
 
-	/** An overview tile's chunks, from its children's; null if none of them has any. */
+	/** An overview tile's chunks, from its children's as saved; null if none of them has any. */
 	private byte @Nullable [] shrinkChunks(TileKey key) {
 		byte[][] children = new byte[4][];
 		for (int dy = 0; dy < 2; dy++) {
 			for (int dx = 0; dx < 2; dx++) {
-				children[dy * 2 + dx] = this.chunks(new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1));
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
+				Tile tile;
+				synchronized (this.io) {
+					this.merge(child);
+					tile = this.saved(child);
+				}
+				if (tile != null) {
+					children[dy * 2 + dx] = child.lod() == 0 ? TileChunks.fromSpots(child, tile.spots) : tile.chunks;
+				}
 			}
 		}
 		return TileChunks.shrink(key, children);
@@ -248,8 +269,8 @@ public final class TileStore {
 
 	/**
 	 * The {@link TileChunks} of a saved tile, or null if there are none. Like {@link #read}. An
-	 * overview tile saved before they were kept gets them from its children, and is rebuilt soon
-	 * after so it keeps them.
+	 * overview tile saved before they were kept has none yet: this asks for it to be rebuilt, once,
+	 * from the level-1 tiles under it up.
 	 */
 	public byte @Nullable [] chunks(TileKey key) {
 		Tile tile;
@@ -263,20 +284,27 @@ public final class TileStore {
 		if (key.lod() == 0) {
 			return TileChunks.fromSpots(key, tile.spots);
 		}
-		if (tile.chunks != null) {
-			return tile.chunks;
+		if (tile.chunks == null) {
+			this.askChunks(key);
 		}
-		byte[] chunks = this.shrinkChunks(key);
-		if (chunks != null) {
-			synchronized (this) {
-				this.staleOverviews.add(key);
-				if (!this.rebuildScheduled && !this.closed) {
-					this.rebuildScheduled = true;
-					WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
-				}
+		return tile.chunks;
+	}
+
+	/** Rebuilds an overview tile saved without chunks, and every level-1 tile under it, so each gets them. */
+	private synchronized void askChunks(TileKey key) {
+		if (this.closed || !this.chunksAsked.add(key)) {
+			return;
+		}
+		int span = 1 << (key.lod() - 1);
+		for (int du = 0; du < span; du++) {
+			for (int dv = 0; dv < span; dv++) {
+				this.staleOverviews.add(new TileKey(key.layer(), key.tileU() * span + du, key.tileV() * span + dv, 1));
 			}
 		}
-		return chunks;
+		if (!this.rebuildScheduled) {
+			this.rebuildScheduled = true;
+			WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
+		}
 	}
 
 	/** The saved {@link TileSpots} of a level-0 tile, or null if there are none. Like {@link #read}. */
