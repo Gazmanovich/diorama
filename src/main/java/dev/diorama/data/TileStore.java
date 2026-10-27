@@ -480,6 +480,25 @@ public final class TileStore {
 		this.store(key, old);
 	}
 
+	/** For tests: makes a level-0 tile look like one saved before spots were kept, on disk too. */
+	public void forgetSpots(TileKey key) {
+		Tile old;
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			if (tile == null || key.lod() != 0) {
+				return;
+			}
+			old = new Tile(tile.pixels, null, null);
+			synchronized (this) {
+				this.cache.put(key, old);
+				// A write still waiting would put the spots back.
+				this.unwritten.replace(key, old);
+			}
+		}
+		this.store(key, old);
+	}
+
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {

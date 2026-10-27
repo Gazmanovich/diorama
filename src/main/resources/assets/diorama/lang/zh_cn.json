@@ -69,6 +69,7 @@
 	"diorama.waypoint.temporary": "临时",
 	"diorama.menu.where": "%s, %s, %s · %s 米",
 	"diorama.menu.not_mapped": "此处尚无地图数据",
+	"diorama.menu.not_saved": "回到这附近后才能使用此位置",
 	"diorama.menu.finding": "正在寻找地面…",
 	"diorama.menu.teleport_here": "传送至此",
 	"diorama.menu.add_waypoint": "在此处添加路径点",

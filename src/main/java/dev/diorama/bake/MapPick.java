@@ -34,6 +34,20 @@ public final class MapPick {
 
 	/** A pick for map points in {@code tile}, which must be a level-0 tile. */
 	public MapPick(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar) {
+		this(source, looks, tile, fogOfWar, false);
+	}
+
+	/**
+	 * A pick whose rays start at the top of the world, not at the top of the chunks around the
+	 * tile: for a source that loads each chunk when a ray first reaches it, where looking at them
+	 * all first would load hundreds. The rays walk more air first and reach the same blocks, unless
+	 * something taller than the map had seen when it drew them now stands in front.
+	 */
+	public static MapPick fromWorldTop(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar) {
+		return new MapPick(source, looks, tile, fogOfWar, true);
+	}
+
+	private MapPick(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar, boolean fromWorldTop) {
 		this.source = source;
 		this.looks = looks;
 		this.reader = new VoxelReader(source, looks);
@@ -43,7 +57,7 @@ public final class MapPick {
 		this.roofless = !this.cave && this.underRoof;
 		// Start where the baker starts for this tile, so whatever the map draws can be picked.
 		this.startY = this.cave ? Math.min(tile.layer(), source.maxY())
-			: this.roofless ? Math.min(source.roof(), source.maxY()) : TileBaker.localTop(tile, source, 0);
+			: this.roofless ? Math.min(source.roof(), source.maxY()) : fromWorldTop ? source.maxY() : TileBaker.localTop(tile, source, 0);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - TileBaker.CAVE_DEPTH) : source.minY();
 	}
 

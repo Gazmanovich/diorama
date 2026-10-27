@@ -5,6 +5,7 @@ import dev.diorama.bake.MapPick;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.bake.TileSpots;
+import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
@@ -478,10 +479,10 @@ public final class MapScreen extends Screen {
 			this.menu = new MapMenu(this.waypointItems(pin.waypoint()), this.font, screenX, screenY, this.width, this.height);
 			return;
 		}
-		CompletableFuture<@Nullable BlockPos> spot = this.spotAt(screenX, screenY);
+		CompletableFuture<MapLevel.Spot> spot = this.spotAt(screenX, screenY, true);
 		try {
 			// Where the chunks are gone, the spot comes off the disk, usually in a few milliseconds.
-			BlockPos found = spot.get(SPOT_WAIT_MS, TimeUnit.MILLISECONDS);
+			MapLevel.Spot found = spot.get(SPOT_WAIT_MS, TimeUnit.MILLISECONDS);
 			this.menu = new MapMenu(this.spotItems(found), this.font, screenX, screenY, this.width, this.height);
 		} catch (TimeoutException e) {
 			// A slow disk: say so until it answers, unless the menu has been closed or replaced by then.
@@ -496,7 +497,7 @@ public final class MapScreen extends Screen {
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} catch (ExecutionException e) {
-			this.menu = new MapMenu(this.spotItems(null), this.font, screenX, screenY, this.width, this.height);
+			this.menu = new MapMenu(this.spotItems(MapLevel.Spot.NOTHING), this.font, screenX, screenY, this.width, this.height);
 		}
 	}
 
@@ -504,31 +505,33 @@ public final class MapScreen extends Screen {
 	private static final long SPOT_WAIT_MS = 50;
 
 	/**
-	 * Where a player would stand on the block shown under a screen point; null where the map has
-	 * nothing. Answered at once from the map's chunks; where they're gone, from the spots saved
-	 * with the tile, which takes a read off the render thread.
+	 * Where a player would stand on the block shown under a screen point. Answered at once from
+	 * the map's chunks; where they're gone, from the spots saved with the tile, which takes a read
+	 * off the render thread, or with {@code readWorld} from the world's save where the tile has none.
 	 */
-	private CompletableFuture<@Nullable BlockPos> spotAt(double screenX, double screenY) {
+	private CompletableFuture<MapLevel.Spot> spotAt(double screenX, double screenY, boolean readWorld) {
 		MapSession session = MapSession.get();
 		BlockLooks looks = BlockLooks.get();
 		MapViewport.View view = this.lastView;
 		if (session == null || looks == null || view == null) {
-			return CompletableFuture.completedFuture(null);
+			return CompletableFuture.completedFuture(MapLevel.Spot.NOTHING);
 		}
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
 		double v = TileSpots.rowMiddle(view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom());
 		TileKey tile = new TileKey(this.layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		MapPick pick = new MapPick(session.map(), looks, tile, session.map().fogOfWar());
 		return switch (pick.pick(u, v)) {
-			case MapPick.FOUND -> CompletableFuture.completedFuture(new BlockPos((int) Math.floor(u), pick.y, pick.z));
-			case MapPick.NOTHING -> CompletableFuture.completedFuture(null);
-			default -> session.map().savedSpot(this.layer, u, v);
+			case MapPick.FOUND -> CompletableFuture.completedFuture(new MapLevel.Spot(new BlockPos((int) Math.floor(u), pick.y, pick.z), false));
+			case MapPick.NOTHING -> CompletableFuture.completedFuture(MapLevel.Spot.NOTHING);
+			default -> session.map().savedSpot(this.layer, u, v, looks, readWorld);
 		};
 	}
 
-	private List<MapMenu.Item> spotItems(@Nullable BlockPos spot) {
+	private List<MapMenu.Item> spotItems(MapLevel.Spot found) {
+		BlockPos spot = found.pos();
 		if (spot == null) {
-			return List.of(MapMenu.Item.info(Component.translatable("diorama.menu.not_mapped")));
+			// Drawn by Diorama 0.3.0 or older, with no save to read the ground from: it comes back when the player does.
+			return List.of(MapMenu.Item.info(Component.translatable(found.unsaved() ? "diorama.menu.not_saved" : "diorama.menu.not_mapped")));
 		}
 		int x = spot.getX();
 		int y = spot.getY();
@@ -912,7 +915,8 @@ public final class MapScreen extends Screen {
 			this.spotV = blockV;
 			this.spotLayer = this.layer;
 			this.spotAge = 0;
-			CompletableFuture<@Nullable BlockPos> found = this.spotAt(mouseX, mouseY);
+			// Not from the world's save: that loads chunks on the server, too much for every block the mouse crosses.
+			CompletableFuture<@Nullable BlockPos> found = this.spotAt(mouseX, mouseY, false).thenApply(MapLevel.Spot::pos);
 			Object request = new Object();
 			this.spotRequest = request;
 			if (found.isDone()) {

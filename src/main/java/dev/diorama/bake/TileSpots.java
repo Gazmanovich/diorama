@@ -84,16 +84,24 @@ public final class TileSpots {
 		if (spots == null) {
 			return null;
 		}
-		// Clamped as longs (Math.clamp is Java 21; the 1.20.1 jar is built for 17).
-		int column = (int) Math.max(0L, Math.min(COLUMNS - 1L, (long) Math.floor(u - key.minU())));
-		int row = (int) Math.max(0L, Math.min(ROWS - 1L, (long) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT)));
-		int value = spots[row * COLUMNS + column];
+		int i = index(key, u, v);
+		int value = spots[i];
 		if ((value & ~0xFFFFFF) != SPOT) {
 			return null;
 		}
+		int column = i % COLUMNS;
+		int row = i / COLUMNS;
 		int y = (short) value;
 		int z = (int) Math.floor(Projection.zAt(v(key, row), y)) - ((value >>> 16) & 0xFF);
 		return new BlockPos((int) Math.floor(key.minU()) + column, y, z);
+	}
+
+	/**
+	 * Whether the spots answer for map point {@code (u, v)} of a level-0 surface tile: they were
+	 * saved, and the chunks were there when that part was baked.
+	 */
+	public static boolean known(TileKey key, int @Nullable [] spots, double u, double v) {
+		return spots != null && spots[index(key, u, v)] != UNKNOWN;
 	}
 
 	/**
@@ -106,6 +114,14 @@ public final class TileSpots {
 			return Integer.MIN_VALUE;
 		}
 		return (int) Math.floor(Projection.zAt(v(key, row), (short) value)) - ((value >>> 16) & 0xFF);
+	}
+
+	/** The sample at map point {@code (u, v)} of a level-0 tile. */
+	private static int index(TileKey key, double u, double v) {
+		// Clamped as longs (Math.clamp is Java 21; the 1.20.1 jar is built for 17).
+		int column = (int) Math.max(0L, Math.min(COLUMNS - 1L, (long) Math.floor(u - key.minU())));
+		int row = (int) Math.max(0L, Math.min(ROWS - 1L, (long) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT)));
+		return row * COLUMNS + column;
 	}
 
 	/** The map v a sample answers for: the middle of its pixel row. */

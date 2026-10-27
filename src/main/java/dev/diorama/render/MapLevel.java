@@ -14,6 +14,7 @@ import dev.diorama.bake.TileSpots;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.SeenBlocks;
 import dev.diorama.data.TileStore;
+import dev.diorama.data.WorldSavePick;
 import dev.diorama.render.gpu.MapTexture;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -810,19 +811,57 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Where a player would stand at a map point by the spots saved with its tile, for where the
-	 * chunks are gone. Reads the disk off the render thread; null if nothing was saved there.
+	 * What the map knows of a point: where a player would stand there, or null for nowhere.
+	 * {@code unsaved} when the map shows something there but doesn't know where its ground is.
 	 */
-	public CompletableFuture<@Nullable BlockPos> savedSpot(int layer, double u, double v) {
+	public record Spot(@Nullable BlockPos pos, boolean unsaved) {
+		public static final Spot NOTHING = new Spot(null, false);
+	}
+
+	/**
+	 * Where a player would stand at a map point by the spots saved with its tile, for where the
+	 * chunks are gone. Reads the disk off the render thread.
+	 *
+	 * <p>A tile saved before tiles kept their spots (Diorama 0.3.0 and older) has none. Where it
+	 * shows something, {@code readWorld} works the spot out from the world's chunks in
+	 * singleplayer; elsewhere, or where the save has nothing either, the answer is {@code unsaved}.
+	 */
+	public CompletableFuture<Spot> savedSpot(int layer, double u, double v, BlockLooks looks, boolean readWorld) {
 		TileStore store = this.store;
 		if (store == null || layer != TileKey.SURFACE) {
-			return CompletableFuture.completedFuture(null);
+			return CompletableFuture.completedFuture(Spot.NOTHING);
 		}
 		TileKey key = new TileKey(layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
-		return CompletableFuture.supplyAsync(() -> TileSpots.spot(key, store.spots(key), u, v)).exceptionally(t -> {
+		WorldSavePick world = readWorld ? WorldSavePick.current() : null;
+		boolean fog = this.fogOfWar;
+		return CompletableFuture.supplyAsync(() -> {
+			int[] spots = store.spots(key);
+			if (TileSpots.known(key, spots, u, v)) {
+				return CompletableFuture.completedFuture(new Spot(TileSpots.spot(key, spots, u, v), false));
+			}
+			if (!drawn(store.read(key), key, u, v)) {
+				return CompletableFuture.completedFuture(Spot.NOTHING);
+			}
+			if (world == null) {
+				return CompletableFuture.completedFuture(new Spot(null, true));
+			}
+			// Nothing found in the save, where the map shows something: say to come back, not that nothing's there.
+			return world.pick(this, looks, u, v, fog).thenApply(pos -> new Spot(pos, pos == null));
+		}).thenCompose(spot -> spot).exceptionally(t -> {
 			Diorama.LOGGER.warn("Couldn't read the saved spots of tile {}", key, t);
-			return null;
+			return Spot.NOTHING;
 		});
+	}
+
+	/** Whether a saved tile shows anything at map point {@code (u, v)}. */
+	private static boolean drawn(int @Nullable [] pixels, TileKey key, double u, double v) {
+		if (pixels == null) {
+			return false;
+		}
+		int size = Projection.TILE_PIXELS;
+		int x = (int) Math.max(0L, Math.min(size - 1L, (long) Math.floor((u - key.minU()) * Projection.PIXELS_PER_UNIT)));
+		int y = (int) Math.max(0L, Math.min(size - 1L, (long) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT)));
+		return (pixels[y * size + x] >>> 24) != 0;
 	}
 
 	/**
@@ -916,6 +955,20 @@ public final class MapLevel implements ChunkSource {
 			}
 		}
 		this.overviewChanged.add(key);
+	}
+
+	/** For tests: makes a level-0 tile look saved before tiles kept their spots, on disk too. Not on the render thread. */
+	public void forgetSpots(TileKey key) {
+		TileStore store = this.store;
+		if (store != null) {
+			store.forgetSpots(key);
+		}
+	}
+
+	/** For tests: whether a level-0 tile has spots saved. Not on the render thread. */
+	public boolean hasSavedSpots(TileKey key) {
+		TileStore store = this.store;
+		return store != null && store.spots(key) != null;
 	}
 
 	/** For tests: the claims a tile shows by the current claims, painted on this thread; null for none. */
