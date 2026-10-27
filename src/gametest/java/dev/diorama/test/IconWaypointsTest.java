@@ -234,6 +234,13 @@ final class IconWaypointsTest {
 			double scale = mc.getWindow().getGuiScale();
 			return new double[] {at[0] * scale, at[1] * scale};
 		});
+		// Only a left click picks: a right click leaves the picker open.
+		context.getInput().setCursorPos(farm[0], farm[1]);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		context.waitTicks(2);
+		if (!context.computeOnClient(mc -> mc.gui.screen() instanceof WaypointIconScreen)) {
+			throw new AssertionError("A right click picked an icon");
+		}
 		click(context, farm[0], farm[1]);
 		hold(context, 6);
 		double[] save = context.computeOnClient(mc -> {

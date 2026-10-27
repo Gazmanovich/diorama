@@ -117,9 +117,9 @@ public final class WaypointIconScreen extends Screen {
 		return Component.translatableWithFallback("diorama.waypoint.icon." + id.replace(':', '.'), fallback);
 	}
 
-	private boolean clicked(double mouseX, double mouseY) {
+	private boolean clicked(double mouseX, double mouseY, int button) {
 		int i = this.cellAt(mouseX, mouseY);
-		if (i < 0) {
+		if (i < 0 || button != com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT) {
 			return false;
 		}
 		this.picked.accept(this.icons.get(i));
@@ -130,12 +130,12 @@ public final class WaypointIconScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
-		return this.clicked(event.x(), event.y()) || super.mouseClicked(event, doubleClick);
+		return this.clicked(event.x(), event.y(), event.button()) || super.mouseClicked(event, doubleClick);
 	}
 	//?} else {
 	/*@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		return this.clicked(mouseX, mouseY) || super.mouseClicked(mouseX, mouseY, button);
+		return this.clicked(mouseX, mouseY, button) || super.mouseClicked(mouseX, mouseY, button);
 	}
 	*///?}
 
