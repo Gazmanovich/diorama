@@ -1,5 +1,7 @@
 package dev.diorama.test;
 
+import dev.diorama.Claims;
+import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapMenu;
 import dev.diorama.MapScreen;
@@ -155,6 +157,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
+			}
+			if (tests.contains("ftb-claims")) {
+				ftbClaims(context, world);
 			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
@@ -3257,6 +3262,251 @@ public class DioramaClientTest implements FabricClientGameTest {
 		openMapOnPlayer(context);
 		context.takeScreenshot("waystones-05-map-after");
 		context.setScreen(() -> null);
+	}
+
+	/**
+	 * Land claims from FTB Chunks, with FTB Chunks installed (opt-in: DIORAMA_TESTS=ftb-claims). The
+	 * player's team claims the chunks round the player, force loads the middle one, and a server
+	 * team claims chunks to the east. The map tints each claim in its team's colour on the ground it
+	 * covers: the top of a tower in the claim is tinted though it's drawn north of the claim's
+	 * ground, and the ground north of the claim isn't. Zoomed far out, and on the minimap, the claims
+	 * show too. Unclaiming takes the tint away.
+	 */
+	private static void ftbClaims(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> dev.diorama.compat.FtbChunks.available())) {
+			throw new AssertionError("DIORAMA_TESTS=ftb-claims needs FTB Chunks installed");
+		}
+		// Two server teams claim the hills and village round spawn, side by side.
+		int spawnX = context.computeOnClient(mc -> mc.player.getBlockX());
+		int spawnY = context.computeOnClient(mc -> mc.player.getBlockY());
+		int spawnZ = context.computeOnClient(mc -> mc.player.getBlockZ());
+		world.getServer().runCommand("ftbteams server create Spawn");
+		world.getServer().runCommand("ftbteams server create Market");
+		// Commands name a team by its short name, its name and a piece of its id.
+		String spawn = ftbTeamShortName(world, "Spawn");
+		String market = ftbTeamShortName(world, "Market");
+		world.getServer().runCommand("ftbteams server settings " + spawn + " ftbteams:color #E04040");
+		world.getServer().runCommand("ftbteams server settings " + market + " ftbteams:color #3CB4E6");
+		world.getServer().runCommand("ftbchunks admin claim_as " + spawn + " 48 " + spawnX + " " + spawnZ);
+		world.getServer().runCommand("ftbchunks admin claim_as " + market + " 16 " + (spawnX + 80) + " " + spawnZ);
+		context.waitFor(mc -> Claims.get().at((spawnX + 80) >> 4, spawnZ >> 4) != null && Claims.get().at(spawnX >> 4, spawnZ >> 4) != null, 600);
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(spawnX, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(spawnY, spawnZ)), Projection.TILE_UNITS))), 200);
+		settle(context, 20);
+		context.takeScreenshot("ftb-claims-00-spawn");
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("ftb-claims-00-spawn-zoom-2");
+		// Turned off, the claims go, and the map is as it was without them.
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> !Claims.get().isEmpty())) {
+			throw new AssertionError("Claims still known with the setting off");
+		}
+		context.takeScreenshot("ftb-claims-00-spawn-zoom-2-off");
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.ALWAYS);
+		context.waitFor(mc -> Claims.get().at(spawnX >> 4, spawnZ >> 4) != null, 600);
+		context.setScreen(() -> null);
+
+		// The middle of a chunk, on an open patch far from anything placed before.
+		int cx = -1792 + 8;
+		int cz = 1808 + 8;
+		int x0 = cx - 56;
+		int z0 = cz - 40;
+		int x1 = cx + 88;
+		int z1 = cz + 40;
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		// A grass platform over whatever is there, water included, with clear air above it.
+		int y = Math.max(72, world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz)));
+		// Fill takes at most 32768 blocks at once: a chunk's column at a time.
+		for (int x = x0; x <= x1; x += 16) {
+			for (int z = z0; z <= z1; z += 16) {
+				int xe = Math.min(x1, x + 15);
+				int ze = Math.min(z1, z + 15);
+				world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + xe + " " + (y + 60) + " " + ze + " air");
+				world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + z + " " + xe + " " + (y - 1) + " " + ze + " grass_block");
+			}
+		}
+		// A tower in the claim's north-west chunk, whose top the map draws well north of its foot.
+		int towerX = cx - 16;
+		int towerZ = cz - 16;
+		int top = y + 23;
+		world.getServer().runCommand("fill " + (towerX - 3) + " " + y + " " + (towerZ - 3) + " " + (towerX + 2) + " " + top + " " + (towerZ + 2) + " stone_bricks");
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+
+		world.getServer().runCommand("execute as @a at @s run ftbchunks claim 16");
+		world.getServer().runCommand("execute as @a at @s run ftbchunks load");
+		world.getServer().runCommand("ftbchunks admin claim_as " + spawn + " 16 " + (cx + 64) + " " + cz);
+		int playerChunkX = cx >> 4;
+		int playerChunkZ = cz >> 4;
+		long claimed = System.nanoTime();
+		for (int tick = 0; ; tick++) {
+			boolean all = context.computeOnClient(mc -> {
+				Claims.Snapshot claims = Claims.get();
+				return claims.at(playerChunkX - 1, playerChunkZ - 1) != null && claims.at(playerChunkX + 4, playerChunkZ) != null
+					&& claims.at(playerChunkX, playerChunkZ) != null && claims.at(playerChunkX, playerChunkZ).forceLoaded();
+			});
+			if (all) {
+				break;
+			}
+			if (tick > 600) {
+				String seen = context.computeOnClient(mc -> "own " + Claims.get().at(playerChunkX - 1, playerChunkZ - 1)
+					+ ", middle " + Claims.get().at(playerChunkX, playerChunkZ) + ", Spawn's " + Claims.get().at(playerChunkX + 4, playerChunkZ));
+				throw new AssertionError("The claims didn't all reach the map: " + seen);
+			}
+			context.waitTick();
+		}
+		Diorama.LOGGER.info("FTB claims reached the map's claims {} ms after the commands", (System.nanoTime() - claimed) / 1_000_000);
+		Claims.Claim own = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 1, playerChunkZ + 1));
+		Claims.Claim server = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ));
+		if (own == null || server == null || own.team().equals(server.team()) || server.rgb() != 0xE04040 || !"Spawn".equals(server.name())) {
+			throw new AssertionError("Expected the player's claim and Spawn's red claim: " + own + ", " + server);
+		}
+		if (context.computeOnClient(mc -> Claims.get().at(playerChunkX - 2, playerChunkZ)) != null) {
+			throw new AssertionError("A chunk outside both claims shows as claimed");
+		}
+		settle(context, 40);
+
+		// The tower's top is in the claim; the ground just north of the claim isn't, though a ray
+		// at its row crosses the claim lower down.
+		int claimNorth = (playerChunkZ - 1) << 4;
+		assertClaimTint(context, towerX + 0.5, top + 1, towerZ + 0.5, true, "the tower's top");
+		assertClaimTint(context, cx + 0.5, y, claimNorth - 3 + 0.5, false, "the ground north of the claim");
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, true, "the ground under the player");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "Spawn's ground");
+		assertClaimTint(context, cx + 30 + 0.5, y, cz + 0.5, false, "the ground between the claims");
+
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS))), 200);
+		context.takeScreenshot("ftb-claims-01-map");
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("ftb-claims-02-map-zoom-1");
+		// Hovering a claimed spot names its owner.
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 10);
+		double[] spot = mapPoint(context, 60, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("ftb-claims-03-hover");
+
+		// Far out the map shows overview tiles, which carry their own chunks once rebuilt. Back
+		// over spawn, which has more mapped round it.
+		context.waitTicks(200);
+		double[] far = {0.35, 0.12};
+		for (int i = 0; i < far.length; i++) {
+			double zoom = far[i];
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(spawnX, Projection.v(spawnY, spawnZ), zoom, TileKey.SURFACE));
+			// The view the screen reports is the one it last drew.
+			context.waitTicks(3);
+			int lod = context.computeOnClient(mc -> MapViewport.lodFor(MapSession.get().map(), ((MapScreen) mc.gui.screen()).view()));
+			if (lod == 0) {
+				throw new AssertionError("Zoomed out to " + zoom + ", the map should show overview tiles");
+			}
+			TileKey overview = new TileKey(TileKey.SURFACE, Math.floorDiv(spawnX, Projection.TILE_UNITS << lod),
+				Math.floorDiv((int) Math.floor(Projection.v(spawnY, spawnZ)), Projection.TILE_UNITS << lod), lod);
+			context.waitFor(mc -> claimsShown(overview), 600);
+			settle(context, 20);
+			context.takeScreenshot("ftb-claims-04-map-far-lod" + lod);
+		}
+		context.setScreen(() -> null);
+		context.waitTicks(20);
+		context.takeScreenshot("ftb-claims-05-minimap");
+
+		// Unclaiming takes the tint away.
+		world.getServer().runCommand("execute as @a at @s run ftbchunks unload");
+		world.getServer().runCommand("execute as @a at @s run ftbchunks unclaim 16");
+		long unclaimed = System.nanoTime();
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) == null, 600);
+		Diorama.LOGGER.info("FTB unclaim reached the map's claims {} ms after the command", (System.nanoTime() - unclaimed) / 1_000_000);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, false, "the ground under the player after unclaiming");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "Spawn's ground after the player unclaimed");
+		openMapOnPlayer(context);
+		context.waitTicks(40);
+		context.takeScreenshot("ftb-claims-06-unclaimed");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("ftbchunks admin unclaim_as " + spawn + " 16 " + (cx + 64) + " " + cz);
+		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+
+		// What a big server costs: 65 by 65 claimed chunks next to the player, arriving at once.
+		// Claims are taken in on the client tick; painting a tile runs on a baker thread.
+		context.runOnClient(mc -> Claims.resetSlowestTick());
+		world.getServer().runCommand("ftbchunks admin claim_as " + market + " 512 " + (cx - 600) + " " + cz);
+		context.waitFor(mc -> Claims.get().at((cx - 600) >> 4, cz >> 4) != null && Claims.get().at((cx - 1100) >> 4, (cz + 500) >> 4) != null, 1200);
+		context.waitTicks(200);
+		String parts = context.computeOnClient(mc -> Claims.slowestTickParts());
+		long slowest = context.computeOnClient(mc -> Claims.resetSlowestTick());
+		int nearby = context.computeOnClient(mc -> {
+			int n = 0;
+			for (int x = ((cx - 600) >> 4) - 40; x <= ((cx - 600) >> 4) + 40; x++) {
+				for (int z = (cz >> 4) - 40; z <= (cz >> 4) + 40; z++) {
+					n += Claims.get().at(x, z) != null ? 1 : 0;
+				}
+			}
+			return n;
+		});
+		TileKey here = new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS), Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS));
+		long paint = context.computeOnClient(mc -> {
+			MapSession.get().map().claimPixels(here);
+			long t = System.nanoTime();
+			MapSession.get().map().claimPixels(here);
+			return System.nanoTime() - t;
+		});
+		Diorama.LOGGER.info("FTB claims cost: {} chunks claimed nearby, slowest tick spent on claims {} us while they arrived ({}), painting one tile {} ms",
+			nearby, slowest / 1000, parts, paint / 1_000_000);
+		world.getServer().runCommand("ftbchunks admin unclaim_as " + market + " 512 " + (cx - 600) + " " + cz);
+
+		// Deleting a server team sends no update for its chunks; its claims go all the same.
+		world.getServer().runCommand("ftbteams server delete " + spawn);
+		context.waitFor(mc -> Claims.get().at(spawnX >> 4, spawnZ >> 4) == null, 400);
+	}
+
+	/** The short name FTB Teams' commands know a team by, from its display name. */
+	private static String ftbTeamShortName(TestSingleplayerContext world, String name) {
+		return world.getServer().computeOnServer(server -> {
+			try {
+				Object api = Class.forName("dev.ftb.mods.ftbteams.api.FTBTeamsAPI").getMethod("api").invoke(null);
+				Object manager = api.getClass().getMethod("getManager").invoke(api);
+				for (Object team : (java.util.Collection<?>) manager.getClass().getMethod("getTeams").invoke(manager)) {
+					String shortName = (String) team.getClass().getMethod("getShortName").invoke(team);
+					if (shortName.equals(name) || shortName.startsWith(name + "#")) {
+						return shortName;
+					}
+				}
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't look up FTB Teams' teams", e);
+			}
+			throw new AssertionError("No FTB team named " + name);
+		});
+	}
+
+	/** Whether the map has painted claims over a tile it shows. */
+	private static boolean claimsShown(TileKey key) {
+		MapTile tile = MapSession.get().map().peek(key);
+		return tile != null && tile.claims() != null;
+	}
+
+	/** Checks whether the map tints the top of the block at a spot ({@code y} is the height of its top face) as claimed. */
+	private static void assertClaimTint(ClientGameTestContext context, double x, double y, double z, boolean claimed, String what) {
+		double v = Projection.v(y, z);
+		TileKey key = new TileKey(TileKey.SURFACE, Math.floorDiv((int) Math.floor(x), Projection.TILE_UNITS), Math.floorDiv((int) Math.floor(v), Projection.TILE_UNITS));
+		int px = (int) Math.floor((x - key.minU()) * Projection.PIXELS_PER_UNIT);
+		int py = (int) Math.floor((v - key.minV()) * Projection.PIXELS_PER_UNIT);
+		int pixel = context.computeOnClient(mc -> {
+			int[] pixels = MapSession.get().map().claimPixels(key);
+			return pixels == null ? 0 : pixels[py * Projection.TILE_PIXELS + px];
+		});
+		if ((pixel >>> 24 != 0) != claimed) {
+			throw new AssertionError("Expected " + what + " " + (claimed ? "tinted as claimed" : "untinted") + ", pixel " + Integer.toHexString(pixel));
+		}
 	}
 
 	/**

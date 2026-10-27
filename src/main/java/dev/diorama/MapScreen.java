@@ -212,7 +212,7 @@ public final class MapScreen extends Screen {
 		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
 		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
-		this.viewport.draw(graphics, session.map(), view, overlayBits(session));
+		this.viewport.draw(graphics, session.map(), view, overlayBits(session), Settings.get().claims != Settings.ClaimsShown.OFF);
 		boolean caves = this.layer != TileKey.SURFACE;
 		this.placeControls();
 		Radar.Blip hovered = null;
@@ -938,7 +938,21 @@ public final class MapScreen extends Screen {
 		Component detail = biome != null
 			? Component.translatable("diorama.map.spot_detail", biome, distance)
 			: Component.translatable("diorama.map.distance", distance);
-		return lines(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()), detail);
+		List<FormattedCharSequence> lines = lines(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()), detail);
+		Claims.Claim claim = Settings.get().claims == Settings.ClaimsShown.OFF ? null : Claims.get().at(spot.getX() >> 4, spot.getZ() >> 4);
+		if (claim != null) {
+			lines = new ArrayList<>(lines);
+			lines.add(claimLine(claim).getVisualOrderText());
+		}
+		return lines;
+	}
+
+	/** Who owns the chunk under the mouse: a square of their colour, then their name. */
+	private static Component claimLine(Claims.Claim claim) {
+		Component owner = claim.name().isEmpty() ? Component.translatable("diorama.map.claim.unnamed") : Component.literal(claim.name());
+		Component line = Component.literal("■ ").withStyle(s -> s.withColor(claim.rgb()))
+			.append(Component.translatable("diorama.map.claim", owner).withStyle(ChatFormatting.GRAY));
+		return claim.forceLoaded() ? line.copy().append(Component.translatable("diorama.map.claim.force_loaded").withStyle(ChatFormatting.GRAY)) : line;
 	}
 
 	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. */

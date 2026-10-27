@@ -64,11 +64,14 @@ public final class MapViewport {
 	private static final double OVERLAY_ZOOM = 1.0;
 
 	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view) {
-		this.draw(graphics, level, view, 0);
+		this.draw(graphics, level, view, 0, false);
 	}
 
-	/** Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles. */
-	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
+	/**
+	 * Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles, and land
+	 * claims if {@code claims}.
+	 */
+	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims) {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
@@ -80,7 +83,7 @@ public final class MapViewport {
 			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 		}
 
-		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0);
+		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims);
 		this.drawFog(graphics, level, view);
 		graphics.disableScissor();
 	}
@@ -146,7 +149,7 @@ public final class MapViewport {
 		return Math.sqrt(du * du + dv * dv);
 	}
 
-	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays) {
+	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
@@ -176,10 +179,14 @@ public final class MapViewport {
 				float sx = view.screenX(tu * units);
 				float sy = view.screenY(tv * units);
 				MapTexture overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
+				MapTexture claimed = claims ? level.claims(key, tile) : null;
 				if (circle != null) {
 					Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
 					if (inside != null) {
 						canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), -1);
+						if (claimed != null) {
+							canvas.quad(claimed, sampling, inside.corners(), inside.uvs(), -1);
+						}
 						if (overlay != null) {
 							canvas.quad(overlay, sampling, inside.corners(), inside.uvs(), -1);
 						}
@@ -187,6 +194,9 @@ public final class MapViewport {
 					continue;
 				}
 				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
+				if (claimed != null) {
+					canvas.rect(claimed, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
+				}
 				if (overlay != null) {
 					canvas.rect(overlay, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, -1);
 				}

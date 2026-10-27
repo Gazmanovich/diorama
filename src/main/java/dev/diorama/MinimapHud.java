@@ -161,7 +161,7 @@ public final class MinimapHud implements HudElement {
 			this.frame(graphics, settings.minimapFrame, x, y, size);
 		}
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer, round);
-		this.viewport.draw(graphics, session.map(), view);
+		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() && settings.radarOnMinimap ? Radar.collect(view, partialTick, false) : List.of();
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();

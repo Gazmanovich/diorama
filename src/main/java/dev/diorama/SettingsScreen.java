@@ -115,6 +115,9 @@ public final class SettingsScreen extends Screen {
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));
+		if (Claims.supported()) {
+			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
+		}
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
