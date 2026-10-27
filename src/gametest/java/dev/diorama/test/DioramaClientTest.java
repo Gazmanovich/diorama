@@ -4466,6 +4466,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.getInput().setCursorPos(0, 0);
 		context.waitTicks(3);
 		context.takeScreenshot("settings-02-opacity-" + clickedOpacity);
+		// Round, the frame is a ring around the faded map, not a disc behind it.
+		click(context, "Shape: ");
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-opacity-" + clickedOpacity + "-round");
+		click(context, "Shape: ");
 		context.runOnClient(mc -> {
 			Settings.get().minimapOpacity = Settings.MAX_OPACITY;
 			Settings.get().save();
