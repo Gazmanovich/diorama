@@ -248,9 +248,15 @@ public final class TileStore {
 		}
 	}
 
-	/** An overview tile's chunks, from its children's as saved; null if none of them has any. */
+	/**
+	 * An overview tile's chunks, from its children's as saved; null if none of them has any, or if
+	 * a child overview was saved before chunks were kept. That child is rebuilt first, and this
+	 * tile again after it, so a tile never keeps chunks with holes where its children had none.
+	 */
 	private byte @Nullable [] shrinkChunks(TileKey key) {
 		byte[][] children = new byte[4][];
+		boolean complete = true;
+		boolean anyTile = false;
 		for (int dy = 0; dy < 2; dy++) {
 			for (int dx = 0; dx < 2; dx++) {
 				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
@@ -259,12 +265,31 @@ public final class TileStore {
 					this.merge(child);
 					tile = this.saved(child);
 				}
-				if (tile != null) {
-					children[dy * 2 + dx] = child.lod() == 0 ? TileChunks.fromSpots(child, tile.spots) : tile.chunks;
+				if (tile == null) {
+					continue;
+				}
+				anyTile = true;
+				if (child.lod() == 0) {
+					children[dy * 2 + dx] = TileChunks.fromSpots(child, tile.spots);
+				} else if (tile.chunks == null) {
+					complete = false;
+					this.askChunks(child);
+				} else {
+					children[dy * 2 + dx] = tile.chunks;
 				}
 			}
 		}
-		return TileChunks.shrink(key, children);
+		if (!complete) {
+			return null;
+		}
+		byte[] chunks = TileChunks.shrink(key, children);
+		if (chunks == null && anyTile) {
+			// Children saved before spots were kept say nothing about chunks: all unknown, but
+			// done, so the tiles above don't wait on this one.
+			chunks = new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS];
+			java.util.Arrays.fill(chunks, TileChunks.NONE);
+		}
+		return chunks;
 	}
 
 	/**
@@ -435,6 +460,24 @@ public final class TileStore {
 			}
 		}
 		return spots;
+	}
+
+	/** For tests: makes an overview tile look like one saved before chunks were kept, on disk too. */
+	public void forgetChunks(TileKey key) {
+		Tile old;
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			if (tile == null || key.lod() == 0) {
+				return;
+			}
+			old = new Tile(tile.pixels, null, null);
+			synchronized (this) {
+				this.cache.put(key, old);
+				this.chunksAsked.remove(key);
+			}
+		}
+		this.store(key, old);
 	}
 
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */

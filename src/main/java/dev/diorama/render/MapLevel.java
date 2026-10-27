@@ -898,6 +898,26 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
+	/**
+	 * For tests: makes the overview tiles from level 1 up to {@code key} over its area look saved
+	 * before chunks were kept, and reloads {@code key}. Not on the render thread.
+	 */
+	public void forgetChunks(TileKey key) {
+		TileStore store = this.store;
+		if (store == null) {
+			return;
+		}
+		for (int lod = 1; lod <= key.lod(); lod++) {
+			int span = 1 << (key.lod() - lod);
+			for (int du = 0; du < span; du++) {
+				for (int dv = 0; dv < span; dv++) {
+					store.forgetChunks(new TileKey(key.layer(), key.tileU() * span + du, key.tileV() * span + dv, lod));
+				}
+			}
+		}
+		this.overviewChanged.add(key);
+	}
+
 	/** For tests: the claims a tile shows by the current claims, painted on this thread; null for none. */
 	public int @Nullable [] claimPixels(TileKey key) {
 		TileStore store = this.store;

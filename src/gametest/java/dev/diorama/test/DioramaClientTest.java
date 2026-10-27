@@ -3416,6 +3416,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.waitFor(mc -> claimsShown(overview), 600);
 			settle(context, 20);
 			context.takeScreenshot("ftb-claims-04-map-far-lod" + lod);
+			if (i == far.length - 1) {
+				// A map saved before overview tiles kept their chunks: the claims go, and come back
+				// once the tiles under it are rebuilt.
+				MapLevel level = context.computeOnClient(mc -> MapSession.get().map());
+				level.forgetChunks(overview);
+				context.waitFor(mc -> !claimsShown(overview), 200);
+				context.waitFor(mc -> claimsShown(overview), 1200);
+				context.takeScreenshot("ftb-claims-04-map-far-migrated");
+			}
 		}
 		context.setScreen(() -> null);
 		context.waitTicks(20);
