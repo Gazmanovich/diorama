@@ -37,6 +37,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `xaero-icons` | Radar icons from Xaero's Minimap icon files ([docs](radar-icons.md)) |
 | `model-faces` | Faces read off mob models |
 | `waypoints` | Adding, editing, sharing and showing waypoints |
+| `icons` | Waypoint icons: each one ships, sleeping in a bed keeps a Bed pin there, an icon is saved with its waypoint |
 | `xaero-import` | Importing waypoints from Xaero's Minimap |
 | `fog-of-war` | Cave slices under a server's fair-play rule |
 | `settings` | The settings screen |
@@ -48,7 +49,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `multiplayer` | Two worlds on one dedicated server |
 | `server-id`, `tracked-players`, `realms` | Telling server worlds apart, players tracked by Xaero's server plugin, Realms |
 
-Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod) and `showcase`.
+Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod), `showcase` and `icon-waypoints` (the showcase castle with icon pins, for pictures; `DIORAMA_GIF=1` adds the frames of picking an icon).
 
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 

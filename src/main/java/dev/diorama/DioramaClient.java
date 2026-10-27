@@ -70,6 +70,7 @@ public final class DioramaClient {
 		// On the first tick every mod is set up, Waystones and its event library included.
 		Waystones.start();
 		MapSession.tick(mc);
+		Waypoints.watchSleep(mc);
 		while (OPEN_MAP.consumeClick()) {
 			if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
 				mc.gui.setScreen(new MapScreen());

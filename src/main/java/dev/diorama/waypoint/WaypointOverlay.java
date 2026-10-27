@@ -26,7 +26,7 @@ public final class WaypointOverlay {
 	public record Pin(Waypoint waypoint, float x, float y, float size, boolean clamped) {
 		/** Where the head is centred: above the spot for a standing pin. */
 		public float headY() {
-			return this.clamped ? this.y : this.y - Pins.headAbove((int) this.size);
+			return this.clamped ? this.y : this.y - Pins.headAbove(this.waypoint, (int) this.size);
 		}
 	}
 
@@ -36,31 +36,32 @@ public final class WaypointOverlay {
 	public static List<Pin> layout(MapViewport.View view, List<Waypoint> waypoints, boolean fullscreen) {
 		List<Pin> pins = new ArrayList<>();
 		int size = fullscreen ? Pins.LARGE : Pins.SMALL;
-		float inset = Pins.edgeReach(size);
 		float cx = view.x() + view.width() / 2.0F;
 		float cy = view.y() + view.height() / 2.0F;
-		// At least a pixel, so a view smaller than a badge still gets finite positions.
-		float halfW = Math.max(1, view.width() / 2.0F - inset);
-		float halfH = Math.max(1, view.height() / 2.0F - inset);
 		Circle circle = view.round() ? Circle.in(view) : null;
-		float radius = circle == null ? 0 : Math.max(1, circle.r - inset);
 		for (Waypoint waypoint : waypoints) {
 			if (!WaypointStore.isShown(waypoint)) {
 				continue;
 			}
+			// Badges with icons are bigger, so they sit further in.
+			float inset = Pins.edgeReach(waypoint, size);
+			// At least a pixel, so a view smaller than a badge still gets finite positions.
+			float halfW = Math.max(1, view.width() / 2.0F - inset);
+			float halfH = Math.max(1, view.height() / 2.0F - inset);
+			float radius = circle == null ? 0 : Math.max(1, circle.r - inset);
 			float x = view.screenX(waypoint.x + 0.5);
 			float y = view.screenY(Projection.v(waypoint.y, waypoint.z + 0.5));
 			float dx = x - cx;
 			float dy = y - cy;
 			if (circle != null) {
-				if (Pins.fitsStanding(size, x, y, circle)) {
+				if (Pins.fitsStanding(waypoint, size, x, y, circle)) {
 					pins.add(new Pin(waypoint, x, y, size, false));
 				} else {
 					// On a round view the badge goes round the rim.
 					float reach = Math.max(1, (float) Math.hypot(dx, dy) / radius);
 					pins.add(new Pin(waypoint, cx + dx / reach, cy + dy / reach, size, true));
 				}
-			} else if (Pins.fitsStanding(size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
+			} else if (Pins.fitsStanding(waypoint, size, x, y, view.x(), view.y(), view.x() + view.width(), view.y() + view.height())) {
 				pins.add(new Pin(waypoint, x, y, size, false));
 			} else {
 				// Too near the edge for the whole pin to show: a badge pointing the way, pulled in to
@@ -86,7 +87,9 @@ public final class WaypointOverlay {
 			} else {
 				Pins.standing(graphics, waypoint, pin.x(), pin.y(), s);
 			}
-			if (fullscreen && !pin.clamped() && (pin == hovered || view.zoom() >= 2)) {
+			// Icons say what a place is, so their names wait for the cursor.
+			boolean named = pin == hovered || view.zoom() >= 2 && !Pins.showsIcon(waypoint);
+			if (fullscreen && !pin.clamped() && named) {
 				int w = font.width(waypoint.name);
 				graphics.pose().pushMatrix();
 				graphics.pose().translate(pin.x() - w / 2.0F, pin.y() + 3);
@@ -107,7 +110,7 @@ public final class WaypointOverlay {
 			if (!pin.clamped()) {
 				d = Math.min(d, Math.hypot(pin.x() - mouseX, pin.y() - mouseY));
 			}
-			if (d <= pin.size() / 2 + 2 && d < bestDistance) {
+			if (d <= Pins.reach(pin.waypoint(), (int) pin.size()) && d < bestDistance) {
 				best = pin;
 				bestDistance = d;
 			}

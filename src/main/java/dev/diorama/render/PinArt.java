@@ -1,5 +1,7 @@
 package dev.diorama.render;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The waypoint pins as pixel art, one texel per GUI pixel: a round badge with a dark rim and a
  * bevel lit from the top left, either standing on a point that touches the spot or, at the edge of
@@ -170,8 +172,12 @@ public final class PinArt {
 		return new Art(image, ax, ay, ox + 1, 1, ox + d - 1, d - 1);
 	}
 
-	/** A round badge of diameter {@code d}; with {@code caretAngle} (radians, screen space, 0 is right) a caret beside it points that way. */
-	public static Art badge(int colour, boolean death, int d, double caretAngle, int caretSize) {
+	/**
+	 * A round badge of diameter {@code d}; with {@code caretAngle} (radians, screen space, 0 is right)
+	 * a caret beside it points that way. With an {@code icon}, the icon sits on it as on an icon pin,
+	 * and {@code d} should be its {@link #iconHead}.
+	 */
+	public static Art badge(int colour, boolean death, int d, double caretAngle, int caretSize, @Nullable Image icon) {
 		int face = death ? DEATH_FACE : colour;
 		boolean caret = !Double.isNaN(caretAngle);
 		int pad = caret ? 6 : 0;
@@ -181,6 +187,8 @@ public final class PinArt {
 		face(image, mask, w, w, face);
 		if (death) {
 			headstone(image, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
+		} else if (icon != null) {
+			sticker(image, icon, pad + d / 2.0F, pad + d / 2.0F);
 		}
 		if (caret) {
 			float cx = pad + d / 2.0F;
@@ -203,7 +211,96 @@ public final class PinArt {
 			image.put(rim, INK, 0.9F);
 			image.put(m, colour, 1);
 		}
+		if (icon != null && !death) {
+			// No initials: an empty label box.
+			return new Art(image, pad + d / 2.0F, pad + d / 2.0F, 0, 0, 0, 0);
+		}
 		return new Art(image, pad + d / 2.0F, pad + d / 2.0F, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
+	}
+
+	/** The white round an icon, a touch off so it doesn't glare on snow. */
+	private static final int STICKER_WHITE = 0xF6F6F6;
+	/** The tip under an icon pin's head, as long as the large pin's. */
+	private static final int ICON_TIP = 6;
+
+	/**
+	 * The head of a pin or badge showing an icon: the icon's tile, its white edge, then room for the
+	 * tile's corners to clear the bevel and rim (21 for an 11-pixel tile; at 19 square icons touched
+	 * the rim). Odd, so the tile centres.
+	 */
+	public static int iconHead(Image icon) {
+		int d = Math.max(icon.width, icon.height) + 10;
+		return d % 2 == 0 ? d + 1 : d;
+	}
+
+	/** How far above the marked spot an icon pin's head is centred. */
+	public static float iconHeadAbove(Image icon) {
+		return iconHead(icon) / 2.0F + ICON_TIP;
+	}
+
+	/**
+	 * The standing pin for a waypoint with an icon: the round pin in the waypoint's colour, its head
+	 * grown to hold the icon, the icon on it like a sticker (its own dark outline, part of the art,
+	 * then a white edge round its shape). One texel per GUI pixel.
+	 */
+	public static Art iconPin(Image icon, int colour) {
+		int d = iconHead(icon);
+		int w = d + 4;
+		int h = d + ICON_TIP + 3;
+		Image image = new Image(w, h);
+		float ax = 2 + d / 2.0F;
+		float ay = d + ICON_TIP;
+		image.over(ellipse(w, h, ax, ay - 0.5F, d * 0.26F + 0.6F, 1.3F), 0x000000, 0.28F);
+		boolean[] mask = disc(w, h, ax, d / 2.0F, d / 2.0F);
+		boolean[] point = polygon(w, h, new float[] {ax - d * 0.32F, d * 0.75F, ax + d * 0.32F, d * 0.75F, ax, ay});
+		for (int i = 0; i < mask.length; i++) {
+			mask[i] |= point[i];
+		}
+		face(image, mask, w, h, colour);
+		sticker(image, icon, ax, d / 2.0F);
+		return new Art(image, ax, ay, 0, 0, 0, 0);
+	}
+
+	/** Puts an icon centred on (cx, cy), with a white edge round its shape. */
+	private static void sticker(Image image, Image icon, float cx, float cy) {
+		int w = image.width;
+		int ix = Math.round(cx - icon.width / 2.0F);
+		int iy = Math.round(cy - icon.height / 2.0F);
+		boolean[] shape = new boolean[image.width * image.height];
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				shape[(iy + y) * w + ix + x] = icon.a[y * icon.width + x] >= 128;
+			}
+		}
+		boolean[] edge = grow4(shape, w, image.height);
+		for (int i = 0; i < edge.length; i++) {
+			edge[i] &= !shape[i];
+		}
+		image.put(edge, STICKER_WHITE, 1);
+		for (int y = 0; y < icon.height; y++) {
+			for (int x = 0; x < icon.width; x++) {
+				int s = y * icon.width + x;
+				if (icon.a[s] >= 128) {
+					int t = (iy + y) * w + ix + x;
+					image.r[t] = icon.r[s];
+					image.g[t] = icon.g[s];
+					image.b[t] = icon.b[s];
+					image.a[t] = 255;
+				}
+			}
+		}
+	}
+
+	/** An image from ARGB pixels, row by row. */
+	public static Image fromArgb(int width, int height, int[] argb) {
+		Image image = new Image(width, height);
+		for (int i = 0; i < argb.length; i++) {
+			image.r[i] = (argb[i] >> 16) & 0xFF;
+			image.g[i] = (argb[i] >> 8) & 0xFF;
+			image.b[i] = argb[i] & 0xFF;
+			image.a[i] = argb[i] >>> 24;
+		}
+		return image;
 	}
 
 	/** The designed standing pin nearest a head size: 15 or 13. */
@@ -365,6 +462,17 @@ public final class PinArt {
 					boolean edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
 					out[i] = edge || !m[i - 1] || !m[i + 1] || !m[i - w] || !m[i + w];
 				}
+			}
+		}
+		return out;
+	}
+
+	/** The shape grown by a pixel up, down, left and right, so its corners come out cut. */
+	private static boolean[] grow4(boolean[] m, int w, int h) {
+		boolean[] out = new boolean[m.length];
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				out[y * w + x] = at(m, w, h, x, y) || at(m, w, h, x - 1, y) || at(m, w, h, x + 1, y) || at(m, w, h, x, y - 1) || at(m, w, h, x, y + 1);
 			}
 		}
 		return out;

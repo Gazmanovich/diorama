@@ -14,7 +14,9 @@ public final class Waypoint {
 		/** Set from the map's menu; never saved, so it's gone once the player leaves the world. */
 		TEMPORARY,
 		/** A waystone the Waystones mod told the client about ({@link Waystones}). Never saved, and Waystones names it. */
-		WAYSTONE
+		WAYSTONE,
+		/** The bed the player last slept in, kept up to date: one per dimension. */
+		BED
 	}
 
 	/** Colours a waypoint can take, picked to stay readable on both grass and water. */
@@ -26,6 +28,8 @@ public final class Waypoint {
 	public UUID id = UUID.randomUUID();
 	public String name = "";
 	public String initials = "";
+	/** A picture the pin shows instead of the initials, by {@link dev.diorama.render.WaypointIcons} id, or empty. */
+	public String icon = "";
 	public int x;
 	public int y;
 	public int z;

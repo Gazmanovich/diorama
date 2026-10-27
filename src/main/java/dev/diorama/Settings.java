@@ -75,6 +75,8 @@ public final class Settings {
 	public boolean waypointsOnMap = true;
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
+	/** A pin on the bed the player last slept in ({@link dev.diorama.waypoint.Waypoints#watchSleep}). */
+	public boolean bedMarkers = true;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
