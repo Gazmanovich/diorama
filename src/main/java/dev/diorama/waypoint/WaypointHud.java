@@ -66,21 +66,28 @@ public final class WaypointHud implements HudElement {
 				continue;
 			}
 			double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-			Pins.standing(graphics, waypoint, sx, sy, Pins.LARGE);
-			Settings.WaypointLabels labels = Settings.get().waypointLabels;
-			if (labels == Settings.WaypointLabels.NONE) {
-				continue;
+			// Keep the world anchor fractional: snapping it to GUI pixels makes markers jump
+			// by several framebuffer pixels at larger GUI scales. Move the entire marker together.
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(sx, sy);
+			try {
+				Pins.standing(graphics, waypoint, 0, 0, Pins.LARGE);
+				Settings.WaypointLabels labels = Settings.get().waypointLabels;
+				if (labels == Settings.WaypointLabels.NONE) {
+					continue;
+				}
+				String text = Math.round(distance) + " m";
+				boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
+				if (labels == Settings.WaypointLabels.ALWAYS || labels == Settings.WaypointLabels.AUTO && (nearCrosshair || distance < NAME_DISTANCE)) {
+					text = waypoint.name + " · " + text;
+				}
+				int w = font.width(text);
+				graphics.pose().translate(-w / 2.0F, 4);
+				graphics.fill(-2, -1, w + 2, 9, 0x80000000);
+				graphics.text(font, text, 0, 0, 0xFFFFFFFF, false);
+			} finally {
+				graphics.pose().popMatrix();
 			}
-			String text = Math.round(distance) + " m";
-			boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
-			if (labels == Settings.WaypointLabels.ALWAYS || labels == Settings.WaypointLabels.AUTO && (nearCrosshair || distance < NAME_DISTANCE)) {
-				text = waypoint.name + " · " + text;
-			}
-			int w = font.width(text);
-			int tx = Math.round(sx - w / 2.0F);
-			int ty = Math.round(sy) + 4;
-			graphics.fill(tx - 2, ty - 1, tx + w + 2, ty + 9, 0x80000000);
-			graphics.text(font, text, tx, ty, 0xFFFFFFFF, false);
 		}
 	}
 }

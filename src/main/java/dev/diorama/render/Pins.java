@@ -11,7 +11,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
- * Draws waypoint pins from {@link PinArt}: the pin's body is a small texture on the GUI pixel grid,
+ * Draws waypoint pins from {@link PinArt}: the pin's body is a small texture,
  * its initials are the game's own text drawn on top. Bodies are made once per shape and colour.
  */
 public final class Pins {
@@ -107,18 +107,19 @@ public final class Pins {
 
 	private static void draw(GuiGraphicsExtractor graphics, Sprite sprite, Waypoint waypoint, float x, float y, int head) {
 		PinArt.Art art = sprite.art();
-		// Pixel art sits on the GUI grid.
-		int left = Math.round(x - art.anchorX());
-		int top = Math.round(y - art.anchorY());
+		// Keep the body and initials on one local pixel grid, moving continuously with the map.
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x - art.anchorX(), y - art.anchorY());
 		int w = art.image().width;
 		int h = art.image().height;
 		float edge = sprite.edge();
 		// A colour saved with no alpha at all is meant opaque; otherwise the pin keeps the colour's alpha.
 		int alpha = waypoint.color >>> 24 == 0 ? 0xFF : waypoint.color >>> 24;
-		MapCanvas.of(graphics).rect(sprite.texture(), Sampling.CLAMP_CRISP, left, top, left + w, top + h, 0, 0, w / edge, h / edge, alpha << 24 | 0xFFFFFF);
+		MapCanvas.of(graphics).rect(sprite.texture(), Sampling.CLAMP_CRISP, 0, 0, w, h, 0, 0, w / edge, h / edge, alpha << 24 | 0xFFFFFF);
 		if (waypoint.kind != Waypoint.Kind.DEATH) {
-			label(graphics, waypoint, left + art.labelX0(), top + art.labelY0(), left + art.labelX1(), top + art.labelY1());
+			label(graphics, waypoint, art.labelX0(), art.labelY0(), art.labelX1(), art.labelY1());
 		}
+		graphics.pose().popMatrix();
 	}
 
 	/** The initials at full size, centred on their ink in the head; just the first letter when two don't fit. */
