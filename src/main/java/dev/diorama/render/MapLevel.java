@@ -964,6 +964,12 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
+	/** For tests: whether a level-0 tile has spots saved. Not on the render thread. */
+	public boolean hasSavedSpots(TileKey key) {
+		TileStore store = this.store;
+		return store != null && store.spots(key) != null;
+	}
+
 	/** For tests: the claims a tile shows by the current claims, painted on this thread; null for none. */
 	public int @Nullable [] claimPixels(TileKey key) {
 		TileStore store = this.store;

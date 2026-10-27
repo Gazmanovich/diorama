@@ -492,6 +492,8 @@ public final class TileStore {
 			old = new Tile(tile.pixels, null, null);
 			synchronized (this) {
 				this.cache.put(key, old);
+				// A write still waiting would put the spots back.
+				this.unwritten.replace(key, old);
 			}
 		}
 		this.store(key, old);

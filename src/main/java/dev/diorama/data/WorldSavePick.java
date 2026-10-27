@@ -53,7 +53,15 @@ public final class WorldSavePick {
 	 * nothing. {@code map} answers for the chunks it still has, and for everything but chunks.
 	 */
 	public CompletableFuture<@Nullable BlockPos> pick(ChunkSource map, BlockLooks looks, double u, double v, boolean fogOfWar) {
+		if (!this.server.isRunning()) {
+			return CompletableFuture.completedFuture(null);
+		}
 		return this.server.submit(() -> {
+			// A server that stopped meanwhile runs the task on the caller's thread, where loading a
+			// chunk waits forever on the stopped server.
+			if (!this.server.isSameThread()) {
+				return null;
+			}
 			ServerLevel serverLevel = this.server.getLevel(this.dimension);
 			if (serverLevel == null) {
 				return null;

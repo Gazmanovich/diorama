@@ -885,11 +885,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 		// A tile saved by Diorama 0.3.0 or older has no spots: in singleplayer the menu finds the
 		// ground in the world's save instead (#145).
-		TileKey probeTile = new TileKey(TileKey.SURFACE, (int) Math.floor(probe[0] / Projection.TILE_UNITS), (int) Math.floor(probe[1] / Projection.TILE_UNITS));
-		MapLevel level = context.computeOnClient(mc -> MapSession.get().map());
-		level.forgetSpots(probeTile);
 		context.setScreen(MapScreen::new);
 		double[] oldProbe = freeSpawnProbe(context);
+		TileKey oldTile = new TileKey(TileKey.SURFACE, (int) Math.floor(oldProbe[0] / Projection.TILE_UNITS), (int) Math.floor(oldProbe[1] / Projection.TILE_UNITS));
+		MapLevel level = context.computeOnClient(mc -> MapSession.get().map());
+		level.forgetSpots(oldTile);
+		if (level.hasSavedSpots(oldTile)) {
+			throw new AssertionError("Tile " + oldTile + " still has spots after forgetting them");
+		}
 		rightClickAt(context, oldProbe[5], oldProbe[6]);
 		context.takeScreenshot("saved-map-01c-menu-on-old-tile");
 		List<String> oldLabels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
