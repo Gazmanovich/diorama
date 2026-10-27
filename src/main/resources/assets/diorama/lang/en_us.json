@@ -69,6 +69,7 @@
 	"diorama.waypoint.temporary": "Temporary",
 	"diorama.menu.where": "%s, %s, %s · %s m",
 	"diorama.menu.not_mapped": "Nothing mapped here",
+	"diorama.menu.not_saved": "Come back near here to use this spot",
 	"diorama.menu.finding": "Finding the ground…",
 	"diorama.menu.teleport_here": "Teleport here",
 	"diorama.menu.add_waypoint": "Add waypoint here",

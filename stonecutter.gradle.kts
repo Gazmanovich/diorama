@@ -174,6 +174,7 @@ stonecutter parameters {
 		"\\b(?:net\\.minecraft\\.resources\\.)?(?:Identifier|ResourceLocation)\\.(?:fromNamespaceAndPath|withDefaultNamespace|parse)\\(" to "new net.minecraft.resources.ResourceLocation(",
 		// Chunk statuses had no package of their own.
 		"import net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus;" to "import net.minecraft.world.level.chunk.ChunkStatus;",
+		"\\.getPersistedStatus\\(\\)" to ".getStatus()",
 		// The death packet had a getter for whose death it was.
 		"\\bpacket\\.playerId\\(\\)" to "packet.getPlayerId()",
 		// A built mesh was a RenderedBuffer, nested in BufferBuilder, which built it with end().

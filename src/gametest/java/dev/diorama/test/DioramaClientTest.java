@@ -882,6 +882,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("After the restart, the menu offers " + java.util.Arrays.toString(savedSpot)
 				+ " at spawn; before it, " + java.util.Arrays.toString(spot));
 		}
+
+		// A tile saved by Diorama 0.3.0 or older has no spots: in singleplayer the menu finds the
+		// ground in the world's save instead (#145).
+		TileKey probeTile = new TileKey(TileKey.SURFACE, (int) Math.floor(probe[0] / Projection.TILE_UNITS), (int) Math.floor(probe[1] / Projection.TILE_UNITS));
+		MapLevel level = context.computeOnClient(mc -> MapSession.get().map());
+		level.forgetSpots(probeTile);
+		context.setScreen(MapScreen::new);
+		double[] oldProbe = freeSpawnProbe(context);
+		rightClickAt(context, oldProbe[5], oldProbe[6]);
+		context.takeScreenshot("saved-map-01c-menu-on-old-tile");
+		List<String> oldLabels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
+		if (oldLabels.equals(List.of("Nothing mapped here"))) {
+			throw new AssertionError("On a tile saved without spots, the menu says nothing is mapped at spawn, which the map shows");
+		}
+		int[] worldSpot = menuSpot(context);
+		int[] oldSpot = {(int) oldProbe[2], (int) oldProbe[3], (int) oldProbe[4]};
+		if (!java.util.Arrays.equals(worldSpot, oldSpot)) {
+			throw new AssertionError("On a tile saved without spots, the menu offers " + java.util.Arrays.toString(worldSpot)
+				+ " at spawn; with its chunks loaded, " + java.util.Arrays.toString(oldSpot));
+		}
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
 			double u = (spawnCell[0] + (spawnCell[2] + 0.5) / Projection.COVERAGE_CELLS) * Projection.TILE_UNITS;
