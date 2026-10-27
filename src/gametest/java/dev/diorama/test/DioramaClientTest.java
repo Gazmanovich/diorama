@@ -4457,6 +4457,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (clickedSize != Settings.MAX_SIZE) {
 			throw new AssertionError("Clicking the right end of the Size slider set " + clickedSize + ", not " + Settings.MAX_SIZE);
 		}
+		// The faintest minimap: the preview's map and fog fade, and the frame is a border around the game behind it.
+		clickAt(context, "Opacity: ", 0.0);
+		int clickedOpacity = context.computeOnClient(mc -> Settings.get().minimapOpacity);
+		if (clickedOpacity != Settings.MIN_OPACITY) {
+			throw new AssertionError("Clicking the left end of the Opacity slider set " + clickedOpacity + ", not " + Settings.MIN_OPACITY);
+		}
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("settings-02-opacity-" + clickedOpacity);
+		context.runOnClient(mc -> {
+			Settings.get().minimapOpacity = Settings.MAX_OPACITY;
+			Settings.get().save();
+		});
 		// The biggest minimap, switched off: the dimmed preview stops at the settings' edge.
 		click(context, "Minimap", 0.05);
 		context.getInput().setCursorPos(0, 0);
@@ -4518,14 +4531,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> {
 			java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
 			try {
-				java.nio.file.Files.writeString(file, "{\"minimapZoom\": -1, \"radarRange\": -1}");
+				java.nio.file.Files.writeString(file, "{\"minimapZoom\": -1, \"radarRange\": -1, \"minimapOpacity\": 3}");
 			} catch (java.io.IOException e) {
 				throw new AssertionError(e);
 			}
 			Settings s = Settings.reload();
-			if (s.minimapZoom != 0 || s.radarRange != Settings.RANGES[0]) {
-				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.minimapZoom + ", range " + s.radarRange);
+			if (s.minimapZoom != 0 || s.radarRange != Settings.RANGES[0] || s.minimapOpacity != Settings.MIN_OPACITY) {
+				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.minimapZoom + ", range " + s.radarRange + ", opacity " + s.minimapOpacity);
 			}
+			s.minimapOpacity = Settings.MAX_OPACITY;
 			s.minimapZoom = 3;
 			s.radarRange = 32;
 			s.save();
@@ -4543,6 +4557,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				Settings s = Settings.reload();
 				if (s.minimapSize != Integer.parseInt(size[1]) || s.minimapCorner != Settings.Corner.BOTTOM_LEFT || s.compass) {
 					throw new AssertionError("A saved size of " + size[0] + " loaded as " + s.minimapSize + " (corner " + s.minimapCorner + ", compass " + s.compass + ")");
+				}
+				// Files from before the Opacity setting have none, and keep the solid map they had.
+				if (s.minimapOpacity != Settings.MAX_OPACITY) {
+					throw new AssertionError("A saved file with no opacity loaded as " + s.minimapOpacity + ", not " + Settings.MAX_OPACITY);
 				}
 			});
 		}

@@ -79,7 +79,8 @@ layout(location = 0) in vec2 maskUv;
 //?} else {
 /*in vec2 maskUv;
 *///?}
-// rg: noise offset in eighths of the coarser noise period; b: cave flag (128), fog scale steps
+// rg: noise offset in eighths of the coarser noise period, in the top three bits of each; r's low
+// five bits: how see-through the fog is, in 31sts (0 is opaque); b: cave flag (128), fog scale steps
 // (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the fast
 // quality flag (4) and the smoke flag (1).
 //? if >=26.3 {
@@ -205,7 +206,11 @@ float hash(vec2 p) {
 
 void main() {
     seconds = GameTime * 1200.0;
-    noiseOrigin = floor(params.rg * 255.0 / 32.0 + 0.5) / 8.0;
+    // The red byte is the noise offset in its top three bits and, in its low five, how see-through
+    // the whole fog is, in 31sts: 0 draws the fog as it is, and the minimap raises it to fade the map.
+    vec2 offsetBytes = floor(params.rg * 255.0 + 0.5);
+    noiseOrigin = floor(offsetBytes / 32.0) / 8.0;
+    float fogOpacity = 1.0 - mod(offsetBytes.r, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
     fast = mod(alphaCode, 16.0) >= 2.0;
@@ -287,5 +292,5 @@ void main() {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    fragColor = vec4(color / alpha, alpha) * ColorModulator;
+    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
 }

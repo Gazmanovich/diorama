@@ -154,11 +154,15 @@ public final class MinimapHud implements HudElement {
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
+		float opacity = settings.opacity();
+		this.viewport.opacity(opacity);
+		// A frame that fills the whole minimap is a backdrop the map would show through; a see-through map gets just the border.
+		boolean borderOnly = opacity < 1;
 
 		if (round) {
-			this.roundFrame(graphics, settings.minimapFrame, x, y, size);
+			this.roundFrame(graphics, settings.minimapFrame, x, y, size, borderOnly);
 		} else {
-			this.frame(graphics, settings.minimapFrame, x, y, size);
+			this.frame(graphics, settings.minimapFrame, x, y, size, borderOnly);
 		}
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer, round);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS);
@@ -232,18 +236,32 @@ public final class MinimapHud implements HudElement {
 	 * The border around the map: the classic dark frame with a faint light line inside it, or the
 	 * Minecraft edge, a black line with its corner pixels cut and a light grey line inside it.
 	 */
-	private void frame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size) {
+	private void frame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size, boolean borderOnly) {
 		int x1 = x + size;
 		int y1 = y + size;
 		switch (frame) {
 			case CLASSIC -> {
-				graphics.fill(x - 2, y - 2, x1 + 2, y1 + 2, 0xC0101418);
-				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0x60FFFFFF);
+				if (borderOnly) {
+					border(graphics, x - 2, y - 2, x1 + 2, y1 + 2, 2, 0xC0101418);
+					border(graphics, x - 1, y - 1, x1 + 1, y1 + 1, 1, 0x60FFFFFF);
+				} else {
+					graphics.fill(x - 2, y - 2, x1 + 2, y1 + 2, 0xC0101418);
+					graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0x60FFFFFF);
+				}
 			}
 			case MINECRAFT -> {
-				graphics.fill(x - 2, y - 1, x1 + 2, y1 + 1, 0xFF000000);
-				graphics.fill(x - 1, y - 2, x1 + 1, y1 + 2, 0xFF000000);
-				graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0xFFA0A0A0);
+				if (borderOnly) {
+					// The same black edge with its corner pixels cut, then the grey line inside it.
+					graphics.fill(x - 1, y - 2, x1 + 1, y - 1, 0xFF000000);
+					graphics.fill(x - 1, y1 + 1, x1 + 1, y1 + 2, 0xFF000000);
+					graphics.fill(x - 2, y - 1, x - 1, y1 + 1, 0xFF000000);
+					graphics.fill(x1 + 1, y - 1, x1 + 2, y1 + 1, 0xFF000000);
+					border(graphics, x - 1, y - 1, x1 + 1, y1 + 1, 1, 0xFFA0A0A0);
+				} else {
+					graphics.fill(x - 2, y - 1, x1 + 2, y1 + 1, 0xFF000000);
+					graphics.fill(x - 1, y - 2, x1 + 1, y1 + 2, 0xFF000000);
+					graphics.fill(x - 1, y - 1, x1 + 1, y1 + 1, 0xFFA0A0A0);
+				}
 			}
 			case NONE -> {
 			}
@@ -255,7 +273,7 @@ public final class MinimapHud implements HudElement {
 	 * Minecraft edge's cut corners have nothing to cut on a circle, so it's a black ring around a
 	 * light grey one.
 	 */
-	private void roundFrame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size) {
+	private void roundFrame(GuiGraphicsExtractor graphics, Settings.Frame frame, int x, int y, int size, boolean borderOnly) {
 		if (frame == Settings.Frame.NONE) {
 			return;
 		}
@@ -263,8 +281,19 @@ public final class MinimapHud implements HudElement {
 		float cx = x + size / 2.0F;
 		float cy = y + size / 2.0F;
 		boolean classic = frame == Settings.Frame.CLASSIC;
-		canvas.solid(new Circle(cx, cy, size / 2.0F + 2).disc(), classic ? 0xC0101418 : 0xFF000000);
-		canvas.solid(new Circle(cx, cy, size / 2.0F + 1).disc(), classic ? 0x60FFFFFF : 0xFFA0A0A0);
+		Circle outer = new Circle(cx, cy, size / 2.0F + 2);
+		Circle inner = new Circle(cx, cy, size / 2.0F + 1);
+		// Rings, not discs, for a see-through map: the discs would fill the whole minimap behind it.
+		canvas.solid(borderOnly ? outer.ring(2) : outer.disc(), classic ? 0xC0101418 : 0xFF000000);
+		canvas.solid(borderOnly ? inner.ring(1) : inner.disc(), classic ? 0x60FFFFFF : 0xFFA0A0A0);
+	}
+
+	/** A line {@code thickness} thick just inside a rectangle's edge, without filling the rectangle. */
+	private static void border(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1, int thickness, int color) {
+		graphics.fill(x0, y0, x1, y0 + thickness, color);
+		graphics.fill(x0, y1 - thickness, x1, y1, color);
+		graphics.fill(x0, y0 + thickness, x0 + thickness, y1 - thickness, color);
+		graphics.fill(x1 - thickness, y0 + thickness, x1, y1 - thickness, color);
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */
