@@ -136,7 +136,7 @@ public final class Radar {
 		Settings settings = Settings.get();
 		boolean names = settings.playerNames == Settings.NameTags.ALWAYS || settings.playerNames == Settings.NameTags.FULLSCREEN && fullscreen;
 		// A round view can't cut icons to its circle, so it shows only those wholly inside it, as drawn:
-		// pixel heads snap to whole screen pixels and can come out bigger than their size.
+		// pixel heads use whole screen pixels per texel and can come out bigger than their size.
 		Circle circle = view.round() ? Circle.in(view) : null;
 		IconBatch measure = circle == null ? null : IconBatch.measuring(graphics);
 		for (Blip blip : blips) {
@@ -178,7 +178,7 @@ public final class Radar {
 				MapIcons.caret(icons, cx, cy, caret + 2, withAlpha(0xE0101418, alpha), below);
 				MapIcons.caret(icons, cx, cy, caret, withAlpha(0xFFFFFFFF, alpha), below);
 			} else {
-				pixelCaret(icons, Math.round(blip.x() + s * 0.7F + 1), Math.round(blip.y() - s * 0.5F), below, alpha);
+				pixelCaret(icons, blip.x() + s * 0.7F + 1, blip.y() - s * 0.5F, below, alpha);
 			}
 		}
 	}
@@ -199,8 +199,8 @@ public final class Radar {
 		XaeroRadarIcons.Icon icon = XaeroRadarIcons.of(blip.entity());
 		if (icon != XaeroRadarIcons.Basic.DOT && (icon != null || MobFaces.has(blip.entity()))) {
 			int box = Math.round(s * 1.6F);
-			int x0 = Math.round(blip.x() - box / 2.0F);
-			int y0 = Math.round(blip.y() - box / 2.0F);
+			float x0 = blip.x() - box / 2.0F;
+			float y0 = blip.y() - box / 2.0F;
 			icons.fill(x0 - 1, y0 - 1, x0 + box + 1, y0 + box + 1, withAlpha(blip.kind().color, alpha));
 			icons.fill(x0, y0, x0 + box, y0 + box, withAlpha(0xFF101418, alpha));
 			if (icon instanceof XaeroRadarIcons.Sprite sprite) {
@@ -218,7 +218,7 @@ public final class Radar {
 
 	/**
 	 * The head as pixel art, like a player head item: each texel a whole number of screen pixels,
-	 * on the screen's pixel grid, with a one-texel black outline and a drop shadow.
+	 * with a one-texel black outline and a drop shadow. Its position follows the map continuously.
 	 */
 	private static void pixelHead(IconBatch icons, Blip blip, int alpha, boolean typeOutline) {
 		GuiGraphicsExtractor graphics = icons.graphics();
@@ -241,7 +241,7 @@ public final class Radar {
 			float texel = texel(s * 1.6F, 8);
 			pixelFrame(icons, blip.x(), blip.y(), 8, 8, texel, withAlpha(outline, alpha), alpha);
 			graphics.pose().popMatrix();
-			icons.item(item.stack(), snap(blip.x() - 4 * texel), snap(blip.y() - 4 * texel), texel / 2);
+			icons.item(item.stack(), blip.x() - 4 * texel, blip.y() - 4 * texel, texel / 2);
 		} else if (icon == XaeroRadarIcons.Basic.DOT
 			|| !MobFaces.drawPixel(icons, blip.entity(), blip.x(), blip.y(), s * 1.6F, withAlpha(0xFFFFFFFF, alpha), withAlpha(outline, alpha), alpha)) {
 			dot(icons, blip, alpha);
@@ -258,12 +258,6 @@ public final class Radar {
 		return (float) (pixels / gui);
 	}
 
-	/** Rounds a GUI coordinate to the nearest screen pixel. */
-	static float snap(float value) {
-		double gui = guiScale();
-		return (float) (Math.round(value * gui) / gui);
-	}
-
 	private static double guiScale() {
 		return Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
 	}
@@ -275,8 +269,8 @@ public final class Radar {
 	 */
 	static void pixelFrame(IconBatch icons, float x, float y, int w, int h, float texel, int outline, int alpha) {
 		GuiGraphicsExtractor graphics = icons.graphics();
-		float x0 = snap(x - w * texel / 2);
-		float y0 = snap(y - h * texel / 2);
+		float x0 = x - w * texel / 2;
+		float y0 = y - h * texel / 2;
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x0, y0);
 		graphics.pose().scale(texel);
@@ -287,11 +281,11 @@ public final class Radar {
 		icons.fill(0, 0, w, h, withAlpha(0xFF101418, alpha));
 	}
 
-	/** A square dot in the kind's colour with a black outline, on the GUI pixel grid. */
+	/** A square dot in the kind's colour with a black outline, centred on its fractional map position. */
 	private static void dot(IconBatch icons, Blip blip, int alpha) {
 		int d = Math.max(2, Math.round(blip.size() * (blip.kind() == Kind.PLAYER ? 0.6F : 0.8F)));
-		int x0 = Math.round(blip.x() - d / 2.0F);
-		int y0 = Math.round(blip.y() - d / 2.0F);
+		float x0 = blip.x() - d / 2.0F;
+		float y0 = blip.y() - d / 2.0F;
 		icons.fill(x0, y0, x0 + d + 2, y0 + d + 2, withAlpha(0x60000000, alpha));
 		icons.fill(x0 - 1, y0 - 1, x0 + d + 1, y0 + d + 1, withAlpha(0xFF000000, alpha));
 		icons.fill(x0, y0, x0 + d, y0 + d, withAlpha(blip.kind().color, alpha));
@@ -304,7 +298,7 @@ public final class Radar {
 	}
 
 	/** A small pixel arrow, up or down, white with a black outline, its centre at (cx, cy). */
-	private static void pixelCaret(IconBatch icons, int cx, int cy, boolean down, int alpha) {
+	private static void pixelCaret(IconBatch icons, float cx, float cy, boolean down, int alpha) {
 		int black = withAlpha(0xFF000000, alpha);
 		int white = withAlpha(0xFFFFFFFF, alpha);
 		// Three rows, 1, 3 and 5 pixels wide, tip first.
@@ -312,7 +306,7 @@ public final class Radar {
 			int grow = pass == 0 ? 1 : 0;
 			for (int row = 0; row < 3; row++) {
 				int half = row;
-				int y = down ? cy + 1 - row : cy - 1 + row;
+				float y = down ? cy + 1 - row : cy - 1 + row;
 				icons.fill(cx - half - grow, y - grow, cx + half + 1 + grow, y + 1 + grow, pass == 0 ? black : white);
 			}
 		}
@@ -323,10 +317,11 @@ public final class Radar {
 		Font font = Minecraft.getInstance().font;
 		String name = blip.entity().getName().getString();
 		int w = font.width(name);
-		int tx = Math.round(blip.x() - w / 2.0F);
-		int ty = Math.round(blip.y() + blip.size() * 0.75F + 3);
-		graphics.fill(tx - 1, ty - 1, tx + w, ty + 8, withAlpha(0x40000000, alpha));
-		graphics.text(font, name, tx, ty, withAlpha(0xFFFFFFFF, alpha), false);
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(blip.x() - w / 2.0F, blip.y() + blip.size() * 0.75F + 3);
+		graphics.fill(-1, -1, w, 8, withAlpha(0x40000000, alpha));
+		graphics.text(font, name, 0, 0, withAlpha(0xFFFFFFFF, alpha), false);
+		graphics.pose().popMatrix();
 	}
 
 	/** The blip under the cursor, if any, preferring players and then the nearest. */
