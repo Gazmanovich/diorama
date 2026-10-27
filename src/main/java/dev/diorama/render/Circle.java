@@ -118,14 +118,14 @@ public final class Circle {
 		for (int i = 0; i < SIDES; i++) {
 			int j = (i + 1) % SIDES;
 			// Along the outside in the circle's turning order, then back along the inside.
-			corners[out++] = this.cx + this.r * UNIT[i * 2];
-			corners[out++] = this.cy + this.r * UNIT[i * 2 + 1];
 			corners[out++] = this.cx + this.r * UNIT[j * 2];
 			corners[out++] = this.cy + this.r * UNIT[j * 2 + 1];
-			corners[out++] = this.cx + inner * UNIT[j * 2];
-			corners[out++] = this.cy + inner * UNIT[j * 2 + 1];
+			corners[out++] = this.cx + this.r * UNIT[i * 2];
+			corners[out++] = this.cy + this.r * UNIT[i * 2 + 1];
 			corners[out++] = this.cx + inner * UNIT[i * 2];
 			corners[out++] = this.cy + inner * UNIT[i * 2 + 1];
+			corners[out++] = this.cx + inner * UNIT[j * 2];
+			corners[out++] = this.cy + inner * UNIT[j * 2 + 1];
 		}
 		return corners;
 	}
