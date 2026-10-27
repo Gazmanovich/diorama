@@ -1,5 +1,6 @@
 package dev.diorama.render;
 
+import dev.diorama.Claims;
 import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
@@ -18,6 +19,16 @@ public final class MapTile {
 	private int overlayShown = -1;
 	private boolean empty = true;
 	long lastDrawn;
+	/** Land claims drawn over the tile, or null where it shows none. */
+	private @Nullable MapTexture claims;
+	/** The claims {@link #claims} shows, or null before they're first painted. */
+	Claims.@Nullable Snapshot claimsPainted;
+	/** Goes up whenever the tile's pixels change, as the ground the claims are painted on may move. */
+	int pixelsRevision;
+	/** When {@link #pixelsRevision} last went up. */
+	long pixelsChanged;
+	/** The {@link #pixelsRevision} {@link #claims} was painted for. */
+	int claimsRevision;
 
 	void upload(TileImage image) {
 		if (image.isFull()) {
@@ -136,6 +147,27 @@ public final class MapTile {
 		return 0;
 	}
 
+	/** Shows freshly painted claims, or none: {@code painted} drawn on the pixels of {@code revision}. */
+	void paintClaims(int @Nullable [] pixels, Claims.Snapshot painted, int revision) {
+		this.claimsPainted = painted;
+		this.claimsRevision = revision;
+		if (pixels == null) {
+			if (this.claims != null) {
+				this.claims.close();
+				this.claims = null;
+			}
+			return;
+		}
+		if (this.claims == null) {
+			this.claims = MapTexture.create("diorama claims", Projection.TILE_PIXELS, 1);
+		}
+		this.claims.write(0, 0, 0, Projection.TILE_PIXELS, pixels);
+	}
+
+	public @Nullable MapTexture claims() {
+		return this.texture == null ? null : this.claims;
+	}
+
 	/** Creates the GPU texture if needed; true if it was just created. */
 	private boolean ensureTexture(TileImage image) {
 		if (this.texture != null) {
@@ -172,6 +204,11 @@ public final class MapTile {
 	}
 
 	void close() {
+		if (this.claims != null) {
+			this.claims.close();
+			this.claims = null;
+		}
+		this.claimsPainted = null;
 		if (this.overlay != null) {
 			this.overlay.close();
 			this.overlay = null;

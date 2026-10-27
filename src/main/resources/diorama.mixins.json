@@ -8,6 +8,7 @@
 		"ClientChunkCacheMixin",
 		"ClientPacketListenerMixin",
 		"DeathPacketMixin",
+		"FtbChunksUpdateMixin",
 		"GameRendererMixin",
 		"LevelChunkMixin",
 		"RealmsServerMixin"

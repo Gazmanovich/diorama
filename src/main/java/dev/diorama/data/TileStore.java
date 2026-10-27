@@ -5,6 +5,7 @@ import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
+import dev.diorama.bake.TileChunks;
 import dev.diorama.bake.TileSpots;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -52,14 +53,17 @@ import org.jspecify.annotations.Nullable;
  * writer builds them: a missing overview tile means nothing under it was ever mapped.
  *
  * <p>A level-0 tile also keeps its {@link TileSpots}, so the right-click menu still works there
- * once the chunks are gone.
+ * once the chunks are gone. An overview tile keeps its {@link TileChunks}, so land claims can be
+ * drawn on it; a level-0 tile's come from its spots.
  *
- * <p>File format: {@code OMT1}, the edge length, then deflated: the ABGR pixels, and on level-0
- * tiles {@code SPT1} and the spots. Versions from before spots read the pixels and stop there.
+ * <p>File format: {@code OMT1}, the edge length, then deflated: the ABGR pixels, then on level-0
+ * tiles {@code SPT1} and the spots, and on overview tiles {@code CHK1} and the chunks. Versions
+ * from before spots read the pixels and stop there.
  */
 public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
 	private static final int SPOTS_MAGIC = 0x53505431;
+	private static final int CHUNKS_MAGIC = 0x43484B31;
 	private static final int CACHED_TILES = 24;
 	private static final long WRITE_DELAY_SECONDS = 3;
 	/** After a failed write (a full disk, say), try again this much later. */
@@ -91,10 +95,18 @@ public final class TileStore {
 	private final Map<TileKey, ArrayDeque<TileImage>> handedOver = new HashMap<>();
 	/** Tiles with a merge waiting on the writer thread, so a run of bakes queues one. Guarded by {@code this}. */
 	private final Set<TileKey> mergeQueued = new HashSet<>();
-	/** A saved tile: its pixels, and its spots where it has any. Never modified. */
-	private record Tile(int[] pixels, int @Nullable [] spots) {
+	/**
+	 * A saved tile: its pixels, and its spots (level 0) or chunks (overviews) where it has any.
+	 * Never modified.
+	 */
+	private record Tile(int[] pixels, int @Nullable [] spots, byte @Nullable [] chunks) {
+		Tile(int[] pixels, int @Nullable [] spots) {
+			this(pixels, spots, null);
+		}
+
 		boolean same(Tile other) {
-			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.spots, other.spots);
+			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.spots, other.spots)
+				&& java.util.Arrays.equals(this.chunks, other.chunks);
 		}
 	}
 
@@ -111,8 +123,13 @@ public final class TileStore {
 	 */
 	private final Map<TileKey, Tile> unwritten = new HashMap<>();
 
-	/** Level-1 overview tiles above tiles written since the last rebuild. Guarded by {@code this}. */
+	/**
+	 * Overview tiles to rebuild: level 1 above tiles written since the last rebuild, and the level-1
+	 * tiles under an overview saved before chunks were kept. Guarded by {@code this}.
+	 */
 	private final Set<TileKey> staleOverviews = new HashSet<>();
+	/** Overview tiles saved without chunks whose rebuild has been asked for. Guarded by {@code this}. */
+	private final Set<TileKey> chunksAsked = new HashSet<>();
 	private boolean rebuildScheduled;
 	/** Told about overview tiles the writer rebuilt. Called on the writer thread. */
 	private volatile Consumer<TileKey> overviewChanged = key -> {
@@ -165,22 +182,28 @@ public final class TileStore {
 		}
 	}
 
-	/** Rebuilds and writes every out-of-date overview tile, one level at a time. Writer thread. */
+	/**
+	 * Rebuilds and writes every out-of-date overview tile, one level at a time from the most
+	 * detailed up, each once, so a tile's children are rebuilt before it. Writer thread.
+	 */
 	private void rebuildOverviews() {
-		Set<TileKey> level;
+		java.util.TreeMap<Integer, Set<TileKey>> levels = new java.util.TreeMap<>();
 		synchronized (this) {
-			level = new HashSet<>(this.staleOverviews);
+			for (TileKey key : this.staleOverviews) {
+				levels.computeIfAbsent(key.lod(), lod -> new HashSet<>()).add(key);
+			}
 			this.staleOverviews.clear();
 			this.rebuildScheduled = false;
 		}
-		while (!level.isEmpty()) {
+		while (!levels.isEmpty()) {
+			Set<TileKey> level = levels.pollFirstEntry().getValue();
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
 				int[] pixels = this.shrinkChildren(key);
 				if (pixels == null) {
 					continue;
 				}
-				Tile tile = new Tile(pixels, null);
+				Tile tile = new Tile(pixels, null, this.shrinkChunks(key));
 				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
 				synchronized (this.io) {
 					synchronized (this) {
@@ -207,7 +230,9 @@ public final class TileStore {
 					this.trimCache();
 				}
 			}
-			level = above;
+			if (!above.isEmpty()) {
+				levels.computeIfAbsent(above.iterator().next().lod(), lod -> new HashSet<>()).addAll(above);
+			}
 		}
 	}
 
@@ -220,6 +245,90 @@ public final class TileStore {
 			this.merge(key);
 			Tile tile = this.saved(key);
 			return tile == null ? null : tile.pixels;
+		}
+	}
+
+	/**
+	 * An overview tile's chunks, from its children's as saved; null if none of them has any, or if
+	 * a child overview was saved before chunks were kept. That child is rebuilt first, and this
+	 * tile again after it, so a tile never keeps chunks with holes where its children had none.
+	 */
+	private byte @Nullable [] shrinkChunks(TileKey key) {
+		byte[][] children = new byte[4][];
+		boolean complete = true;
+		boolean anyTile = false;
+		for (int dy = 0; dy < 2; dy++) {
+			for (int dx = 0; dx < 2; dx++) {
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
+				Tile tile;
+				synchronized (this.io) {
+					this.merge(child);
+					tile = this.saved(child);
+				}
+				if (tile == null) {
+					continue;
+				}
+				anyTile = true;
+				if (child.lod() == 0) {
+					children[dy * 2 + dx] = TileChunks.fromSpots(child, tile.spots);
+				} else if (tile.chunks == null) {
+					complete = false;
+					this.askChunks(child);
+				} else {
+					children[dy * 2 + dx] = tile.chunks;
+				}
+			}
+		}
+		if (!complete) {
+			return null;
+		}
+		byte[] chunks = TileChunks.shrink(key, children);
+		if (chunks == null && anyTile) {
+			// Children saved before spots were kept say nothing about chunks: all unknown, but
+			// done, so the tiles above don't wait on this one.
+			chunks = new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS];
+			java.util.Arrays.fill(chunks, TileChunks.NONE);
+		}
+		return chunks;
+	}
+
+	/**
+	 * The {@link TileChunks} of a saved tile, or null if there are none. Like {@link #read}. An
+	 * overview tile saved before they were kept has none yet: this asks for it to be rebuilt, once,
+	 * from the level-1 tiles under it up.
+	 */
+	public byte @Nullable [] chunks(TileKey key) {
+		Tile tile;
+		synchronized (this.io) {
+			this.merge(key);
+			tile = this.saved(key);
+		}
+		if (tile == null) {
+			return null;
+		}
+		if (key.lod() == 0) {
+			return TileChunks.fromSpots(key, tile.spots);
+		}
+		if (tile.chunks == null) {
+			this.askChunks(key);
+		}
+		return tile.chunks;
+	}
+
+	/** Rebuilds an overview tile saved without chunks, and every level-1 tile under it, so each gets them. */
+	private synchronized void askChunks(TileKey key) {
+		if (this.closed || !this.chunksAsked.add(key)) {
+			return;
+		}
+		int span = 1 << (key.lod() - 1);
+		for (int du = 0; du < span; du++) {
+			for (int dv = 0; dv < span; dv++) {
+				this.staleOverviews.add(new TileKey(key.layer(), key.tileU() * span + du, key.tileV() * span + dv, 1));
+			}
+		}
+		if (!this.rebuildScheduled) {
+			this.rebuildScheduled = true;
+			WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
 		}
 	}
 
@@ -353,6 +462,24 @@ public final class TileStore {
 		return spots;
 	}
 
+	/** For tests: makes an overview tile look like one saved before chunks were kept, on disk too. */
+	public void forgetChunks(TileKey key) {
+		Tile old;
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			if (tile == null || key.lod() == 0) {
+				return;
+			}
+			old = new Tile(tile.pixels, null, null);
+			synchronized (this) {
+				this.cache.put(key, old);
+				this.chunksAsked.remove(key);
+			}
+		}
+		this.store(key, old);
+	}
+
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {
@@ -479,7 +606,14 @@ public final class TileStore {
 			}
 			int[] pixels = new int[size * size];
 			ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-			// Tiles saved before spots, and overview tiles, end here.
+			// Tiles saved before spots, and overview tiles saved before chunks, end here.
+			if (key.lod() > 0) {
+				byte[] more = inflated.readNBytes(4 + size * size);
+				if (more.length == 4 + size * size && ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN).getInt() == CHUNKS_MAGIC) {
+					return new Tile(pixels, null, java.util.Arrays.copyOfRange(more, 4, more.length));
+				}
+				return new Tile(pixels, null);
+			}
 			int[] spots = null;
 			byte[] more = inflated.readNBytes(4 + TileSpots.COLUMNS * TileSpots.ROWS * 4);
 			ByteBuffer rest = ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN);
@@ -502,14 +636,20 @@ public final class TileStore {
 		Path file = this.file(key);
 		int[] pixels = tile.pixels;
 		int[] spots = tile.spots;
+		byte[] chunks = tile.chunks;
 		try {
 			Files.createDirectories(file.getParent());
-			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + (spots == null ? 0 : 4 + spots.length * 4)).order(ByteOrder.LITTLE_ENDIAN);
+			int extra = spots != null ? 4 + spots.length * 4 : chunks != null ? 4 + chunks.length : 0;
+			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + extra).order(ByteOrder.LITTLE_ENDIAN);
 			buffer.asIntBuffer().put(pixels);
 			if (spots != null) {
 				buffer.position(pixels.length * 4);
 				buffer.putInt(SPOTS_MAGIC);
 				buffer.asIntBuffer().put(spots);
+			} else if (chunks != null) {
+				buffer.position(pixels.length * 4);
+				buffer.putInt(CHUNKS_MAGIC);
+				buffer.put(chunks);
 			}
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(pixels.length);
 			try (DataOutputStream data = new DataOutputStream(bytes)) {

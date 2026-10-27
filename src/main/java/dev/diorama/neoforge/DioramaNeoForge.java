@@ -1,5 +1,6 @@
 package dev.diorama.neoforge;
 
+import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
@@ -92,6 +93,7 @@ public final class DioramaNeoForge {
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
+			Claims.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
@@ -101,6 +103,7 @@ public final class DioramaNeoForge {
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
+			Claims.clear();
 		});
 		modBus.addListener(RegisterPayloadHandlersEvent.class, XaeroChannels::register);
 		// Radar icons from Xaero's Minimap's icon files, read again on every resource reload.

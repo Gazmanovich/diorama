@@ -96,6 +96,18 @@ public final class TileSpots {
 		return new BlockPos((int) Math.floor(key.minU()) + column, y, z);
 	}
 
+	/**
+	 * The z of the block a sample stands on, or {@link Integer#MIN_VALUE} where the sample has no
+	 * spot (unknown, or nothing to stand on).
+	 */
+	public static int z(TileKey key, int[] spots, int column, int row) {
+		int value = spots[row * COLUMNS + column];
+		if ((value & ~0xFFFFFF) != SPOT) {
+			return Integer.MIN_VALUE;
+		}
+		return (int) Math.floor(Projection.zAt(v(key, row), (short) value)) - ((value >>> 16) & 0xFF);
+	}
+
 	/** The map v a sample answers for: the middle of its pixel row. */
 	private static double v(TileKey key, int row) {
 		return key.minV() + (row + 0.5) / Projection.PIXELS_PER_UNIT;

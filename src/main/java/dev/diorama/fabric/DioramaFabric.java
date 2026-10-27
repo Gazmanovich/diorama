@@ -1,5 +1,6 @@
 package dev.diorama.fabric;
 
+import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
@@ -68,6 +69,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
+			Claims.clear();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
@@ -77,6 +79,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
+			Claims.clear();
 		});
 		XaeroChannels.register();
 		// Radar icons from Xaero's Minimap's icon files, read again on every resource reload.

@@ -109,6 +109,15 @@ public final class Settings {
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
+	/** Where FTB Chunks' land claims show, when it's installed. */
+	public ClaimsShown claims = ClaimsShown.ALWAYS;
+
+	/** Where land claims show: nowhere, on the fullscreen map, or on the minimap too. */
+	public enum ClaimsShown {
+		OFF,
+		FULLSCREEN,
+		ALWAYS
+	}
 
 	public enum Quality {
 		FANCY,
@@ -264,6 +273,9 @@ public final class Settings {
 		settings.radarIconScale = snapScale(settings.radarIconScale);
 		if (settings.playerNames == null) {
 			settings.playerNames = NameTags.FULLSCREEN;
+		}
+		if (settings.claims == null) {
+			settings.claims = ClaimsShown.ALWAYS;
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
