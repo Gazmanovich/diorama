@@ -3467,6 +3467,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Deleting a server team sends no update for its chunks; its claims go all the same.
 		world.getServer().runCommand("ftbteams server delete " + spawn);
 		context.waitFor(mc -> Claims.get().at(spawnX >> 4, spawnZ >> 4) == null, 400);
+		// Let the server finish with the deleted team before the world closes.
+		settle(context, 20);
 	}
 
 	/** The short name FTB Teams' commands know a team by, from its display name. */
