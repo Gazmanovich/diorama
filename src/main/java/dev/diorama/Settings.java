@@ -38,6 +38,10 @@ public final class Settings {
 	public static final int MIN_SIZE = 64;
 	public static final int MAX_SIZE = 224;
 	public static final int SIZE_STEP = 8;
+	/** Minimap opacity, in percent: {@link #MIN_OPACITY} to {@link #MAX_OPACITY} in steps of {@link #OPACITY_STEP}. */
+	public static final int MIN_OPACITY = 20;
+	public static final int MAX_OPACITY = 100;
+	public static final int OPACITY_STEP = 5;
 
 	public static final String DEFAULT_TELEPORT_COMMAND = "tp @s {x} {y} {z}";
 
@@ -50,6 +54,8 @@ public final class Settings {
 	public int minimapSize = 96;
 	public Corner minimapCorner = Corner.TOP_RIGHT;
 	public int minimapZoom = 3;
+	/** How opaque the minimap's map is, in percent. Files from before this setting leave it at 100. */
+	public int minimapOpacity = MAX_OPACITY;
 	public boolean compass = true;
 	public boolean coordinates = true;
 	public boolean biome = true;
@@ -201,6 +207,11 @@ public final class Settings {
 		return ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, this.minimapZoom))];
 	}
 
+	/** How opaque the minimap's map is, 0 to 1. */
+	public float opacity() {
+		return snapOpacity(this.minimapOpacity) / 100.0F;
+	}
+
 	/** The map look these settings ask for. */
 	public MapStyle style() {
 		return MapStyle.DEFAULT.withName("Settings")
@@ -285,6 +296,7 @@ public final class Settings {
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
 		settings.minimapSize = snapSize(settings.minimapSize);
+		settings.minimapOpacity = snapOpacity(settings.minimapOpacity);
 		int nearest = RANGES[0];
 		for (int range : RANGES) {
 			if (Math.abs(range - settings.radarRange) < Math.abs(nearest - settings.radarRange)) {
@@ -312,6 +324,12 @@ public final class Settings {
 	public static int snapSize(int size) {
 		int clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
 		return MIN_SIZE + Math.round((clamped - MIN_SIZE) / (float) SIZE_STEP) * SIZE_STEP;
+	}
+
+	/** The nearest opacity the settings screen can show. */
+	public static int snapOpacity(int opacity) {
+		int clamped = Math.max(MIN_OPACITY, Math.min(MAX_OPACITY, opacity));
+		return MIN_OPACITY + Math.round((clamped - MIN_OPACITY) / (float) OPACITY_STEP) * OPACITY_STEP;
 	}
 
 	/** Reads the minimap size as a number, or as the Small, Medium and Large it was before. */

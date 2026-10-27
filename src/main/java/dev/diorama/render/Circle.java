@@ -107,6 +107,30 @@ public final class Circle {
 		return this.disc;
 	}
 
+	/**
+	 * The band between this circle's edge and a circle {@code width} smaller inside it, as the
+	 * corners of its quads. A new array each time.
+	 */
+	public float[] ring(float width) {
+		float inner = Math.max(0, this.r - width);
+		float[] corners = new float[SIDES * 8];
+		int out = 0;
+		for (int i = 0; i < SIDES; i++) {
+			int j = (i + 1) % SIDES;
+			// Along the outside in the circle's turning order, then back along the inside: counter-clockwise
+			// on screen, like disc()'s quads, since the GUI culls the other winding.
+			corners[out++] = this.cx + this.r * UNIT[i * 2];
+			corners[out++] = this.cy + this.r * UNIT[i * 2 + 1];
+			corners[out++] = this.cx + this.r * UNIT[j * 2];
+			corners[out++] = this.cy + this.r * UNIT[j * 2 + 1];
+			corners[out++] = this.cx + inner * UNIT[j * 2];
+			corners[out++] = this.cy + inner * UNIT[j * 2 + 1];
+			corners[out++] = this.cx + inner * UNIT[i * 2];
+			corners[out++] = this.cy + inner * UNIT[i * 2 + 1];
+		}
+		return corners;
+	}
+
 	/** Cuts the rectangle by each side of the polygon it crosses, into {@link #shape}. Returns its corner count. */
 	private int cut(float x0, float y0, float x1, float y1) {
 		float[] rect = {x0, y0, x0, y1, x1, y1, x1, y0};
