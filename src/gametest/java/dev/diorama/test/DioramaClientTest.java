@@ -1041,10 +1041,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		int fz = z + 4;
 		world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + fz + " " + (x + 3) + " " + (y + 3) + " " + fz + " obsidian");
 		world.getServer().runCommand("fill " + (x + 1) + " " + y + " " + fz + " " + (x + 2) + " " + (y + 2) + " " + fz + " air");
-		world.getServer().runCommand("setblock " + (x + 1) + " " + y + " " + fz + " fire");
 		String start = (x + 2) + " " + y + " " + z + ".5 0 0";
 		int builds = context.computeOnClient(mc -> BlockLooks.builds());
 		int sessions = context.computeOnClient(mc -> MapSession.started());
+		world.getServer().runCommand("setblock " + (x + 1) + " " + y + " " + fz + " fire");
 		// With Immersive Portals, chunks of the Nether stream in through the open portal. The map
 		// stays on the overworld.
 		crossing(context, "portal lit", 100);
@@ -1065,12 +1065,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (context.computeOnClient(mc -> mc.level.dimension() != net.minecraft.world.level.Level.NETHER)) {
 				throw new AssertionError("Walking through the portal didn't reach the Nether");
 			}
-			world.getServer().runCommand("execute in minecraft:overworld run tp @a " + start);
+			teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
 			crossing(context, "back with /execute in " + round, 100);
 		}
-		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		teleport(context, world, net.minecraft.world.level.Level.NETHER, "0 70 0");
 		crossing(context, "/execute in the Nether", 100);
-		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + start);
+		teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
 		crossing(context, "/execute in the overworld", 100);
 		int rebuilt = context.computeOnClient(mc -> BlockLooks.builds()) - builds;
 		if (rebuilt != 0) {
@@ -1086,6 +1086,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (context.computeOnClient(mc -> BlockLooks.builds()) != builds + 1) {
 			throw new AssertionError("A resource reload rebuilt the block color table more than once");
 		}
+	}
+
+	/** Teleports the player into another dimension and waits until they are there. */
+	private static void teleport(ClientGameTestContext context, TestSingleplayerContext world, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, String at) {
+		world.getServer().runCommand("execute in " + dimension.identifier() + " run tp @a " + at);
+		context.waitFor(mc -> mc.level.dimension() == dimension && MapSession.get() != null, 2400);
 	}
 
 	/** Waits some ticks and logs the slowest one, and the block color builds and map sessions so far. */
