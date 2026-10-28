@@ -51,8 +51,8 @@ run=versions/$node/build/run/clientGameTest
 rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz
 start=$(date +%s)
 echo "running :$node:runClientGameTest (tests: $tests)"
-# 90 min, inside the VM's 2 hours with time to set up and send results back.
-timeout --kill-after=60 5400 xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
+# 90 min at most; boat_run.py passes TEST_SECONDS, what its own deadline leaves after setup.
+timeout --kill-after=60 "${TEST_SECONDS:-5400}" xvfb-run -a -s '-screen 0 1920x1080x24' bash ./gradlew --no-daemon --console=plain ":$node:runClientGameTest" > ~/gradle.log 2>&1
 code=$?
 minutes=$(( ($(date +%s) - start) / 60 ))
 

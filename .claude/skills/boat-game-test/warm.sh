@@ -41,7 +41,7 @@ failed=""
 for n in $nodes; do
 	s=$(date +%s)
 	# --seccomp-bpf stops only on the traced calls, so the game runs at close to full speed.
-	timeout 900 strace -f -qq --seccomp-bpf -e trace=openat -o /tmp/trace xvfb-run -a -s '-screen 0 1920x1080x24' \
+	timeout --kill-after=60 900 strace -f -qq --seccomp-bpf -e trace=openat -o /tmp/trace xvfb-run -a -s '-screen 0 1920x1080x24' \
 		bash ./gradlew --no-daemon --console=plain ":$n:runClientGameTest" > ~/boot-$n.log 2>&1
 	code=$?
 	grep -oE '"/[^"]+"' /tmp/trace | tr -d '"' | grep -vE '^/(proc|sys|dev|tmp|run)/|/build/run/' | sort -u \

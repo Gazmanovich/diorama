@@ -313,8 +313,14 @@ def run_node(node, args, repo, snapshot, start):
         if normalized.returncode:
             raise RuntimeError(f'could not prepare sandbox.sh: {tail(normalized)}')
         say(node, f'pushed after {time.time() - start:.0f} s; running {args.tests}')
+        # The tests get what's left after setup, less 2 min to pack the results and 10 to fetch
+        # them and delete the VM.
+        test_seconds = int(min(5400, work_deadline - 720 - time.time()))
+        if test_seconds < 300:
+            raise RuntimeError('setup took so long that no time is left for the tests')
         ran = True
-        code, log = run_script(vm, SANDBOX_SH, node, args.tests, *args.env, deadline=work_deadline - 600)
+        code, log = run_script(vm, SANDBOX_SH, node, args.tests, *args.env, f'TEST_SECONDS={test_seconds}',
+                               deadline=work_deadline - 600)
         (out / 'vm.log').write_text(log, encoding='utf-8')
         if code:
             raise RuntimeError(f'the VM script failed setting up or packing results; see {out / "vm.log"}')
