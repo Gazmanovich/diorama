@@ -472,6 +472,12 @@ public final class WaypointListScreen extends Screen {
 		return span;
 	}
 
+	/** Where a row's badge is centred, from the row's left: a round one in its usual place, a wider one with its left edge there. */
+	private static float badgeX(Waypoint waypoint) {
+		int width = Pins.badgeWidth(waypoint, Pins.LARGE);
+		return width > Pins.LARGE ? 4 + width / 2.0F : 11.5F;
+	}
+
 	private int rowY(int index) {
 		return LIST_TOP + 2 + index * PITCH;
 	}
@@ -544,6 +550,11 @@ public final class WaypointListScreen extends Screen {
 			graphics.centeredText(this.font, Component.translatable(this.all.isEmpty() ? "diorama.folder.empty" : "diorama.waypoints.no_match"), cx, LIST_TOP + 20, HINT);
 		}
 		String here = this.minecraft.level == null ? "" : this.minecraft.level.dimension().identifier().toString();
+		// Names start clear of the widest badge showing: initials of three or four letters widen it.
+		int textLeft = TEXT_LEFT;
+		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
+			textLeft = Math.max(textLeft, (int) Math.ceil(badgeX(this.rows.get(this.scroll + i)) + Pins.badgeWidth(this.rows.get(this.scroll + i), Pins.LARGE) / 2.0F) + 2);
+		}
 		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
 			Waypoint waypoint = this.rows.get(this.scroll + i);
 			int y = this.rowY(i);
@@ -551,11 +562,11 @@ public final class WaypointListScreen extends Screen {
 			if (selected) {
 				ScreenArt.selection(graphics, left, y, right, y + ROW);
 			}
-			Pins.badge(graphics, waypoint, left + 11.5F, y + 12.5F, Pins.LARGE);
+			Pins.badge(graphics, waypoint, left + badgeX(waypoint), y + 12.5F, Pins.LARGE);
 			// The name and position stop short of the selected row's buttons.
-			int room = right - (selected ? this.actionsWidth() + 4 : 6) - (left + TEXT_LEFT);
+			int room = right - (selected ? this.actionsWidth() + 4 : 6) - (left + textLeft);
 			String name = this.fit(waypoint.name, room);
-			graphics.text(this.font, name, left + TEXT_LEFT, y + 4, waypoint.visible && !folderHidden ? 0xFFFFFFFF : HIDDEN, true);
+			graphics.text(this.font, name, left + textLeft, y + 4, waypoint.visible && !folderHidden ? 0xFFFFFFFF : HIDDEN, true);
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
@@ -566,8 +577,8 @@ public final class WaypointListScreen extends Screen {
 				detail += "  ·  " + Component.translatable("diorama.waypoint.hidden").getString();
 			}
 			String shownDetail = this.fit(detail, room);
-			graphics.text(this.font, shownDetail, left + TEXT_LEFT, y + 14, DETAIL, true);
-			boolean overText = mouseX >= left + TEXT_LEFT && mouseX < left + TEXT_LEFT + room && mouseY >= y && mouseY < y + ROW;
+			graphics.text(this.font, shownDetail, left + textLeft, y + 14, DETAIL, true);
+			boolean overText = mouseX >= left + textLeft && mouseX < left + textLeft + room && mouseY >= y && mouseY < y + ROW;
 			if (overText && (!name.equals(waypoint.name) || !shownDetail.equals(detail))) {
 				//? if >=1.21.6 {
 				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(waypoint.name), Component.literal(detail)), mouseX, mouseY);
