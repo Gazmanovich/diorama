@@ -52,7 +52,7 @@ A new VM fetches each snapshot file from boat.dev's storage the first time it's 
 python .claude/skills/boat-game-test/boat_snapshot.py
 ```
 
-Run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles, needs no network on a second pass, and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
+Run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
 
 ## Traps
 

@@ -4,7 +4,7 @@ usage: python boat_snapshot.py
 
 Run it from a clean checkout of origin/master. Starts a large VM from boat.dev's stock image, sets
 it up with sandbox.sh (packages, JDK 25, a boot-only 26.3 run), compiles every node, fetches what
-each node's game test needs and records each node's prefetch list with warm.sh, then saves the VM
+each node's game test needs, boots every node and records its prefetch list with warm.sh, then saves the VM
 as diorama-gametest-<commit> and deletes it. Lists the older diorama-gametest-* snapshots without
 removing them.
 """

@@ -1,10 +1,10 @@
 #!/bin/bash
 # Runs on the VM that becomes the snapshot, started by boat_snapshot.py after sandbox.sh has set the
-# VM up. Compiles every node and fetches everything each node's runClientGameTest needs (Minecraft
-# jars, mappings, libraries, assets) without starting the game, and checks that a second pass needs
-# no network. Then boots each node once (DIORAMA_TESTS=boot) and records the files that run opens
-# in ~/prefetch-lists/<node>.list, which boat_run.py reads ahead on a new VM. Clears this run's
-# leftovers at the end so VMs start clean.
+# VM up. Compiles every node and fetches what each node's runClientGameTest depends on (Minecraft
+# jars, mappings, libraries, assets) without starting the game. Then boots each node once
+# (DIORAMA_TESTS=boot), which fetches the rest (the game's own natives only resolve when it runs),
+# and records the files that run opens in ~/prefetch-lists/<node>.list, which boat_run.py reads
+# ahead on a new VM. Clears this run's leftovers at the end so VMs start clean.
 # Its output goes to ~/warm.out and its exit code to ~/run-exit, as with sandbox.sh.
 # usage: warm.sh <commit>
 set -u
@@ -32,13 +32,6 @@ if [ $code != 0 ]; then
 	grep -E "FAILED|What went wrong" -A3 ~/warm.log | head -40
 	exit 1
 fi
-# Anything still missing would make this pass fail.
-bash ./gradlew --no-daemon --console=plain --offline -I ~/skip-run.gradle $tasks > ~/warm-offline.log 2>&1 || {
-	echo "the offline pass failed: something is still downloaded at run time"
-	grep -E "What went wrong" -A5 ~/warm-offline.log | head -40
-	exit 1
-}
-echo "offline pass: everything is cached"
 
 command -v strace >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq strace >/dev/null || exit 1
 export JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEO_FORCE_EGL=1 DIORAMA_TESTS=boot
@@ -49,7 +42,7 @@ for n in $nodes; do
 	s=$(date +%s)
 	# --seccomp-bpf stops only on the traced calls, so the game runs at close to full speed.
 	timeout 900 strace -f -qq --seccomp-bpf -e trace=openat -o /tmp/trace xvfb-run -a -s '-screen 0 1920x1080x24' \
-		bash ./gradlew --no-daemon --console=plain --offline ":$n:runClientGameTest" > ~/boot-$n.log 2>&1
+		bash ./gradlew --no-daemon --console=plain ":$n:runClientGameTest" > ~/boot-$n.log 2>&1
 	code=$?
 	grep -oE '"/[^"]+"' /tmp/trace | tr -d '"' | grep -vE '^/(proc|sys|dev|tmp|run)/|/build/run/' | sort -u \
 		| while read -r f; do [ -f "$f" ] && echo "$f"; done > ~/prefetch-lists/$n.list
