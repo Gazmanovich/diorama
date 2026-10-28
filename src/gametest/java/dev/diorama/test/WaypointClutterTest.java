@@ -33,6 +33,10 @@ final class WaypointClutterTest {
 	static void photos(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("difficulty peaceful");
+		// The showcase and icon-waypoints leave the player spectating in the air, where this would wait for the ground forever.
+		if (context.computeOnClient(mc -> mc.player.isSpectator())) {
+			throw new AssertionError("Run waypoint-clutter without showcase or icon-waypoints: they leave the player spectating");
+		}
 		context.waitFor(mc -> mc.player.onGround(), 600);
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		// Facing north, level, so the pins ahead spread across the view.
