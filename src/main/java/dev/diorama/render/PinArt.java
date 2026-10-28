@@ -151,60 +151,100 @@ public final class PinArt {
 
 	/**
 	 * A badge raised on a point, with a small shadow where it touches. The pin comes in the two
-	 * designed sizes, a head of 15 or 13 pixels; other sizes get the nearer one.
+	 * designed sizes, a head of 15 or 13 pixels; other sizes get the nearer one. {@code stretch}
+	 * widens the head into a pill by that many pixels (see {@link #stretchFor}), for initials too
+	 * wide for the round one.
 	 */
-	public static Art standing(int colour, boolean death, int head) {
+	public static Art standing(int colour, boolean death, int head, int stretch) {
 		int d = standingHead(head);
 		int tip = d == 13 ? 5 : 6;
 		int face = death ? DEATH_FACE : colour;
-		int w = d + 4;
+		int w = d + 4 + stretch;
 		int h = d + tip + 3;
 		Image image = new Image(w, h);
 		int ox = 2;
-		float ax = ox + d / 2.0F;
+		float ax = ox + (d + stretch) / 2.0F;
 		float ay = d + tip;
 		image.over(ellipse(w, h, ax, ay - 0.5F, d * 0.26F + 0.6F, 1.3F), 0x000000, 0.28F);
-		boolean[] mask = outline(d == 13 ? SMALL_PIN : LARGE_PIN, w, h);
+		boolean[] mask = outline(stretched(d == 13 ? SMALL_PIN : LARGE_PIN, d, stretch), w, h);
 		face(image, mask, w, h, face);
 		if (death) {
-			headstone(image, ox + 1, 1, ox + d - 1, d - 1);
+			headstone(image, ox + 1, 1, ox + d - 1 + stretch, d - 1);
 		}
-		return new Art(image, ax, ay, ox + 1, 1, ox + d - 1, d - 1);
+		return new Art(image, ax, ay, ox + 1, 1, ox + d - 1 + stretch, d - 1);
+	}
+
+	/**
+	 * How many pixels wider than round a head of {@code head} has to be to hold initials whose ink
+	 * is {@code ink} wide. Two letters fit the round head as they always have; wider ones get a pill
+	 * whose round ends stay clear of the letters. Even, so the point stays under the middle.
+	 */
+	public static int stretchFor(int head, int ink) {
+		int d = standingHead(head);
+		if (ink <= d - 4) {
+			return 0;
+		}
+		int extra = ink - (d - 8);
+		return extra + (extra & 1);
+	}
+
+	/**
+	 * A designed pin outline with its head pulled wider: the middle column of the head repeated
+	 * {@code stretch} times, the point left as it is under the middle.
+	 */
+	private static String[] stretched(String[] rows, int head, int stretch) {
+		if (stretch == 0) {
+			return rows;
+		}
+		String[] out = new String[rows.length];
+		int middle = rows[0].length() / 2;
+		for (int y = 0; y < rows.length; y++) {
+			String row = rows[y];
+			out[y] = y < head
+				? row.substring(0, middle) + String.valueOf(row.charAt(middle)).repeat(stretch) + row.substring(middle)
+				: ".".repeat(stretch / 2) + row + ".".repeat(stretch / 2);
+		}
+		return out;
 	}
 
 	/**
 	 * A round badge of diameter {@code d}; with {@code caretAngle} (radians, screen space, 0 is right)
 	 * a caret beside it points that way. With an {@code icon}, the icon sits on it as on an icon pin,
-	 * and {@code d} should be its {@link #iconHead}.
+	 * and {@code d} should be its {@link #iconHead}. {@code stretch} widens it into a pill, as for
+	 * {@link #standing}.
 	 */
-	public static Art badge(int colour, boolean death, int d, double caretAngle, int caretSize, @Nullable Image icon) {
+	public static Art badge(int colour, boolean death, int d, int stretch, double caretAngle, int caretSize, @Nullable Image icon) {
 		int face = death ? DEATH_FACE : colour;
 		boolean caret = !Double.isNaN(caretAngle);
 		int pad = caret ? 6 : 0;
-		int w = d + pad * 2;
-		Image image = new Image(w, w);
-		boolean[] mask = disc(w, w, pad + d / 2.0F, pad + d / 2.0F, d / 2.0F);
-		face(image, mask, w, w, face);
+		int w = d + stretch + pad * 2;
+		int h = d + pad * 2;
+		Image image = new Image(w, h);
+		float cx = pad + (d + stretch) / 2.0F;
+		float cy = pad + d / 2.0F;
+		float r = d / 2.0F;
+		float half = stretch / 2.0F;
+		boolean[] mask = pill(w, h, cx, cy, r, half);
+		face(image, mask, w, h, face);
 		if (death) {
-			headstone(image, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
+			headstone(image, pad + 1, pad + 1, pad + d + stretch - 1, pad + d - 1);
 		} else if (icon != null) {
-			sticker(image, icon, pad + d / 2.0F, pad + d / 2.0F);
+			sticker(image, icon, cx, cy);
 		}
 		if (caret) {
-			float cx = pad + d / 2.0F;
-			float r = d / 2.0F;
 			float fx = (float) Math.cos(caretAngle);
 			float fy = (float) Math.sin(caretAngle);
 			float px = -fy;
 			float py = fx;
-			float x = cx + fx * (r + 1.5F);
-			float y = cx + fy * (r + 1.5F);
-			boolean[] m = polygon(w, w, new float[] {
+			float reach = pillReach(r, half, fx, fy);
+			float x = cx + fx * (reach + 1.5F);
+			float y = cy + fy * (reach + 1.5F);
+			boolean[] m = polygon(w, h, new float[] {
 				x + fx * caretSize * 0.55F, y + fy * caretSize * 0.55F,
 				x - fx * caretSize * 0.4F + px * caretSize * 0.5F, y - fy * caretSize * 0.4F + py * caretSize * 0.5F,
 				x - fx * caretSize * 0.4F - px * caretSize * 0.5F, y - fy * caretSize * 0.4F - py * caretSize * 0.5F
 			});
-			boolean[] rim = dilate(m, w, w);
+			boolean[] rim = dilate(m, w, h);
 			for (int i = 0; i < rim.length; i++) {
 				rim[i] &= !m[i] && image.a[i] < 1;
 			}
@@ -213,9 +253,27 @@ public final class PinArt {
 		}
 		if (icon != null && !death) {
 			// No initials: an empty label box.
-			return new Art(image, pad + d / 2.0F, pad + d / 2.0F, 0, 0, 0, 0);
+			return new Art(image, cx, cy, 0, 0, 0, 0);
 		}
-		return new Art(image, pad + d / 2.0F, pad + d / 2.0F, pad + 1, pad + 1, pad + d - 1, pad + d - 1);
+		return new Art(image, cx, cy, pad + 1, pad + 1, pad + d + stretch - 1, pad + d - 1);
+	}
+
+	/** How far from a pill's centre its edge is along the direction (fx, fy), a unit vector. */
+	private static float pillReach(float r, float half, float fx, float fy) {
+		// Out along the direction until the point is r from the pill's middle line.
+		float lo = 0;
+		float hi = r + half;
+		for (int i = 0; i < 20; i++) {
+			float t = (lo + hi) / 2;
+			float dx = Math.max(0, Math.abs(fx * t) - half);
+			float dy = fy * t;
+			if (dx * dx + dy * dy < r * r) {
+				lo = t;
+			} else {
+				hi = t;
+			}
+		}
+		return lo;
 	}
 
 	/** The white round an icon, a touch off so it doesn't glare on snow. */
@@ -389,6 +447,20 @@ public final class PinArt {
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				float dx = x + 0.5F - cx;
+				float dy = y + 0.5F - cy;
+				m[y * w + x] = dx * dx + dy * dy <= rr;
+			}
+		}
+		return m;
+	}
+
+	/** A disc of radius r drawn out sideways by {@code half} each way from (cx, cy), as {@link #disc}. */
+	private static boolean[] pill(int w, int h, float cx, float cy, float r, float half) {
+		boolean[] m = new boolean[w * h];
+		float rr = (r - 0.25F) * (r - 0.25F);
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				float dx = Math.max(0, Math.abs(x + 0.5F - cx) - half);
 				float dy = y + 0.5F - cy;
 				m[y * w + x] = dx * dx + dy * dy <= rr;
 			}

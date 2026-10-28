@@ -15,7 +15,7 @@ A minimap and world map for Minecraft that draws your world at an angle, like a 
 - **A map that remembers.** Everywhere you've been is saved, per world and dimension, so it's still there next time. Places you haven't seen yet sit under drifting fog.
 - **Caves and the Nether.** Underground, the map shows the cave you're in. In the Nether it looks in under the bedrock roof.
 - **A radar** that shows players and mobs as their own faces, outlined red, yellow or green for hostile, neutral or passive.
-- **Waypoints** on the map and floating in the world, with an icon or your initials on each pin, a marker where you died, a pin on the bed you last slept in, folders to sort them, a distance limit for when there are too many, and an [Add] link when someone shares one in chat.
+- **Waypoints** on the map and floating in the world, with an icon or up to four letters on each pin, a marker where you died, a pin on the bed you last slept in, folders to sort them, a distance limit for when there are too many, and an [Add] link when someone shares one in chat.
 - **A right-click menu** on the map to add a waypoint, drop a temporary one, share the spot in chat, or teleport there if you're allowed to use `/tp`.
 
 | | |

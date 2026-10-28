@@ -25,6 +25,9 @@ public final class Waypoint {
 		0xFFD6409F, 0xFFFFFFFF, 0xFFB0B4BA, 0xFF60646C, 0xFF8D6B4B, 0xFF99D52A, 0xFF7CE2FE, 0xFFF0C0D8
 	};
 
+	/** The most letters a pin's initials can have; the pin's head widens to hold more than two. */
+	public static final int MAX_INITIALS = 4;
+
 	public UUID id = UUID.randomUUID();
 	public String name = "";
 	public String initials = "";

@@ -102,7 +102,7 @@ public final class WaypointEditScreen extends Screen {
 			.bounds(left + 116, top + 16, 40, 20).build());
 		// A death marker always shows its headstone.
 		this.iconButton.active = this.waypoint.kind != Waypoint.Kind.DEATH;
-		this.initials = this.field(left + 160, top + 16, 40, draft(this.initials, this.waypoint.initials), "diorama.waypoint.initials", 2);
+		this.initials = this.field(left + 160, top + 16, 40, draft(this.initials, this.waypoint.initials), "diorama.waypoint.initials", Waypoint.MAX_INITIALS);
 		this.x = this.field(left, top + 56, 64, draft(this.x, Integer.toString(this.waypoint.x)), "diorama.waypoint.x", 9);
 		this.y = this.field(left + 68, top + 56, 64, draft(this.y, Integer.toString(this.waypoint.y)), "diorama.waypoint.y", 9);
 		this.z = this.field(left + 136, top + 56, 64, draft(this.z, Integer.toString(this.waypoint.z)), "diorama.waypoint.z", 9);
