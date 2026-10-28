@@ -27,14 +27,14 @@ Done when every node exits 0, you've seen the screenshots for the sections you c
 
 ## Size and cost
 
-The plan (`box_20`) includes 555 VM-hours a month, counted at the size's rate: small 0.5x, default 1x, large 2x. Past them, runs are paid from a wallet that holds $0, so they stop. Measured on 2026-10-28 from the warm snapshot:
+The plan (`box_20`) includes 555 VM-hours a month, counted at the size's rate: small 0.5x, default 1x, large 2x. Past them, runs are paid from a wallet that holds $0, so they stop. Measured on 2026-10-28 from the warm snapshot, one run each (times on boat.dev vary by a minute between runs):
 
-| | default (4 vCPU) | large (8 vCPU) |
+| `screens` section | default (4 vCPU) | large (8 vCPU) |
 |---|---|---|
-| 26.3, `screens` | XX | XX |
-| 1.21.1, `screens` | XX | XX |
+| 26.3: game / whole run | 4.6 / 6.6 min | 3.0 / 5.0 min |
+| 1.21.1: game / whole run | 3.1 / 6.0 min | 2.7 / 5.0 min |
 
-DEFAULT-VS-LARGE-VERDICT
+About 2.5 min of every run is fixed: VM start, push, Gradle, booting Minecraft and baking the first map. Large only speeds up the game part, so a short run saves a minute or so at twice the VM-hours. Use **default** for a few sections, and **`--type large`** for long runs (`all`, the multiplayer sections) where the game part dominates.
 
 ## Limits
 
@@ -43,6 +43,8 @@ DEFAULT-VS-LARGE-VERDICT
 ## Warm snapshot
 
 VMs start from the newest saved snapshot named `diorama-gametest-<commit>`: JDK 25 (which runs every node, 1.20.1 included), Mesa, and Gradle, Loom and NeoForge caches with every node compiled and every node's Minecraft, libraries and assets downloaded, warmed on master at `<commit>`. The script prints which one it used. A snapshot only holds the disk: a stopped, forked or resumed VM starts with no processes, so every run boots Minecraft afresh.
+
+A new VM fetches each snapshot file from boat.dev's storage the first time it's read. The snapshot also holds the list of files each node's boot opens (`~/prefetch-lists/<node>.list`), and the script reads those ahead in parallel while it pushes; that took a 26.3 run's Gradle start from 62 s to 20 s.
 
 **Refresh it** when runs start downloading again: after a Minecraft, Loom, NeoForge or Gradle bump, or a new node. From a clean checkout of origin/master:
 
@@ -54,6 +56,7 @@ It takes about XX min on a large VM, saves `diorama-gametest-<commit>`, and keep
 
 ## Traps
 
+- **boat.dev's API fails now and then**: 500s, timeouts, live output streams cut after a few minutes. The script starts the tests detached and polls for their exit code, and retries the steps that are safe to repeat. A run that still fails on an API error is worth one rerun.
 - **A killed script leaves its VM running.** On Ctrl-C the script deletes its VMs; a hard kill (a background command's timeout) skips that. Step 4 catches it.
 - **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
 - **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
