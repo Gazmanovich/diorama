@@ -4705,34 +4705,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("waypoints-02b-under-inventory");
 		context.setScreen(() -> null);
 
-		// A waypoint 24 blocks ahead and low enough that its pin stands on the hotbar, looking level.
-		Waypoint low = context.computeOnClient(mc -> {
-			mc.player.setXRot(0);
-			mc.player.xRotO = 0;
-			net.minecraft.world.phys.Vec3 eye = mc.player.getEyePosition();
-			net.minecraft.world.phys.Vec3 look = mc.player.getLookAngle();
-			double distance = 24;
-			double half = mc.getWindow().getGuiScaledHeight() / 2.0;
-			// The pin's foot 8 GUI pixels above the bottom edge, in the hotbar.
-			double drop = distance * Math.tan(Math.toRadians(mc.options.fov().get() / 2.0)) * (half - 8) / half;
-			Waypoint waypoint = new Waypoint("Low", (int) Math.floor(eye.x + look.x * distance), (int) Math.floor(eye.y - drop - 1.0),
-				(int) Math.floor(eye.z + look.z * distance), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]);
-			WaypointStore.get().add(waypoint);
-			return waypoint;
-		});
-		context.waitTicks(5);
-		String missed = context.computeOnClient(mc -> {
-			float width = mc.getWindow().getGuiScaledWidth();
-			float height = mc.getWindow().getGuiScaledHeight();
-			float[] at = WorldProjection.project(low.x + 0.5, low.y + 1.0, low.z + 0.5, width, height);
-			if (at == null || Math.abs(at[0] - width / 2) > 91 || at[1] < height - 22 || at[1] > height) {
-				return at == null ? "behind the camera" : at[0] + "," + at[1] + " of " + width + "x" + height;
+		// One pin standing on the hotbar, and one on chat lines, with the chat closed.
+		Waypoint low = waypointOnScreen(context, "Low", Waypoint.PALETTE[3], 0.5, -8);
+		context.runOnClient(mc -> {
+			for (int i = 1; i <= 3; i++) {
+				mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("Chat line " + i + " over a waypoint"));
 			}
-			return null;
 		});
-		if (missed != null) {
-			throw new AssertionError("The low waypoint isn't on the hotbar: " + missed);
-		}
+		Waypoint chat = waypointOnScreen(context, "Chat", Waypoint.PALETTE[7], 60, -48);
 		context.takeScreenshot("waypoints-02c-under-hotbar");
 		//? if >=1.21.9 {
 		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
@@ -4742,6 +4722,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-02d-under-chat");
 		context.setScreen(() -> null);
+		// The totem animation, which the frame draws before the HUD before 26.3.
+		Waypoint totem = waypointOnScreen(context, "Totem", Waypoint.PALETTE[1], 0.5, 0.55);
+		//? if >=26.3 {
+		context.runOnClient(mc -> mc.player.displayItemActivation(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.TOTEM_OF_UNDYING)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gameRenderer.displayItemActivation(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.TOTEM_OF_UNDYING)));
+		*///?}
+		context.waitTicks(8);
+		context.takeScreenshot("waypoints-02e-under-totem");
+		context.waitTicks(40);
 		// F1 hides them with the rest of the HUD.
 		//? if >=26.2 {
 		context.runOnClient(mc -> mc.gui.hud.toggle());
@@ -4749,13 +4739,63 @@ public class DioramaClientTest implements FabricClientGameTest {
 		/*context.runOnClient(mc -> mc.options.hideGui = true);
 		*///?}
 		context.waitTicks(2);
-		context.takeScreenshot("waypoints-02e-hidden-hud");
+		context.takeScreenshot("waypoints-02f-hidden-hud");
 		//? if >=26.2 {
 		context.runOnClient(mc -> mc.gui.hud.toggle());
 		//?} else {
 		/*context.runOnClient(mc -> mc.options.hideGui = false);
 		*///?}
-		context.runOnClient(mc -> WaypointStore.get().remove(low));
+		context.runOnClient(mc -> {
+			WaypointStore.get().remove(low);
+			WaypointStore.get().remove(chat);
+			WaypointStore.get().remove(totem);
+		});
+	}
+
+	/**
+	 * Adds a waypoint 24 blocks ahead whose pin stands on the given GUI point with the player looking
+	 * level. Below 1, x and y are fractions of the width and height; a negative y counts up from the
+	 * bottom edge.
+	 */
+	private static Waypoint waypointOnScreen(ClientGameTestContext context, String name, int color, double x, double y) {
+		Waypoint waypoint = context.computeOnClient(mc -> {
+			mc.player.setXRot(0);
+			mc.player.xRotO = 0;
+			double width = mc.getWindow().getGuiScaledWidth();
+			double height = mc.getWindow().getGuiScaledHeight();
+			double guiX = x < 1 ? x * width : x;
+			double guiY = y < 0 ? height + y : y < 1 ? y * height : y;
+			net.minecraft.world.phys.Vec3 eye = mc.player.getEyePosition();
+			net.minecraft.world.phys.Vec3 look = mc.player.getLookAngle();
+			double distance = 24;
+			// Blocks per GUI pixel at that distance; the field of view is the vertical one.
+			double scale = distance * Math.tan(Math.toRadians(mc.options.fov().get() / 2.0)) / (height / 2);
+			double right = (guiX - width / 2) * scale;
+			double up = (height / 2 - guiY) * scale;
+			// Screen right is look cross up; the pin stands on the middle of the block's top.
+			double wx = eye.x + look.x * distance - look.z * right;
+			double wz = eye.z + look.z * distance + look.x * right;
+			Waypoint placed = new Waypoint(name, (int) Math.floor(wx), (int) Math.round(eye.y + up - 1.0), (int) Math.floor(wz),
+				mc.level.dimension().identifier().toString(), color);
+			WaypointStore.get().add(placed);
+			return placed;
+		});
+		context.waitTicks(5);
+		String missed = context.computeOnClient(mc -> {
+			float width = mc.getWindow().getGuiScaledWidth();
+			float height = mc.getWindow().getGuiScaledHeight();
+			double guiX = x < 1 ? x * width : x;
+			double guiY = y < 0 ? height + y : y < 1 ? y * height : y;
+			float[] at = WorldProjection.project(waypoint.x + 0.5, waypoint.y + 1.0, waypoint.z + 0.5, width, height);
+			if (at == null || Math.abs(at[0] - guiX) > 12 || Math.abs(at[1] - guiY) > 12) {
+				return at == null ? "behind the camera" : at[0] + "," + at[1] + " instead of " + guiX + "," + guiY;
+			}
+			return null;
+		});
+		if (missed != null) {
+			throw new AssertionError("The " + name + " waypoint isn't where the test put it: " + missed);
+		}
+		return waypoint;
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */

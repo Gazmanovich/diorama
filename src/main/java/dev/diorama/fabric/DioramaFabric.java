@@ -42,8 +42,8 @@ public final class DioramaFabric implements ClientModInitializer {
 			KeyMappingHelper.registerKeyMapping(keyMapping);
 		}
 		// Waypoints in the world are part of the picture of the world, so they go under the whole
-		// vanilla HUD and every screen; the minimap goes over the HUD. Before 1.21.6 there's no way
-		// to go under the HUD here: GameRendererMixin draws the waypoints.
+		// vanilla HUD and every screen; the minimap goes over the HUD. Before 1.21.6
+		// GameRendererMixin draws the waypoints.
 		//? if >=1.21.6 {
 		HudElementRegistry.addFirst(Diorama.id("waypoints"), new WaypointHud());
 		HudElementRegistry.addLast(Diorama.id("minimap"), new MinimapHud());
