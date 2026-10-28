@@ -81,6 +81,8 @@ public final class DrawMode {
 	private final List<double[]> points = new ArrayList<>();
 	private boolean penDown;
 	private boolean erasing;
+	/** The press was the palette's (a colour picked, or the palette closed), so its release is too. */
+	private boolean paletteRelease;
 	/** Where a note being typed goes, in map space. */
 	private double @Nullable [] notePoint;
 	private long lastClickTime;
@@ -97,12 +99,17 @@ public final class DrawMode {
 		return this.active;
 	}
 
-	/** Builds the column for a screen of {@code height}; its widgets go to {@code add}. */
-	public void init(Font font, int height, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus) {
+	/**
+	 * Builds the column; its widgets go to {@code add}. On a resize, which builds it again, what's
+	 * being drawn carries over: a note typed so far is kept, a pen stroke ends where it got to, an
+	 * erase stays undoable, and the points of a line or area stay (they're in map space).
+	 */
+	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus) {
+		this.commitNote();
+		this.endGesture();
 		this.focus = focus;
 		this.toolButtons.clear();
 		this.paletteOpen = false;
-		this.cancel();
 		int y = 20;
 		for (Tool t : Tool.values()) {
 			String name = t.name().toLowerCase(java.util.Locale.ROOT);
@@ -186,11 +193,46 @@ public final class DrawMode {
 		this.paletteOpen = false;
 	}
 
-	/** Drops anything half drawn. */
+	/**
+	 * Ends a pen stroke or an erase the mouse is still down for, as if it were let go: the screen
+	 * that would have had the release is being rebuilt.
+	 */
+	private void endGesture() {
+		if (this.penDown) {
+			this.penDown = false;
+			String dimension = currentDimension();
+			if (dimension != null && this.points.size() >= 2) {
+				this.finish(new Drawing(Drawing.Kind.STROKE, dimension, color, flatten(this.points), ""));
+			}
+			this.points.clear();
+		}
+		if (this.erasing) {
+			this.erasing = false;
+			if (this.erasedNow != null && !this.erasedNow.isEmpty()) {
+				this.undo.push(this.erasedNow);
+			}
+			this.erasedNow = null;
+		}
+	}
+
+	/**
+	 * Any press on the screen, before a widget gets it: a press off the note box keeps the note
+	 * being typed, so a button can't take the keyboard from it half-typed.
+	 */
+	public void anyPress(double x, double y) {
+		if (this.notePoint != null && this.noteBox != null && !on(this.noteBox, x, y)) {
+			this.commitNote();
+		}
+	}
+
+	/** Drops anything half drawn. An erase cut short keeps what it erased undoable. */
 	private void cancel() {
 		this.points.clear();
 		this.penDown = false;
 		this.erasing = false;
+		if (this.erasedNow != null && !this.erasedNow.isEmpty()) {
+			this.undo.push(this.erasedNow);
+		}
 		this.erasedNow = null;
 		if (this.noteBox != null) {
 			this.noteBox.setValue("");
@@ -264,14 +306,11 @@ public final class DrawMode {
 				}
 			}
 			this.paletteOpen = false;
+			this.paletteRelease = true;
 			return true;
 		}
 		if (button != InputConstants.MOUSE_BUTTON_LEFT) {
 			return false;
-		}
-		if (this.notePoint != null && this.noteBox != null && !on(this.noteBox, x, y)) {
-			// Clicking away keeps the note, then the click counts as usual.
-			this.commitNote();
 		}
 		if (tool == Tool.PEN) {
 			this.points.clear();
@@ -309,6 +348,10 @@ public final class DrawMode {
 	 * Clicks out points for the line and area tools and places notes.
 	 */
 	public boolean release(MapViewport.View view, Font font, String dimension, double x, double y, int button, boolean moved) {
+		if (this.paletteRelease) {
+			this.paletteRelease = false;
+			return true;
+		}
 		if (this.penDown && button == InputConstants.MOUSE_BUTTON_LEFT) {
 			this.penDown = false;
 			this.points.add(mapPoint(view, x, y));
@@ -392,7 +435,7 @@ public final class DrawMode {
 			}
 			return true;
 		}
-		if ((key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) && !this.points.isEmpty()) {
+		if ((key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) && !this.penDown && !this.points.isEmpty()) {
 			this.finishShape(dimension);
 			return true;
 		}
@@ -474,15 +517,17 @@ public final class DrawMode {
 			return;
 		}
 		List<Change> changes = this.undo.pop();
-		// Removals go back in the reverse of the order they were taken, so each finds its place.
-		for (int i = changes.size() - 1; i >= 0; i--) {
-			Change change = changes.get(i);
-			if (change.removedFrom < 0) {
-				store.remove(change.drawing);
-			} else {
-				store.restore(change.drawing, change.removedFrom);
+		store.batch(() -> {
+			// Removals go back in the reverse of the order they were taken, so each finds its place.
+			for (int i = changes.size() - 1; i >= 0; i--) {
+				Change change = changes.get(i);
+				if (change.removedFrom < 0) {
+					store.remove(change.drawing);
+				} else {
+					store.restore(change.drawing, change.removedFrom);
+				}
 			}
-		}
+		});
 		this.showWidgets();
 	}
 

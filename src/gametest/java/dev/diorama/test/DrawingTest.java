@@ -95,9 +95,10 @@ final class DrawingTest {
 		Drawing clicked = last(context, dimension, before + 2);
 		expect(clicked.kind == Drawing.Kind.STROKE && clicked.pointCount() == 3 && clicked.color == Waypoint.PALETTE[0], "a three-point red line, got " + describe(clicked));
 
-		// Light blue, then an area round the castle, closed with Enter.
-		pickColour(context, 14);
+		// The area tool, then light blue (picking a colour mustn't add a corner where the swatch
+		// was), then an area round the castle, closed with Enter.
 		pickTool(context, 2);
+		pickColour(context, 14);
 		for (int[] corner : new int[][] {{-26, -30}, {26, -30}, {28, 24}, {-26, 24}}) {
 			float[] at = gui(context, cx + corner[0], base + 1, cz + corner[1]);
 			click(context, at[0], at[1]);
@@ -107,8 +108,8 @@ final class DrawingTest {
 		expect(area.kind == Drawing.Kind.AREA && area.pointCount() == 4 && area.color == Waypoint.PALETTE[14], "a four-corner light blue area, got " + describe(area));
 
 		// White, then a note on the keep. Its text has a c in it, which on the map switches to caves.
-		pickColour(context, 9);
 		pickTool(context, 3);
+		pickColour(context, 9);
 		float[] keep = gui(context, cx + 2, base + 12, cz - 10);
 		click(context, keep[0], keep[1]);
 		context.getInput().typeChars("Home, cows in the yard");
@@ -120,6 +121,13 @@ final class DrawingTest {
 		expect(note.kind == Drawing.Kind.NOTE && note.text.equals("Home, cows in the yard") && note.color == Waypoint.PALETTE[9], "a white note, got " + describe(note));
 		int layer = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
 		expect(layer == TileKey.SURFACE, "pressing C while typing a note left the map on the surface");
+		// Another, by the gate, kept by clicking the colour button half-way rather than with Enter.
+		float[] gateNote = gui(context, cx + 14, base + 1, cz + 30);
+		click(context, gateNote[0], gateNote[1]);
+		context.getInput().typeChars("Gate");
+		pickColour(context, 2);
+		Drawing kept = last(context, dimension, before + 5);
+		expect(kept.kind == Drawing.Kind.NOTE && kept.text.equals("Gate") && kept.color == Waypoint.PALETTE[9], "a click on the colour button keeps a half-typed note, got " + describe(kept));
 		moveTo(context, 1300 / 4.0, 30 / 4.0);
 		context.waitTicks(3);
 		context.takeScreenshot("drawing-01-drawn");
@@ -129,10 +137,10 @@ final class DrawingTest {
 		float[] middle = {(line[0][0] + line[1][0]) / 2, (line[0][1] + line[1][1]) / 2};
 		click(context, middle[0], middle[1]);
 		int left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
-		expect(left == before + 3, "erasing the line leaves three drawings, got " + (left - before));
+		expect(left == before + 4, "erasing the line leaves four drawings, got " + (left - before));
 		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
 		List<Drawing> after = context.computeOnClient(mc -> DrawingStore.get().in(dimension));
-		expect(after.size() == before + 4 && after.get(before + 1).id.equals(clicked.id), "Undo puts the line back in its place");
+		expect(after.size() == before + 5 && after.get(before + 1).id.equals(clicked.id), "Undo puts the line back in its place");
 
 		// Esc leaves draw mode but not the map.
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
@@ -145,9 +153,10 @@ final class DrawingTest {
 		settle(context, 60);
 		context.takeScreenshot("drawing-03-far");
 
-		// Saved: the file read afresh has the four.
-		List<String> saved = context.computeOnClient(mc -> DrawingStore.open(WorldKey.current()).in(dimension).stream().map(d -> d.kind + " " + d.pointCount()).toList());
-		expect(saved.size() == before + 4, "four drawings saved, read back as " + saved);
+		// Saved: the file read afresh has the same drawings, in the same order, point for point.
+		List<String> live = context.computeOnClient(mc -> DrawingStore.get().in(dimension).stream().map(DrawingTest::full).toList());
+		List<String> saved = context.computeOnClient(mc -> DrawingStore.open(WorldKey.current()).in(dimension).stream().map(DrawingTest::full).toList());
+		expect(live.size() == before + 5 && saved.equals(live), "the five drawings read back from the file as drawn: " + saved + " vs " + live);
 
 		// The minimap: lines and the area, not the note; then the setting turns them off there.
 		context.setScreen(() -> null);
@@ -194,6 +203,10 @@ final class DrawingTest {
 			throw new AssertionError("Expected " + expected + " drawings, found " + all.size());
 		}
 		return all.get(all.size() - 1);
+	}
+
+	private static String full(Drawing d) {
+		return d.id + " " + d.kind + " " + Integer.toHexString(d.color) + " " + java.util.Arrays.toString(d.points) + " " + d.text;
 	}
 
 	private static String describe(Drawing d) {

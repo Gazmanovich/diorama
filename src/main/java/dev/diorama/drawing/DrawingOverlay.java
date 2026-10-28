@@ -12,8 +12,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Draws drawings over a map view, the fullscreen map's or the minimap's. Lines keep their width
  * on screen at every zoom: a coloured core over a dark rim, so they read on snow and forest alike.
- * Areas are a see-through fill with a solid edge; notes, a label on a dark plate. Everything
- * becomes untextured quads, drawn in one go in the drawings' order.
+ * Areas are a see-through fill with a solid edge; notes, a label on a dark plate. Lines and
+ * areas become untextured quads, drawn in one go in the drawings' order; notes go on top.
  */
 public final class DrawingOverlay {
 	/** A line's coloured core, and the dark rim either side of it, in GUI pixels. */
@@ -72,12 +72,17 @@ public final class DrawingOverlay {
 		graphics.disableScissor();
 	}
 
-	/** The topmost drawing at a screen point, or null. Notes count only when {@code notes}. */
+	/**
+	 * The topmost drawing at a screen point, or null, in the order they're drawn: notes over
+	 * everything, then lines and areas, newest first. Notes count only when {@code notes}.
+	 */
 	public static @Nullable Drawing under(Font font, MapViewport.View view, List<Drawing> drawings, double x, double y, boolean notes) {
-		for (int i = drawings.size() - 1; i >= 0; i--) {
-			Drawing drawing = drawings.get(i);
-			if (hits(font, view, drawing, x, y, notes)) {
-				return drawing;
+		for (boolean noteRound : new boolean[] {true, false}) {
+			for (int i = drawings.size() - 1; i >= 0; i--) {
+				Drawing drawing = drawings.get(i);
+				if ((drawing.kind == Drawing.Kind.NOTE) == noteRound && hits(font, view, drawing, x, y, notes)) {
+					return drawing;
+				}
 			}
 		}
 		return null;

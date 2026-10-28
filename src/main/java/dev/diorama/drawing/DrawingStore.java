@@ -45,6 +45,8 @@ public final class DrawingStore {
 	private final String worldKey;
 	private final Path file;
 	private final List<Drawing> drawings = new ArrayList<>();
+	/** Inside {@link #batch}: changes wait to be saved together. */
+	private boolean batching;
 
 	private DrawingStore(String worldKey) {
 		this.worldKey = worldKey;
@@ -108,6 +110,17 @@ public final class DrawingStore {
 		return index;
 	}
 
+	/** Makes several changes and saves once, after them all. */
+	public void batch(Runnable changes) {
+		this.batching = true;
+		try {
+			changes.run();
+		} finally {
+			this.batching = false;
+			this.save();
+		}
+	}
+
 	/**
 	 * Reads the file one entry at a time, so a single bad entry costs only itself. If anything
 	 * couldn't be read, the file is copied aside first: the next save rewrites it, and the copy
@@ -142,10 +155,12 @@ public final class DrawingStore {
 			Diorama.LOGGER.error("Couldn't read drawings from {}", this.file, e);
 		}
 		if (damaged) {
+			Path backup = this.file.resolveSibling("drawings.json.unreadable-" + System.currentTimeMillis());
 			try {
-				Files.copy(this.file, this.file.resolveSibling("drawings.json.damaged"), StandardCopyOption.REPLACE_EXISTING);
+				Files.copy(this.file, backup);
+				Diorama.LOGGER.warn("Kept a copy of the unreadable drawings file at {}", backup);
 			} catch (IOException e) {
-				Diorama.LOGGER.error("Couldn't keep a copy of {}", this.file, e);
+				Diorama.LOGGER.error("Couldn't back up {}", this.file, e);
 			}
 		}
 	}
@@ -166,6 +181,9 @@ public final class DrawingStore {
 	}
 
 	private void save() {
+		if (this.batching) {
+			return;
+		}
 		try {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("drawings.json.tmp");

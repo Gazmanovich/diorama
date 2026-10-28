@@ -170,7 +170,7 @@ public final class MapScreen extends Screen {
 			this.menu = null;
 			this.draw.toggle();
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.draw.button")).build());
-		this.draw.init(this.font, this.height, this::addRenderableWidget, this::setFocused);
+		this.draw.init(this.font, this::addRenderableWidget, this::setFocused);
 		this.placeControls();
 	}
 
@@ -353,6 +353,7 @@ public final class MapScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		this.draw.anyPress(event.x(), event.y());
 		return this.menuPressed(event.x(), event.y(), event.button()) || this.clicked(super.mouseClicked(event, doubleClick), event.x(), event.y(), event.button());
 	}
 
@@ -374,6 +375,7 @@ public final class MapScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean mouseClicked(double x, double y, int button) {
+		this.draw.anyPress(x, y);
 		return this.menuPressed(x, y, button) || this.clicked(super.mouseClicked(x, y, button), x, y, button);
 	}
 
