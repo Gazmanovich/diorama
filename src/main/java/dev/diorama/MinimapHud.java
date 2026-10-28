@@ -1,6 +1,7 @@
 package dev.diorama;
 
 import dev.diorama.bake.TileKey;
+import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
@@ -19,7 +20,8 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -57,16 +59,19 @@ public final class MinimapHud implements HudElement {
 	*///?}
 		Minecraft mc = Minecraft.getInstance();
 		Settings settings = Settings.get();
+		Screen screen = mc.gui.screen();
 		//? if >=26.2 {
 		if (!settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
 		/*if (!settings.minimap || mc.options.hideGui
 		*///?}
-			|| mc.gui.screen() instanceof MapScreen || mc.gui.screen() instanceof AbstractContainerScreen<?>
-			|| mc.gui.screen() instanceof SettingsScreen || debugScreenOpen(mc) || !this.canDraw(mc)) {
-			// Not drawn. Inventories and chests count, because the item lists other mods (JEI, REI,
-			// EMI) put beside them run into the minimap's corner. The settings screen draws its own
-			// copy, sharp over the blur, as a preview. The F3 screen fills both top corners with text
+			|| screen != null && !(screen instanceof ChatScreen) || Cobblemon.inBattle()
+			|| debugScreenOpen(mc) || !this.canDraw(mc)) {
+			// Not drawn under any screen but chat, the way Xaero's Minimap and JourneyMap do it:
+			// screens fill the middle and other mods put theirs in the corners too, like the item
+			// lists JEI, REI and EMI put beside inventories. The settings screen draws its own copy,
+			// sharp over the blur, as a preview. A Cobblemon battle keeps its tiles in both top
+			// corners even with its screen closed. The F3 screen fills both top corners with text
 			// people open it to read.
 			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
