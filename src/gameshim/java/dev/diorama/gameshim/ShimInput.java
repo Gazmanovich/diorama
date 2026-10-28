@@ -77,6 +77,17 @@ final class ShimInput implements TestInput {
 	}
 
 	@Override
+	public void pressKey(int key) {
+		ShimThreading.checkOnTestThread("pressKey");
+		InputConstants.Key pressed = InputConstants.Type.KEYSYM.getOrCreate(key);
+		context.runOnClient(minecraft -> {
+			key(minecraft, pressed, InputConstants.PRESS);
+			key(minecraft, pressed, InputConstants.RELEASE);
+		});
+		context.waitTick();
+	}
+
+	@Override
 	public void typeChars(String chars) {
 		ShimThreading.checkOnTestThread("typeChars");
 		context.runOnClient(minecraft -> chars.codePoints().forEach(c -> {

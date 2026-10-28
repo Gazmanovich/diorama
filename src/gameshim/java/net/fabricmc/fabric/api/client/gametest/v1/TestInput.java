@@ -41,6 +41,9 @@ public interface TestInput {
 	/** Presses and releases the key or mouse button bound to the mapping, then waits a tick. */
 	void pressKey(KeyMapping keyMapping);
 
+	/** Presses and releases a key ({@code InputConstants.KEY_*}), then waits a tick. */
+	void pressKey(int key);
+
 	/** Types the characters, as the keyboard would send them to the focused text field. */
 	void typeChars(String chars);
 

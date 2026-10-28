@@ -125,6 +125,16 @@ public final class Settings {
 		ALWAYS
 	}
 
+	/** Where the player's drawings show. Notes stay off the minimap, where they'd cover it. */
+	public DrawingsShown drawings = DrawingsShown.ALWAYS;
+
+	/** Where drawings show: nowhere but draw mode, on the fullscreen map, or on the minimap too. */
+	public enum DrawingsShown {
+		OFF,
+		FULLSCREEN,
+		ALWAYS
+	}
+
 	public enum Quality {
 		FANCY,
 		FAST
@@ -287,6 +297,9 @@ public final class Settings {
 		}
 		if (settings.claims == null) {
 			settings.claims = ClaimsShown.ALWAYS;
+		}
+		if (settings.drawings == null) {
+			settings.drawings = DrawingsShown.ALWAYS;
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
