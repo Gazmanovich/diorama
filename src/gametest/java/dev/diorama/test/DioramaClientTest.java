@@ -163,6 +163,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("enlarge")) {
+				enlarge(context);
+			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
 			}
@@ -4456,6 +4459,55 @@ public class DioramaClientTest implements FabricClientGameTest {
 		world.getServer().runCommand("gamemode creative @a");
 	}
 
+	/**
+	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
+	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
+	 * to its size.
+	 */
+	private static void enlarge(ClientGameTestContext context) {
+		context.setScreen(() -> null);
+		int[] saved = context.computeOnClient(mc -> new int[] {Settings.get().minimapEnlarged, Settings.get().minimapCorner.ordinal()});
+		context.runOnClient(mc -> {
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.getKey("key.keyboard.z"));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		settle(context, 20);
+		context.takeScreenshot("enlarge-01-normal");
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		if (!context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Holding the enlarge key didn't reach its key mapping");
+		}
+		settle(context, 40);
+		context.takeScreenshot("enlarge-02-200");
+		for (int percent : new int[] {150, 325, 400}) {
+			context.runOnClient(mc -> Settings.get().minimapEnlarged = percent);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-03-" + percent);
+		}
+		context.runOnClient(mc -> Settings.get().minimapEnlarged = 200);
+		for (Settings.Corner corner : Settings.Corner.values()) {
+			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-04-" + corner.name().toLowerCase(java.util.Locale.ROOT));
+		}
+		context.runOnClient(mc -> Settings.get().minimapCorner = Settings.Corner.TOP_RIGHT);
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
+		context.takeScreenshot("enlarge-05-released");
+		// The Enlarged slider sits beside Size, so the Minimap tab is no taller.
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 10);
+		context.takeScreenshot("enlarge-06-settings");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			Settings.get().minimapEnlarged = saved[0];
+			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+	}
+
 	private static void toggleDebugScreen(Minecraft mc) {
 		//? if >=1.21.9 {
 		mc.debugEntries.toggleDebugOverlay();
@@ -4992,10 +5044,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world");
 			*///?}
 		}
 		return Set.of(env.split(","));

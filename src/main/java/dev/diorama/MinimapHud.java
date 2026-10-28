@@ -80,7 +80,9 @@ public final class MinimapHud implements HudElement {
 		Settings.Corner corner = settings.minimapCorner;
 		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
 		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
-		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0);
+		// Held, the enlarge key shows it bigger, in the same corner.
+		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
+		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0, size);
 	}
 
 	/**
@@ -95,7 +97,7 @@ public final class MinimapHud implements HudElement {
 		}
 		Settings settings = Settings.get();
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
-		int[] bounds = this.draw(graphics, partialTick, true, top, 0);
+		int[] bounds = this.draw(graphics, partialTick, true, top, 0, settings.minimapSize);
 		if (!settings.minimap) {
 			//? if <1.21.6 {
 			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
@@ -142,10 +144,10 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/**
-	 * Draws the minimap in a corner, {@code effects} pixels lower for status effect icons. Returns
-	 * what it covers, x0, y0, x1, y1, then the map's own x, y and size.
+	 * Draws the minimap {@code wanted} pixels wide or less, in a corner, {@code effects} pixels lower
+	 * for status effect icons. Returns what it covers, x0, y0, x1, y1, then the map's own x, y and size.
 	 */
-	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects) {
+	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects, int wanted) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
 		LocalPlayer player = mc.player;
@@ -154,7 +156,7 @@ public final class MinimapHud implements HudElement {
 		Font font = mc.font;
 		List<String> info = this.infoLines(settings, player, mc);
 		int infoHeight = info.size() * 10;
-		int size = this.fit(settings.minimapSize, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
+		int size = this.fit(wanted, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
