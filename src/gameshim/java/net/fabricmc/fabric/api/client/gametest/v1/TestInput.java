@@ -41,6 +41,9 @@ public interface TestInput {
 	/** Presses and releases the key or mouse button bound to the mapping, then waits a tick. */
 	void pressKey(KeyMapping keyMapping);
 
+	/** Presses and releases a key ({@code InputConstants.KEY_*}), then waits a tick. */
+	void pressKey(int key);
+
 	/** Presses the key or mouse button bound to the mapping and keeps it held. */
 	void holdKey(KeyMapping keyMapping);
 

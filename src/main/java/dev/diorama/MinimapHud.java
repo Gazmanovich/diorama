@@ -5,6 +5,8 @@ import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
+import dev.diorama.drawing.DrawingOverlay;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
 import dev.diorama.render.gpu.MapCanvas;
@@ -44,6 +46,7 @@ public final class MinimapHud implements HudElement {
 	private static final long LAYER_HOLD_MS = 3000;
 
 	private final MapViewport viewport = new MapViewport();
+	private final DrawingOverlay drawings = new DrawingOverlay();
 	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
 	private int shownLayer;
 	private boolean showing;
@@ -174,6 +177,10 @@ public final class MinimapHud implements HudElement {
 		}
 		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer, round);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS);
+		DrawingStore drawings = DrawingStore.get();
+		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
+			this.drawings.draw(graphics, font, view, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);
+		}
 		List<Radar.Blip> blips = ServerRules.radarAllowed() && settings.radarOnMinimap ? Radar.collect(view, partialTick, false) : List.of();
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
