@@ -25,6 +25,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.WorldProjection;
 import dev.diorama.waypoint.XaeroImport;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -2525,6 +2526,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		*///?}
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-02-in-world");
+		waypointsUnderTheGui(context);
 
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
@@ -4691,6 +4693,56 @@ public class DioramaClientTest implements FabricClientGameTest {
 		int tu = (int) Math.floor(player.getX() / Projection.TILE_UNITS);
 		int tv = (int) Math.floor(Projection.v(player.getY(), player.getZ()) / Projection.TILE_UNITS);
 		return MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv));
+	}
+
+	/**
+	 * Waypoints in the world are part of the picture of the world: the inventory, opened with Home
+	 * in view, the hotbar, and the chat box all cover them.
+	 */
+	private static void waypointsUnderTheGui(ClientGameTestContext context) {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.inventory.InventoryScreen(Minecraft.getInstance().player));
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-02b-under-inventory");
+		context.setScreen(() -> null);
+
+		// A waypoint 24 blocks ahead and low enough that its pin stands on the hotbar, looking level.
+		Waypoint low = context.computeOnClient(mc -> {
+			mc.player.setXRot(0);
+			mc.player.xRotO = 0;
+			net.minecraft.world.phys.Vec3 eye = mc.player.getEyePosition();
+			net.minecraft.world.phys.Vec3 look = mc.player.getLookAngle();
+			double distance = 24;
+			double half = mc.getWindow().getGuiScaledHeight() / 2.0;
+			// The pin's foot 8 GUI pixels above the bottom edge, in the hotbar.
+			double drop = distance * Math.tan(Math.toRadians(mc.options.fov().get() / 2.0)) * (half - 8) / half;
+			Waypoint waypoint = new Waypoint("Low", (int) Math.floor(eye.x + look.x * distance), (int) Math.floor(eye.y - drop - 1.0),
+				(int) Math.floor(eye.z + look.z * distance), mc.level.dimension().identifier().toString(), Waypoint.PALETTE[3]);
+			WaypointStore.get().add(waypoint);
+			return waypoint;
+		});
+		context.waitTicks(5);
+		String missed = context.computeOnClient(mc -> {
+			float width = mc.getWindow().getGuiScaledWidth();
+			float height = mc.getWindow().getGuiScaledHeight();
+			float[] at = WorldProjection.project(low.x + 0.5, low.y + 1.0, low.z + 0.5, width, height);
+			if (at == null || Math.abs(at[0] - width / 2) > 91 || at[1] < height - 22 || at[1] > height) {
+				return at == null ? "behind the camera" : at[0] + "," + at[1] + " of " + width + "x" + height;
+			}
+			return null;
+		});
+		if (missed != null) {
+			throw new AssertionError("The low waypoint isn't on the hotbar: " + missed);
+		}
+		context.takeScreenshot("waypoints-02c-under-hotbar");
+		//? if >=1.21.9 {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-02d-under-chat");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> WaypointStore.get().remove(low));
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
