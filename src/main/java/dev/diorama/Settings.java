@@ -40,6 +40,10 @@ public final class Settings {
 	public static final int MIN_SIZE = 64;
 	public static final int MAX_SIZE = 224;
 	public static final int SIZE_STEP = 8;
+	/** How much the enlarge key grows the minimap, in percent: {@link #MIN_ENLARGED} to {@link #MAX_ENLARGED} in steps of {@link #ENLARGED_STEP}. */
+	public static final int MIN_ENLARGED = 125;
+	public static final int MAX_ENLARGED = 400;
+	public static final int ENLARGED_STEP = 25;
 	/** Minimap opacity, in percent: {@link #MIN_OPACITY} to {@link #MAX_OPACITY} in steps of {@link #OPACITY_STEP}. */
 	public static final int MIN_OPACITY = 20;
 	public static final int MAX_OPACITY = 100;
@@ -55,6 +59,8 @@ public final class Settings {
 	@JsonAdapter(SizeAdapter.class)
 	public int minimapSize = 96;
 	public Corner minimapCorner = Corner.TOP_RIGHT;
+	/** The minimap's size while the enlarge key is held, in percent of {@link #minimapSize}. */
+	public int minimapEnlarged = 200;
 	public int minimapZoom = 3;
 	/** How opaque the minimap's map is, in percent. Files from before this setting leave it at 100. */
 	public int minimapOpacity = MAX_OPACITY;
@@ -304,6 +310,7 @@ public final class Settings {
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
 		settings.minimapSize = snapSize(settings.minimapSize);
 		settings.minimapOpacity = snapOpacity(settings.minimapOpacity);
+		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
 		settings.apply();
@@ -337,6 +344,12 @@ public final class Settings {
 	public static int snapSize(int size) {
 		int clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
 		return MIN_SIZE + Math.round((clamped - MIN_SIZE) / (float) SIZE_STEP) * SIZE_STEP;
+	}
+
+	/** The nearest enlarged size the settings screen can show. */
+	public static int snapEnlarged(int percent) {
+		int clamped = Math.max(MIN_ENLARGED, Math.min(MAX_ENLARGED, percent));
+		return MIN_ENLARGED + Math.round((clamped - MIN_ENLARGED) / (float) ENLARGED_STEP) * ENLARGED_STEP;
 	}
 
 	/** The nearest opacity the settings screen can show. */
