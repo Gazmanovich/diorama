@@ -15,8 +15,8 @@ import time
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-from boat_run import (HERE, SANDBOX_SH, SNAPSHOT_PREFIX, boat, boat_retry, create_vm, events, install_cleanup,  # noqa: E402
-                      remove_vm, run_script, tail)
+import boat_run  # noqa: E402
+from boat_run import HERE, SANDBOX_SH, SNAPSHOT_PREFIX, boat, boat_retry, create_vm, events, reconcile, run_script, tail  # noqa: E402
 
 WARM_SH = '/home/user/src/.claude/skills/boat-game-test/warm.sh'
 
@@ -38,17 +38,19 @@ def main():
     name = SNAPSHOT_PREFIX + commit
     start = time.time()
 
-    install_cleanup()
-    vm = create_vm('large', None, f'snapshot-build-{commit}', ttl=14400)
-    print(f'VM {vm} (large) ready')
+    # The whole build gets 4 hours, the VM's lifetime.
+    boat_run.work_deadline = start + 3.75 * 3600
+    boat_run.interrupt_on_signals()
     try:
+        vm = create_vm('large', None, f'snapshot-build-{commit}', ttl=14400)
+        print(f'VM {vm} (large) ready')
         pushed = boat_retry('push', vm, str(repo), '--to', '/home/user/src', timeout=300)
         if pushed.returncode:
             sys.exit(f'boat push failed: {tail(pushed)}')
         normalized = boat_retry('exec', vm, '--timeout', '60', '--', 'sed', '-i', r's/\r$//', SANDBOX_SH, WARM_SH)
         if normalized.returncode:
             sys.exit(f'could not prepare the scripts: {tail(normalized)}')
-        deadline = start + 3.5 * 3600
+        deadline = boat_run.work_deadline - 600
         print('setting up and booting 26.3 once (sandbox.sh)')
         code, log = run_script(vm, SANDBOX_SH, '26.3', 'boot', deadline=deadline)
         print(log.strip()[-2000:])
@@ -80,7 +82,8 @@ def main():
             sys.exit(f'boat snapshot failed: {tail(saved)}')
         print(f'saved {name} after {(time.time() - start) / 60:.0f} min')
     finally:
-        remove_vm(vm)
+        # Deletes the build VM, also after an error or Ctrl-C.
+        reconcile(rounds=2)
 
     listed = next(events(boat('snapshots', '--json').stdout), {})
     older = [s for s in listed.get('named', []) if s['name'].startswith(SNAPSHOT_PREFIX) and s['name'] != name]

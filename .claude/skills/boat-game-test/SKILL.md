@@ -19,9 +19,9 @@ A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa
    python .claude/skills/boat-game-test/boat_run.py <node[,node...]> --tests <section,section>
    ```
 
-   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`): the tests stop at 90 min and the script stops waiting for them at 100, leaving time to fetch results and delete the VMs.
+   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`): the tests stop at 90 min and the script's own work at 105, which leaves the rest for deleting the VMs.
 3. Open the screenshots it lists (`build/boat-runs/<time>-<node>/screenshots/`) and look at them. A pass with the wrong picture is still a failure. On a failure the script prints the assertion; `gradle.log` and `latest.log` in the same folder have the rest.
-4. Read the end of the output. The script deletes its VMs and then checks the account; `!! still on the account` or `!! VM ... kept` names a VM of yours that's left, with the commands to deal with it. A kept VM is stopped with the run's results on it, because they couldn't be fetched. Your VMs' names start with the prefix the script prints first (`diorama-test-<branch>-...-<pid>`); leave every other VM alone, they belong to other agents.
+4. Read the end of the output. Every VM of the run is named with the prefix the script prints first (`diorama-test-<random>-`); at the end it deletes every VM with that prefix and says which are left. A `!!` line names one that needs you, with the command. `keeping VM` means the tests ran but their results couldn't be fetched, so the VM is stopped with them on it; fetch and delete it. Leave every VM without your prefix alone: they belong to other agents.
 
 Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` (plain `boat list` hides stopped VMs) shows none of your VMs.
 
@@ -38,7 +38,7 @@ About 2.5 min of every run is fixed: VM start, push, Gradle, booting Minecraft a
 
 ## Limits
 
-100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. Before each start the script reads `boat limits` (free, counts nothing): it waits up to 3 min for a start this minute, and stops starting when the hour's or day's starts are gone. A refused start stops the rest of the fan-out; rerun the failed nodes later, not in a loop. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
+100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. Before each start the script reads `boat limits` (free, counts nothing): it waits about 3 min at most for a start this minute, and stops starting when the hour's or day's starts are gone. Other agents can still take the last start between that check and this script's start, so a start can be refused anyway; a refusal stops the rest of this run's starts. Rerun the failed nodes later, not in a loop. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
 
 ## Warm snapshot
 
@@ -57,7 +57,7 @@ Run it in the background with the 4-hour budget it gives its VM. It saves nothin
 ## Traps
 
 - **boat.dev's API fails now and then**: 500s, timeouts, live output streams cut after a few minutes. The script starts the tests detached and polls for their exit code, and retries the steps that are safe to repeat. A run that still fails on an API error is worth one rerun, after step 4's check.
-- **A killed script leaves its VM running.** On Ctrl-C the script deletes its VMs, including ones still starting; a hard kill (a background command's timeout) skips that. Then look for your VM names with `boat list --all`.
+- **A killed script leaves its VM running.** On Ctrl-C the script deletes the VMs with its prefix, checking twice 20 s apart for ones still starting; a hard kill (a background command's timeout) skips that. Then look for your prefix in `boat list --all`.
 - **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
 - **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
 - **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara, then run on this PC under the Minecraft lock.
