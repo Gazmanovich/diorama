@@ -6,8 +6,11 @@ import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
 import dev.diorama.waypoint.Waypoint;
+import dev.diorama.render.Pins;
 import dev.diorama.waypoint.WaypointEditScreen;
+import dev.diorama.waypoint.WaypointIconScreen;
 import dev.diorama.waypoint.WaypointListScreen;
+import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointStore;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
@@ -65,6 +68,20 @@ final class LongInitialsTest {
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(at.getX(), Projection.v(at.getY(), at.getZ() - 20), 4.0, TileKey.SURFACE));
 		settle(context, 60);
 		context.takeScreenshot("initials-map");
+		// The cursor over the right end of a wide pin's head points at that pin.
+		String pointed = context.computeOnClient(mc -> {
+			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
+				if (pin.waypoint().initials.equals("WOOD") && !pin.clamped()) {
+					float end = pin.x() + (Pins.badgeWidth(pin.waypoint(), (int) pin.size()) / 2.0F - 2);
+					WaypointOverlay.Pin under = WaypointOverlay.under(((MapScreen) mc.gui.screen()).pins(), end, pin.headY());
+					return under == null ? "nothing" : under.waypoint().initials;
+				}
+			}
+			return "no WOOD pin on the map";
+		});
+		if (!pointed.equals("WOOD")) {
+			throw new AssertionError("The right end of WOOD's pin on the map points at " + pointed);
+		}
 		context.setScreen(() -> null);
 
 		context.setScreen(() -> new WaypointListScreen(null));
@@ -74,6 +91,9 @@ final class LongInitialsTest {
 		context.setScreen(() -> new WaypointEditScreen(null, wood, false));
 		context.waitTicks(5);
 		context.takeScreenshot("initials-editor");
+		context.setScreen(() -> new WaypointIconScreen(null, wood, "", id -> { }));
+		context.waitTicks(5);
+		context.takeScreenshot("initials-icon-picker");
 		context.setScreen(() -> null);
 
 		context.runOnClient(mc -> {

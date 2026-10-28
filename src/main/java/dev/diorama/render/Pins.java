@@ -88,10 +88,13 @@ public final class Pins {
 		return icon != null ? PinArt.iconHeadAbove(icon) : headAbove(size);
 	}
 
-	/** How near the centre of this waypoint's head, or badge, the cursor has to be to point at it. */
+	/**
+	 * How near the centre of this waypoint's head, or badge, the cursor has to be to point at it; a
+	 * head widened for its initials ({@link #stretch}) reaches as far from its middle line.
+	 */
 	public static float reach(Waypoint waypoint, int size) {
 		PinArt.Image icon = icon(waypoint);
-		return (icon != null ? PinArt.iconHead(icon) : size + stretch(waypoint, size)) / 2.0F + 2;
+		return (icon != null ? PinArt.iconHead(icon) : size) / 2.0F + 2;
 	}
 
 	/** How far above the marked spot a standing pin's head is centred, in GUI pixels. */
@@ -128,7 +131,7 @@ public final class Pins {
 	}
 
 	/** How much wider than round this waypoint's head is drawn to hold its initials. */
-	private static int stretch(Waypoint waypoint, int head) {
+	public static int stretch(Waypoint waypoint, int head) {
 		if (waypoint.kind == Waypoint.Kind.DEATH || icon(waypoint) != null) {
 			return 0;
 		}

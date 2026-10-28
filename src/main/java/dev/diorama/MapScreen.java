@@ -8,6 +8,7 @@ import dev.diorama.bake.TileSpots;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
+import dev.diorama.render.Pins;
 import dev.diorama.render.Radar;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
@@ -780,13 +781,15 @@ public final class MapScreen extends Screen {
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
 		for (WaypointOverlay.Pin pin : pins) {
 			float r = pin.size() / 2 + 2;
-			if (pin.clamped() && pin.x() + r > bx0 && pin.x() - r < bx1 && pin.y() + r > by0 && pin.y() - r < by1) {
+			// Initials of three or four letters make the badge wider than it's tall.
+			float rx = r + Pins.stretch(pin.waypoint(), (int) pin.size()) / 2.0F;
+			if (pin.clamped() && pin.x() + rx > bx0 && pin.x() - rx < bx1 && pin.y() + r > by0 && pin.y() - r < by1) {
 				// An edge pin behind the zoom buttons moves the shorter way out: above them or left.
 				float up = pin.y() + r - by0;
-				float left = pin.x() + r - bx0;
+				float left = pin.x() + rx - bx0;
 				pin = up <= left
 					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), true)
-					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - r, pin.y(), pin.size(), true);
+					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), true);
 			}
 			out.add(pin);
 		}

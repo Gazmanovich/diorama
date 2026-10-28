@@ -17,7 +17,8 @@ import net.minecraft.network.chat.Component;
  * back to the editor.
  */
 public final class WaypointIconScreen extends Screen {
-	private static final int CELL = 30;
+	/** Wide enough for the initials badge with four letters. */
+	private static final int CELL = 34;
 	/** Columns when the icons fit in the window's height; a resource pack's many icons get more. */
 	private static final int MIN_COLUMNS = 6;
 	private static final int LABEL = 0xFFA0A0A0;
