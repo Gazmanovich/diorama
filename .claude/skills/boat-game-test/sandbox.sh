@@ -1,9 +1,16 @@
 #!/bin/bash
 # Runs on a boat.dev VM, started by boat_run.py: installs what's missing, copies the pushed tree
 # from ~/src over ~/diorama (keeping its Gradle caches), runs one node's client game tests with
-# software rendering, and packs the results into ~/result.tgz.
+# software rendering, and packs the results into ~/result.tgz. Its output goes to ~/sandbox.log and
+# its exit code to ~/run-exit, which boat_run.py polls for.
 # usage: sandbox.sh <node> <tests|all> [KEY=VALUE...]
 set -u
+# One run per VM: a start the API reported as failed may have started after all.
+exec 9>~/sandbox.lock
+flock -n 9 || exit 75
+touch ~/run-started
+exec > ~/sandbox.log 2>&1
+trap 'echo $? > ~/run-exit' EXIT
 node=$1
 tests=$2
 shift 2
