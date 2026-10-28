@@ -42,17 +42,18 @@ legacyForge {
 			loadedMods = listOf(mods["diorama"], mods["diorama_gameshim"], mods["diorama_test"])
 			gameDirectory = project.file("build/run/clientGameTest")
 			systemProperty("diorama.gameshim", "true")
+			// The shim's mixins, which only this run loads (the mixin block below lists the rest).
+			programArguments.addAll("--mixin.config", "diorama-gameshim.mixins.json")
 		}
 	}
 }
 
 // The mixins' reference maps tell them the SRG names a real install runs on. The configs listed
-// here are for development runs; a real install finds a jar's in its manifest.
+// here are for every development run; a real install finds a jar's in its manifest.
 mixin {
 	add(main, "diorama.refmap.json")
 	add(gameshim, "diorama-gameshim.refmap.json")
 	config("diorama.mixins.json")
-	config("diorama-gameshim.mixins.json")
 	config("mixinextras.init.mixins.json")
 }
 tasks.named<Jar>("jar") {

@@ -149,10 +149,16 @@ public final class XaeroChannels {
 					if (event instanceof NetworkEvent.ServerCustomPayloadLoginEvent) {
 						return;
 					}
-					// Read here: the buffer is only good until this returns. Handled on the client thread.
+					// Read here: the buffer is only good until this returns. Handled on the client thread,
+					// as on Fabric, unless the player has left by then.
 					Message message = read(type, event.getPayload());
 					NetworkEvent.Context context = event.getSource().get();
-					context.enqueueWork(() -> receive(message));
+					Connection connection = context.getNetworkManager();
+					context.enqueueWork(() -> {
+						if (connection.isConnected()) {
+							receive(message);
+						}
+					});
 					context.setPacketHandled(true);
 				});
 		}
