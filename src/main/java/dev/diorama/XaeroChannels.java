@@ -1,15 +1,16 @@
 package dev.diorama;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.Minecraft;
 //? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 //?} else {
-/*import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientPacketListener;
+/*import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.PacketFlow;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -49,8 +50,9 @@ import org.jspecify.annotations.Nullable;
  * an answer moves the server's tracking from the World Map's channel to Diorama.
  *
  * <p>Fabric and NeoForge allow one handler per channel, and registering a channel twice throws at
- * startup. So a channel is only Diorama's when the Xaero mod that owns it isn't installed. With
- * both of Xaero's mods installed, they keep their channels and Diorama names worlds by their seed.
+ * startup. So a channel is only Diorama's when the Xaero mod that owns it isn't installed. On a
+ * channel a Xaero mod has, Diorama still reads level IDs as they arrive, before that mod reads
+ * them (see {@link #peek}), and leaves the rest to it.
  */
 public final class XaeroChannels {
 	/** Message kinds, the first byte of every message. */
@@ -67,8 +69,8 @@ public final class XaeroChannels {
 	/** VoxelMap's and JourneyMap's world ID channel, which MapModCompanion also listens on. */
 	private static final Identifier WORLD_INFO = Identifier.fromNamespaceAndPath("worldinfo", "world_id");
 
-	/** Whether Diorama listens on at least one of the channels. */
-	private static boolean listening;
+	/** The channels a Xaero mod has, whose level IDs Diorama reads in {@link #peek}. */
+	private static final List<Identifier> CLAIMED = new ArrayList<>(2);
 	/** The channel tracked players come on: the first Diorama answered on, the minimap's over the World Map's. */
 	private static CustomPacketPayload.@Nullable Type<Message> trackerChannel;
 
@@ -102,6 +104,22 @@ public final class XaeroChannels {
 			// Registering a handler also tells the server Diorama listens here. Plugins need that:
 			// Paper drops messages on channels the client hasn't registered.
 			ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
+		}
+	}
+
+	/**
+	 * For tests: Diorama leaves the channels as if Xaero's mods had them (true), keeping only what
+	 * {@link #peek} reads, or takes them back (false). Call while not on a server.
+	 */
+	public static void handOverForTests(boolean toXaero) {
+		for (CustomPacketPayload.Type<Message> type : List.of(MINIMAP, WORLD_MAP)) {
+			if (toXaero) {
+				ClientPlayNetworking.unregisterGlobalReceiver(type.id());
+				CLAIMED.add(type.id());
+			} else {
+				CLAIMED.remove(type.id());
+				ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
+			}
 		}
 	}
 	//?} else if fabric {
@@ -163,21 +181,25 @@ public final class XaeroChannels {
 	/** The channels whose Xaero mod isn't installed. */
 	private static List<CustomPacketPayload.Type<Message>> unclaimed() {
 		List<CustomPacketPayload.Type<Message>> unclaimed = new ArrayList<>(2);
+		CLAIMED.clear();
 		// Fair-Play Minimap used the minimap's channel name in some versions.
 		if (unclaimed(MINIMAP, "xaerominimap", "xaerominimapfair")) {
 			unclaimed.add(MINIMAP);
+		} else {
+			CLAIMED.add(MINIMAP.id());
 		}
 		if (unclaimed(WORLD_MAP, "xaeroworldmap")) {
 			unclaimed.add(WORLD_MAP);
+		} else {
+			CLAIMED.add(WORLD_MAP.id());
 		}
-		listening = !unclaimed.isEmpty();
 		return unclaimed;
 	}
 
 	private static boolean unclaimed(CustomPacketPayload.Type<Message> type, String... xaeroMods) {
 		for (String mod : xaeroMods) {
 			if (modLoaded(mod)) {
-				Diorama.LOGGER.info("{} is installed, so it keeps {} to itself", mod, type.id());
+				Diorama.LOGGER.info("{} is installed, so it keeps {}; Diorama only reads level IDs there", mod, type.id());
 				return false;
 			}
 		}
@@ -283,8 +305,23 @@ public final class XaeroChannels {
 		trackerChannel = null;
 	}
 
-	static boolean listening() {
-		return listening;
+	/**
+	 * A message from the server on {@code channel}, before the mod that has the channel reads it.
+	 * On a channel a Xaero mod has, a level ID is taken as if Diorama had the channel; the body is
+	 * left as it was. Called on the network thread, by a mixin.
+	 */
+	public static void peek(Identifier channel, ByteBuf body) {
+		if (!CLAIMED.contains(channel) || body.readableBytes() < 5 || body.getByte(body.readerIndex()) != LEVEL_ID) {
+			return;
+		}
+		int id = body.getInt(body.readerIndex() + 1);
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> {
+			// Unless the player left before the client got to it.
+			if (mc.getConnection() != null) {
+				WorldKey.serverLevelId(id);
+			}
+		});
 	}
 
 	/**

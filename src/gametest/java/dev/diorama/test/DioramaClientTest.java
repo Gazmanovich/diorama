@@ -532,7 +532,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
 		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);
+		// With Xaero's mods installed, the channels are theirs and Diorama has no handler there,
+		// but it still reads the level ID on the way: survival opens its own folder again.
+		dev.diorama.XaeroChannels.handOverForTests(true);
+		String survivalWithXaero;
+		try {
+			survivalWithXaero = playOnServer(context, "diorama-shared", "id-survival-xaero", null, null, List.of("Survival Camp"), List.of("Old Camp", "Lobby Camp"), true, SURVIVAL_ID);
+		} finally {
+			dev.diorama.XaeroChannels.handOverForTests(false);
+		}
 		levelIdOnJoin = null;
+		if (!survivalWithXaero.equals(survival)) {
+			throw new AssertionError("With Xaero's mods holding the channels, survival opened " + survivalWithXaero + ", not " + survival);
+		}
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
 		}

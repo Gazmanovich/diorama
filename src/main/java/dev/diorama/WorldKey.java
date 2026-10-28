@@ -221,7 +221,7 @@ public final class WorldKey {
 	}
 
 	private static boolean expectingId(Naming naming, ServerData data) {
-		if (silent || !XaeroChannels.listening() || lastId == null && !XaeroChannels.serverMayNameWorlds() && !namedBefore(data)) {
+		if (silent || lastId == null && !XaeroChannels.serverMayNameWorlds() && !namedBefore(data)) {
 			return false;
 		}
 		if (System.currentTimeMillis() - naming.since < (lastId == null ? FIRST_WAIT_MS : LATER_WAIT_MS)) {
