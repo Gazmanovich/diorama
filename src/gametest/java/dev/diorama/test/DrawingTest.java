@@ -76,6 +76,11 @@ final class DrawingTest {
 		for (int i = 1; i <= 24; i++) {
 			double t = i / 24.0;
 			moveTo(context, gate[0] + (road[0] - gate[0]) * t + Math.sin(t * Math.PI * 3) * 6, gate[1] + (road[1] - gate[1]) * t);
+			if (i == 12) {
+				// Enter mid-stroke does nothing: the pencil still has the keyboard focus from its click,
+				// and Enter mustn't press it.
+				context.getInput().pressKey(InputConstants.KEY_RETURN);
+			}
 		}
 		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(2);
@@ -132,12 +137,21 @@ final class DrawingTest {
 		context.waitTicks(3);
 		context.takeScreenshot("drawing-01-drawn");
 
-		// Erase the line by clicking it, then the Undo button brings it back where it was.
+		// Erase the line by dragging over it, and leave draw mode with Esc before letting go. Back
+		// in draw mode, the Undo button still brings it back where it was.
 		pickTool(context, 4);
 		float[] middle = {(line[0][0] + line[1][0]) / 2, (line[0][1] + line[1][1]) / 2};
-		click(context, middle[0], middle[1]);
+		moveTo(context, middle[0] - 2, middle[1] + 2);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		moveTo(context, middle[0], middle[1]);
+		moveTo(context, middle[0] + 2, middle[1] - 2);
 		int left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
 		expect(left == before + 4, "erasing the line leaves four drawings, got " + (left - before));
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+		expect(context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && !map.drawMode().active()), "Esc mid-erase leaves draw mode and keeps the map open");
+		click(context, widget(context, s -> s.drawButton()));
 		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
 		List<Drawing> after = context.computeOnClient(mc -> DrawingStore.get().in(dimension));
 		expect(after.size() == before + 5 && after.get(before + 1).id.equals(clicked.id), "Undo puts the line back in its place");

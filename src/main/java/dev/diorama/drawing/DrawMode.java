@@ -110,6 +110,8 @@ public final class DrawMode {
 		this.focus = focus;
 		this.toolButtons.clear();
 		this.paletteOpen = false;
+		// The screen being rebuilt never sends the release a palette press was waiting for.
+		this.paletteRelease = false;
 		int y = 20;
 		for (Tool t : Tool.values()) {
 			String name = t.name().toLowerCase(java.util.Locale.ROOT);
@@ -229,6 +231,7 @@ public final class DrawMode {
 	private void cancel() {
 		this.points.clear();
 		this.penDown = false;
+		this.paletteRelease = false;
 		this.erasing = false;
 		if (this.erasedNow != null && !this.erasedNow.isEmpty()) {
 			this.undo.push(this.erasedNow);
@@ -435,8 +438,12 @@ public final class DrawMode {
 			}
 			return true;
 		}
-		if ((key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) && !this.penDown && !this.points.isEmpty()) {
-			this.finishShape(dimension);
+		if (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) {
+			// Enter finishes a line or area, and is draw mode's either way: let through, it would
+			// press whichever button was clicked last (a tool, or the pencil, which leaves draw mode).
+			if (!this.penDown && !this.points.isEmpty()) {
+				this.finishShape(dimension);
+			}
 			return true;
 		}
 		if (key == InputConstants.KEY_Z && controlDown()) {
