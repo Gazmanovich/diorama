@@ -21,9 +21,9 @@ A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa
 
    `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`); the script gives up at 115 min.
 3. Open the screenshots it lists (`build/boat-runs/<time>-<node>/screenshots/`) and look at them. A pass with the wrong picture is still a failure. On a failure the script prints the assertion; `gradle.log` and `latest.log` in the same folder have the rest.
-4. Run `boat list` and delete any VM of yours still there (`boat delete <id> --yes`). Yours are named `diorama-test-<your branch>-<node>-<pid>`; leave the others, they belong to other agents.
+4. Run `boat list --all` (plain `boat list` hides stopped VMs) and delete any VM of yours still there (`boat delete <id> --yes`). Yours are named `diorama-test-<your branch>-<node>-<pid>`; leave the others, they belong to other agents.
 
-Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list` shows none of your VMs.
+Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` shows none of your VMs.
 
 ## Size and cost
 

@@ -24,6 +24,10 @@ HERE = Path(__file__).resolve().parent
 SANDBOX_SH = '/home/user/src/.claude/skills/boat-game-test/sandbox.sh'
 # The VM's own limit; sandbox.sh stops the tests at 90 min, inside it.
 TTL = 7200
+# A new VM fetches each snapshot file from boat.dev's storage the first time it's read, which made
+# Gradle's start on a fresh VM about 80 s instead of 5. Reading the files a node's run opens (lists
+# made by warm.sh) 64 at a time while the tree is pushed saved about a minute on a 26.3 run.
+PREFETCH = ('tr "\\n" "\\0" < ~/prefetch-lists/{node}.list | xargs -0 -P 64 -n 20 cat > /dev/null 2>&1')
 
 
 def find_boat():
@@ -188,6 +192,8 @@ def run_node(node, args, repo, label, snapshot, start):
     vm = create_vm(args.type, snapshot, f'diorama-test-{label}-{node}-{os.getpid()}')
     say(node, f'VM {vm} ({args.type}) ready after {time.time() - start:.0f} s')
     try:
+        if not args.no_prefetch:
+            boat('exec', vm, '--detach', '--json', '--', 'bash', '-c', PREFETCH.format(node=node))
         # The snapshot's copy and results: push only adds files, and an old result.tgz could pass for this run's.
         cleared = boat_retry('exec', vm, '--timeout', '120', '--', 'rm', '-rf', '/home/user/src', '/home/user/result',
                              '/home/user/result.tgz', '/home/user/run-started', '/home/user/run-exit')
@@ -237,6 +243,7 @@ def main():
     parser.add_argument('--env', action='append', default=[], help='extra KEY=VALUE for the game, e.g. DIORAMA_GIF=1')
     parser.add_argument('--keep', action='store_true', help='stop the VM instead of deleting it, to look around after')
     parser.add_argument('--snapshot', help='saved snapshot to start from (default: the newest diorama-gametest-*)')
+    parser.add_argument('--no-prefetch', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
 
