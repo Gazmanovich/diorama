@@ -251,9 +251,9 @@ public final class MapScreen extends Screen {
 			this.gauge.layout(this.minecraft.level, player.blockPosition(), this.layer, this.width, this.height);
 			this.sliceUp.setPosition(this.gauge.upButtonX(), this.gauge.upButtonY());
 			this.sliceDown.setPosition(this.gauge.upButtonX(), this.gauge.downButtonY());
-			// Its labels slide left of the zoom buttons rather than under them.
+			// Its labels slide left of the map's buttons (draw, zoom, recenter) rather than under them.
 			int avoidX = this.zoomIn.getX() - 3;
-			int avoidTop = this.zoomIn.getY() - 2;
+			int avoidTop = this.drawButton.getY() - 2;
 			int avoidBottom = this.recenter.getY() + this.recenter.getHeight() + 2;
 			//? if >=1.21.2 {
 			this.gauge.draw(graphics, this.font, pos.y, this.layer, avoidX, avoidTop, avoidBottom);
@@ -820,7 +820,8 @@ public final class MapScreen extends Screen {
 			view.zoom(), view.layer());
 		List<WaypointOverlay.Pin> pins = WaypointOverlay.layout(clear, waypoints, true);
 		int bx0 = this.zoomIn.getX() - 2;
-		int by0 = this.zoomIn.getY() - 2;
+		// From the draw button down to recenter.
+		int by0 = this.drawButton.getY() - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
 		int by1 = this.recenter.getY() + this.recenter.getHeight() + 2;
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
