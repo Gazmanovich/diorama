@@ -234,6 +234,8 @@ public final class MinimapHud implements HudElement {
 		int fitted = size;
 		if (top) {
 			fitted = Math.min(fitted, height - MARGIN - effects - infoHeight - MARGIN - 4);
+			// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
+			fitted = Math.min(fitted, width - 2 * MARGIN - 4);
 		} else {
 			fitted = Math.min(fitted, width / 2 - HOTBAR_HALF_WIDTH - 2 * MARGIN - 4);
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);

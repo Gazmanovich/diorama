@@ -4485,6 +4485,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 20);
 			context.takeScreenshot("enlarge-03-" + percent);
 		}
+		// On a tall, narrow window, 4x is wider than the screen: it stops at the screen's width.
+		context.getInput().resizeWindow(360, 900);
+		settle(context, 20);
+		context.takeScreenshot("enlarge-03-400-narrow");
+		context.getInput().resizeWindow(1600, 900);
 		context.runOnClient(mc -> Settings.get().minimapEnlarged = 200);
 		for (Settings.Corner corner : Settings.Corner.values()) {
 			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
@@ -4494,6 +4499,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.runOnClient(mc -> Settings.get().minimapCorner = Settings.Corner.TOP_RIGHT);
 		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
 		context.waitTicks(5);
+		if (context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Letting go of the enlarge key didn't reach its key mapping");
+		}
 		context.takeScreenshot("enlarge-05-released");
 		// The Enlarged slider sits beside Size, so the Minimap tab is no taller.
 		context.setScreen(() -> new SettingsScreen(null));
