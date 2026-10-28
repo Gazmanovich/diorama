@@ -10,6 +10,7 @@
 set -u
 exec 9>~/sandbox.lock
 flock -n 9 || exit 75
+rm -f ~/run-exit
 touch ~/run-started
 exec > ~/warm.out 2>&1
 trap 'echo $? > ~/run-exit' EXIT
@@ -56,8 +57,12 @@ for n in $nodes; do
 	echo "$n boot: exit=$code after $(( $(date +%s) - s )) s, $(wc -l < ~/prefetch-lists/$n.list) files to read ahead"
 	[ $code = 0 ] || failed="$failed $n"
 done
-# A node that doesn't boot on master is master's problem, not the snapshot's: its list is partial.
-[ -z "$failed" ] || echo "these nodes failed their boot run, see ~/boot-<node>.log:$failed"
+# Every node has to boot from this cache for the snapshot to be worth saving.
+if [ -n "$failed" ]; then
+	echo "these nodes failed their boot run, see ~/boot-<node>.log on the VM:$failed"
+	for n in $failed; do grep -E "FAILED|What went wrong|Exception" -A3 ~/boot-$n.log | head -12; done
+	exit 1
+fi
 
 rm -rf ~/src ~/result ~/result.tgz ~/gradle.log ~/sandbox.log ~/skip-run.gradle versions/*/build/run/clientGameTest/{saves,screenshots,logs,crash-reports}
 echo "Warmed on master $commit, $(date -u +%Y-%m-%dT%H:%MZ), all $(echo $nodes | wc -w) nodes." > ~/diorama-snapshot.txt

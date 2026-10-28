@@ -8,6 +8,7 @@ set -u
 # One run per VM: a start the API reported as failed may have started after all.
 exec 9>~/sandbox.lock
 flock -n 9 || exit 75
+rm -f ~/run-exit
 touch ~/run-started
 exec > ~/sandbox.log 2>&1
 trap 'echo $? > ~/run-exit' EXIT

@@ -19,11 +19,11 @@ A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa
    python .claude/skills/boat-game-test/boat_run.py <node[,node...]> --tests <section,section>
    ```
 
-   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`); the script gives up at 115 min.
+   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`): the tests stop at 90 min and the script stops waiting for them at 100, leaving time to fetch results and delete the VMs.
 3. Open the screenshots it lists (`build/boat-runs/<time>-<node>/screenshots/`) and look at them. A pass with the wrong picture is still a failure. On a failure the script prints the assertion; `gradle.log` and `latest.log` in the same folder have the rest.
-4. Run `boat list --all` (plain `boat list` hides stopped VMs) and delete any VM of yours still there (`boat delete <id> --yes`). Yours are named `diorama-test-<your branch>-<node>-<pid>`; leave the others, they belong to other agents.
+4. Read the end of the output. The script deletes its VMs and then checks the account; `!! still on the account` or `!! VM ... kept` names a VM of yours that's left, with the commands to deal with it. A kept VM is stopped with the run's results on it, because they couldn't be fetched. Your VMs' names start with the prefix the script prints first (`diorama-test-<branch>-...-<pid>`); leave every other VM alone, they belong to other agents.
 
-Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` shows none of your VMs.
+Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` (plain `boat list` hides stopped VMs) shows none of your VMs.
 
 ## Size and cost
 
@@ -38,11 +38,11 @@ About 2.5 min of every run is fixed: VM start, push, Gradle, booting Minecraft a
 
 ## Limits
 
-100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, and a refused start counts too. The script never retries a refused start: it fails, and you decide when to run again. Before a fan-out of more than about 10 VMs, run `boat limits` (free, counts nothing) and check `starts` and `planIncluded.vmHoursRemaining`. Other agents share the same account and the same limits.
+100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. Before each start the script reads `boat limits` (free, counts nothing): it waits up to 3 min for a start this minute, and stops starting when the hour's or day's starts are gone. A refused start stops the rest of the fan-out; rerun the failed nodes later, not in a loop. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
 
 ## Warm snapshot
 
-VMs start from the newest saved snapshot named `diorama-gametest-<commit>`: JDK 25 (which runs every node, 1.20.1 included), Mesa, and Gradle, Loom and NeoForge caches with every node compiled and every node's Minecraft, libraries and assets downloaded, warmed on master at `<commit>`. The script prints which one it used. A snapshot only holds the disk: a stopped, forked or resumed VM starts with no processes, so every run boots Minecraft afresh.
+VMs start from the newest saved snapshot named `diorama-gametest-<commit>`: JDK 25 (which runs every node, 1.20.1 included), Mesa, and Gradle, Loom and NeoForge caches with every node compiled, every node's Minecraft, libraries and assets downloaded, and every node booted once from that cache, warmed at `<commit>`. The script prints which one it used. A snapshot only holds the disk: a stopped, forked or resumed VM starts with no processes, so every run boots Minecraft afresh.
 
 A new VM fetches each snapshot file from boat.dev's storage the first time it's read. The snapshot also holds the list of files each node's boot opens (`~/prefetch-lists/<node>.list`), and the script reads those ahead in parallel while it pushes; that took a 26.3 run's Gradle start from 62 s to 20 s.
 
@@ -52,12 +52,12 @@ A new VM fetches each snapshot file from boat.dev's storage the first time it's 
 python .claude/skills/boat-game-test/boat_snapshot.py
 ```
 
-It takes about XX min on a large VM, saves `diorama-gametest-<commit>`, and keeps the two newest such snapshots. Tell Dara the new name.
+Run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles, needs no network on a second pass, and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
 
 ## Traps
 
-- **boat.dev's API fails now and then**: 500s, timeouts, live output streams cut after a few minutes. The script starts the tests detached and polls for their exit code, and retries the steps that are safe to repeat. A run that still fails on an API error is worth one rerun.
-- **A killed script leaves its VM running.** On Ctrl-C the script deletes its VMs; a hard kill (a background command's timeout) skips that. Step 4 catches it.
+- **boat.dev's API fails now and then**: 500s, timeouts, live output streams cut after a few minutes. The script starts the tests detached and polls for their exit code, and retries the steps that are safe to repeat. A run that still fails on an API error is worth one rerun, after step 4's check.
+- **A killed script leaves its VM running.** On Ctrl-C the script deletes its VMs, including ones still starting; a hard kill (a background command's timeout) skips that. Then look for your VM names with `boat list --all`.
 - **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
 - **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
 - **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara, then run on this PC under the Minecraft lock.
