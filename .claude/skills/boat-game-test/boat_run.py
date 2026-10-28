@@ -7,6 +7,7 @@ pushes this working tree (uncommitted changes included), runs :<node>:runClientG
 results to build/boat-runs/<time>-<node>/ and deletes the VM. Exits non-zero if any node failed.
 """
 import argparse
+import concurrent.futures
 import json
 import os
 import secrets
@@ -71,9 +72,13 @@ def text_of(output):
 
 
 def boat(*args, cwd=None, timeout=120):
-    if args[0] not in ('list', 'delete', 'stop', 'info'):
-        # Work stops at the deadline; cleanup calls don't.
-        timeout = max(10, min(timeout, work_deadline - time.time()))
+    if args[0] in ('list', 'delete', 'stop', 'info'):
+        # Cleanup runs past the work deadline, in short calls.
+        timeout = min(timeout, 60)
+    else:
+        timeout = min(timeout, work_deadline - time.time())
+        if timeout <= 0:
+            return subprocess.CompletedProcess(args, 124, '', f'boat {args[0]} not run: past the deadline')
     try:
         return subprocess.run([BOAT, '--no-update', *args], capture_output=True, text=True, encoding='utf-8',
                               errors='replace', cwd=cwd, timeout=timeout)
@@ -122,9 +127,32 @@ def find_vm(name):
     return None if found is None else next((vm for n, vm, _ in found if n == name), '')
 
 
+def settle(name, vm, vm_state):
+    """Deletes one of this run's VMs, or stops it if it's kept; None when that worked, else why not."""
+    if name in keep_names:
+        if vm_state in ('stopped', 'stopping') or boat('stop', vm, '--json').returncode == 0:
+            return 'kept'
+        return f'kept, but it is {vm_state} and boat stop failed: boat stop {vm}'
+    if boat('delete', vm, '--yes', '--json').returncode == 0:
+        return None
+    # Already being deleted (by its own thread, a moment ago) also fails a delete.
+    sandbox = next(events(boat('info', vm, '--json', timeout=30).stdout), {}).get('sandbox')
+    if sandbox is None:
+        return 'delete failed and its state is unknown'
+    return None if sandbox.get('state') in GONE else f'delete failed, {sandbox.get("state")}'
+
+
+def ignore_signals():
+    for sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, 'SIGBREAK', None)):
+        if sig:
+            signal.signal(sig, signal.SIG_IGN)
+
+
 def reconcile(rounds=1):
-    """Deletes every VM with this run's prefix, stopping instead the ones kept on purpose, and says
-    what's left. The only cleanup there is: on normal exit, on an error and after Ctrl-C."""
+    """The final cleanup, on normal exit, on an error and after Ctrl-C: deletes every VM with this
+    run's prefix, stopping instead the ones kept on purpose, and says what's left. Signals are
+    ignored meanwhile, so a second Ctrl-C can't cut it short."""
+    ignore_signals()
     left = None
     for i in range(rounds):
         if i:
@@ -134,20 +162,10 @@ def reconcile(rounds=1):
         if found is None:
             left = None
             continue
-        left = []
-        for name, vm, vm_state in found:
-            if vm_state in GONE:
-                continue
-            if name in keep_names:
-                if vm_state in ('stopped', 'stopping') or boat('stop', vm, '--json').returncode == 0:
-                    left.append((name, vm, 'kept'))
-                else:
-                    left.append((name, vm, f'kept, but it is {vm_state} and boat stop failed: boat stop {vm}'))
-            elif boat('delete', vm, '--yes', '--json').returncode:
-                # Already being deleted (by its own thread, a moment ago) also fails a delete.
-                sandbox = next(events(boat('info', vm, '--json', timeout=30).stdout), {}).get('sandbox')
-                if sandbox and sandbox.get('state') not in GONE:
-                    left.append((name, vm, f'delete failed, {sandbox.get("state")}'))
+        found = [f for f in found if f[2] not in GONE]
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            outcomes = list(pool.map(lambda f: settle(*f), found))
+        left = [(name, vm, why) for (name, vm, _), why in zip(found, outcomes) if why]
     if left is None:
         say(None, f'!! could not list VMs to clean up: find yours with `boat list --all`, named {PREFIX}*, '
                   'and delete them with boat delete <id> --yes')
@@ -253,6 +271,8 @@ def run_script(vm, script, *args, deadline):
     misses = 0
     while time.time() < deadline:
         time.sleep(30)
+        if interrupted.is_set():
+            raise RuntimeError('stopped: the script was interrupted')
         read = next(events(boat('exec', vm, '--timeout', '30', '--json', '--', 'cat', '/home/user/run-exit',
                                 timeout=60).stdout), {})
         if read.get('exitCode') == 0 and read.get('stdout', '').strip().isdigit():
@@ -276,6 +296,8 @@ def run_node(node, args, repo, snapshot, start):
     say(node, f'VM {vm} ({args.type}) ready after {time.time() - start:.0f} s')
     ran = False
     try:
+        if interrupted.is_set():
+            raise RuntimeError('stopped: the script was interrupted')
         if not args.no_prefetch:
             boat('exec', vm, '--detach', '--json', '--', 'bash', '-c', PREFETCH.format(node=node))
         # The snapshot's copy and results: push only adds files, and an old result.tgz could pass for this run's.
@@ -389,7 +411,13 @@ def main():
     except KeyboardInterrupt:
         interrupted.set()
         stop_starting.set()
-        say(None, 'stopping: deleting this run\'s VMs')
+        ignore_signals()
+        say(None, 'stopping: each node deletes its VM, then the script checks for any left')
+        # A thread inside `boat new` learns its VM's id within 5 min, then deletes it.
+        until = time.time() + 360
+        for t in threads:
+            if t.is_alive():
+                t.join(max(0, until - time.time()))
         reconcile(rounds=2)
         sys.exit(130)
     reconcile()
