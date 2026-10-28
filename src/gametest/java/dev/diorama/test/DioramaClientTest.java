@@ -4709,7 +4709,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		Waypoint low = waypointOnScreen(context, "Low", Waypoint.PALETTE[3], 0.5, -8);
 		context.runOnClient(mc -> {
 			for (int i = 1; i <= 3; i++) {
+				//? if >=26.1 {
 				mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("Chat line " + i + " over a waypoint"));
+				//?} else {
+				/*mc.player.displayClientMessage(net.minecraft.network.chat.Component.literal("Chat line " + i + " over a waypoint"), false);
+				*///?}
 			}
 		});
 		Waypoint chat = waypointOnScreen(context, "Chat", Waypoint.PALETTE[7], 60, -48);
