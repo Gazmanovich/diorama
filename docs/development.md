@@ -12,17 +12,20 @@ One source tree builds a jar for each supported Minecraft version, using [Stonec
 ./gradlew :26.1:build   # also runs on 26.1.1 and 26.1.2
 ./gradlew :1.21.11:build
 ./gradlew :1.21.1-neoforge:build   # NeoForge 21.1.178 or later; every NeoForge version is <minecraft>-neoforge
+./gradlew :1.20.1-forge:build      # Forge 47.1 or later
 ```
 
 Each jar lands in `versions/<version>/build/libs/`. 1.21.11 ships obfuscated, so its build remaps the mod to the names a normal install uses. `./gradlew --continue compileJava` compiles every version; run it before merging anything that touches code shared across versions.
 
-## Fabric and NeoForge
+## Fabric, NeoForge and Forge
 
-Versions named `<minecraft>-neoforge` build for NeoForge; the rest build for Fabric. NeoForge gets a jar for each Minecraft version it has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3.
+Versions named `<minecraft>-neoforge` build for NeoForge, `1.20.1-forge` builds for Forge, and the rest build for Fabric. NeoForge gets a jar for each Minecraft version it has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3.
 
 From 1.21.6 the map draws through parts of the game that are private. Fabric API's access wideners open them for the Fabric jars, and a per-version access transformer, written by `build.neoforge.gradle.kts`, opens them for the NeoForge jars.
 
-Everything but the entrypoints is shared: `dev.diorama.fabric` hooks the mod up to Fabric API and `dev.diorama.neoforge` to NeoForge's events. Each jar contains only its own package and metadata (`fabric.mod.json` or `META-INF/neoforge.mods.toml`). Other differences between the loaders sit in `//? if fabric` and `//? if neoforge` blocks.
+Everything but the entrypoints is shared: `dev.diorama.fabric` hooks the mod up to Fabric API, `dev.diorama.neoforge` to NeoForge's events and `dev.diorama.forge` to Forge's. Each jar contains only its own package and metadata (`fabric.mod.json`, `META-INF/neoforge.mods.toml` or `META-INF/mods.toml`). Other differences between the loaders sit in `//? if fabric`, `//? if neoforge` and `//? if forge` blocks.
+
+Forge 1.20.1 is where NeoForge forked from, so on Forge the NeoForge code in a block's `else` branch usually works under Forge's package names, which `stonecutter.gradle.kts` swaps in. Forge runs a normal install on its own (SRG) names: `build.forge.gradle.kts` remaps the release jar and the mixins' reference maps to them, so look game members up by name only through `ObfuscationReflectionHelper`.
 
 ## Game tests
 
@@ -53,7 +56,7 @@ Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `ways
 
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 
-`./gradlew :1.21.1-neoforge:runClientGameTest` runs the same scenarios on NeoForge, all but the dedicated server ones. NeoForge has no client game test API, so they run on `src/gameshim`, the test-only stand-in for Fabric's that the Fabric jars before 1.21.4 use too.
+`./gradlew :1.21.1-neoforge:runClientGameTest` runs the same scenarios on NeoForge, all but the dedicated server ones, and `./gradlew :1.20.1-forge:runClientGameTest` on Forge. NeoForge has no client game test API, so they run on `src/gameshim`, the test-only stand-in for Fabric's that the Fabric jars before 1.21.4 use too.
 
 `./gradlew :1.21.11:runProductionClientGameTest` runs the same tests against the remapped release jar in a normal install, with Fabric API as published. In development 1.21.11 uses Mojang's names, but a normal install uses intermediary ones, so anything that looks the game up by name only fails there.
 
