@@ -326,7 +326,7 @@ public final class Settings {
 	private static int nearest(int[] steps, int value) {
 		int nearest = steps[0];
 		for (int step : steps) {
-			if (Math.abs(step - value) < Math.abs(nearest - value)) {
+			if (Math.abs((long) step - value) < Math.abs((long) nearest - value)) {
 				nearest = step;
 			}
 		}
