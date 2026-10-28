@@ -9,6 +9,7 @@ import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
@@ -77,6 +78,8 @@ public final class DioramaFabric implements ClientModInitializer {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
+			// Mods sync their block ids from the server, which can number block states differently.
+			BlockLooks.invalidate();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();

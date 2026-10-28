@@ -114,6 +114,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("icon-waypoints")) {
 				IconWaypointsTest.photos(context, world);
 			}
+			if (tests.contains("portal-crossing")) {
+				portalCrossing(context, world);
+			}
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
 			}
@@ -1019,6 +1022,78 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/**
+	 * Crossing between dimensions keeps the block color table: building it takes seconds with a
+	 * big modpack's states, and it used to be rebuilt on every crossing (#150). Walks through a
+	 * nether portal and comes back with /execute in, three times, then reloads resources, which
+	 * must rebuild it. Works with Immersive Portals installed too, whose portals keep the other
+	 * side's level loaded. Opt-in: DIORAMA_TESTS=portal-crossing.
+	 */
+	private static void portalCrossing(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos p = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = p.getX(), y = p.getY(), z = p.getZ();
+		world.getServer().runCommand("fill " + (x - 4) + " " + (y - 2) + " " + (z - 4) + " " + (x + 8) + " " + (y - 1) + " " + (z + 12) + " stone");
+		world.getServer().runCommand("fill " + (x - 4) + " " + y + " " + (z - 4) + " " + (x + 8) + " " + (y + 8) + " " + (z + 12) + " air");
+		int fz = z + 4;
+		world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + fz + " " + (x + 3) + " " + (y + 3) + " " + fz + " obsidian");
+		world.getServer().runCommand("fill " + (x + 1) + " " + y + " " + fz + " " + (x + 2) + " " + (y + 2) + " " + fz + " air");
+		world.getServer().runCommand("setblock " + (x + 1) + " " + y + " " + fz + " fire");
+		String start = (x + 2) + " " + y + " " + z + ".5 0 0";
+		int rebuilt = sample(context, "portal lit", 100);
+		context.takeScreenshot("portal-crossing-01-lit");
+		for (int round = 0; round < 3; round++) {
+			context.runOnClient(mc -> {
+				mc.player.snapTo(x + 2.0, y, z + 0.5, 0F, 0F);
+				mc.options.keyUp.setDown(true);
+			});
+			rebuilt += sample(context, "walk through " + round, 120);
+			context.runOnClient(mc -> mc.options.keyUp.setDown(false));
+			if (round == 0) {
+				context.takeScreenshot("portal-crossing-02-nether");
+			}
+			if (context.computeOnClient(mc -> mc.level.dimension() != net.minecraft.world.level.Level.NETHER)) {
+				throw new AssertionError("Walking through the portal didn't reach the Nether");
+			}
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a " + start);
+			rebuilt += sample(context, "back with /execute in " + round, 100);
+		}
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		rebuilt += sample(context, "/execute in the Nether", 100);
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + start);
+		rebuilt += sample(context, "/execute in the overworld", 100);
+		if (rebuilt != 0) {
+			throw new AssertionError("Crossing between dimensions rebuilt the block color table " + rebuilt + " times");
+		}
+		Object before = context.computeOnClient(mc -> dev.diorama.bake.BlockLooks.get());
+		context.runOnClient(mc -> mc.reloadResourcePacks());
+		// Throws if the reload never rebuilds it.
+		context.waitFor(mc -> mc.gui.overlay() == null && dev.diorama.bake.BlockLooks.get() != before, 2400);
+		if (sample(context, "after a resource reload", 100) != 0) {
+			throw new AssertionError("A resource reload rebuilt the block color table more than once");
+		}
+	}
+
+	/** Waits some ticks and logs the slowest one; returns how many times the block color table changed. */
+	private static int sample(ClientGameTestContext context, String label, int ticks) {
+		long last = System.nanoTime();
+		long slowest = 0;
+		int changes = 0;
+		Object seen = context.computeOnClient(mc -> dev.diorama.bake.BlockLooks.get());
+		for (int i = 0; i < ticks; i++) {
+			context.waitTick();
+			long now = System.nanoTime();
+			slowest = Math.max(slowest, now - last);
+			last = now;
+			Object looks = context.computeOnClient(mc -> dev.diorama.bake.BlockLooks.get());
+			if (looks != seen) {
+				changes++;
+				seen = looks;
+			}
+		}
+		Diorama.LOGGER.info("[portal-crossing] {}: slowest tick {} ms, block color table changed {} times", label, slowest / 1_000_000, changes);
+		return changes;
 	}
 
 	/** The Nether and the End: the minimap, and the fullscreen map near and far. */

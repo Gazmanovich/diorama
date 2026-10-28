@@ -129,12 +129,17 @@ public final class MapSession {
 				return null;
 			}
 			current = new MapSession(level, key);
-			BlockLooks.invalidate();
 		}
 		return current;
 	}
 
 	public static void chunkLoaded(ClientLevel level, LevelChunk chunk) {
+		// Immersive Portals keeps the levels seen through its portals loaded too, and their chunks
+		// arrive while the client is briefly switched to them. The map follows the player's level.
+		LocalPlayer player = Minecraft.getInstance().player;
+		if (player == null || player.level() != level) {
+			return;
+		}
 		// Chunks can arrive before the first client tick of a new level, so this may start the session.
 		MapSession session = forLevel(level);
 		if (session == null) {
