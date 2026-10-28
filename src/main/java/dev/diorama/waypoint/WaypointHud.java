@@ -50,7 +50,7 @@ public final class WaypointHud implements HudElement {
 		Font font = mc.font;
 		List<Waypoint> waypoints = store.in(mc.level.dimension().identifier().toString());
 		for (Waypoint waypoint : waypoints) {
-			if (!WaypointStore.isShown(waypoint)) {
+			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, player)) {
 				continue;
 			}
 			double dx = waypoint.x + 0.5 - eye.x;

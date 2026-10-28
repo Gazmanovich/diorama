@@ -7,6 +7,7 @@ import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
 import dev.diorama.render.gpu.MapCanvas;
+import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
@@ -170,7 +171,8 @@ public final class MinimapHud implements HudElement {
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
-			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, store.in(mc.level.dimension().identifier().toString()), false), false, null);
+			List<Waypoint> near = store.in(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, player)).toList();
+			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, near, false), false, null);
 		}
 		Radar.draw(graphics, view, blips, false, true);
 		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, player.getViewYRot(partialTick), 5);
