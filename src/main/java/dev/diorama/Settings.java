@@ -34,6 +34,8 @@ public final class Settings {
 	public static final double[] ZOOMS = {0.75, 1, 1.5, 2, 3, 4};
 	/** Radar height ranges, in blocks. */
 	public static final int[] RANGES = {16, 32, 64, 128};
+	/** How near a waypoint has to be to show in the world and on the minimap, in blocks; 0 is any distance. */
+	public static final int[] WAYPOINT_DISTANCES = {0, 64, 128, 256, 512, 1024, 2048};
 	/** Minimap sizes, in GUI pixels: {@link #MIN_SIZE} to {@link #MAX_SIZE} in steps of {@link #SIZE_STEP}. */
 	public static final int MIN_SIZE = 64;
 	public static final int MAX_SIZE = 224;
@@ -87,6 +89,11 @@ public final class Settings {
 	/** A pin on the bed the player last slept in ({@link dev.diorama.waypoint.Waypoints#watchSleep}). */
 	public boolean bedMarkers = true;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
+	/**
+	 * Waypoints further than this many blocks away leave the world and the minimap; the map still
+	 * shows them all. 0 shows them at any distance. One of {@link #WAYPOINT_DISTANCES}.
+	 */
+	public int waypointDistance = 0;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
@@ -297,13 +304,8 @@ public final class Settings {
 		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
 		settings.minimapSize = snapSize(settings.minimapSize);
 		settings.minimapOpacity = snapOpacity(settings.minimapOpacity);
-		int nearest = RANGES[0];
-		for (int range : RANGES) {
-			if (Math.abs(range - settings.radarRange) < Math.abs(nearest - settings.radarRange)) {
-				nearest = range;
-			}
-		}
-		settings.radarRange = nearest;
+		settings.radarRange = nearest(RANGES, settings.radarRange);
+		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
 		settings.apply();
 		return settings;
 	}
@@ -318,6 +320,17 @@ public final class Settings {
 			trimmed = trimmed.substring(1).trim();
 		}
 		return trimmed.isEmpty() ? DEFAULT_TELEPORT_COMMAND : trimmed;
+	}
+
+	/** The value in {@code steps} nearest to {@code value}. */
+	private static int nearest(int[] steps, int value) {
+		int nearest = steps[0];
+		for (int step : steps) {
+			if (Math.abs((long) step - value) < Math.abs((long) nearest - value)) {
+				nearest = step;
+			}
+		}
+		return nearest;
 	}
 
 	/** The nearest size the settings screen can show. */
