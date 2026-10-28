@@ -101,7 +101,7 @@ public final class DioramaNeoForge {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
-			// Mods sync their block ids from the server, which can number block states differently.
+			// Mods sync block ids from the server before this, which can number block states differently.
 			BlockLooks.invalidate();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

@@ -38,6 +38,7 @@ public final class MapSession {
 	private static final int SNAPSHOTS_PER_TICK = 24;
 
 	private static @Nullable MapSession current;
+	private static int started;
 	private static final boolean DEBUG_CHANGES = Diorama.DEBUG;
 	private static final Map<String, Integer> CHANGE_TALLY = new java.util.TreeMap<>();
 	private static long lastTallyLog;
@@ -65,6 +66,11 @@ public final class MapSession {
 
 	public static @Nullable MapSession get() {
 		return current;
+	}
+
+	/** For tests: how many sessions have started, one each time the player's level changes. */
+	public static int started() {
+		return started;
 	}
 
 	/**
@@ -129,6 +135,7 @@ public final class MapSession {
 				return null;
 			}
 			current = new MapSession(level, key);
+			started++;
 		}
 		return current;
 	}

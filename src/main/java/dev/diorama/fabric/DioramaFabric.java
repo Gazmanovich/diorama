@@ -23,12 +23,14 @@ import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.event.registry.RegistryIdRemapCallback;
 //? if >=1.21.6 {
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 //?} else {
 /*import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 *///?}
 import net.minecraft.client.KeyMapping;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.packs.PackType;
 
 /**
@@ -62,6 +64,8 @@ public final class DioramaFabric implements ClientModInitializer {
 		});
 		*///?}
 		ClientChunkEvents.CHUNK_LOAD.register(MapSession::chunkLoaded);
+		// Joining a server whose mods number block states differently renumbers them here, and leaving puts them back.
+		RegistryIdRemapCallback.event(BuiltInRegistries.BLOCK).register(state -> BlockLooks.invalidate());
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> ServerRules.onServerMessage(message));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> WaypointShare.register(dispatcher));
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
@@ -78,8 +82,6 @@ public final class DioramaFabric implements ClientModInitializer {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
 			WorldKey.onJoinOrLeave();
-			// Mods sync their block ids from the server, which can number block states differently.
-			BlockLooks.invalidate();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
