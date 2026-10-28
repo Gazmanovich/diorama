@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-//? if neoforge && <1.21.4 {
+//? if neoforge && <1.21.4 || forge {
 /*import net.neoforged.neoforge.client.ClientCommandHandler;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 *///?}
@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * Tells the map when server light for a chunk has been applied, which cave slices draw. Hooks the
  * method that applies it; the packet handler only queues that work. Also tells it when a block
  * entity got new data, which is how a copycat being filled reaches the client.
- * On NeoForge before 1.21.4 it also runs the client's own commands from chat links.
+ * On NeoForge before 1.21.4 and on Forge it also runs the client's own commands from chat links.
  */
 @Mixin(ClientPacketListener.class)
 public abstract class ClientPacketListenerMixin {
@@ -45,10 +45,10 @@ public abstract class ClientPacketListenerMixin {
 		}
 	}
 
-	//? if neoforge && <1.21.4 {
+	//? if neoforge && <1.21.4 || forge {
 	/*// A chat link's command, like a shared waypoint's [Add], goes through here. NeoForge 21.0 and
 	// 21.3 send it straight to the server, so the client's own commands never run (NeoForge 21.1
-	// checks them itself from 21.1.178, and 21.4 on always does).
+	// checks them itself from 21.1.178, and 21.4 on always does). Forge 1.20.1 does the same.
 	@Inject(method = "sendUnsignedCommand", at = @At("HEAD"), cancellable = true)
 	private void diorama$runClientCommand(String command, CallbackInfoReturnable<Boolean> cir) {
 		if (ClientCommandHandler.runCommand(command)) {

@@ -677,7 +677,12 @@ public final class BlockLooks {
 		try {
 			//? if >=26.1 || neoforge {
 			field = SpriteContents.class.getDeclaredField("originalImage");
-			//?} else {
+			//?} else if forge {
+			/*// Forge runs the game with SRG names outside the dev environment, so look the field up by
+			// its SRG name, mapped to whatever names this run uses.
+			field = SpriteContents.class.getDeclaredField(net.minecraftforge.fml.util.ObfuscationReflectionHelper.remapName(
+				cpw.mods.modlauncher.api.INameMappingService.Domain.FIELD, "f_243904_"));
+			*///?} else {
 			/*// Fabric runs the game with intermediary names outside the dev environment (NeoForge
 			// doesn't), so look the field up by its intermediary name (SpriteContents.originalImage, a
 			// NativeImage) mapped to whatever names this run uses.

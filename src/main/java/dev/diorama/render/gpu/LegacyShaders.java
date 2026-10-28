@@ -136,7 +136,9 @@ final class LegacyShaders extends RenderType {
 	static final RenderType FOG = create("diorama_fog", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_SHADER);
 
 	private static RenderType create(String name, VertexFormat format, RenderStateShard.ShaderStateShard shader) {
-		return RenderType.create(name, format, VertexFormat.Mode.QUADS, 1536, RenderType.CompositeState.builder()
+		// The form vanilla makes public. The one without the two flags (false here) does the same,
+		// but only Fabric API opens it up.
+		return RenderType.create(name, format, VertexFormat.Mode.QUADS, 1536, false, false, RenderType.CompositeState.builder()
 			.setShaderState(shader)
 			.setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
 			.setDepthTestState(RenderStateShard.NO_DEPTH_TEST)
