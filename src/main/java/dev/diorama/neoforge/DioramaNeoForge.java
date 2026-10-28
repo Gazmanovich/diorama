@@ -65,13 +65,13 @@ public final class DioramaNeoForge {
 		//? if >=1.21.6 {
 		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> event.registerPipeline(DioramaPipelines.FOG));
 		//?}
-		// Above the whole vanilla HUD, in the same order as on Fabric: waypoint labels, then the
-		// minimap over them. Each layer already sits 200 deeper than the one before, which the Fabric
-		// jars before 1.21.6 have to make up for themselves.
+		// As on Fabric: waypoints in the world under the whole vanilla HUD and every screen, as part
+		// of the picture of the world, and the minimap above the HUD. Each layer already sits 200
+		// deeper than the one before, which the Fabric jars before 1.21.6 have to make up for themselves.
 		modBus.addListener(RegisterGuiLayersEvent.class, event -> {
 			WaypointHud waypoints = new WaypointHud();
 			MinimapHud minimap = new MinimapHud();
-			event.registerAboveAll(Diorama.id("waypoints"), (graphics, deltaTracker) -> waypoints.extractRenderState(graphics, deltaTracker));
+			event.registerBelowAll(Diorama.id("waypoints"), (graphics, deltaTracker) -> waypoints.extractRenderState(graphics, deltaTracker));
 			event.registerAboveAll(Diorama.id("minimap"), (graphics, deltaTracker) -> minimap.extractRenderState(graphics, deltaTracker));
 		});
 

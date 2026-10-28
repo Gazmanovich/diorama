@@ -4742,6 +4742,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(5);
 		context.takeScreenshot("waypoints-02d-under-chat");
 		context.setScreen(() -> null);
+		// F1 hides them with the rest of the HUD.
+		//? if >=26.2 {
+		context.runOnClient(mc -> mc.gui.hud.toggle());
+		//?} else {
+		/*context.runOnClient(mc -> mc.options.hideGui = true);
+		*///?}
+		context.waitTicks(2);
+		context.takeScreenshot("waypoints-02e-hidden-hud");
+		//? if >=26.2 {
+		context.runOnClient(mc -> mc.gui.hud.toggle());
+		//?} else {
+		/*context.runOnClient(mc -> mc.options.hideGui = false);
+		*///?}
 		context.runOnClient(mc -> WaypointStore.get().remove(low));
 	}
 
