@@ -25,6 +25,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.WorldProjection;
 import dev.diorama.waypoint.XaeroImport;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -2525,6 +2526,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		*///?}
 		context.waitTicks(10);
 		context.takeScreenshot("waypoints-02-in-world");
+		waypointsUnderTheGui(context);
 
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
@@ -4691,6 +4693,113 @@ public class DioramaClientTest implements FabricClientGameTest {
 		int tu = (int) Math.floor(player.getX() / Projection.TILE_UNITS);
 		int tv = (int) Math.floor(Projection.v(player.getY(), player.getZ()) / Projection.TILE_UNITS);
 		return MapSession.get().map().peek(new TileKey(TileKey.SURFACE, tu, tv));
+	}
+
+	/**
+	 * Waypoints in the world are part of the picture of the world: the inventory, opened with Home
+	 * in view, the hotbar, and the chat box all cover them.
+	 */
+	private static void waypointsUnderTheGui(ClientGameTestContext context) {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.inventory.InventoryScreen(Minecraft.getInstance().player));
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-02b-under-inventory");
+		context.setScreen(() -> null);
+
+		// One pin standing on the hotbar, and one on chat lines, with the chat closed.
+		Waypoint low = waypointOnScreen(context, "Low", Waypoint.PALETTE[3], 0.5, -8);
+		context.runOnClient(mc -> {
+			for (int i = 1; i <= 3; i++) {
+				//? if >=26.1 {
+				mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("Chat line " + i + " over a waypoint"));
+				//?} else {
+				/*mc.player.displayClientMessage(net.minecraft.network.chat.Component.literal("Chat line " + i + " over a waypoint"), false);
+				*///?}
+			}
+		});
+		Waypoint chat = waypointOnScreen(context, "Chat", Waypoint.PALETTE[7], 60, -48);
+		context.takeScreenshot("waypoints-02c-under-hotbar");
+		//? if >=1.21.9 {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
+		context.waitTicks(5);
+		context.takeScreenshot("waypoints-02d-under-chat");
+		context.setScreen(() -> null);
+		// The totem animation, which the frame draws before the HUD before 26.3.
+		Waypoint totem = waypointOnScreen(context, "Totem", Waypoint.PALETTE[1], 0.5, 0.55);
+		//? if >=26.3 {
+		context.runOnClient(mc -> mc.player.displayItemActivation(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.TOTEM_OF_UNDYING)));
+		//?} else {
+		/*context.runOnClient(mc -> mc.gameRenderer.displayItemActivation(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.TOTEM_OF_UNDYING)));
+		*///?}
+		context.waitTicks(8);
+		context.takeScreenshot("waypoints-02e-under-totem");
+		context.waitTicks(40);
+		// F1 hides them with the rest of the HUD.
+		//? if >=26.2 {
+		context.runOnClient(mc -> mc.gui.hud.toggle());
+		//?} else {
+		/*context.runOnClient(mc -> mc.options.hideGui = true);
+		*///?}
+		context.waitTicks(2);
+		context.takeScreenshot("waypoints-02f-hidden-hud");
+		//? if >=26.2 {
+		context.runOnClient(mc -> mc.gui.hud.toggle());
+		//?} else {
+		/*context.runOnClient(mc -> mc.options.hideGui = false);
+		*///?}
+		context.runOnClient(mc -> {
+			WaypointStore.get().remove(low);
+			WaypointStore.get().remove(chat);
+			WaypointStore.get().remove(totem);
+		});
+	}
+
+	/**
+	 * Adds a waypoint 24 blocks ahead whose pin stands on the given GUI point with the player looking
+	 * level. Below 1, x and y are fractions of the width and height; a negative y counts up from the
+	 * bottom edge.
+	 */
+	private static Waypoint waypointOnScreen(ClientGameTestContext context, String name, int color, double x, double y) {
+		Waypoint waypoint = context.computeOnClient(mc -> {
+			mc.player.setXRot(0);
+			mc.player.xRotO = 0;
+			double width = mc.getWindow().getGuiScaledWidth();
+			double height = mc.getWindow().getGuiScaledHeight();
+			double guiX = x < 1 ? x * width : x;
+			double guiY = y < 0 ? height + y : y < 1 ? y * height : y;
+			net.minecraft.world.phys.Vec3 eye = mc.player.getEyePosition();
+			net.minecraft.world.phys.Vec3 look = mc.player.getLookAngle();
+			double distance = 24;
+			// Blocks per GUI pixel at that distance; the field of view is the vertical one.
+			double scale = distance * Math.tan(Math.toRadians(mc.options.fov().get() / 2.0)) / (height / 2);
+			double right = (guiX - width / 2) * scale;
+			double up = (height / 2 - guiY) * scale;
+			// Screen right is look cross up; the pin stands on the middle of the block's top.
+			double wx = eye.x + look.x * distance - look.z * right;
+			double wz = eye.z + look.z * distance + look.x * right;
+			Waypoint placed = new Waypoint(name, (int) Math.floor(wx), (int) Math.round(eye.y + up - 1.0), (int) Math.floor(wz),
+				mc.level.dimension().identifier().toString(), color);
+			WaypointStore.get().add(placed);
+			return placed;
+		});
+		context.waitTicks(5);
+		String missed = context.computeOnClient(mc -> {
+			float width = mc.getWindow().getGuiScaledWidth();
+			float height = mc.getWindow().getGuiScaledHeight();
+			double guiX = x < 1 ? x * width : x;
+			double guiY = y < 0 ? height + y : y < 1 ? y * height : y;
+			float[] at = WorldProjection.project(waypoint.x + 0.5, waypoint.y + 1.0, waypoint.z + 0.5, width, height);
+			if (at == null || Math.abs(at[0] - guiX) > 12 || Math.abs(at[1] - guiY) > 12) {
+				return at == null ? "behind the camera" : at[0] + "," + at[1] + " instead of " + guiX + "," + guiY;
+			}
+			return null;
+		});
+		if (missed != null) {
+			throw new AssertionError("The " + name + " waypoint isn't where the test put it: " + missed);
+		}
+		return waypoint;
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */

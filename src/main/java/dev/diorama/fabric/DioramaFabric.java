@@ -41,20 +41,21 @@ public final class DioramaFabric implements ClientModInitializer {
 		for (KeyMapping keyMapping : DioramaClient.KEY_MAPPINGS) {
 			KeyMappingHelper.registerKeyMapping(keyMapping);
 		}
+		// Waypoints in the world are part of the picture of the world, so they go under the whole
+		// vanilla HUD and every screen; the minimap goes over the HUD. Before 1.21.6
+		// GameRendererMixin draws the waypoints.
 		//? if >=1.21.6 {
-		HudElementRegistry.addLast(Diorama.id("waypoints"), new WaypointHud());
+		HudElementRegistry.addFirst(Diorama.id("waypoints"), new WaypointHud());
 		HudElementRegistry.addLast(Diorama.id("minimap"), new MinimapHud());
 		//?} else {
 		/*// Drawn after the whole vanilla HUD, like addLast. Each vanilla HUD layer sits 200 deeper
-		// than the one before and the GUI depth-tests, so lift the vanilla fills and text these
-		// draw above all of them.
-		WaypointHud waypointHud = new WaypointHud();
+		// than the one before and the GUI depth-tests, so lift the vanilla fills and text this
+		// draws above all of them.
 		MinimapHud minimapHud = new MinimapHud();
 		HudRenderCallback.EVENT.register((graphics, deltaTracker) -> {
 			var pose = graphics.pose();
 			pose.pushPose();
 			pose.translate(0, 0, 5000);
-			waypointHud.render(graphics, deltaTracker);
 			minimapHud.render(graphics, deltaTracker);
 			pose.popPose();
 		});
