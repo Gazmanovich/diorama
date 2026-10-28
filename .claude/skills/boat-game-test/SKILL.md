@@ -44,7 +44,7 @@ About 2.5 min of every run is fixed: VM start, push, Gradle, booting Minecraft a
 
 VMs start from the newest saved snapshot named `diorama-gametest-<commit>`: JDK 25 (which runs every node, 1.20.1 included), Mesa, and Gradle, Loom and NeoForge caches with every node compiled, every node's Minecraft, libraries and assets downloaded, and every node booted once from that cache, warmed at `<commit>`. The script prints which one it used. A snapshot only holds the disk: a stopped, forked or resumed VM starts with no processes, so every run boots Minecraft afresh.
 
-A new VM fetches each snapshot file from boat.dev's storage the first time it's read. The snapshot also holds the list of files each node's boot opens (`~/prefetch-lists/<node>.list`), and the script reads those ahead in parallel while it pushes; that took a 26.3 run's Gradle start from 62 s to 20 s.
+A new VM fetches each snapshot file from boat.dev's storage the first time it's read. The snapshot also holds the list of files each node's boot opens (`~/prefetch-lists/<node>.list`), and the script reads those ahead in parallel while it pushes. How much that saves depends on how warm boat.dev's storage is: on a snapshot made minutes before, 26.3's Gradle start took 82–103 s cold and about 25 s read ahead; on one that has been used for a while, 28 s cold and 17 s read ahead.
 
 **Refresh it** when runs start downloading again: after a Minecraft, Loom, NeoForge or Gradle bump, or a new node. From a clean checkout of origin/master:
 
@@ -52,7 +52,7 @@ A new VM fetches each snapshot file from boat.dev's storage the first time it's 
 python .claude/skills/boat-game-test/boat_snapshot.py
 ```
 
-Run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
+It took 64 min on 2026-10-28, most of it booting all 22 nodes one after another; run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
 
 ## Traps
 
