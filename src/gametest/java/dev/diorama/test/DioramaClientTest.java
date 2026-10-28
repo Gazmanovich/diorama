@@ -12,6 +12,7 @@ import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.WorldKey;
 import dev.diorama.bake.BiomeTints;
+import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
@@ -113,6 +114,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("icon-waypoints")) {
 				IconWaypointsTest.photos(context, world);
+			}
+			if (tests.contains("portal-crossing")) {
+				portalCrossing(context, world);
 			}
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
@@ -1019,6 +1023,89 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/**
+	 * Crossing between dimensions keeps the block color table: building it takes seconds with a
+	 * big modpack's states, and it used to be rebuilt on every crossing (#150). Walks through a
+	 * nether portal and comes back with /execute in, three times, and checks the table is never
+	 * rebuilt and the map only ever moves with the player. Then reloads resources, which must
+	 * rebuild it once. Works with Immersive Portals installed too, whose portals keep the other
+	 * side's level loaded. Opt-in: DIORAMA_TESTS=portal-crossing.
+	 */
+	private static void portalCrossing(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos p = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = p.getX(), y = p.getY(), z = p.getZ();
+		world.getServer().runCommand("fill " + (x - 4) + " " + (y - 2) + " " + (z - 4) + " " + (x + 8) + " " + (y - 1) + " " + (z + 12) + " stone");
+		world.getServer().runCommand("fill " + (x - 4) + " " + y + " " + (z - 4) + " " + (x + 8) + " " + (y + 8) + " " + (z + 12) + " air");
+		int fz = z + 4;
+		world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + fz + " " + (x + 3) + " " + (y + 3) + " " + fz + " obsidian");
+		world.getServer().runCommand("fill " + (x + 1) + " " + y + " " + fz + " " + (x + 2) + " " + (y + 2) + " " + fz + " air");
+		String start = (x + 2) + " " + y + " " + z + ".5 0 0";
+		int builds = context.computeOnClient(mc -> BlockLooks.builds());
+		int sessions = context.computeOnClient(mc -> MapSession.started());
+		world.getServer().runCommand("setblock " + (x + 1) + " " + y + " " + fz + " fire");
+		// With Immersive Portals, chunks of the Nether stream in through the open portal. The map
+		// stays on the overworld.
+		crossing(context, "portal lit", 100);
+		context.takeScreenshot("portal-crossing-01-lit");
+		if (context.computeOnClient(mc -> MapSession.started()) != sessions) {
+			throw new AssertionError("The map left the overworld while the player stood by the portal");
+		}
+		for (int round = 0; round < 3; round++) {
+			context.runOnClient(mc -> {
+				mc.player.snapTo(x + 2.0, y, z + 0.5, 0F, 0F);
+				mc.options.keyUp.setDown(true);
+			});
+			crossing(context, "walk through " + round, 120);
+			context.runOnClient(mc -> mc.options.keyUp.setDown(false));
+			if (round == 0) {
+				context.takeScreenshot("portal-crossing-02-nether");
+			}
+			if (context.computeOnClient(mc -> mc.level.dimension() != net.minecraft.world.level.Level.NETHER)) {
+				throw new AssertionError("Walking through the portal didn't reach the Nether");
+			}
+			teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
+			crossing(context, "back with /execute in " + round, 100);
+		}
+		teleport(context, world, net.minecraft.world.level.Level.NETHER, "0 70 0");
+		crossing(context, "/execute in the Nether", 100);
+		teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
+		crossing(context, "/execute in the overworld", 100);
+		int rebuilt = context.computeOnClient(mc -> BlockLooks.builds()) - builds;
+		if (rebuilt != 0) {
+			throw new AssertionError("Crossing between dimensions rebuilt the block color table " + rebuilt + " times");
+		}
+		int started = context.computeOnClient(mc -> MapSession.started()) - sessions;
+		if (started != 8) {
+			throw new AssertionError("8 crossings started " + started + " map sessions");
+		}
+		context.runOnClient(mc -> mc.reloadResourcePacks());
+		context.waitFor(mc -> BlockLooks.builds() > builds, 2400);
+		crossing(context, "after a resource reload", 100);
+		if (context.computeOnClient(mc -> BlockLooks.builds()) != builds + 1) {
+			throw new AssertionError("A resource reload rebuilt the block color table more than once");
+		}
+	}
+
+	/** Teleports the player into another dimension and waits until they are there. */
+	private static void teleport(ClientGameTestContext context, TestSingleplayerContext world, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, String at) {
+		world.getServer().runCommand("execute in " + dimension.identifier() + " run tp @a " + at);
+		context.waitFor(mc -> mc.level.dimension() == dimension && MapSession.get() != null, 2400);
+	}
+
+	/** Waits some ticks and logs the slowest one, and the block color builds and map sessions so far. */
+	private static void crossing(ClientGameTestContext context, String label, int ticks) {
+		long last = System.nanoTime();
+		long slowest = 0;
+		for (int i = 0; i < ticks; i++) {
+			context.waitTick();
+			long now = System.nanoTime();
+			slowest = Math.max(slowest, now - last);
+			last = now;
+		}
+		Diorama.LOGGER.info("[portal-crossing] {}: slowest tick {} ms; {} block color builds and {} map sessions so far", label, slowest / 1_000_000,
+			(Object) context.<Integer, RuntimeException>computeOnClient(mc -> BlockLooks.builds()), (Object) context.<Integer, RuntimeException>computeOnClient(mc -> MapSession.started()));
 	}
 
 	/** The Nether and the End: the minimap, and the fullscreen map near and far. */
