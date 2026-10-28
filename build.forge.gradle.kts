@@ -114,12 +114,14 @@ tasks.withType<ProcessResources>().configureEach {
 	exclude("fabric.mod.json", "META-INF/neoforge.mods.toml")
 }
 
-// The mixin configs name their reference map only here: Loom adds it to the Fabric jars'.
+// The mixin configs name their reference map only here: Loom adds it to the Fabric jars'. Forge
+// also logs an error for a config without the Mixin version it needs.
 tasks.withType<ProcessResources>().configureEach {
 	val refmaps = mapOf("diorama.mixins.json" to "diorama.refmap.json", "diorama-gameshim.mixins.json" to "diorama-gameshim.refmap.json")
+	inputs.property("mixinConfigAdditions", refmaps.toString() + " minVersion 0.8")
 	filesMatching(refmaps.keys) {
-		val refmap = refmaps.getValue(name)
-		filter { line -> if (line.trim() == "\"required\": true,") "$line\n\t\"refmap\": \"$refmap\"," else line }
+		val added = "\n\t\"refmap\": \"${refmaps.getValue(name)}\"," + if (name == "diorama.mixins.json") "\n\t\"minVersion\": \"0.8\"," else ""
+		filter { line -> if (line.trim() == "\"required\": true,") line + added else line }
 	}
 }
 
