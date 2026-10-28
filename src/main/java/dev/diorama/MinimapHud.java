@@ -1,6 +1,7 @@
 package dev.diorama;
 
 import dev.diorama.bake.TileKey;
+import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
@@ -9,6 +10,7 @@ import dev.diorama.drawing.DrawingStore;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
 import dev.diorama.render.gpu.MapCanvas;
+import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
@@ -20,7 +22,8 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -59,16 +62,19 @@ public final class MinimapHud implements HudElement {
 	*///?}
 		Minecraft mc = Minecraft.getInstance();
 		Settings settings = Settings.get();
+		Screen screen = mc.gui.screen();
 		//? if >=26.2 {
 		if (!settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
 		/*if (!settings.minimap || mc.options.hideGui
 		*///?}
-			|| mc.gui.screen() instanceof MapScreen || mc.gui.screen() instanceof AbstractContainerScreen<?>
-			|| mc.gui.screen() instanceof SettingsScreen || debugScreenOpen(mc) || !this.canDraw(mc)) {
-			// Not drawn. Inventories and chests count, because the item lists other mods (JEI, REI,
-			// EMI) put beside them run into the minimap's corner. The settings screen draws its own
-			// copy, sharp over the blur, as a preview. The F3 screen fills both top corners with text
+			|| screen != null && !(screen instanceof ChatScreen) || Cobblemon.inBattle()
+			|| debugScreenOpen(mc) || !this.canDraw(mc)) {
+			// Not drawn under any screen but chat, the way Xaero's Minimap and JourneyMap do it:
+			// screens fill the middle and other mods put theirs in the corners too, like the item
+			// lists JEI, REI and EMI put beside inventories. The settings screen draws its own copy,
+			// sharp over the blur, as a preview. A Cobblemon battle keeps its tiles in both top
+			// corners even with its screen closed. The F3 screen fills both top corners with text
 			// people open it to read.
 			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
@@ -77,7 +83,9 @@ public final class MinimapHud implements HudElement {
 		Settings.Corner corner = settings.minimapCorner;
 		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
 		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
-		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0);
+		// Held, the enlarge key shows it bigger, in the same corner.
+		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
+		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0, size);
 	}
 
 	/**
@@ -92,7 +100,7 @@ public final class MinimapHud implements HudElement {
 		}
 		Settings settings = Settings.get();
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
-		int[] bounds = this.draw(graphics, partialTick, true, top, 0);
+		int[] bounds = this.draw(graphics, partialTick, true, top, 0, settings.minimapSize);
 		if (!settings.minimap) {
 			//? if <1.21.6 {
 			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
@@ -139,10 +147,10 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/**
-	 * Draws the minimap in a corner, {@code effects} pixels lower for status effect icons. Returns
-	 * what it covers, x0, y0, x1, y1, then the map's own x, y and size.
+	 * Draws the minimap {@code wanted} pixels wide or less, in a corner, {@code effects} pixels lower
+	 * for status effect icons. Returns what it covers, x0, y0, x1, y1, then the map's own x, y and size.
 	 */
-	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects) {
+	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects, int wanted) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
 		LocalPlayer player = mc.player;
@@ -151,7 +159,7 @@ public final class MinimapHud implements HudElement {
 		Font font = mc.font;
 		List<String> info = this.infoLines(settings, player, mc);
 		int infoHeight = info.size() * 10;
-		int size = this.fit(settings.minimapSize, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
+		int size = this.fit(wanted, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
@@ -177,7 +185,8 @@ public final class MinimapHud implements HudElement {
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
-			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, store.in(mc.level.dimension().identifier().toString()), false), false, null);
+			List<Waypoint> near = store.in(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, player)).toList();
+			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, near, false), false, null);
 		}
 		Radar.draw(graphics, view, blips, false, true);
 		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, player.getViewYRot(partialTick), 5);
@@ -232,6 +241,8 @@ public final class MinimapHud implements HudElement {
 		int fitted = size;
 		if (top) {
 			fitted = Math.min(fitted, height - MARGIN - effects - infoHeight - MARGIN - 4);
+			// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
+			fitted = Math.min(fitted, width - 2 * MARGIN - 4);
 		} else {
 			fitted = Math.min(fitted, width / 2 - HOTBAR_HALF_WIDTH - 2 * MARGIN - 4);
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);

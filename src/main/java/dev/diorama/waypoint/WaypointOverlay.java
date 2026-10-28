@@ -105,8 +105,10 @@ public final class WaypointOverlay {
 		Pin best = null;
 		double bestDistance = Double.MAX_VALUE;
 		for (Pin pin : pins) {
-			// A standing pin answers at its head and at the spot its point touches.
-			double d = Math.hypot(pin.x() - mouseX, pin.headY() - mouseY);
+			// A standing pin answers at its head and at the spot its point touches. A head widened for
+			// its initials answers along its middle line.
+			double along = Math.max(0, Math.abs(pin.x() - mouseX) - Pins.stretch(pin.waypoint(), (int) pin.size()) / 2.0);
+			double d = Math.hypot(along, pin.headY() - mouseY);
 			if (!pin.clamped()) {
 				d = Math.min(d, Math.hypot(pin.x() - mouseX, pin.y() - mouseY));
 			}

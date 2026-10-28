@@ -10,6 +10,7 @@ import dev.diorama.bake.TileSpots;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
+import dev.diorama.render.Pins;
 import dev.diorama.render.Radar;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
@@ -68,6 +69,7 @@ public final class MapScreen extends Screen {
 	private static final int BAR = 16;
 	private static final int BOTTOM_BAR = 14;
 	private static final Component HELP = Component.translatable("diorama.map.help");
+	private static final String STATUS_GAP = "   ·   ";
 	/** One press of a zoom button: two notches of the mouse wheel. */
 	private static final int ZOOM_BUTTON_STEPS = 2;
 	private static final Identifier TAB = Identifier.withDefaultNamespace("widget/tab");
@@ -301,8 +303,8 @@ public final class MapScreen extends Screen {
 		// The bars: tabs and status on top with the buttons, the mouse's ways in at the bottom.
 		graphics.fill(0, 0, this.width, BAR, 0x90000000);
 		this.drawTabs(graphics, mouseX, mouseY);
-		Component status = this.statusText(session, player, caves);
-		graphics.text(this.font, status.getString(), this.tabsEnd + 8, 4, 0xFFFFFFFF, false);
+		int statusX = this.tabsEnd + 8;
+		graphics.text(this.font, this.statusText(session, player, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
 		graphics.text(this.font, (this.draw.active() ? this.draw.help() : HELP).getString(), 6, this.height - 11, 0xFFC8D0DA, false);
 		// Widgets (the buttons) draw over the map, then the icons on them.
@@ -333,19 +335,37 @@ public final class MapScreen extends Screen {
 		}
 	}
 
-	/** The status line: the player's position, the chunks mapped and whether baking is running. */
-	private static Component statusText(MapSession session, LocalPlayer player, boolean caves) {
-		Component mode = !caves && session.map().roofless()
-			? Component.translatable("diorama.map.under_roof").append("   ·   ")
-			: Component.empty();
-		Component chunks = Component.translatable("diorama.map.chunks", session.map().chunkCount());
-		Component baking = session.map().bakingCount() > 0
-			? Component.literal("   ·   ").append(Component.translatable("diorama.map.baking"))
-			: Component.empty();
-		return mode.copy()
-			.append(Component.literal(String.format("%d, %d, %d   ·   ", player.getBlockX(), player.getBlockY(), player.getBlockZ())))
-			.append(chunks)
-			.append(baking);
+	/**
+	 * The status line: whether the view is under the Nether's roof, the player's position, the
+	 * chunks mapped and whether baking is running. It has {@code room} pixels before the buttons;
+	 * what doesn't fit is left out, the chunk count first, then baking, then the roof.
+	 */
+	private String statusText(MapSession session, LocalPlayer player, boolean caves, int room) {
+		String roof = !caves && session.map().roofless() ? Component.translatable("diorama.map.under_roof").getString() : null;
+		String position = String.format("%d, %d, %d", player.getBlockX(), player.getBlockY(), player.getBlockZ());
+		String chunks = Component.translatable("diorama.map.chunks", session.map().chunkCount()).getString();
+		String baking = session.map().bakingCount() > 0 ? Component.translatable("diorama.map.baking").getString() : null;
+		List<String> parts = new ArrayList<>();
+		for (String part : new String[] {roof, position, chunks, baking}) {
+			if (part != null) {
+				parts.add(part);
+			}
+		}
+		for (String dropped : new String[] {chunks, baking, roof}) {
+			if (this.font.width(String.join(STATUS_GAP, parts)) <= room) {
+				break;
+			}
+			parts.remove(dropped);
+		}
+		return this.font.plainSubstrByWidth(String.join(STATUS_GAP, parts), Math.max(0, room));
+	}
+
+	/** Where the buttons at the top right start: the status line has to end before them. */
+	private int buttonsStart() {
+		if (this.waypointsButton.visible) {
+			return this.waypointsButton.getX();
+		}
+		return this.settingsButton.visible ? this.settingsButton.getX() : this.width;
 	}
 
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
@@ -806,13 +826,15 @@ public final class MapScreen extends Screen {
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
 		for (WaypointOverlay.Pin pin : pins) {
 			float r = pin.size() / 2 + 2;
-			if (pin.clamped() && pin.x() + r > bx0 && pin.x() - r < bx1 && pin.y() + r > by0 && pin.y() - r < by1) {
+			// Initials of three or four letters make the badge wider than it's tall.
+			float rx = r + Pins.stretch(pin.waypoint(), (int) pin.size()) / 2.0F;
+			if (pin.clamped() && pin.x() + rx > bx0 && pin.x() - rx < bx1 && pin.y() + r > by0 && pin.y() - r < by1) {
 				// An edge pin behind the zoom buttons moves the shorter way out: above them or left.
 				float up = pin.y() + r - by0;
-				float left = pin.x() + r - bx0;
+				float left = pin.x() + rx - bx0;
 				pin = up <= left
 					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), true)
-					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - r, pin.y(), pin.size(), true);
+					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), true);
 			}
 			out.add(pin);
 		}

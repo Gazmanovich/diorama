@@ -118,6 +118,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("drawings")) {
 				DrawingTest.run(context, world);
 			}
+			if (tests.contains("waypoint-clutter")) {
+				WaypointClutterTest.photos(context, world);
+			}
+			if (tests.contains("long-initials")) {
+				LongInitialsTest.photos(context, world);
+			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
 			}
@@ -163,11 +169,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("enlarge")) {
+				enlarge(context);
+			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
 			}
 			if (tests.contains("ftb-claims")) {
 				ftbClaims(context, world);
+			}
+			if (tests.contains("cobblemon")) {
+				cobblemonBattle(context, world);
 			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
@@ -3380,6 +3392,86 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/**
+	 * A Cobblemon battle, with Cobblemon installed (opt-in: DIORAMA_TESTS=cobblemon). The player's
+	 * Pikachu takes on the nearest wild Pokémon, the way a thrown Poké Ball starts a battle: the
+	 * Rattata spawned beside them, or one that spawned on its own closer. Cobblemon's battle
+	 * screen and the battlers' tiles fill every corner, so the minimap stays out of the way, in
+	 * whichever corner it's set to, also once the battle screen is closed with the tiles still up,
+	 * and comes back when the battle ends (#147).
+	 */
+	private static void cobblemonBattle(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> cobblemonClass("client.CobblemonClient") != null)) {
+			throw new AssertionError("DIORAMA_TESTS=cobblemon needs Cobblemon installed");
+		}
+		world.getServer().runCommand("gamemode survival @a");
+		world.getServer().runCommand("time set noon");
+		world.getServer().runCommand("execute as @a run pokegive pikachu level=50");
+		world.getServer().runCommand("execute as @a at @s run pokespawnat ~4 ~ ~ rattata level=2");
+		context.setScreen(() -> null);
+		settle(context, 40);
+		context.takeScreenshot("cobblemon-00-before");
+		world.getServer().runOnServer(server -> {
+			try {
+				net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayers().get(0);
+				Class<?> pokemonEntity = cobblemonClass("entity.pokemon.PokemonEntity");
+				net.minecraft.world.entity.Entity wild = player.level().getEntities((net.minecraft.world.entity.Entity) null,
+					player.getBoundingBox().inflate(16), pokemonEntity::isInstance).get(0);
+				Class<?> builder = cobblemonClass("battles.BattleBuilder");
+				for (java.lang.reflect.Method m : builder.getMethods()) {
+					if (m.getName().equals("pve") && m.getParameterCount() == 2) {
+						m.invoke(builder.getField("INSTANCE").get(null), player, wild);
+						return;
+					}
+				}
+				throw new AssertionError("No BattleBuilder.pve(player, pokemon)");
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
+		context.waitFor(mc -> inCobblemonBattle() && mc.gui.screen() != null && mc.gui.screen().getClass().getSimpleName().equals("BattleGUI"), 400);
+		// Past the battle screen's opening animation.
+		context.waitTicks(80);
+		Settings.Corner saved = context.computeOnClient(mc -> Settings.get().minimapCorner);
+		for (Settings.Corner corner : Settings.Corner.values()) {
+			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
+			context.waitTicks(5);
+			context.takeScreenshot("cobblemon-01-battle-" + corner.name().toLowerCase(java.util.Locale.ROOT));
+		}
+		context.runOnClient(mc -> Settings.get().minimapCorner = saved);
+		// Closed with Esc, the battle screen leaves the battlers' tiles in the top corners.
+		context.runOnClient(mc -> mc.gui.screen().onClose());
+		context.waitTicks(20);
+		if (!context.computeOnClient(mc -> inCobblemonBattle())) {
+			throw new AssertionError("Closing the battle screen ended the battle");
+		}
+		context.takeScreenshot("cobblemon-02-battle-screen-closed");
+		// Cobblemon's command takes one player.
+		world.getServer().runCommand("stopbattle @p");
+		context.waitFor(mc -> !inCobblemonBattle(), 200);
+		context.setScreen(() -> null);
+		settle(context, 40);
+		context.takeScreenshot("cobblemon-03-after");
+		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	private static boolean inCobblemonBattle() {
+		try {
+			Class<?> client = cobblemonClass("client.CobblemonClient");
+			return client.getMethod("getBattle").invoke(client.getField("INSTANCE").get(null)) != null;
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	private static @Nullable Class<?> cobblemonClass(String name) {
+		try {
+			return Class.forName("com.cobblemon.mod.common." + name);
+		} catch (ClassNotFoundException e) {
+			return null;
+		}
+	}
+
+	/**
 	 * Land claims from FTB Chunks, with FTB Chunks installed (opt-in: DIORAMA_TESTS=ftb-claims). The
 	 * player's team claims the chunks round the player, force loads the middle one, and a server
 	 * team claims chunks to the east. The map tints each claim in its team's colour on the ground it
@@ -4350,9 +4442,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new net.minecraft.client.gui.screens.inventory.InventoryScreen(Minecraft.getInstance().player));
 		settle(context, 20);
 		context.takeScreenshot("screens-02-inventory");
+		// Under any screen, the minimap steps aside, the pause menu too (#147)...
 		context.setScreen(() -> new net.minecraft.client.gui.screens.PauseScreen(true));
 		settle(context, 20);
 		context.takeScreenshot("screens-03-pause");
+		// ...but not chat, which leaves the corners alone.
+		//? if >=1.21.9 {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
+		settle(context, 20);
+		context.takeScreenshot("screens-03-chat");
 		context.setScreen(() -> null);
 		// F3's debug screen fills both top corners; the minimap steps out of its way, and comes back.
 		context.runOnClient(DioramaClientTest::toggleDebugScreen);
@@ -4362,6 +4463,63 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 20);
 		context.takeScreenshot("screens-05-debug-closed");
 		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	/**
+	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
+	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
+	 * to its size.
+	 */
+	private static void enlarge(ClientGameTestContext context) {
+		context.setScreen(() -> null);
+		int[] saved = context.computeOnClient(mc -> new int[] {Settings.get().minimapEnlarged, Settings.get().minimapCorner.ordinal()});
+		context.runOnClient(mc -> {
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.getKey("key.keyboard.z"));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		settle(context, 20);
+		context.takeScreenshot("enlarge-01-normal");
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		if (!context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Holding the enlarge key didn't reach its key mapping");
+		}
+		settle(context, 40);
+		context.takeScreenshot("enlarge-02-200");
+		for (int percent : new int[] {150, 325, 400}) {
+			context.runOnClient(mc -> Settings.get().minimapEnlarged = percent);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-03-" + percent);
+		}
+		// On a tall, narrow window, 4x is wider than the screen: it stops at the screen's width.
+		context.getInput().resizeWindow(360, 900);
+		settle(context, 20);
+		context.takeScreenshot("enlarge-03-400-narrow");
+		context.getInput().resizeWindow(1600, 900);
+		context.runOnClient(mc -> Settings.get().minimapEnlarged = 200);
+		for (Settings.Corner corner : Settings.Corner.values()) {
+			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-04-" + corner.name().toLowerCase(java.util.Locale.ROOT));
+		}
+		context.runOnClient(mc -> Settings.get().minimapCorner = Settings.Corner.TOP_RIGHT);
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Letting go of the enlarge key didn't reach its key mapping");
+		}
+		context.takeScreenshot("enlarge-05-released");
+		// The Enlarged slider sits beside Size, so the Minimap tab is no taller.
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 10);
+		context.takeScreenshot("enlarge-06-settings");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			Settings.get().minimapEnlarged = saved[0];
+			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
 	}
 
 	private static void toggleDebugScreen(Minecraft mc) {
@@ -4900,10 +5058,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world");
 			*///?}
 		}
 		return Set.of(env.split(","));
