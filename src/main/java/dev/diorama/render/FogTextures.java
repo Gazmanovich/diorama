@@ -20,8 +20,17 @@ final class FogTextures {
 		return noise;
 	}
 
-	/** Tileable value noise, a coarser scale in each channel from red to alpha. */
 	private static MapTexture createNoise() {
+		MapTexture texture = MapTexture.create("diorama fog noise", NOISE_SIZE, 1);
+		texture.write(0, 0, 0, NOISE_SIZE, noisePixels());
+		return texture;
+	}
+
+	/**
+	 * Tileable value noise, a coarser scale in each channel from red to alpha, as ABGR pixels.
+	 * The same every time: exported images paint the fog from it on the CPU.
+	 */
+	static int[] noisePixels() {
 		int size = NOISE_SIZE;
 		float[][] channels = {
 			fractal(size, 6, 1L),
@@ -37,9 +46,7 @@ final class FogTextures {
 			int a = Math.round(channels[3][i] * 255);
 			pixels[i] = (a << 24) | (b << 16) | (g << 8) | r;
 		}
-		MapTexture texture = MapTexture.create("diorama fog noise", size, 1);
-		texture.write(0, 0, 0, size, pixels);
-		return texture;
+		return pixels;
 	}
 
 	private static float[] fractal(int size, int cells, long seed) {

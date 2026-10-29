@@ -499,6 +499,70 @@ public final class TileStore {
 		this.store(key, old);
 	}
 
+	/**
+	 * Merges every bake handed over so far and rebuilds the overview tiles above them, so reads
+	 * at every level show everything mapped up to now. Waits for the writer; not on the render
+	 * thread.
+	 */
+	public void catchUp() throws InterruptedException {
+		Future<?> done = WRITER.submit(() -> {
+			Set<TileKey> handed;
+			synchronized (this) {
+				handed = new HashSet<>(this.handedOver.keySet());
+			}
+			for (TileKey key : handed) {
+				this.merge(key);
+			}
+			synchronized (this) {
+				for (TileKey key : this.unwritten.keySet()) {
+					if (key.lod() < TileKey.MAX_LOD) {
+						this.staleOverviews.add(key.parent());
+					}
+				}
+			}
+			this.rebuildOverviews();
+		});
+		try {
+			done.get();
+		} catch (ExecutionException e) {
+			Diorama.LOGGER.error("Couldn't bring the saved map up to date", e);
+		}
+	}
+
+	/** Every saved tile at an overview level, 0 for the detailed tiles, on disk or about to be. */
+	public Set<TileKey> saved(int lod) {
+		Set<TileKey> keys = new HashSet<>();
+		Path dir = lod == 0 ? this.folder : this.folder.resolve("lod" + lod);
+		if (Files.isDirectory(dir)) {
+			try (java.util.stream.Stream<Path> files = Files.list(dir)) {
+				files.forEach(file -> {
+					String name = file.getFileName().toString();
+					int split = name.indexOf('_');
+					if (!name.endsWith(".omt") || split < 0) {
+						return;
+					}
+					try {
+						int u = Integer.parseInt(name.substring(0, split));
+						int v = Integer.parseInt(name.substring(split + 1, name.length() - 4));
+						keys.add(new TileKey(TileKey.SURFACE, u, v, lod));
+					} catch (NumberFormatException e) {
+						// Not a tile.
+					}
+				});
+			} catch (IOException e) {
+				Diorama.LOGGER.warn("Couldn't list saved tiles in {}", dir, e);
+			}
+		}
+		synchronized (this) {
+			for (TileKey key : this.unwritten.keySet()) {
+				if (key.lod() == lod) {
+					keys.add(key);
+				}
+			}
+		}
+		return keys;
+	}
+
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {
