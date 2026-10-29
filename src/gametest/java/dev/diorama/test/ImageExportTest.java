@@ -135,7 +135,7 @@ final class ImageExportTest {
 		settle(context);
 		context.takeScreenshot("image-export-03-whole");
 		ImageExport.Area whole = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
-		coversMappedChunks(context, whole);
+		coversMappedChunks(context, world, whole);
 		Path wholeFile = save(context);
 		checkImage(wholeFile, whole);
 		matchesTiles(context, wholeFile, whole);
@@ -355,23 +355,34 @@ final class ImageExportTest {
 		}
 	}
 
-	/** Whole map's box holds the middle of every chunk the map has near the player, on its ground. */
-	private static void coversMappedChunks(ClientGameTestContext context, ImageExport.Area whole) {
-		String missing = context.computeOnClient(mc -> {
-			double[] units = whole.units();
+	/**
+	 * Whole map's box holds the middle of every chunk the map has near the player, on its ground.
+	 * The ground's height comes from the server: a chunk the map keeps may be unloaded on the
+	 * client by now, and the client reads an unloaded chunk's ground at the bottom of the world.
+	 */
+	private static void coversMappedChunks(ClientGameTestContext context, TestSingleplayerContext world, ImageExport.Area whole) {
+		List<int[]> mapped = context.computeOnClient(mc -> {
+			List<int[]> chunks = new java.util.ArrayList<>();
 			int cx0 = mc.player.getBlockX() >> 4;
 			int cz0 = mc.player.getBlockZ() >> 4;
 			for (int cz = cz0 - 12; cz <= cz0 + 12; cz++) {
 				for (int cx = cx0 - 12; cx <= cx0 + 12; cx++) {
-					if (MapSession.get().map().chunk(cx, cz) == null) {
-						continue;
+					if (MapSession.get().map().chunk(cx, cz) != null) {
+						chunks.add(new int[] {cx, cz});
 					}
-					int x = cx * 16 + 8;
-					int z = cz * 16 + 8;
-					double v = Projection.v(mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z), z);
-					if (x < units[0] || x > units[2] || v < units[1] || v > units[3]) {
-						return "chunk " + cx + "," + cz;
-					}
+				}
+			}
+			return chunks;
+		});
+		double[] units = whole.units();
+		String missing = world.getServer().computeOnServer(server -> {
+			for (int[] chunk : mapped) {
+				int x = chunk[0] * 16 + 8;
+				int z = chunk[1] * 16 + 8;
+				int y = server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+				double v = Projection.v(y, z);
+				if (x < units[0] || x > units[2] || v < units[1] || v > units[3]) {
+					return "chunk " + chunk[0] + "," + chunk[1] + " (ground at y " + y + ", map row " + v + ")";
 				}
 			}
 			return null;
