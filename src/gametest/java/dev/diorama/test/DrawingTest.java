@@ -228,7 +228,9 @@ final class DrawingTest {
 			Settings.get().radarNeutral = radarNeutral;
 			Settings.get().radarPassive = radarPassive;
 		});
-		// Back as the other sections expect: they wait for the player to stand on the ground.
+		// Back as the other sections expect: they wait for the player to stand on the ground. Straight
+		// from spectator, creative would keep them flying; survival lands them first.
+		world.getServer().runCommand("gamemode survival @a");
 		world.getServer().runCommand("gamemode creative @a");
 	}
 
