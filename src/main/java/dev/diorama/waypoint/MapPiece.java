@@ -300,7 +300,7 @@ final class MapPiece {
 
 	/** Grass in the open, lit as the map lights a top face in the sun: the top where there's no map yet. */
 	private static int grassTop(BlockLooks looks, ClientLevel level, BlockPos pos, MapStyle style) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(Blocks.GRASS_BLOCK.defaultBlockState());
+		int id = BlockLooks.id(Blocks.GRASS_BLOCK.defaultBlockState());
 		float[] rgb = albedo(looks, level, id, pos, true, false);
 		float ambient = style.ambient();
 		float shade = 1 + style.heightShade() * (float) Math.max(-1, Math.min(1, (pos.getY() - 64) / 64.0));

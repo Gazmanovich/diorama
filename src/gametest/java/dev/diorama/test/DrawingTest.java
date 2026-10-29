@@ -53,6 +53,8 @@ final class DrawingTest {
 		// On the road south of the castle, so the minimap shows the road and the gate.
 		world.getServer().runCommand("tp @a " + (cx + 0.5) + " " + (base + 4) + " " + (cz + 46.5) + " 180 -4");
 		context.waitTicks(60);
+		boolean radarNeutral = context.computeOnClient(mc -> Settings.get().radarNeutral);
+		boolean radarPassive = context.computeOnClient(mc -> Settings.get().radarPassive);
 		context.runOnClient(mc -> {
 			Settings.get().radarNeutral = false;
 			Settings.get().radarPassive = false;
@@ -221,7 +223,15 @@ final class DrawingTest {
 		context.runOnClient(mc -> Settings.get().drawings = Settings.DrawingsShown.FULLSCREEN);
 		context.waitTicks(3);
 		context.takeScreenshot("drawing-05-minimap-off");
-		context.runOnClient(mc -> Settings.get().drawings = Settings.DrawingsShown.ALWAYS);
+		context.runOnClient(mc -> {
+			Settings.get().drawings = Settings.DrawingsShown.ALWAYS;
+			Settings.get().radarNeutral = radarNeutral;
+			Settings.get().radarPassive = radarPassive;
+		});
+		// Back as the other sections expect: they wait for the player to stand on the ground. Straight
+		// from spectator, creative would keep them flying; survival lands them first.
+		world.getServer().runCommand("gamemode survival @a");
+		world.getServer().runCommand("gamemode creative @a");
 	}
 
 	private interface WidgetOf {

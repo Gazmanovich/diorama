@@ -208,6 +208,8 @@ stonecutter parameters {
 		// Not a Minecraft change: the 1.20.1 jar is built for Java 17, which has no Math.clamp.
 		// Minecraft's own clamp has the int, float and double forms.
 		"\\bMath\\.clamp\\(" to "net.minecraft.util.Mth.clamp(",
+		// The tests' scenes: short grass was named plain grass.
+		"\"short_grass\"" to "\"grass\"",
 	)
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {

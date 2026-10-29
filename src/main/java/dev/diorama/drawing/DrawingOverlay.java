@@ -20,9 +20,9 @@ public final class DrawingOverlay {
 	public static final float CORE = 2;
 	public static final float RIM = 1;
 	/** An area's edge, in GUI pixels. */
-	private static final float EDGE = 1;
-	private static final int FILL_ALPHA = 0x40;
-	private static final int PLATE = 0x90000000;
+	static final float EDGE = 1;
+	static final int FILL_ALPHA = 0x40;
+	static final int PLATE = 0x90000000;
 	/** How near the cursor has to be to a line or an area's edge to pick it, in GUI pixels. */
 	private static final float PICK_REACH = 3;
 	/** The corners of a joint: an octagon around each point, so bends look round at any angle. */
@@ -177,7 +177,7 @@ public final class DrawingOverlay {
 	}
 
 	/** The colour darkened to a third, for the rim under a line. */
-	private static int rim(int color) {
+	static int rim(int color) {
 		int r = (color >> 16 & 0xFF) * 3 / 10;
 		int g = (color >> 8 & 0xFF) * 3 / 10;
 		int b = (color & 0xFF) * 3 / 10;

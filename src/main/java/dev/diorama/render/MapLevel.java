@@ -720,10 +720,19 @@ public final class MapLevel implements ChunkSource {
 				this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
 			} catch (Throwable t) {
-				Diorama.LOGGER.error("Failed to bake tile {}", key, t);
+				logFailed("Failed to bake tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 			}
 		});
+	}
+
+	/** A bake stopped by block states being numbered again (see {@link BlockLooks#bakeId}) says so only in debug. */
+	private static void logFailed(String message, TileKey key, Throwable t) {
+		if (t instanceof BlockLooks.StatesRenumbered) {
+			Diorama.LOGGER.debug(message + ": block states were being numbered again", key);
+		} else {
+			Diorama.LOGGER.error(message, key, t);
+		}
 	}
 
 	/**
@@ -744,12 +753,12 @@ public final class MapLevel implements ChunkSource {
 							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
 						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					} catch (Throwable t) {
-						Diorama.LOGGER.error("Failed to finish GPU tile {}", key, t);
+						logFailed("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 					}
 				}));
 			} catch (Throwable t) {
-				Diorama.LOGGER.error("Failed to mesh tile {}", key, t);
+				logFailed("Failed to mesh tile {}", key, t);
 				this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
 			}
 		});
@@ -790,7 +799,7 @@ public final class MapLevel implements ChunkSource {
 					// The check tile never reached the GPU: hand its turn back.
 					dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, false);
 				}
-				Diorama.LOGGER.error("Failed to check tile {} on the GPU", key, t);
+				logFailed("Failed to check tile {} on the GPU", key, t);
 			}
 		});
 	}
