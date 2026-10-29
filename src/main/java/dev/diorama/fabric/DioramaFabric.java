@@ -10,6 +10,7 @@ import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
 import dev.diorama.waypoint.WaypointHud;
@@ -73,6 +74,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
 			Maps.onLeave();
+			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -84,6 +86,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
 			Maps.onLeave();
+			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

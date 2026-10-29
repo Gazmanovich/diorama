@@ -334,5 +334,6 @@
     "diorama.maps.waypoint": "%s waypoint",
     "diorama.maps.waypoints": "%s waypoints",
     "diorama.maps.made": "made %s",
-    "diorama.maps.none": "No maps"
+    "diorama.maps.none": "No maps",
+    "diorama.maps.not_saved": "Couldn't save the list of maps; see the game log"
 }

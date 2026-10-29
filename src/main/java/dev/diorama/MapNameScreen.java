@@ -84,11 +84,15 @@ public final class MapNameScreen extends Screen {
 			if (id != null) {
 				this.parent.show(this.dimension, id);
 				this.onClose();
+				return;
 			}
 		} else if (maps.rename(this.dimension, this.existing, typed)) {
 			this.parent.show(this.dimension, this.existing);
 			this.onClose();
+			return;
 		}
+		// The name was checked already, so the list of maps couldn't be saved.
+		this.problem = Component.translatable("diorama.maps.not_saved");
 	}
 
 	@Override

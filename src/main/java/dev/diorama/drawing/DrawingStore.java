@@ -62,7 +62,7 @@ public final class DrawingStore {
 
 	/**
 	 * The store for the world the client is in, loading it when the world changes; null while the
-	 * world isn't known. Nothing lives only in memory, so leaving a world needs no clean-up.
+	 * world isn't known.
 	 */
 	public static @Nullable DrawingStore get() {
 		String key = WorldKey.current();
@@ -73,6 +73,14 @@ public final class DrawingStore {
 			current = new DrawingStore(key);
 		}
 		return current;
+	}
+
+	/**
+	 * Called on leaving a world. The drawings are all on disk, but which ones show depends on the
+	 * world's maps in use, so the next visit reads them again.
+	 */
+	public static void onLeave() {
+		current = null;
 	}
 
 	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests. */

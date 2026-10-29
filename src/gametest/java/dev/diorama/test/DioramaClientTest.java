@@ -355,6 +355,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String nether = "minecraft:the_nether";
 		TestWorldSave save;
 		String newId;
+		String[] worldKeyLeft = new String[1];
 		try (TestSingleplayerContext world = context.worldBuilder()
 			.setUseConsistentSettings(false)
 			.adjustSettings(s -> {
@@ -382,6 +383,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 					new double[] {at.getX(), Projection.v(at.getY(), at.getZ())}, "Old note"));
 				return WorldKey.current();
 			});
+			worldKeyLeft[0] = worldKey;
 			java.nio.file.Path mainFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(overworld, dev.diorama.Maps.MAIN));
 			context.waitFor(mc -> tileFiles(mainFolder) > 20 && hasTileAt(mainFolder, 600), 600);
 			long mainTiles = tileFiles(mainFolder);
@@ -516,10 +518,43 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("After deleting Scratch the waypoints file should keep Old Base and New Base only: " + saved);
 			}
 
+			// A list that can't be saved changes nothing: no new map, the same map in use.
+			java.nio.file.Path mapsFile = context.computeOnClient(mc -> WorldKey.folder(worldKey).resolve("maps.json"));
+			java.nio.file.Path blocker = mapsFile.resolveSibling("maps.json.tmp");
+			try {
+				java.nio.file.Files.createDirectories(blocker);
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+			context.runOnClient(mc -> {
+				if (dev.diorama.Maps.get().create(overworld, "Blocked") != null) {
+					throw new AssertionError("A map was made though the list of maps couldn't be saved");
+				}
+				if (dev.diorama.Maps.get().list(overworld).size() != 2 || !dev.diorama.Maps.get().active(overworld).equals(dev.diorama.Maps.MAIN)) {
+					throw new AssertionError("A failed save changed the maps: " + dev.diorama.Maps.get().list(overworld));
+				}
+			});
+			try {
+				java.nio.file.Files.delete(blocker);
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+
 			// Leave on the new map.
 			context.runOnClient(mc -> dev.diorama.Maps.get().use(overworld, newId));
 			context.setScreen(() -> null);
 			context.waitTicks(40);
+		}
+		// A hand edit breaks the End's entry: the Overworld's maps still open, and the file is kept aside.
+		java.nio.file.Path mapsFile = context.computeOnClient(mc -> WorldKey.folder(worldKeyLeft[0]).resolve("maps.json"));
+		try {
+			String text = java.nio.file.Files.readString(mapsFile);
+			if (!text.contains("\"dimensions\": {")) {
+				throw new AssertionError("Unexpected maps file: " + text);
+			}
+			java.nio.file.Files.writeString(mapsFile, text.replace("\"dimensions\": {", "\"dimensions\": {\"minecraft:the_end\": {\"maps\": \"broken\"},"));
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
 		}
 		try (TestSingleplayerContext reopened = save.open()) {
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
@@ -532,6 +567,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 					throw new AssertionError("Reopened on the new map, the waypoints should be its own");
 				}
 			});
+			try (java.util.stream.Stream<java.nio.file.Path> kept = java.nio.file.Files.list(mapsFile.getParent())) {
+				if (kept.noneMatch(f -> f.getFileName().toString().startsWith("maps.json.unreadable-"))) {
+					throw new AssertionError("The maps file with a broken entry wasn't kept aside");
+				}
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
 			context.setScreen(MapScreen::new);
 			settle(context, 60);
 			context.takeScreenshot("sub-maps-07-reopened");

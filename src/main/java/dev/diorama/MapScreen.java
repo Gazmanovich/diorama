@@ -234,6 +234,8 @@ public final class MapScreen extends Screen {
 			this.onClose();
 			return;
 		}
+		// The map can open before a server names its world, and the list of maps is the world's.
+		this.mapsButton.active = Maps.get() != null;
 		MapSession session = MapSession.get();
 		LocalPlayer player = this.minecraft.player;
 		if (session == null || player == null) {

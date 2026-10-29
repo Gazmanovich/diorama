@@ -100,6 +100,8 @@ public final class MapsScreen extends Screen {
 	}
 
 	private void step(int step) {
+		// Every dimension's main map has the same ID, so a click before the step isn't half a double-click.
+		this.lastClicked = null;
 		int index = this.dimensions.indexOf(this.dimension);
 		this.show(this.dimensions.get(Math.floorMod(index + step, this.dimensions.size())), null);
 		this.scroll = 0;

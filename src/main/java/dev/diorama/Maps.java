@@ -2,6 +2,9 @@ package dev.diorama;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.waypoint.WaypointStore;
 import java.io.IOException;
@@ -193,12 +196,16 @@ public final class Maps {
 		}
 	}
 
-	/** Makes an empty map and switches the dimension to it. Returns its ID, or null for a name that won't do. */
+	/**
+	 * Makes an empty map and switches the dimension to it. Returns its ID, or null for a name that
+	 * won't do or a list that couldn't be saved.
+	 */
 	public @Nullable String create(String dimension, String name) {
 		String trimmed = name.trim();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_NAME || this.taken(dimension, trimmed, null)) {
 			return null;
 		}
+		String before = GSON.toJson(this.saved);
 		Dimension saved = this.saved.dimensions.computeIfAbsent(dimension, d -> new Dimension());
 		Entry entry = new Entry();
 		// Random rather than counted, so a map made after one was deleted can't find anything it left.
@@ -208,7 +215,11 @@ public final class Maps {
 		entry.name = trimmed;
 		entry.created = System.currentTimeMillis();
 		saved.maps.add(entry);
-		this.use(dimension, entry.id);
+		saved.active = entry.id;
+		if (!this.saveOrUndo(before)) {
+			return null;
+		}
+		this.changed(dimension);
 		return entry.id;
 	}
 
@@ -216,18 +227,22 @@ public final class Maps {
 	 * Switches the dimension to another of its maps. The map in use is saved and closed first, as on
 	 * a dimension change, and the waypoints and drawings shown become the other map's.
 	 */
-	public void use(String dimension, String id) {
+	public boolean use(String dimension, String id) {
 		if (!this.exists(dimension, id)) {
-			return;
+			return false;
 		}
+		String before = GSON.toJson(this.saved);
 		Dimension saved = this.saved.dimensions.computeIfAbsent(dimension, d -> new Dimension());
 		boolean changed = !saved.active.equals(id);
 		saved.active = id;
-		this.save();
+		if (!this.saveOrUndo(before)) {
+			return false;
+		}
 		if (changed) {
 			Diorama.LOGGER.info("{} of {} is now on map {}", dimension, this.worldKey, id.isEmpty() ? "main" : id);
 			this.changed(dimension);
 		}
+		return true;
 	}
 
 	public boolean rename(String dimension, String id, String name) {
@@ -235,31 +250,35 @@ public final class Maps {
 		if (trimmed.isEmpty() || trimmed.length() > MAX_NAME || this.taken(dimension, trimmed, id) || !this.exists(dimension, id)) {
 			return false;
 		}
+		String before = GSON.toJson(this.saved);
 		Dimension saved = this.saved.dimensions.computeIfAbsent(dimension, d -> new Dimension());
 		if (id.isEmpty()) {
 			saved.mainName = trimmed;
 		} else {
 			saved.maps.stream().filter(e -> e.id.equals(id)).forEach(e -> e.name = trimmed);
 		}
-		this.save();
-		return true;
+		return this.saveOrUndo(before);
 	}
 
 	/**
 	 * Deletes a map that isn't in use: its tiles, and the waypoints and drawings made on it. The
-	 * list is saved first, so a folder that can't be deleted completely is at least no longer a map.
+	 * list is saved first, so a folder that can't be deleted completely is at least no longer a map;
+	 * if the list can't be saved, nothing is deleted.
 	 */
 	public boolean delete(String dimension, String id) {
 		Dimension saved = this.saved.dimensions.get(dimension);
 		if (saved == null || saved.active.equals(id) || !this.exists(dimension, id)) {
 			return false;
 		}
+		String before = GSON.toJson(this.saved);
 		if (id.isEmpty()) {
 			saved.mainDeleted = true;
 		} else {
 			saved.maps.removeIf(e -> e.id.equals(id));
 		}
-		this.save();
+		if (!this.saveOrUndo(before)) {
+			return false;
+		}
 		WaypointStore.mapDeleted(this.worldKey, dimension, id);
 		DrawingStore.mapDeleted(this.worldKey, dimension, id);
 		Path folder = this.tileFolder(dimension, id);
@@ -339,16 +358,27 @@ public final class Maps {
 		if (!Files.isRegularFile(this.file)) {
 			return;
 		}
+		boolean damaged = false;
 		try (Reader reader = Files.newBufferedReader(this.file, StandardCharsets.UTF_8)) {
-			Saved read = GSON.fromJson(reader, Saved.class);
-			if (read == null || read.dimensions == null) {
-				return;
+			JsonElement root = JsonParser.parseReader(reader);
+			JsonElement dimensions = root.isJsonObject() ? root.getAsJsonObject().get("dimensions") : null;
+			if (dimensions == null || !dimensions.isJsonObject()) {
+				damaged = true;
+				dimensions = new JsonObject();
 			}
-			// Drop what a hand edit might have broken: entries without an ID or a name, repeated IDs,
-			// and a map in use that isn't there.
-			for (Map.Entry<String, Dimension> dimension : read.dimensions.entrySet()) {
-				Dimension in = dimension.getValue();
-				if (dimension.getKey() == null || in == null) {
+			// One dimension at a time, so a bad one costs only itself. Also dropped: what a hand edit
+			// might have broken, like entries without an ID or a name, repeated IDs, and a map in use
+			// that isn't there.
+			for (Map.Entry<String, JsonElement> dimension : dimensions.getAsJsonObject().entrySet()) {
+				Dimension in;
+				try {
+					in = GSON.fromJson(dimension.getValue(), Dimension.class);
+				} catch (RuntimeException e) {
+					damaged = true;
+					Diorama.LOGGER.warn("Skipping the maps of {} in {}, which couldn't be read", dimension.getKey(), this.file, e);
+					continue;
+				}
+				if (in == null) {
 					continue;
 				}
 				Dimension clean = new Dimension();
@@ -376,12 +406,31 @@ public final class Maps {
 				this.saved.dimensions.put(dimension.getKey(), clean);
 			}
 		} catch (Exception e) {
+			damaged = true;
 			Diorama.LOGGER.error("Couldn't read this world's maps from {}; using each dimension's main map", this.file, e);
-			this.saved = new Saved();
+		}
+		if (damaged) {
+			// The next save rewrites the file, so what couldn't be read is kept beside it.
+			Path backup = this.file.resolveSibling(FILE + ".unreadable-" + System.currentTimeMillis());
+			try {
+				Files.copy(this.file, backup);
+				Diorama.LOGGER.warn("Kept a copy of the unreadable maps file at {}", backup);
+			} catch (IOException e) {
+				Diorama.LOGGER.error("Couldn't back up {}", this.file, e);
+			}
 		}
 	}
 
-	private void save() {
+	/** Saves the list; if that fails, puts back the list as it was before the change and says so. */
+	private boolean saveOrUndo(String before) {
+		if (this.save()) {
+			return true;
+		}
+		this.saved = GSON.fromJson(before, Saved.class);
+		return false;
+	}
+
+	private boolean save() {
 		try {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling(FILE + ".tmp");
@@ -389,8 +438,10 @@ public final class Maps {
 				GSON.toJson(this.saved, writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			return true;
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.error("Couldn't save this world's maps to {}", this.file, e);
+			return false;
 		}
 	}
 }
