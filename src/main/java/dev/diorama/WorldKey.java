@@ -55,6 +55,11 @@ public final class WorldKey {
 	 * next as it arrives, or not at all: some only send an ID when the player changes worlds.
 	 */
 	private static final long LATER_WAIT_MS = 1000;
+	/**
+	 * For tests: a level waits for its ID however long it takes, so a test about which ID lands on
+	 * which level doesn't depend on how fast the machine runs the game.
+	 */
+	public static volatile boolean waitForIdsForever;
 	/** In a singleplayer save: the ID that tells it from a world saved under the same name before. */
 	private static final String SAVE_ID = "diorama-world-id.txt";
 	/** In a singleplayer world's folder: the ID of the save it was made for. */
@@ -224,7 +229,7 @@ public final class WorldKey {
 		if (silent || lastId == null && !XaeroChannels.serverMayNameWorlds() && !namedBefore(data)) {
 			return false;
 		}
-		if (System.currentTimeMillis() - naming.since < (lastId == null ? FIRST_WAIT_MS : LATER_WAIT_MS)) {
+		if (waitForIdsForever || System.currentTimeMillis() - naming.since < (lastId == null ? FIRST_WAIT_MS : LATER_WAIT_MS)) {
 			return true;
 		}
 		if (lastId == null) {
