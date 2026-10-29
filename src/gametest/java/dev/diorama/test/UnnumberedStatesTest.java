@@ -57,6 +57,9 @@ final class UnnumberedStatesTest {
 			}
 		});
 		settle(context, 60);
+		if (context.computeOnClient(mc -> mc.level.getBlockState(new BlockPos(40, top - 3, 40)) != unnumbered)) {
+			throw new AssertionError("The client lost the unnumbered stone");
+		}
 		// The baker reads the column as stone, the block those states belong to.
 		int read = context.computeOnClient(mc -> new VoxelReader(MapSession.get().map(), BlockLooks.get()).state(40, top - 3, 40));
 		if (read != Block.BLOCK_STATE_REGISTRY.getId(Blocks.STONE.defaultBlockState())) {
@@ -71,8 +74,11 @@ final class UnnumberedStatesTest {
 		int quiet = 0;
 		for (int i = 0; i < 1200 && quiet < 30; i++) {
 			context.waitTick();
-			boolean baking = context.computeOnClient(mc -> MapSession.get() != null && MapSession.get().map().bakingCount() > 0);
+			boolean baking = context.computeOnClient(mc -> MapSession.get() == null || MapSession.get().map().bakingCount() > 0);
 			quiet = baking ? 0 : quiet + 1;
+		}
+		if (quiet < 30) {
+			throw new AssertionError("The map was still baking after 1200 ticks");
 		}
 	}
 }
