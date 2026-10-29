@@ -33,7 +33,11 @@ final class LongInitialsTest {
 		if (context.computeOnClient(mc -> mc.player.isSpectator())) {
 			throw new AssertionError("Run long-initials without showcase or icon-waypoints: they leave the player spectating");
 		}
-		context.waitFor(mc -> mc.player.onGround(), 600);
+		// The same spot every run. Where the player spawns changes from run to run, and with it the
+		// ground the pins stand on: one spot put MUSH's head over the right end of WOOD's.
+		int ground = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, -2, -2));
+		world.getServer().runCommand("tp @a -1.5 " + ground + " -1.5");
+		context.waitFor(mc -> mc.player.onGround() && mc.player.blockPosition().getX() == -2 && mc.player.blockPosition().getZ() == -2, 600);
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		// Facing north, looking a little down at the pins ahead.
 		world.getServer().runCommand("tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 180 15");
