@@ -43,7 +43,13 @@ public final class ExportDrawings implements ImageExport.Finish {
 	public static ExportDrawings build(List<Drawing> drawings, ImageExport.Area area, ResourceManager resources) {
 		ExportDrawings out = new ExportDrawings(area);
 		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
-		ExportFont font = null;
+		List<String> texts = new ArrayList<>();
+		for (Drawing drawing : drawings) {
+			if (drawing.kind == Drawing.Kind.NOTE && drawing.complete()) {
+				texts.add(drawing.text);
+			}
+		}
+		ExportFont font = texts.isEmpty() ? null : ExportFont.load(resources, texts);
 		float reach = (DrawingOverlay.CORE + DrawingOverlay.RIM * 2) * SCALE;
 		for (Drawing drawing : drawings) {
 			if (!drawing.complete()) {
@@ -64,9 +70,6 @@ public final class ExportDrawings implements ImageExport.Finish {
 				bottom = Math.max(bottom, p[k * 2 + 1]);
 			}
 			if (drawing.kind == Drawing.Kind.NOTE) {
-				if (font == null) {
-					font = ExportFont.load(resources);
-				}
 				out.plate(font, drawing.text, p[0], p[1], drawing.color);
 				continue;
 			}
@@ -78,17 +81,25 @@ public final class ExportDrawings implements ImageExport.Finish {
 		return out;
 	}
 
-	/** A note's dark plate and its text with a shadow, laid out as {@code DrawingOverlay.plate} does, in GUI pixels times {@link #SCALE}. */
+	/**
+	 * A note's dark plate and its text with a shadow, laid out as {@code DrawingOverlay.plate} does,
+	 * in GUI pixels times {@link #SCALE}. Text taller than the plate spills over it, as on the map.
+	 */
 	private void plate(ExportFont font, String text, float x, float y, int color) {
-		int textWidth = font.width(text);
+		int textWidth = (int) Math.ceil(font.width(text));
+		float[] extent = font.extent(text);
+		// The canvas, in GUI pixels from the text's top left: the plate, and whatever the glyphs reach past it.
+		int top = (int) Math.floor(Math.min(-2, extent[0]));
+		int bottom = (int) Math.ceil(Math.max(9, extent[1]));
 		int w = (textWidth + 3) * SCALE;
-		int h = 11 * SCALE;
-		int left = Math.round(x - textWidth * SCALE / 2.0F) - 2 * SCALE;
-		int top = Math.round(y - 4 * SCALE) - 2 * SCALE;
+		int h = (bottom - top) * SCALE;
 		int[] argb = new int[w * h];
-		Arrays.fill(argb, DrawingOverlay.PLATE);
-		font.draw(argb, w, h, text, 2 * SCALE, 2 * SCALE, SCALE, color & 0xFFFFFF);
-		this.plates.add(new Plate(argb, w, h, left, top));
+		int plateTop = (-2 - top) * SCALE;
+		Arrays.fill(argb, plateTop * w, (plateTop + 11 * SCALE) * w, DrawingOverlay.PLATE);
+		font.draw(argb, w, h, text, 2 * SCALE, -top * SCALE, SCALE, color & 0xFFFFFF);
+		int textX = Math.round(x - textWidth * SCALE / 2.0F);
+		int textY = Math.round(y - 4 * SCALE);
+		this.plates.add(new Plate(argb, w, h, textX - 2 * SCALE, textY + top * SCALE));
 	}
 
 	@Override
@@ -138,8 +149,19 @@ public final class ExportDrawings implements ImageExport.Finish {
 			if (cy < Math.min(ay, by) - half - 1 || cy > Math.max(ay, by) + half + 1) {
 				continue;
 			}
-			int x0 = Math.max(0, (int) Math.floor(Math.min(ax, bx) - half - 1));
-			int x1 = Math.min(this.width - 1, (int) Math.ceil(Math.max(ax, bx) + half + 1));
+			// Only where the line's band crosses this row, not the whole of a long diagonal's box.
+			float t0 = 0;
+			float t1 = 1;
+			if (Math.abs(by - ay) > 1e-4F) {
+				float ta = (cy - half - 1 - ay) / (by - ay);
+				float tb = (cy + half + 1 - ay) / (by - ay);
+				t0 = Math.max(0, Math.min(ta, tb));
+				t1 = Math.min(1, Math.max(ta, tb));
+			}
+			float sx0 = ax + (bx - ax) * t0;
+			float sx1 = ax + (bx - ax) * t1;
+			int x0 = Math.max(0, (int) Math.floor(Math.min(sx0, sx1) - half - 1));
+			int x1 = Math.min(this.width - 1, (int) Math.ceil(Math.max(sx0, sx1) + half + 1));
 			if (x0 > x1) {
 				continue;
 			}

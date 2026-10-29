@@ -39,6 +39,8 @@ final class ImageExportTest {
 	/** A drawn line through the player and a note under it, in colours the test world's ground doesn't have. */
 	private static final int LINE = 0xFF00FF;
 	private static final int NOTE = 0xFFFF55;
+	/** A note in characters only Unifont has. */
+	private static final int CJK = 0x55FFFF;
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		double[] drawn = context.computeOnClient(mc -> {
@@ -47,6 +49,7 @@ final class ImageExportTest {
 			String dimension = mc.level.dimension().identifier().toString();
 			DrawingStore.get().add(new Drawing(Drawing.Kind.STROKE, dimension, 0xFF000000 | LINE, new double[] {u - 20, v, u + 20, v}, ""));
 			DrawingStore.get().add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | NOTE, new double[] {u, v + 30}, "Hi"));
+			DrawingStore.get().add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | CJK, new double[] {u, v - 30}, "\u5730\u56fe"));
 			return new double[] {u, v};
 		});
 		context.setScreen(MapScreen::new);
@@ -103,8 +106,12 @@ final class ImageExportTest {
 		if (!lineAt(areaFile, area, drawn)) {
 			throw new AssertionError("The drawn line isn't in " + areaFile.getFileName());
 		}
-		if (!noteNear(areaFile, area, drawn[0], drawn[1] + 30)) {
+		// Its text in its colour, and the game's shadow, a quarter of it, behind.
+		if (countNear(areaFile, area, drawn[0], drawn[1] + 30, NOTE) < 40 || countNear(areaFile, area, drawn[0], drawn[1] + 30, (NOTE & 0xFCFCFC) >> 2) < 10) {
 			throw new AssertionError("The note isn't in " + areaFile.getFileName());
+		}
+		if (countNear(areaFile, area, drawn[0], drawn[1] - 30, CJK) < 30) {
+			throw new AssertionError("The note in Unifont characters isn't in " + areaFile.getFileName());
 		}
 
 		// Whole map: everything explored, boxed with clouds round it.
@@ -270,20 +277,21 @@ final class ImageExportTest {
 		return close(rgb, LINE, 24);
 	}
 
-	/** Whether some pixel near a point is the note's colour: its text. */
-	private static boolean noteNear(Path file, ImageExport.Area area, double u, double v) {
+	/** How many pixels near a point are about a colour: a note's text, or its shadow. */
+	private static int countNear(Path file, ImageExport.Area area, double u, double v, int colour) {
 		BufferedImage image = read(file);
 		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
 		int cx = (int) Math.floor(u * perUnit - area.x());
 		int cy = (int) Math.floor(v * perUnit - area.y());
+		int count = 0;
 		for (int y = cy - 16; y <= cy + 16; y++) {
 			for (int x = cx - 24; x <= cx + 24; x++) {
-				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, NOTE, 12)) {
-					return true;
+				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, colour, 12)) {
+					count++;
 				}
 			}
 		}
-		return false;
+		return count;
 	}
 
 	private static boolean close(int rgb, int want, int within) {
