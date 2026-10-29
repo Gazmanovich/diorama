@@ -91,6 +91,7 @@ public final class BlockLooks {
 	public static final byte TINT_WATER = 4;
 
 	private static volatile BlockLooks current;
+	private static int builds;
 	/** The models the current table was built from; a resource reload replaces them. */
 	private static Object builtFrom;
 
@@ -248,6 +249,11 @@ public final class BlockLooks {
 		this.constantTint[id] = this.constantTint[material];
 		this.emission[id] = this.emission[material];
 		return id;
+	}
+
+	/** For tests: how many times the table has been built. */
+	public static int builds() {
+		return builds;
 	}
 
 	public static void invalidate() {
@@ -437,6 +443,7 @@ public final class BlockLooks {
 			}
 		}
 		current = looks;
+		builds++;
 		//? if >=26.1 {
 		builtFrom = models;
 		//?} else {

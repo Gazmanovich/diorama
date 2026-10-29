@@ -12,6 +12,7 @@ import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.WorldKey;
 import dev.diorama.bake.BiomeTints;
+import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
@@ -114,6 +115,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("icon-waypoints")) {
 				IconWaypointsTest.photos(context, world);
 			}
+			if (tests.contains("drawings")) {
+				DrawingTest.run(context, world);
+			}
+			if (tests.contains("waypoint-clutter")) {
+				WaypointClutterTest.photos(context, world);
+			}
+			if (tests.contains("long-initials")) {
+				LongInitialsTest.photos(context, world);
+			}
+			if (tests.contains("portal-crossing")) {
+				portalCrossing(context, world);
+			}
 			if (tests.contains("dimensions")) {
 				dimensions(context, world);
 			}
@@ -156,11 +169,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("enlarge")) {
+				enlarge(context);
+			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
 			}
 			if (tests.contains("ftb-claims")) {
 				ftbClaims(context, world);
+			}
+			if (tests.contains("cobblemon")) {
+				cobblemonBattle(context, world);
 			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
@@ -528,7 +547,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
 		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);
+		// With Xaero's mods installed, the channels are theirs and Diorama has no handler there,
+		// but it still reads the level ID on the way: survival opens its own folder again.
+		dev.diorama.XaeroChannels.handOverForTests(true);
+		String survivalWithXaero;
+		try {
+			survivalWithXaero = playOnServer(context, "diorama-shared", "id-survival-xaero", null, null, List.of("Survival Camp"), List.of("Old Camp", "Lobby Camp"), true, SURVIVAL_ID);
+			levelIdBeforeHop(context, address, false);
+			levelIdBeforeHop(context, address, true);
+		} finally {
+			dev.diorama.XaeroChannels.handOverForTests(false);
+		}
 		levelIdOnJoin = null;
+		if (!survivalWithXaero.equals(survival)) {
+			throw new AssertionError("With Xaero's mods holding the channels, survival opened " + survivalWithXaero + ", not " + survival);
+		}
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
 		}
@@ -538,6 +571,52 @@ public class DioramaClientTest implements FabricClientGameTest {
 		List<String> old = context.computeOnClient(mc -> WaypointStore.open(seeded).all().stream().map(w -> w.name).toList());
 		if (!old.equals(List.of("Old Camp"))) {
 			throw new AssertionError("The seed's folder lost its waypoint or took another world's: " + old);
+		}
+	}
+	//?}
+
+	/**
+	 * A level ID the server sends just before moving the player to the Nether names the level it
+	 * came in, not the Nether, which waits for its own: the ID keeps its place among the packets,
+	 * also in a bundle ({@code bundled}), whose packets the client handles on its own thread. Run
+	 * while Xaero's mods hold the channels, where Diorama reads IDs on the way to them.
+	 */
+	//? if >=1.21 && fabric {
+	private static void levelIdBeforeHop(ClientGameTestContext context, String address, boolean bundled) {
+		levelIdOnJoin = LOBBY_ID;
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed("diorama-hop"))
+			.createServer(serverProperties())) {
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
+				String overworld = context.computeOnClient(mc -> WorldKey.current());
+				// The overworld's ID again, then the move to the Nether. The client only runs when the
+				// test lets it, so both are waiting when it next handles packets, as when they reach a
+				// client mid-frame. It handles them and opens the Nether's map, or waits for its ID,
+				// which comes after.
+				server.runOnServer(s -> {
+					net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+						new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
+					s.getPlayerList().getPlayers().get(0).connection.send(bundled
+						? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
+						: id);
+					s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
+				});
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					throw new AssertionError(e);
+				}
+				context.waitTicks(5);
+				sendXaero(server, SURVIVAL_ID);
+				context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
+				String nether = context.computeOnClient(mc -> WorldKey.current());
+				levelIdOnJoin = null;
+				if (!overworld.equals(address + "-id-7c56d495") || !nether.equals(address + "-id-04adb1e4")) {
+					throw new AssertionError("The ID sent " + (bundled ? "in a bundle " : "") + "before the move to the Nether named the wrong level: overworld " + overworld + ", Nether " + nether);
+				}
+			}
 		}
 	}
 	//?}
@@ -1019,6 +1098,89 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return 0F;
+	}
+
+	/**
+	 * Crossing between dimensions keeps the block color table: building it takes seconds with a
+	 * big modpack's states, and it used to be rebuilt on every crossing (#150). Walks through a
+	 * nether portal and comes back with /execute in, three times, and checks the table is never
+	 * rebuilt and the map only ever moves with the player. Then reloads resources, which must
+	 * rebuild it once. Works with Immersive Portals installed too, whose portals keep the other
+	 * side's level loaded. Opt-in: DIORAMA_TESTS=portal-crossing.
+	 */
+	private static void portalCrossing(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos p = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = p.getX(), y = p.getY(), z = p.getZ();
+		world.getServer().runCommand("fill " + (x - 4) + " " + (y - 2) + " " + (z - 4) + " " + (x + 8) + " " + (y - 1) + " " + (z + 12) + " stone");
+		world.getServer().runCommand("fill " + (x - 4) + " " + y + " " + (z - 4) + " " + (x + 8) + " " + (y + 8) + " " + (z + 12) + " air");
+		int fz = z + 4;
+		world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + fz + " " + (x + 3) + " " + (y + 3) + " " + fz + " obsidian");
+		world.getServer().runCommand("fill " + (x + 1) + " " + y + " " + fz + " " + (x + 2) + " " + (y + 2) + " " + fz + " air");
+		String start = (x + 2) + " " + y + " " + z + ".5 0 0";
+		int builds = context.computeOnClient(mc -> BlockLooks.builds());
+		int sessions = context.computeOnClient(mc -> MapSession.started());
+		world.getServer().runCommand("setblock " + (x + 1) + " " + y + " " + fz + " fire");
+		// With Immersive Portals, chunks of the Nether stream in through the open portal. The map
+		// stays on the overworld.
+		crossing(context, "portal lit", 100);
+		context.takeScreenshot("portal-crossing-01-lit");
+		if (context.computeOnClient(mc -> MapSession.started()) != sessions) {
+			throw new AssertionError("The map left the overworld while the player stood by the portal");
+		}
+		for (int round = 0; round < 3; round++) {
+			context.runOnClient(mc -> {
+				mc.player.snapTo(x + 2.0, y, z + 0.5, 0F, 0F);
+				mc.options.keyUp.setDown(true);
+			});
+			crossing(context, "walk through " + round, 120);
+			context.runOnClient(mc -> mc.options.keyUp.setDown(false));
+			if (round == 0) {
+				context.takeScreenshot("portal-crossing-02-nether");
+			}
+			if (context.computeOnClient(mc -> mc.level.dimension() != net.minecraft.world.level.Level.NETHER)) {
+				throw new AssertionError("Walking through the portal didn't reach the Nether");
+			}
+			teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
+			crossing(context, "back with /execute in " + round, 100);
+		}
+		teleport(context, world, net.minecraft.world.level.Level.NETHER, "0 70 0");
+		crossing(context, "/execute in the Nether", 100);
+		teleport(context, world, net.minecraft.world.level.Level.OVERWORLD, start);
+		crossing(context, "/execute in the overworld", 100);
+		int rebuilt = context.computeOnClient(mc -> BlockLooks.builds()) - builds;
+		if (rebuilt != 0) {
+			throw new AssertionError("Crossing between dimensions rebuilt the block color table " + rebuilt + " times");
+		}
+		int started = context.computeOnClient(mc -> MapSession.started()) - sessions;
+		if (started != 8) {
+			throw new AssertionError("8 crossings started " + started + " map sessions");
+		}
+		context.runOnClient(mc -> mc.reloadResourcePacks());
+		context.waitFor(mc -> BlockLooks.builds() > builds, 2400);
+		crossing(context, "after a resource reload", 100);
+		if (context.computeOnClient(mc -> BlockLooks.builds()) != builds + 1) {
+			throw new AssertionError("A resource reload rebuilt the block color table more than once");
+		}
+	}
+
+	/** Teleports the player into another dimension and waits until they are there. */
+	private static void teleport(ClientGameTestContext context, TestSingleplayerContext world, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, String at) {
+		world.getServer().runCommand("execute in " + dimension.identifier() + " run tp @a " + at);
+		context.waitFor(mc -> mc.level.dimension() == dimension && MapSession.get() != null, 2400);
+	}
+
+	/** Waits some ticks and logs the slowest one, and the block color builds and map sessions so far. */
+	private static void crossing(ClientGameTestContext context, String label, int ticks) {
+		long last = System.nanoTime();
+		long slowest = 0;
+		for (int i = 0; i < ticks; i++) {
+			context.waitTick();
+			long now = System.nanoTime();
+			slowest = Math.max(slowest, now - last);
+			last = now;
+		}
+		Diorama.LOGGER.info("[portal-crossing] {}: slowest tick {} ms; {} block color builds and {} map sessions so far", label, slowest / 1_000_000,
+			(Object) context.<Integer, RuntimeException>computeOnClient(mc -> BlockLooks.builds()), (Object) context.<Integer, RuntimeException>computeOnClient(mc -> MapSession.started()));
 	}
 
 	/** The Nether and the End: the minimap, and the fullscreen map near and far. */
@@ -3290,6 +3452,86 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/**
+	 * A Cobblemon battle, with Cobblemon installed (opt-in: DIORAMA_TESTS=cobblemon). The player's
+	 * Pikachu takes on the nearest wild Pokémon, the way a thrown Poké Ball starts a battle: the
+	 * Rattata spawned beside them, or one that spawned on its own closer. Cobblemon's battle
+	 * screen and the battlers' tiles fill every corner, so the minimap stays out of the way, in
+	 * whichever corner it's set to, also once the battle screen is closed with the tiles still up,
+	 * and comes back when the battle ends (#147).
+	 */
+	private static void cobblemonBattle(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> cobblemonClass("client.CobblemonClient") != null)) {
+			throw new AssertionError("DIORAMA_TESTS=cobblemon needs Cobblemon installed");
+		}
+		world.getServer().runCommand("gamemode survival @a");
+		world.getServer().runCommand("time set noon");
+		world.getServer().runCommand("execute as @a run pokegive pikachu level=50");
+		world.getServer().runCommand("execute as @a at @s run pokespawnat ~4 ~ ~ rattata level=2");
+		context.setScreen(() -> null);
+		settle(context, 40);
+		context.takeScreenshot("cobblemon-00-before");
+		world.getServer().runOnServer(server -> {
+			try {
+				net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayers().get(0);
+				Class<?> pokemonEntity = cobblemonClass("entity.pokemon.PokemonEntity");
+				net.minecraft.world.entity.Entity wild = player.level().getEntities((net.minecraft.world.entity.Entity) null,
+					player.getBoundingBox().inflate(16), pokemonEntity::isInstance).get(0);
+				Class<?> builder = cobblemonClass("battles.BattleBuilder");
+				for (java.lang.reflect.Method m : builder.getMethods()) {
+					if (m.getName().equals("pve") && m.getParameterCount() == 2) {
+						m.invoke(builder.getField("INSTANCE").get(null), player, wild);
+						return;
+					}
+				}
+				throw new AssertionError("No BattleBuilder.pve(player, pokemon)");
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
+		context.waitFor(mc -> inCobblemonBattle() && mc.gui.screen() != null && mc.gui.screen().getClass().getSimpleName().equals("BattleGUI"), 400);
+		// Past the battle screen's opening animation.
+		context.waitTicks(80);
+		Settings.Corner saved = context.computeOnClient(mc -> Settings.get().minimapCorner);
+		for (Settings.Corner corner : Settings.Corner.values()) {
+			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
+			context.waitTicks(5);
+			context.takeScreenshot("cobblemon-01-battle-" + corner.name().toLowerCase(java.util.Locale.ROOT));
+		}
+		context.runOnClient(mc -> Settings.get().minimapCorner = saved);
+		// Closed with Esc, the battle screen leaves the battlers' tiles in the top corners.
+		context.runOnClient(mc -> mc.gui.screen().onClose());
+		context.waitTicks(20);
+		if (!context.computeOnClient(mc -> inCobblemonBattle())) {
+			throw new AssertionError("Closing the battle screen ended the battle");
+		}
+		context.takeScreenshot("cobblemon-02-battle-screen-closed");
+		// Cobblemon's command takes one player.
+		world.getServer().runCommand("stopbattle @p");
+		context.waitFor(mc -> !inCobblemonBattle(), 200);
+		context.setScreen(() -> null);
+		settle(context, 40);
+		context.takeScreenshot("cobblemon-03-after");
+		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	private static boolean inCobblemonBattle() {
+		try {
+			Class<?> client = cobblemonClass("client.CobblemonClient");
+			return client.getMethod("getBattle").invoke(client.getField("INSTANCE").get(null)) != null;
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	private static @Nullable Class<?> cobblemonClass(String name) {
+		try {
+			return Class.forName("com.cobblemon.mod.common." + name);
+		} catch (ClassNotFoundException e) {
+			return null;
+		}
+	}
+
+	/**
 	 * Land claims from FTB Chunks, with FTB Chunks installed (opt-in: DIORAMA_TESTS=ftb-claims). The
 	 * player's team claims the chunks round the player, force loads the middle one, and a server
 	 * team claims chunks to the east. The map tints each claim in its team's colour on the ground it
@@ -4260,9 +4502,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.setScreen(() -> new net.minecraft.client.gui.screens.inventory.InventoryScreen(Minecraft.getInstance().player));
 		settle(context, 20);
 		context.takeScreenshot("screens-02-inventory");
+		// Under any screen, the minimap steps aside, the pause menu too (#147)...
 		context.setScreen(() -> new net.minecraft.client.gui.screens.PauseScreen(true));
 		settle(context, 20);
 		context.takeScreenshot("screens-03-pause");
+		// ...but not chat, which leaves the corners alone.
+		//? if >=1.21.9 {
+		context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen("", false));
+		//?} else {
+		/*context.setScreen(() -> new net.minecraft.client.gui.screens.ChatScreen(""));
+		*///?}
+		settle(context, 20);
+		context.takeScreenshot("screens-03-chat");
 		context.setScreen(() -> null);
 		// F3's debug screen fills both top corners; the minimap steps out of its way, and comes back.
 		context.runOnClient(DioramaClientTest::toggleDebugScreen);
@@ -4272,6 +4523,63 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 20);
 		context.takeScreenshot("screens-05-debug-closed");
 		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	/**
+	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
+	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
+	 * to its size.
+	 */
+	private static void enlarge(ClientGameTestContext context) {
+		context.setScreen(() -> null);
+		int[] saved = context.computeOnClient(mc -> new int[] {Settings.get().minimapEnlarged, Settings.get().minimapCorner.ordinal()});
+		context.runOnClient(mc -> {
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.getKey("key.keyboard.z"));
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
+		settle(context, 20);
+		context.takeScreenshot("enlarge-01-normal");
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		if (!context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Holding the enlarge key didn't reach its key mapping");
+		}
+		settle(context, 40);
+		context.takeScreenshot("enlarge-02-200");
+		for (int percent : new int[] {150, 325, 400}) {
+			context.runOnClient(mc -> Settings.get().minimapEnlarged = percent);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-03-" + percent);
+		}
+		// On a tall, narrow window, 4x is wider than the screen: it stops at the screen's width.
+		context.getInput().resizeWindow(360, 900);
+		settle(context, 20);
+		context.takeScreenshot("enlarge-03-400-narrow");
+		context.getInput().resizeWindow(1600, 900);
+		context.runOnClient(mc -> Settings.get().minimapEnlarged = 200);
+		for (Settings.Corner corner : Settings.Corner.values()) {
+			context.runOnClient(mc -> Settings.get().minimapCorner = corner);
+			settle(context, 20);
+			context.takeScreenshot("enlarge-04-" + corner.name().toLowerCase(java.util.Locale.ROOT));
+		}
+		context.runOnClient(mc -> Settings.get().minimapCorner = Settings.Corner.TOP_RIGHT);
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("Letting go of the enlarge key didn't reach its key mapping");
+		}
+		context.takeScreenshot("enlarge-05-released");
+		// The Enlarged slider sits beside Size, so the Minimap tab is no taller.
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 10);
+		context.takeScreenshot("enlarge-06-settings");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			Settings.get().minimapEnlarged = saved[0];
+			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
+			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
+			net.minecraft.client.KeyMapping.resetMapping();
+		});
 	}
 
 	private static void toggleDebugScreen(Minecraft mc) {
@@ -4810,10 +5118,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "dimensions", "saved-map", "recreated-world");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world");
 			*///?}
 		}
 		return Set.of(env.split(","));

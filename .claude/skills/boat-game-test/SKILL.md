@@ -1,36 +1,63 @@
 ---
 name: boat-game-test
-description: Run Diorama's client game tests on a boat.dev VM instead of this PC. Use when a functional game test run (does it pass, do the screenshots show the right thing) has to wait for the local Minecraft lock, or when several versions need testing at once.
+description: Run Diorama's client game tests on boat.dev VMs instead of this PC. Use when a functional game test run (does it pass, do the screenshots show the right thing) would wait for the local Minecraft lock, or when several versions need testing at once.
 ---
 
 # Game tests on boat.dev
 
-A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa. Tests pass the same way and screenshots show the same scenes, but slower than on Dara's PC: the full 26.3 suite took 68 min there against 24 min here. One section takes 5–15 min on 26.3 (`screens` 4–8, `tour` 7–17), depending on how busy the host is; the three multiplayer ones together about an hour.
+A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa. Tests pass the same way and screenshots show the same scenes, only slower than on Dara's PC. That makes it the place for functional checks and the wrong place for anything about the GPU:
 
-That makes it the right place for functional checks and the wrong place for anything about the GPU:
-
-- **boat.dev**: a feature works, a screenshot shows what it should, a fix holds on another version.
+- **boat.dev**: a feature works, a screenshot shows what it should, a fix holds on other versions.
 - **This PC, under the Minecraft lock**: fps, frame time and bake-speed measurements, GPU bake (`DIORAMA_GPU_BAKE`), pixel-for-pixel comparisons against an RTX image, and anything driven on the desktop.
 
 ## Run
 
-1. Pick the test sections your change touches. They're the names in `selectedTests()` in `src/gametest/java/dev/diorama/test/DioramaClientTest.java` (`tour`, `waypoints`, `multiplayer`, ...). Run a few sections, not `all`: the trial's compute hours are limited (`boat limits` shows what's left).
-2. Run from your checkout. It pushes your working tree, uncommitted changes included:
+1. Pick the test sections your change touches: the names in `selectedTests()` in `src/gametest/java/dev/diorama/test/DioramaClientTest.java` (`tour`, `waypoints`, `multiplayer`, ...). Run the sections you need, not `all`.
+2. Run from your checkout. It pushes your working tree, uncommitted changes included, to one VM per node, all at once:
 
    ```
-   python .claude/skills/boat-game-test/boat_run.py <node> --tests <section,section>
+   python .claude/skills/boat-game-test/boat_run.py <node[,node...]> --tests <section,section>
    ```
 
-   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. The script waits for the run and gives up after 2 hours; give the command a 2-hour timeout.
+   `<node>` is a folder in `versions/`: `26.3`, `1.21.11`, `26.3-neoforge`, ... Pass game environment variables with `--env DIORAMA_GIF=1`. Run it in the foreground with a 2-hour timeout (`timeout: 7200000`): the tests stop at 90 min and the script's own work at 105, which leaves the rest for deleting the VMs. Every VM also has a 2-hour lifetime on boat.dev's side, which catches what a killed script leaves.
 3. Open the screenshots it lists (`build/boat-runs/<time>-<node>/screenshots/`) and look at them. A pass with the wrong picture is still a failure. On a failure the script prints the assertion; `gradle.log` and `latest.log` in the same folder have the rest.
+4. Read the end of the output. Every VM of the run is named with the prefix the script prints first (`diorama-test-<random>-`); at the end it deletes every VM with that prefix and says which are left. A `!!` line names one that needs you, with the command. `keeping VM` means the tests ran but their results couldn't be fetched, so the VM is stopped with them on it; fetch and delete it. Leave every VM without your prefix alone: they belong to other agents.
 
-Done when the run exits 0 and you've seen the screenshots for the sections you changed.
+Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` (plain `boat list` hides stopped VMs) shows none of your VMs.
 
-## Limits and traps
+## Size and cost
 
-- **Two VMs at a time** on the trial, Default size (4 vCPU, 8 GB). When both are busy the script waits up to 15 min for one. When the trial's compute hours run out it stops; tell Dara.
-- **Starting point**: VMs start from the named snapshot `diorama-gametest`, which has 26.3 built. Other nodes download their Minecraft and mappings on every run, about 5 min more.
-- **Refresh the snapshot** when 26.3 runs start by downloading dependencies too (a Gradle, Loom or Minecraft bump): run once with `--keep`, then `boat resume <id>`, `boat snapshot <id> diorama-gametest`, `boat delete <id> --yes`.
-- **Leftover VMs**: the script deletes its VM even when the tests fail, but not when the script itself is killed. Then `boat list` shows it; `boat delete <id> --yes`. VMs stop on their own after 2 hours.
-- **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done, or its disk stays on the account for 14 days.
-- **The account is Dara's.** If `boat` says you're signed out or have no plan, stop and tell Dara, then run on this PC under the Minecraft lock.
+The plan (`box_20`) includes 555 VM-hours a month, counted at the size's rate: small 0.5x, default 1x, large 2x. Past them, runs are paid from a wallet that holds $0, so they stop. Measured on 2026-10-28 from the warm snapshot, one run each (times on boat.dev vary by a minute between runs):
+
+| `screens` section | default (4 vCPU) | large (8 vCPU) |
+|---|---|---|
+| 26.3: game / whole run | 4.6 / 6.6 min | 3.0 / 5.0 min |
+| 1.21.1: game / whole run | 3.1 / 6.0 min | 2.7 / 5.0 min |
+
+About 2.5 min of every run is fixed: VM start, push, Gradle, booting Minecraft and baking the first map. Large only speeds up the game part, so a short run saves a minute or so at twice the VM-hours. Use **default** for a few sections, and **`--type large`** for long runs (`all`, the multiplayer sections) where the game part dominates.
+
+## Limits
+
+100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. Before each start the script reads `boat limits` (free, counts nothing): it waits about 3 min at most for a start this minute, and stops starting when the hour's or day's starts are gone. Other agents can still take the last start between that check and this script's start, so a start can be refused anyway; a refusal stops the rest of this run's starts. Rerun the failed nodes later, not in a loop. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
+
+## Warm snapshot
+
+VMs start from the newest saved snapshot named `diorama-gametest-<commit>`: JDK 25 (which runs every node, 1.20.1 included), Mesa, and Gradle, Loom and NeoForge caches with every node compiled, every node's Minecraft, libraries and assets downloaded, and every node booted once from that cache, warmed at `<commit>`. The script prints which one it used. A snapshot only holds the disk: a stopped, forked or resumed VM starts with no processes, so every run boots Minecraft afresh.
+
+A new VM fetches each snapshot file from boat.dev's storage the first time it's read. The snapshot also holds the list of files each node's boot opens (`~/prefetch-lists/<node>.list`), and the script reads those ahead in parallel while it pushes. How much that saves depends on how warm boat.dev's storage is: on a snapshot made minutes before, 26.3's Gradle start took 82–103 s cold and about 25 s read ahead; on one that has been used for a while, 28 s cold and 17 s read ahead.
+
+**Refresh it** when runs start downloading again: after a Minecraft, Loom, NeoForge or Gradle bump, or a new node. From a clean checkout of origin/master:
+
+```
+python .claude/skills/boat-game-test/boat_snapshot.py
+```
+
+It took 64 min on 2026-10-28, most of it booting all 22 nodes one after another; run it in the background with the 4-hour budget it gives its VM. It saves nothing unless every node compiles and boots. It saves `diorama-gametest-<commit>`, lists the older ones and leaves them (remove one only if you made it or Dara says so), and the newest is what boat_run.py picks. Tell Dara the new name.
+
+## Traps
+
+- **boat.dev's API fails now and then**: 500s, timeouts, live output streams cut after a few minutes. The script starts the tests detached and polls for their exit code, and retries the steps that are safe to repeat. A run that still fails on an API error is worth one rerun, after step 4's check.
+- **A killed script leaves its VM running** until its 2-hour lifetime ends. On Ctrl-C the script waits up to 6 min for each node to delete its VM, then deletes anything left with its prefix; a hard kill (a background command's timeout) skips all that. Either way, look for your prefix in `boat list --all`.
+- **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
+- **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
+- **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara, then run on this PC under the Minecraft lock.

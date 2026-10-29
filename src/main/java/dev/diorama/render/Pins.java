@@ -43,7 +43,8 @@ public final class Pins {
 		}
 		int head = PinArt.standingHead(size);
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
-		Sprite sprite = sprite("pin " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head));
+		int stretch = stretch(waypoint, head);
+		Sprite sprite = sprite("pin " + head + " " + stretch + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head, stretch));
 		draw(graphics, sprite, waypoint, x, y);
 	}
 
@@ -52,8 +53,9 @@ public final class Pins {
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
 		PinArt.Image icon = icon(waypoint);
 		Sprite sprite = icon != null
-			? sprite(ICON + "badge " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), Double.NaN, 0, icon))
-			: sprite("badge " + head + " " + rgb(waypoint) + " " + death, () -> PinArt.badge(rgb(waypoint), death, head, Double.NaN, 0, null));
+			? sprite(ICON + "badge " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), 0, Double.NaN, 0, icon))
+			: sprite("badge " + head + " " + stretch(waypoint, head) + " " + rgb(waypoint) + " " + death,
+				() -> PinArt.badge(rgb(waypoint), death, head, stretch(waypoint, head), Double.NaN, 0, null));
 		draw(graphics, sprite, waypoint, x, y);
 	}
 
@@ -68,9 +70,16 @@ public final class Pins {
 		int caret = head >= LARGE ? 6 : 5;
 		PinArt.Image icon = icon(waypoint);
 		Sprite sprite = icon != null
-			? sprite(ICON + "edge " + waypoint.icon + " " + rgb(waypoint) + " " + step, () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), snapped, 6, icon))
-			: sprite("edge " + head + " " + rgb(waypoint) + " " + death + " " + step, () -> PinArt.badge(rgb(waypoint), death, head, snapped, caret, null));
+			? sprite(ICON + "edge " + waypoint.icon + " " + rgb(waypoint) + " " + step, () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), 0, snapped, 6, icon))
+			: sprite("edge " + head + " " + stretch(waypoint, head) + " " + rgb(waypoint) + " " + death + " " + step,
+				() -> PinArt.badge(rgb(waypoint), death, head, stretch(waypoint, head), snapped, caret, null));
 		draw(graphics, sprite, waypoint, x, y);
+	}
+
+	/** How wide this waypoint's badge is drawn with a head of {@code head}, without a caret. */
+	public static int badgeWidth(Waypoint waypoint, int head) {
+		PinArt.Image icon = icon(waypoint);
+		return icon != null ? PinArt.iconHead(icon) : head + stretch(waypoint, head);
 	}
 
 	/** How far above the marked spot this waypoint's standing pin has its head centred. */
@@ -79,7 +88,10 @@ public final class Pins {
 		return icon != null ? PinArt.iconHeadAbove(icon) : headAbove(size);
 	}
 
-	/** How near the centre of this waypoint's head, or badge, the cursor has to be to point at it. */
+	/**
+	 * How near the centre of this waypoint's head, or badge, the cursor has to be to point at it; a
+	 * head widened for its initials ({@link #stretch}) reaches as far from its middle line.
+	 */
 	public static float reach(Waypoint waypoint, int size) {
 		PinArt.Image icon = icon(waypoint);
 		return (icon != null ? PinArt.iconHead(icon) : size) / 2.0F + 2;
@@ -108,14 +120,23 @@ public final class Pins {
 		PinArt.Image icon = icon(waypoint);
 		int head = icon != null ? PinArt.iconHead(icon) : PinArt.standingHead(size);
 		float above = head + (head == SMALL ? 5 : 6);
-		float side = (head + 4) / 2.0F;
+		float side = (head + 4 + (icon != null ? 0 : stretch(waypoint, head))) / 2.0F;
 		return new float[] {x - side, y - above, x + side, y + 3};
 	}
 
 	/** How far this waypoint's badge with a caret reaches from its centre, so a view can keep it inside. */
 	public static float edgeReach(Waypoint waypoint, int head) {
 		PinArt.Image icon = icon(waypoint);
-		return (icon != null ? PinArt.iconHead(icon) : head) / 2.0F + 6;
+		return (icon != null ? PinArt.iconHead(icon) : head + stretch(waypoint, head)) / 2.0F + 6;
+	}
+
+	/** How much wider than round this waypoint's head is drawn to hold its initials. */
+	public static int stretch(Waypoint waypoint, int head) {
+		if (waypoint.kind == Waypoint.Kind.DEATH || icon(waypoint) != null) {
+			return 0;
+		}
+		String text = waypoint.label();
+		return text.isEmpty() ? 0 : PinArt.stretchFor(head, ink(Minecraft.getInstance().font, text));
 	}
 
 	/** Whether this waypoint's pin shows an icon rather than initials. */
@@ -176,15 +197,12 @@ public final class Pins {
 		graphics.pose().popMatrix();
 	}
 
-	/** The initials at full size, centred on their ink in the head; just the first letter when two don't fit. */
+	/** The initials at full size, centred on their ink in the head, which is drawn wide enough for them. */
 	private static void label(GuiGraphicsExtractor graphics, Waypoint waypoint, int x0, int y0, int x1, int y1) {
 		Font font = Minecraft.getInstance().font;
 		String text = waypoint.label();
 		if (text.isEmpty()) {
 			return;
-		}
-		if (ink(font, text) > x1 - x0 - 2) {
-			text = text.substring(0, text.offsetByCodePoints(0, 1));
 		}
 		int rgb = rgb(waypoint);
 		boolean light = PinArt.light(rgb);

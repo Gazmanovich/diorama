@@ -52,7 +52,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `multiplayer` | Two worlds on one dedicated server |
 | `server-id`, `tracked-players`, `realms` | Telling server worlds apart, players tracked by Xaero's server plugin, Realms |
 
-Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod), `ftb-claims` (needs FTB Chunks, FTB Teams and FTB Library, plus Architectury before 26.1), `showcase` and `icon-waypoints` (the showcase castle with icon pins, for pictures; `DIORAMA_GIF=1` adds the frames of picking an icon).
+Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod), `ftb-claims` (needs FTB Chunks, FTB Teams and FTB Library, plus Architectury before 26.1), `showcase` and `icon-waypoints` (the showcase castle with icon pins, for pictures; `DIORAMA_GIF=1` adds the frames of picking an icon), `waypoint-clutter` (120 waypoints in the world, on the minimap and on the map, with and without the waypoint distance limit) and `long-initials` (pins with one to four letters in the world, on both minimap shapes, on the map, in the list and in the editor).
 
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 

@@ -85,6 +85,12 @@ public final class SettingsScreen extends Screen {
 		int sizes = (Settings.MAX_SIZE - Settings.MIN_SIZE) / Settings.SIZE_STEP + 1;
 		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
 			i -> s.minimapSize = Settings.MIN_SIZE + i * Settings.SIZE_STEP, i -> Component.literal(Integer.toString(Settings.MIN_SIZE + i * Settings.SIZE_STEP)));
+		int enlargedSizes = (Settings.MAX_ENLARGED - Settings.MIN_ENLARGED) / Settings.ENLARGED_STEP + 1;
+		minimap.slider("enlarged", (s.minimapEnlarged - Settings.MIN_ENLARGED) / Settings.ENLARGED_STEP, enlargedSizes,
+			i -> s.minimapEnlarged = Settings.MIN_ENLARGED + i * Settings.ENLARGED_STEP,
+			i -> Component.literal(java.math.BigDecimal.valueOf(Settings.MIN_ENLARGED + i * Settings.ENLARGED_STEP, 2).stripTrailingZeros().toPlainString() + "×"));
+		// Beside Size, so the tab doesn't grow.
+		minimap.lastTwoSideBySide();
 		minimap.slider("zoom", s.minimapZoom, Settings.ZOOMS.length, i -> s.minimapZoom = i, i -> Component.literal(Settings.ZOOMS[i] + "×"));
 		int opacities = (Settings.MAX_OPACITY - Settings.MIN_OPACITY) / Settings.OPACITY_STEP + 1;
 		minimap.slider("opacity", (Settings.snapOpacity(s.minimapOpacity) - Settings.MIN_OPACITY) / Settings.OPACITY_STEP, opacities,
@@ -123,6 +129,7 @@ public final class SettingsScreen extends Screen {
 		if (Claims.supported()) {
 			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
 		}
+		overlays.choice("drawings", Settings.DrawingsShown.values(), () -> s.drawings, v -> s.drawings = v);
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
@@ -133,6 +140,9 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		waypoints.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
+		int[] distances = Settings.WAYPOINT_DISTANCES;
+		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],
+			i -> distances[i] == 0 ? Component.translatable("diorama.settings.waypoint_distance.any") : Component.literal(distances[i] + " m"));
 		waypoints.open("teleport_command", Component.literal("/" + s.teleportCommand), () -> this.minecraft.gui.setScreen(new TeleportCommandScreen(this)));
 
 		SettingsTab look = new SettingsTab("diorama.settings.look");

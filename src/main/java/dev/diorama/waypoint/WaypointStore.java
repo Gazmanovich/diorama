@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import dev.diorama.Diorama;
+import dev.diorama.Settings;
 import dev.diorama.WorldKey;
 import java.io.IOException;
 import java.io.Reader;
@@ -22,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -263,6 +265,19 @@ public final class WaypointStore {
 	public static boolean isShown(Waypoint waypoint) {
 		WaypointStore store = get();
 		return store == null ? waypoint.visible : store.shown(waypoint);
+	}
+
+	/**
+	 * Whether a waypoint is near enough to the player to show in the world and on the minimap, by
+	 * the waypoint distance setting; the map shows every waypoint. Deaths, temporary waypoints and
+	 * the bed show at any distance: there are only a few, and they're the ones players head back to.
+	 */
+	public static boolean isNear(Waypoint waypoint, Entity player) {
+		int limit = Settings.get().waypointDistance;
+		if (limit <= 0 || waypoint.kind == Waypoint.Kind.DEATH || waypoint.kind == Waypoint.Kind.TEMPORARY || waypoint.kind == Waypoint.Kind.BED) {
+			return true;
+		}
+		return waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) <= limit;
 	}
 
 	public void add(Waypoint waypoint) {
