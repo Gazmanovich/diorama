@@ -121,8 +121,8 @@ public final class Measure {
 		int x = Math.round(view.screenX(this.to[0])) - width / 2;
 		int y = Math.round(view.screenY(this.to[1])) - 16;
 		x = Math.max(view.x() + 2, Math.min(view.x() + view.width() - width - 2, x));
-		// Clear of the map screen's top bar.
-		y = Math.max(view.y() + 18, y);
+		// Clear of the map screen's top and bottom bars.
+		y = Math.max(view.y() + 18, Math.min(view.y() + view.height() - 26, y));
 		graphics.fill(x - 2, y - 2, x + width + 1, y + 9, 0xC0000000);
 		graphics.text(font, text, x, y, 0xFFFFFFFF, true);
 	}

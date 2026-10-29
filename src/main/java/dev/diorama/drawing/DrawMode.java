@@ -206,6 +206,7 @@ public final class DrawMode {
 	 * that would have had the release is being rebuilt.
 	 */
 	private void endGesture() {
+		this.measure.end();
 		if (this.penDown) {
 			this.penDown = false;
 			String dimension = currentDimension();
