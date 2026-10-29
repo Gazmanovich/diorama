@@ -910,24 +910,31 @@ public class DioramaClientTest implements FabricClientGameTest {
 				// The overworld's ID again, then the move to the Nether. The client only runs when the
 				// test lets it, so both are waiting when it next handles packets, as when they reach a
 				// client mid-frame. It handles them and opens the Nether's map, or waits for its ID,
-				// which comes after.
-				server.runOnServer(s -> {
-					net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
-						new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
-					s.getPlayerList().getPlayers().get(0).connection.send(bundled
-						? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
-						: id);
-					s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
-				});
+				// which comes after. However long that takes: on a slow machine the test's own wait
+				// below can outlast the second the map gives a server to name a new level.
+				WorldKey.waitForIdsForever = true;
+				String nether;
 				try {
-					Thread.sleep(500);
-				} catch (InterruptedException e) {
-					throw new AssertionError(e);
+					server.runOnServer(s -> {
+						net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+							new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
+						s.getPlayerList().getPlayers().get(0).connection.send(bundled
+							? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
+							: id);
+						s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
+					});
+					try {
+						Thread.sleep(500);
+					} catch (InterruptedException e) {
+						throw new AssertionError(e);
+					}
+					context.waitTicks(5);
+					sendXaero(server, SURVIVAL_ID);
+					context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
+					nether = context.computeOnClient(mc -> WorldKey.current());
+				} finally {
+					WorldKey.waitForIdsForever = false;
 				}
-				context.waitTicks(5);
-				sendXaero(server, SURVIVAL_ID);
-				context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
-				String nether = context.computeOnClient(mc -> WorldKey.current());
 				levelIdOnJoin = null;
 				if (!overworld.equals(address + "-id-7c56d495") || !nether.equals(address + "-id-04adb1e4")) {
 					throw new AssertionError("The ID sent " + (bundled ? "in a bundle " : "") + "before the move to the Nether named the wrong level: overworld " + overworld + ", Nether " + nether);
@@ -2331,12 +2338,27 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Fog of war. Build a known scene deep underground: a straight corridor through solid
 		// stone that turns north at its far end into a hidden room. From the corridor's start,
 		// the corridor must be revealed and the room must not, because it is around a corner.
+		// First over the scene: an earlier section can leave the player thousands of blocks away,
+		// where its chunks aren't loaded and every fill fails.
+		int surface = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, 115, 110));
+		world.getServer().runCommand("tp @a 115.5 " + surface + " 110.5");
+		for (int i = 0; i < 600 && !world.getServer().computeOnServer(server -> server.overworld().isLoaded(new BlockPos(100, 0, 98))
+			&& server.overworld().isLoaded(new BlockPos(131, 0, 98)) && server.overworld().isLoaded(new BlockPos(100, 0, 120))
+			&& server.overworld().isLoaded(new BlockPos(131, 0, 120))); i++) {
+			context.waitTick();
+		}
 		world.getServer().runCommand("fill 100 -42 98 131 -34 120 minecraft:stone");
 		world.getServer().runCommand("fill 102 -40 115 128 -38 117 minecraft:air");
 		world.getServer().runCommand("fill 126 -40 110 128 -38 114 minecraft:air");
 		world.getServer().runCommand("fill 119 -40 100 128 -38 109 minecraft:air");
 		world.getServer().runCommand("tellraw @a \"\u00a7f\u00a7a\u00a7i\u00a7r\u00a7x\u00a7a\u00a7e\u00a7r\u00a7o\"");
+		if (!world.getServer().computeOnServer(server -> server.overworld().getBlockState(new BlockPos(115, -39, 116)).isAir()
+			&& server.overworld().getBlockState(new BlockPos(115, -39, 118)).is(net.minecraft.world.level.block.Blocks.STONE))) {
+			throw new AssertionError("The fog-of-war scene wasn't built");
+		}
 		world.getServer().runCommand("tp @a 103.5 -40 116.5 -90 0");
+		context.waitFor(mc -> mc.level.getBlockState(new BlockPos(115, -39, 116)).isAir()
+			&& mc.level.getBlockState(new BlockPos(115, -39, 118)).is(net.minecraft.world.level.block.Blocks.STONE), 600);
 		settle(context, 100);
 		context.takeScreenshot("diorama-07-fog-of-war-minimap");
 		// Down here the map opens on the cave, unless Caves underground is off.
