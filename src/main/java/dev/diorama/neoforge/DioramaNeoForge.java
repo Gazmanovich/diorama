@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
+import dev.diorama.Maps;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
@@ -11,6 +12,7 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
 //? if >=1.21.6 {
@@ -90,6 +92,8 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
+			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -100,6 +104,8 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
+			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			// Mods sync block ids from the server before this, which can number block states differently.
 			BlockLooks.invalidate();

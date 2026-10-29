@@ -45,6 +45,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 //?}
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
@@ -104,11 +105,13 @@ public final class MapScreen extends Screen {
 	/** Whether the latest press went to a control (a button, a tab, the gauge), so it can't pan. */
 	private boolean pressOnControl;
 	private final DepthGauge gauge = new DepthGauge();
+	private Button export;
 	private Button zoomIn;
 	private Button zoomOut;
 	private Button recenter;
 	private Button sliceUp;
 	private Button sliceDown;
+	private Button mapsButton;
 	private Button waypointsButton;
 	private Button settingsButton;
 	/** Turns draw mode on and off; it sits above the zoom buttons. */
@@ -145,13 +148,29 @@ public final class MapScreen extends Screen {
 		this.pressOnMenu = false;
 		this.pressOnControl = false;
 		Settings settings = Settings.get();
-		// Either can be hidden; Waypoints takes the corner when Settings isn't there.
+		// Any of them can be hidden; the ones shown sit together in the corner, Settings last.
+		this.mapsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.maps"), b ->
+			this.minecraft.gui.setScreen(new MapsScreen(this))).size(64, BAR).build());
+		this.mapsButton.visible = settings.mapMapsButton;
+		this.mapsButton.active = Maps.get() != null;
 		this.waypointsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.waypoints"), b ->
-			this.minecraft.gui.setScreen(new WaypointListScreen(this))).bounds(this.width - (settings.mapSettingsButton ? 130 : 64), 0, 64, BAR).build());
+			this.minecraft.gui.setScreen(new WaypointListScreen(this))).size(64, BAR).build());
 		this.waypointsButton.visible = settings.mapWaypointsButton;
 		this.settingsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
-			this.minecraft.gui.setScreen(new SettingsScreen(this))).bounds(this.width - 64, 0, 64, BAR).build());
+			this.minecraft.gui.setScreen(new SettingsScreen(this))).size(64, BAR).build());
 		this.settingsButton.visible = settings.mapSettingsButton;
+		int right = this.width;
+		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton)) {
+			if (button.visible) {
+				right -= button.getWidth();
+				button.setPosition(right, 0);
+				right -= 2;
+			}
+		}
+		this.export = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
+			this.menu = null;
+			this.minecraft.gui.setScreen(new ExportScreen(this, this.centerU, this.centerV, this.zoom, this.width, this.height));
+		}).size(20, 20).createNarration(n -> Component.translatable("diorama.export.title")).build());
 		this.zoomIn = this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.zoomButton(ZOOM_BUTTON_STEPS))
 			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.zoom_in")).build());
 		this.zoomOut = this.addRenderableWidget(Button.builder(Component.literal("-"), b -> this.zoomButton(-ZOOM_BUTTON_STEPS))
@@ -182,6 +201,10 @@ public final class MapScreen extends Screen {
 		int x = this.width - (caves ? 56 : 26);
 		int y = this.height - 90;
 		this.drawButton.setPosition(x, y - 26);
+		// Only the sky view is saved, so only it can be exported; not while drawing on it.
+		MapSession session = MapSession.get();
+		this.export.visible = !caves && !this.draw.active() && session != null && session.map().savedMap() != null;
+		this.export.setPosition(x, y - 48);
 		this.zoomIn.setPosition(x, y);
 		this.zoomOut.setPosition(x, y + 22);
 		this.recenter.setPosition(x, y + 48);
@@ -211,6 +234,8 @@ public final class MapScreen extends Screen {
 			this.onClose();
 			return;
 		}
+		// The map can open before a server names its world, and the list of maps is the world's.
+		this.mapsButton.active = Maps.get() != null;
 		MapSession session = MapSession.get();
 		LocalPlayer player = this.minecraft.player;
 		if (session == null || player == null) {
@@ -306,7 +331,9 @@ public final class MapScreen extends Screen {
 		int statusX = this.tabsEnd + 8;
 		graphics.text(this.font, this.statusText(session, player, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
-		graphics.text(this.font, (this.draw.active() ? this.draw.help() : HELP).getString(), 6, this.height - 11, 0xFFC8D0DA, false);
+		String help = (this.draw.active() ? this.draw.help() : HELP).getString();
+		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
+		this.drawMapName(graphics, 6 + this.font.width(help) + 12);
 		// Widgets (the buttons) draw over the map, then the icons on them.
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		Markers.player(graphics, this.recenter.getX() + 10, this.recenter.getY() + 10.5F, 180, 5);
@@ -315,6 +342,9 @@ public final class MapScreen extends Screen {
 			DrawMode.outline(graphics, this.drawButton.getX(), this.drawButton.getY(), 20, 20, 0xFFFFFFFF);
 		}
 		this.draw.drawControls(graphics);
+		if (this.export.visible) {
+			DrawMode.icon(graphics, PICTURE, this.export.getX(), this.export.getY(), 0xFFFFFFFF);
+		}
 		if (caves) {
 			this.caret(graphics, this.sliceUp, false);
 			this.caret(graphics, this.sliceDown, true);
@@ -337,7 +367,7 @@ public final class MapScreen extends Screen {
 
 	/**
 	 * The status line: whether the view is under the Nether's roof, the player's position, the
-	 * chunks mapped and whether baking is running. It has {@code room} pixels before the buttons;
+	 * chunks mapped, whether baking is running and how far an image export is. It has {@code room} pixels before the buttons;
 	 * what doesn't fit is left out, the chunk count first, then baking, then the roof.
 	 */
 	private String statusText(MapSession session, LocalPlayer player, boolean caves, int room) {
@@ -345,8 +375,10 @@ public final class MapScreen extends Screen {
 		String position = String.format("%d, %d, %d", player.getBlockX(), player.getBlockY(), player.getBlockZ());
 		String chunks = Component.translatable("diorama.map.chunks", session.map().chunkCount()).getString();
 		String baking = session.map().bakingCount() > 0 ? Component.translatable("diorama.map.baking").getString() : null;
+		MapExport export = MapExport.running();
+		String saving = export != null ? Component.translatable("diorama.export.saving", Math.round(export.progress() * 100)).getString() : null;
 		List<String> parts = new ArrayList<>();
-		for (String part : new String[] {roof, position, chunks, baking}) {
+		for (String part : new String[] {roof, position, chunks, baking, saving}) {
 			if (part != null) {
 				parts.add(part);
 			}
@@ -360,12 +392,40 @@ public final class MapScreen extends Screen {
 		return this.font.plainSubstrByWidth(String.join(STATUS_GAP, parts), Math.max(0, room));
 	}
 
+	/**
+	 * The name of the dimension's map in use, at the right end of the bottom bar, once the dimension
+	 * has more than one. Shortened to fit after the help text, or left out if even a little won't.
+	 */
+	private void drawMapName(GuiGraphicsExtractor graphics, int left) {
+		Maps maps = Maps.get();
+		if (maps == null || this.minecraft.level == null) {
+			return;
+		}
+		String dimension = this.minecraft.level.dimension().identifier().toString();
+		if (!maps.several(dimension)) {
+			return;
+		}
+		String name = Component.translatable("diorama.map.current_map", maps.name(dimension, maps.active(dimension))).getString();
+		int room = this.width - 6 - left;
+		if (this.font.width(name) > room) {
+			String ellipsis = CommonComponents.ELLIPSIS.getString();
+			if (room < this.font.width(ellipsis) * 4) {
+				return;
+			}
+			name = this.font.plainSubstrByWidth(name, room - this.font.width(ellipsis)) + ellipsis;
+		}
+		graphics.text(this.font, name, this.width - 6 - this.font.width(name), this.height - 11, 0xFFFFFFFF, false);
+	}
+
 	/** Where the buttons at the top right start: the status line has to end before them. */
 	private int buttonsStart() {
-		if (this.waypointsButton.visible) {
-			return this.waypointsButton.getX();
+		int start = this.width;
+		for (Button button : List.of(this.mapsButton, this.waypointsButton, this.settingsButton)) {
+			if (button.visible) {
+				start = Math.min(start, button.getX());
+			}
 		}
-		return this.settingsButton.visible ? this.settingsButton.getX() : this.width;
+		return start;
 	}
 
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
@@ -820,8 +880,8 @@ public final class MapScreen extends Screen {
 			view.zoom(), view.layer());
 		List<WaypointOverlay.Pin> pins = WaypointOverlay.layout(clear, waypoints, true);
 		int bx0 = this.zoomIn.getX() - 2;
-		// From the draw button down to recenter.
-		int by0 = this.drawButton.getY() - 2;
+		// From the export (or draw) button down to recenter.
+		int by0 = (this.export.visible ? this.export.getY() : this.drawButton.getY()) - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
 		int by1 = this.recenter.getY() + this.recenter.getHeight() + 2;
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
@@ -880,6 +940,11 @@ public final class MapScreen extends Screen {
 		return -1;
 	}
 
+	/** One of the game's tabs, as the map's Surface and Caves are drawn. */
+	static void tab(GuiGraphicsExtractor graphics, boolean selected, boolean hovered, int x, int y, int w, int h) {
+		sprite(graphics, selected ? (hovered ? TAB_SELECTED_HIGHLIGHTED : TAB_SELECTED) : (hovered ? TAB_HIGHLIGHTED : TAB), x, y, w, h);
+	}
+
 	private static void sprite(GuiGraphicsExtractor graphics, Identifier sprite, int x, int y, int w, int h) {
 		//? if >=1.21.6 {
 		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h);
@@ -895,6 +960,19 @@ public final class MapScreen extends Screen {
 		graphics.blitNineSliced(TAB_BUTTON, x, y, w, h, 2, 2, 2, 0, 130, h, 0, row * 24);
 		*///?}
 	}
+
+	/** The Export button's icon: a framed picture of a hill under the sun, 11 by 9. */
+	private static final String[] PICTURE = {
+		"###########",
+		"#.........#",
+		"#......##.#",
+		"#......##.#",
+		"#...#.....#",
+		"#..#.#....#",
+		"#.#...#.#.#",
+		"##.....#.##",
+		"###########"
+	};
 
 	/** A small up or down arrow on a slice button, grey when it can't go further. */
 	private void caret(GuiGraphicsExtractor graphics, Button button, boolean down) {
@@ -917,7 +995,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.waypointsButton, this.settingsButton, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}
@@ -942,6 +1020,10 @@ public final class MapScreen extends Screen {
 		}
 		if (on(this.waypointsButton, x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
 			return tip(this.waypointsButton, this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
+		}
+		if (on(this.export, x, y)) {
+			return new Tip(List.of(Component.translatable("diorama.export.title").getVisualOrderText()),
+				new ScreenRectangle(this.export.getX(), this.export.getY(), this.export.getWidth(), this.export.getHeight()));
 		}
 		if (on(this.zoomIn, x, y)) {
 			return tip(this.zoomIn, Component.translatable("diorama.map.zoom_in"), Component.translatable("diorama.map.scroll_up"));
@@ -1092,6 +1174,11 @@ public final class MapScreen extends Screen {
 	/** For tests: the waypoint pins drawn last frame, in GUI coordinates. */
 	public List<WaypointOverlay.Pin> pins() {
 		return this.pins;
+	}
+
+	/** For tests: the Export button. */
+	public Button exportButton() {
+		return this.export;
 	}
 
 	/** For tests: the right-click menu, if it's open. */

@@ -541,6 +541,11 @@ public final class MapLevel implements ChunkSource {
 		return this.store != null;
 	}
 
+	/** The saved sky view, or null when nothing is saved. Render thread. */
+	public @Nullable TileStore savedMap() {
+		return this.store;
+	}
+
 	/** Uploads finished bakes and starts new ones. Call regularly on the render thread. */
 	public void update() {
 		this.frame++;

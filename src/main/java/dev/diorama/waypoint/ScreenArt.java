@@ -8,11 +8,11 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 
 /** Vanilla's own pieces of GUI art, drawn the way each Minecraft version takes them. */
-final class ScreenArt {
+public final class ScreenArt {
 	/** The darker panel vanilla puts under a list while a world is open. */
 	private static final Identifier LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/inworld_menu_list_background.png");
 	static final Identifier SEARCH = Identifier.withDefaultNamespace("icon/search");
-	static final Identifier TEXT_FIELD = Identifier.withDefaultNamespace("widget/text_field");
+	public static final Identifier TEXT_FIELD = Identifier.withDefaultNamespace("widget/text_field");
 	static final Identifier TEXT_FIELD_FOCUSED = Identifier.withDefaultNamespace("widget/text_field_highlighted");
 	static final Identifier SCROLLER = Identifier.withDefaultNamespace("widget/scroller");
 	static final Identifier SCROLLER_BACKGROUND = Identifier.withDefaultNamespace("widget/scroller_background");
@@ -26,13 +26,13 @@ final class ScreenArt {
 	*///?}
 	/** Vanilla's scrollbar width and shortest handle. */
 	static final int SCROLLBAR_WIDTH = 6;
-	static final int SCROLLER_MIN = 32;
+	public static final int SCROLLER_MIN = 32;
 
 	private ScreenArt() {
 	}
 
 	/** A GUI sprite (nine-sliced where its metadata says so) stretched over the rectangle. */
-	static void sprite(GuiGraphicsExtractor graphics, Identifier sprite, int x, int y, int width, int height) {
+	public static void sprite(GuiGraphicsExtractor graphics, Identifier sprite, int x, int y, int width, int height) {
 		//? if >=1.21.6 {
 		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, width, height);
 		//?} else if >=1.21.2 {
@@ -65,7 +65,7 @@ final class ScreenArt {
 	}
 
 	/** Vanilla's in-world list panel from y0 to y1, with its header and footer separators. */
-	static void list(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
+	public static void list(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
 		int w = x1 - x0;
 		int h = y1 - y0;
 		// Texture offsets as vanilla's lists use them, so the pattern sits the same way.
@@ -94,13 +94,13 @@ final class ScreenArt {
 	}
 
 	/** Vanilla's selection outline: white when the list has focus, as vanilla's lists draw it. */
-	static void selection(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
+	public static void selection(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
 		graphics.fill(x0, y0, x1, y1, 0xFFFFFFFF);
 		graphics.fill(x0 + 1, y0 + 1, x1 - 1, y1 - 1, 0xFF000000);
 	}
 
 	/** Vanilla's scrollbar on the right of a list from y0 to y1, its handle {@code top} of {@code range} down. */
-	static void scrollbar(GuiGraphicsExtractor graphics, int x, int y0, int y1, int handle, int top) {
+	public static void scrollbar(GuiGraphicsExtractor graphics, int x, int y0, int y1, int handle, int top) {
 		sprite(graphics, SCROLLER_BACKGROUND, x, y0, SCROLLBAR_WIDTH, y1 - y0);
 		sprite(graphics, SCROLLER, x, y0 + top, SCROLLBAR_WIDTH, handle);
 	}

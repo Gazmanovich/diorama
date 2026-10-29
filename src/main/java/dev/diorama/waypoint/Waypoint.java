@@ -44,6 +44,8 @@ public final class Waypoint {
 	public String folder = "";
 	public Kind kind = Kind.MANUAL;
 	public long created = System.currentTimeMillis();
+	/** The dimension's map it was made on ({@link dev.diorama.Maps}); null for the main map. */
+	public @org.jspecify.annotations.Nullable String map;
 
 	public Waypoint() {
 	}

@@ -46,6 +46,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `settings` | The settings screen |
 | `overlays` | Chunk grid, slime chunks and spawn spots |
 | `screens` | The minimap while other screens are open |
+| `image-export` | Saving an area and the whole map as images through the export screen |
 | `dimensions` | The Nether and the End |
 | `saved-map` | The map surviving a restart |
 | `recreated-world` | A new world under a deleted world's name |

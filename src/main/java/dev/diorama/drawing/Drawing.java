@@ -31,6 +31,8 @@ public final class Drawing {
 	public double[] points = new double[0];
 	/** A note's text; empty for the others. */
 	public String text = "";
+	/** The dimension's map it was drawn on ({@link dev.diorama.Maps}); null for the main map. */
+	public @org.jspecify.annotations.Nullable String map;
 
 	public Drawing() {
 	}
