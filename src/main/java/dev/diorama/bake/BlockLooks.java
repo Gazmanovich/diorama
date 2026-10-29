@@ -168,9 +168,8 @@ public final class BlockLooks {
 
 	/**
 	 * The state's id in the tables here. A state the game hasn't numbered, which some mods make
-	 * on the fly (Epic Fight's cracked ground, #180) and every state has for a moment while
-	 * NeoForge or Forge number them again on leaving a world, takes its block's default state's
-	 * id, or air's.
+	 * on the fly (Epic Fight's cracked ground, #180), takes its block's default state's id, or
+	 * air's.
 	 */
 	public static int id(BlockState state) {
 		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
@@ -181,6 +180,33 @@ public final class BlockLooks {
 			id = Block.BLOCK_STATE_REGISTRY.getId(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
 		}
 		return Math.max(id, 0);
+	}
+
+	/**
+	 * {@link #id} for a bake. While NeoForge or Forge number every state again, as they do when a
+	 * world is left, states have no id for a moment and the table is short: the bake stops
+	 * ({@link StatesRenumbered}) rather than read those blocks as something else, since the map
+	 * still saves its last bakes as it closes.
+	 */
+	public static int bakeId(BlockState state) {
+		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		if (id >= 0) {
+			return id;
+		}
+		BlockLooks looks = current;
+		if (looks != null && Block.BLOCK_STATE_REGISTRY.size() != looks.registrySize) {
+			throw StatesRenumbered.INSTANCE;
+		}
+		return id(state);
+	}
+
+	/** See {@link #bakeId}. */
+	public static final class StatesRenumbered extends RuntimeException {
+		private static final StatesRenumbered INSTANCE = new StatesRenumbered();
+
+		private StatesRenumbered() {
+			super("Block states are being numbered again", null, false, false);
+		}
 	}
 
 	/**
