@@ -92,12 +92,18 @@ public final class ExportDrawings implements ImageExport.Finish {
 	 * in GUI pixels times {@link #SCALE}. Text taller than the plate spills over it, as on the map.
 	 */
 	private void plate(ExportFont font, String text, float x, float y, int color) {
+		// The plate is laid out from the text as written, as the game's is; the text drawn on it may
+		// be shaped into other glyphs (see ExportFont.shaped), so the canvas holds both.
+		String shaped = ExportFont.shaped(text);
 		int textWidth = (int) Math.ceil(font.width(text));
-		float[] extent = font.extent(text);
+		int drawnWidth = Math.max(textWidth, (int) Math.ceil(font.width(shaped)));
+		float[] written = font.extent(text);
+		float[] drawn = font.extent(shaped);
 		// The canvas, in GUI pixels from the text's top left: the plate, and whatever the glyphs reach past it.
-		int top = (int) Math.floor(Math.min(-2, extent[0]));
-		int bottom = (int) Math.ceil(Math.max(9, extent[1]));
-		int w = (textWidth + 3) * SCALE;
+		int top = (int) Math.floor(Math.min(-2, Math.min(written[0], drawn[0])));
+		int bottom = (int) Math.ceil(Math.max(9, Math.max(written[1], drawn[1])));
+		int plateW = (textWidth + 3) * SCALE;
+		int w = (drawnWidth + 3) * SCALE;
 		int h = (bottom - top) * SCALE;
 		int textX = Math.round(x - textWidth * SCALE / 2.0F);
 		int textY = Math.round(y - 4 * SCALE);
@@ -109,7 +115,9 @@ public final class ExportDrawings implements ImageExport.Finish {
 		}
 		int[] argb = new int[w * h];
 		int plateTop = (-2 - top) * SCALE;
-		Arrays.fill(argb, plateTop * w, (plateTop + 11 * SCALE) * w, DrawingOverlay.PLATE);
+		for (int row = plateTop; row < plateTop + 11 * SCALE; row++) {
+			Arrays.fill(argb, row * w, row * w + plateW, DrawingOverlay.PLATE);
+		}
 		font.draw(argb, w, h, text, 2 * SCALE, -top * SCALE, SCALE, color & 0xFFFFFF);
 		this.plates.add(new Plate(argb, w, h, left, canvasTop));
 	}
