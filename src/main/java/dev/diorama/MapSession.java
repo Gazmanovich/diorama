@@ -56,12 +56,26 @@ public final class MapSession {
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
 	}
 
-	/** {@code .minecraft/diorama/<world>/<dimension>}, or null outside a world. */
+	/** The folder of the dimension's map in use ({@link Maps}), or null outside a world. */
 	private static @Nullable Path mapFolder(ClientLevel level, @Nullable String key) {
 		if (key == null) {
 			return null;
 		}
-		return WorldKey.folder(key).resolve(WorldKey.key("dim", level.dimension().identifier().toString()));
+		Maps maps = Maps.of(key);
+		String dimension = level.dimension().identifier().toString();
+		return maps.tileFolder(dimension, maps.active(dimension));
+	}
+
+	/**
+	 * The player switched a dimension to another of its maps. If it's this one, the map is saved and
+	 * closed as on a dimension change, and the next tick starts one on the other map; its sweep for
+	 * loaded chunks maps what's around the player again.
+	 */
+	public static void mapChanged(String dimension) {
+		if (current != null && current.level.dimension().identifier().toString().equals(dimension)) {
+			current.map.close();
+			current = null;
+		}
 	}
 
 	public static @Nullable MapSession get() {

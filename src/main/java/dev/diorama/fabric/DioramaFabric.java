@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
+import dev.diorama.Maps;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
@@ -71,6 +72,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -81,6 +83,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();

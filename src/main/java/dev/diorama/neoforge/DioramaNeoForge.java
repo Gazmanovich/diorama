@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
+import dev.diorama.Maps;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
@@ -90,6 +91,7 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
 			TrackedPlayers.clear();
@@ -100,6 +102,7 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			Maps.onLeave();
 			WorldKey.onJoinOrLeave();
 			// Mods sync block ids from the server before this, which can number block states differently.
 			BlockLooks.invalidate();

@@ -209,6 +209,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
 		}
+		if (tests.contains("sub-maps")) {
+			subMaps(context);
+		}
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
@@ -335,6 +338,219 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Reopening the new world lost its waypoint");
 			}
 		}
+	}
+
+	/**
+	 * Sub-maps (#156), in a world of its own so the maps it leaves in use don't reach the other
+	 * tests. Main maps two places; a new map made through the Maps screen starts with only what's
+	 * around the player, without Main's waypoint and drawing, and leaves the Nether on its main map;
+	 * going back to Main brings them all back; a deleted map's tiles and waypoints go; and the map
+	 * in use is still in use when the world is opened again.
+	 */
+	private static void subMaps(ClientGameTestContext context) {
+		String overworld = "minecraft:overworld";
+		String nether = "minecraft:the_nether";
+		TestWorldSave save;
+		String newId;
+		try (TestSingleplayerContext world = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> {
+				s.setName("Diorama Sub-maps");
+				s.setSeed("diorama");
+				s.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			})
+			.create()) {
+			save = world.getWorldSave();
+			world.getServer().runCommand("time set noon");
+			world.getServer().runCommand("weather clear");
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+			// Main maps a second place, 600 blocks east, then the player comes back.
+			world.getServer().runCommand("tp @a 600 120 0");
+			context.waitFor(mc -> mc.player.getX() > 500 && MapSession.get() != null && MapSession.get().map().chunk(600 >> 4, 0) != null, 2400);
+			settle(context, 100);
+			world.getServer().runCommand("tp @a 0 120 0");
+			context.waitFor(mc -> mc.player.getX() < 100, 600);
+			settle(context, 100);
+			String worldKey = context.computeOnClient(mc -> {
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("Old Base", at.getX(), at.getY(), at.getZ(), overworld, Waypoint.PALETTE[3]));
+				WaypointStore.get().add(new Waypoint("Nether Hub", 10, 70, 10, nether, Waypoint.PALETTE[5]));
+				dev.diorama.drawing.DrawingStore.get().add(new dev.diorama.drawing.Drawing(dev.diorama.drawing.Drawing.Kind.NOTE, overworld, 0xFFFFFFFF,
+					new double[] {at.getX(), Projection.v(at.getY(), at.getZ())}, "Old note"));
+				return WorldKey.current();
+			});
+			java.nio.file.Path mainFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(overworld, dev.diorama.Maps.MAIN));
+			context.waitFor(mc -> tileFiles(mainFolder) > 20 && hasTileAt(mainFolder, 600), 600);
+			long mainTiles = tileFiles(mainFolder);
+			context.setScreen(MapScreen::new);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(300, Projection.v(70, 0), 0.45, TileKey.SURFACE));
+			settle(context, 60);
+			context.takeScreenshot("sub-maps-01-main");
+
+			// The player makes a new map through the Maps screen.
+			clickButton(context, "diorama.map.maps");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			context.waitTicks(20);
+			context.takeScreenshot("sub-maps-02-maps-screen");
+			clickButton(context, "diorama.maps.new");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapNameScreen, 40);
+			String suggested = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(0).getValue());
+			if (!suggested.equals("Map 2")) {
+				throw new AssertionError("A second map should be suggested as Map 2, not " + suggested);
+			}
+			typeInto(context, 0, "After the reset");
+			context.takeScreenshot("sub-maps-03-name");
+			clickButton(context, "diorama.waypoint.save");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			newId = context.computeOnClient(mc -> dev.diorama.Maps.get().active(overworld));
+			if (newId.equals(dev.diorama.Maps.MAIN)) {
+				throw new AssertionError("Saving a new map didn't switch the Overworld to it");
+			}
+			if (!context.computeOnClient(mc -> dev.diorama.Maps.get().active(nether)).equals(dev.diorama.Maps.MAIN)) {
+				throw new AssertionError("A new Overworld map switched the Nether's too");
+			}
+			// The new map fills in from the chunks already loaded around the player, and only those.
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 300, 600);
+			settle(context, 100);
+			context.takeScreenshot("sub-maps-04-maps-screen-two");
+			java.nio.file.Path newFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(overworld, newId));
+			context.waitFor(mc -> tileFiles(newFolder) > 0, 600);
+			context.runOnClient(mc -> {
+				if (WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("Old Base"))) {
+					throw new AssertionError("Main's waypoint shows on the new map");
+				}
+				if (WaypointStore.get().all().stream().noneMatch(w -> w.name.equals("Nether Hub"))) {
+					throw new AssertionError("The Nether's waypoint went with the Overworld's map");
+				}
+				if (!dev.diorama.drawing.DrawingStore.get().in(overworld).isEmpty()) {
+					throw new AssertionError("Main's drawing shows on the new map");
+				}
+				if (hasTileAt(newFolder, 600) || MapSession.get().map().chunk(600 >> 4, 0) != null) {
+					throw new AssertionError("The new map has the place only Main mapped");
+				}
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("New Base", at.getX(), at.getY(), at.getZ(), overworld, Waypoint.PALETTE[1]));
+			});
+			context.setScreen(() -> null);
+			context.setScreen(MapScreen::new);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(300, Projection.v(70, 0), 0.45, TileKey.SURFACE));
+			settle(context, 60);
+			context.takeScreenshot("sub-maps-05-new-map");
+
+			// Back to Main: its tiles, waypoint and drawing are all there, the new map's waypoint isn't.
+			clickButton(context, "diorama.map.maps");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			clickMapsRow(context, 0);
+			clickButton(context, "diorama.maps.use");
+			context.waitFor(mc -> dev.diorama.Maps.get().active(overworld).equals(dev.diorama.Maps.MAIN) && MapSession.get() != null, 200);
+			context.runOnClient(mc -> {
+				if (WaypointStore.get().all().stream().noneMatch(w -> w.name.equals("Old Base"))) {
+					throw new AssertionError("Main's waypoint didn't come back with Main");
+				}
+				if (WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("New Base"))) {
+					throw new AssertionError("The new map's waypoint shows on Main");
+				}
+				if (dev.diorama.drawing.DrawingStore.get().in(overworld).stream().noneMatch(d -> d.text.equals("Old note"))) {
+					throw new AssertionError("Main's drawing didn't come back with Main");
+				}
+			});
+			if (!hasTileAt(mainFolder, 600) || tileFiles(mainFolder) < mainTiles) {
+				throw new AssertionError("Main lost tiles: " + mainTiles + " then " + tileFiles(mainFolder));
+			}
+
+			// A third map, then deleting it from Main: its tiles and waypoint go, nothing else does.
+			String scratchId = context.computeOnClient(mc -> {
+				String id = dev.diorama.Maps.get().create(overworld, "Scratch");
+				BlockPos at = mc.player.blockPosition();
+				WaypointStore.get().add(new Waypoint("Scratch Pin", at.getX(), at.getY(), at.getZ(), overworld, Waypoint.PALETTE[2]));
+				return id;
+			});
+			java.nio.file.Path scratchFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(overworld, scratchId));
+			context.waitFor(mc -> MapSession.get() != null && tileFiles(scratchFolder) > 0, 600);
+			context.runOnClient(mc -> dev.diorama.Maps.get().use(overworld, dev.diorama.Maps.MAIN));
+			context.setScreen(() -> new dev.diorama.MapsScreen(null));
+			context.waitTicks(10);
+			clickMapsRow(context, 2);
+			clickButton(context, "diorama.waypoint.delete");
+			context.takeScreenshot("sub-maps-06-delete-armed");
+			clickButton(context, "diorama.menu.delete_confirm");
+			context.runOnClient(mc -> {
+				if (java.nio.file.Files.exists(scratchFolder)) {
+					throw new AssertionError("The deleted map's tiles are still there: " + scratchFolder);
+				}
+				if (dev.diorama.Maps.get().list(overworld).size() != 2) {
+					throw new AssertionError("Expected Main and After the reset left, not " + dev.diorama.Maps.get().list(overworld));
+				}
+			});
+			String saved = readFile(context.computeOnClient(mc -> WorldKey.folder(worldKey).resolve("waypoints.json")));
+			if (saved.contains("Scratch Pin") || !saved.contains("New Base") || !saved.contains("Old Base")) {
+				throw new AssertionError("After deleting Scratch the waypoints file should keep Old Base and New Base only: " + saved);
+			}
+
+			// Leave on the new map.
+			context.runOnClient(mc -> dev.diorama.Maps.get().use(overworld, newId));
+			context.setScreen(() -> null);
+			context.waitTicks(40);
+		}
+		try (TestSingleplayerContext reopened = save.open()) {
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
+			context.runOnClient(mc -> {
+				if (!dev.diorama.Maps.get().active(overworld).equals(newId)) {
+					throw new AssertionError("Reopening the world didn't open the map in use when it was left");
+				}
+				if (WaypointStore.get().all().stream().noneMatch(w -> w.name.equals("New Base"))
+					|| WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("Old Base"))) {
+					throw new AssertionError("Reopened on the new map, the waypoints should be its own");
+				}
+			});
+			context.setScreen(MapScreen::new);
+			settle(context, 60);
+			context.takeScreenshot("sub-maps-07-reopened");
+			context.setScreen(() -> null);
+		}
+	}
+
+	/** Whether a map folder has a full-detail surface tile in the column of map units that x is in. */
+	private static boolean hasTileAt(java.nio.file.Path folder, int x) {
+		String column = Math.floorDiv(x, Projection.TILE_UNITS) + "_";
+		try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(folder)) {
+			return files.filter(java.nio.file.Files::isDirectory).filter(d -> d.getFileName().toString().startsWith("surface")).anyMatch(d -> {
+				try (java.util.stream.Stream<java.nio.file.Path> tiles = java.nio.file.Files.list(d)) {
+					return tiles.anyMatch(t -> t.getFileName().toString().startsWith(column) && t.toString().endsWith(".omt"));
+				} catch (java.io.IOException e) {
+					return false;
+				}
+			});
+		} catch (java.io.IOException e) {
+			return false;
+		}
+	}
+
+	/** How many tile files a map folder holds, at every level. */
+	private static long tileFiles(java.nio.file.Path folder) {
+		if (!java.nio.file.Files.isDirectory(folder)) {
+			return 0;
+		}
+		try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(folder)) {
+			return files.filter(f -> f.toString().endsWith(".omt")).count();
+		} catch (java.io.IOException | java.io.UncheckedIOException e) {
+			return 0;
+		}
+	}
+
+	private static String readFile(java.nio.file.Path file) {
+		try {
+			return java.nio.file.Files.readString(file);
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** Clicks a row of the Maps screen's list by its place, with the mouse. */
+	private static void clickMapsRow(ClientGameTestContext context, int row) {
+		double[] at = context.computeOnClient(mc -> new double[] {mc.gui.screen().width / 2.0 - 100, 48 + 2 + row * 26 + 12});
+		clickAtGui(context, at[0], at[1]);
+		context.waitTicks(6);
 	}
 
 	private static final long REALM_ID = 4242;
@@ -5118,10 +5334,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "sub-maps", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "sub-maps");
 			*///?}
 		}
 		return Set.of(env.split(","));

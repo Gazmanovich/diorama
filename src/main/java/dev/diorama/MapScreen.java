@@ -45,6 +45,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 //?}
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
@@ -109,6 +110,7 @@ public final class MapScreen extends Screen {
 	private Button recenter;
 	private Button sliceUp;
 	private Button sliceDown;
+	private Button mapsButton;
 	private Button waypointsButton;
 	private Button settingsButton;
 	/** Turns draw mode on and off; it sits above the zoom buttons. */
@@ -145,13 +147,25 @@ public final class MapScreen extends Screen {
 		this.pressOnMenu = false;
 		this.pressOnControl = false;
 		Settings settings = Settings.get();
-		// Either can be hidden; Waypoints takes the corner when Settings isn't there.
+		// Any of them can be hidden; the ones shown sit together in the corner, Settings last.
+		this.mapsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.maps"), b ->
+			this.minecraft.gui.setScreen(new MapsScreen(this))).size(64, BAR).build());
+		this.mapsButton.visible = settings.mapMapsButton;
+		this.mapsButton.active = Maps.get() != null;
 		this.waypointsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.waypoints"), b ->
-			this.minecraft.gui.setScreen(new WaypointListScreen(this))).bounds(this.width - (settings.mapSettingsButton ? 130 : 64), 0, 64, BAR).build());
+			this.minecraft.gui.setScreen(new WaypointListScreen(this))).size(64, BAR).build());
 		this.waypointsButton.visible = settings.mapWaypointsButton;
 		this.settingsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
-			this.minecraft.gui.setScreen(new SettingsScreen(this))).bounds(this.width - 64, 0, 64, BAR).build());
+			this.minecraft.gui.setScreen(new SettingsScreen(this))).size(64, BAR).build());
 		this.settingsButton.visible = settings.mapSettingsButton;
+		int right = this.width;
+		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton)) {
+			if (button.visible) {
+				right -= button.getWidth();
+				button.setPosition(right, 0);
+				right -= 2;
+			}
+		}
 		this.zoomIn = this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.zoomButton(ZOOM_BUTTON_STEPS))
 			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.zoom_in")).build());
 		this.zoomOut = this.addRenderableWidget(Button.builder(Component.literal("-"), b -> this.zoomButton(-ZOOM_BUTTON_STEPS))
@@ -306,7 +320,9 @@ public final class MapScreen extends Screen {
 		int statusX = this.tabsEnd + 8;
 		graphics.text(this.font, this.statusText(session, player, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
-		graphics.text(this.font, (this.draw.active() ? this.draw.help() : HELP).getString(), 6, this.height - 11, 0xFFC8D0DA, false);
+		String help = (this.draw.active() ? this.draw.help() : HELP).getString();
+		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
+		this.drawMapName(graphics, 6 + this.font.width(help) + 12);
 		// Widgets (the buttons) draw over the map, then the icons on them.
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		Markers.player(graphics, this.recenter.getX() + 10, this.recenter.getY() + 10.5F, 180, 5);
@@ -360,12 +376,40 @@ public final class MapScreen extends Screen {
 		return this.font.plainSubstrByWidth(String.join(STATUS_GAP, parts), Math.max(0, room));
 	}
 
+	/**
+	 * The name of the dimension's map in use, at the right end of the bottom bar, once the dimension
+	 * has more than one. Shortened to fit after the help text, or left out if even a little won't.
+	 */
+	private void drawMapName(GuiGraphicsExtractor graphics, int left) {
+		Maps maps = Maps.get();
+		if (maps == null || this.minecraft.level == null) {
+			return;
+		}
+		String dimension = this.minecraft.level.dimension().identifier().toString();
+		if (!maps.several(dimension)) {
+			return;
+		}
+		String name = Component.translatable("diorama.map.current_map", maps.name(dimension, maps.active(dimension))).getString();
+		int room = this.width - 6 - left;
+		if (this.font.width(name) > room) {
+			String ellipsis = CommonComponents.ELLIPSIS.getString();
+			if (room < this.font.width(ellipsis) * 4) {
+				return;
+			}
+			name = this.font.plainSubstrByWidth(name, room - this.font.width(ellipsis)) + ellipsis;
+		}
+		graphics.text(this.font, name, this.width - 6 - this.font.width(name), this.height - 11, 0xFFFFFFFF, false);
+	}
+
 	/** Where the buttons at the top right start: the status line has to end before them. */
 	private int buttonsStart() {
-		if (this.waypointsButton.visible) {
-			return this.waypointsButton.getX();
+		int start = this.width;
+		for (Button button : List.of(this.mapsButton, this.waypointsButton, this.settingsButton)) {
+			if (button.visible) {
+				start = Math.min(start, button.getX());
+			}
 		}
-		return this.settingsButton.visible ? this.settingsButton.getX() : this.width;
+		return start;
 	}
 
 	// Mouse and key events came as separate numbers before 1.21.9. Each override hands them to a
@@ -917,7 +961,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.waypointsButton, this.settingsButton, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.mapsButton, this.waypointsButton, this.settingsButton, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}

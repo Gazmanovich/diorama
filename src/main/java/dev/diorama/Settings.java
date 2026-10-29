@@ -103,6 +103,8 @@ public final class Settings {
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
+	/** The Maps button on the map, where each dimension's maps are made and switched. */
+	public boolean mapMapsButton = true;
 	/** Add waypoint and Add temporary waypoint in the map's right-click menu. */
 	public boolean mapAddWaypoints = true;
 	/**
