@@ -4,7 +4,14 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+//? if >=1.21.9 {
+import java.util.Collections;
+//?}
 import java.util.List;
+//? if >=1.21.9 {
+import java.util.Map;
+import java.util.WeakHashMap;
+//?}
 import net.minecraft.client.Minecraft;
 //? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -26,6 +33,13 @@ import net.minecraft.network.FriendlyByteBuf;
 //? if >=1.21 {
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+//?}
+//? if >=1.21.9 {
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketType;
+import net.minecraft.network.protocol.common.ClientCommonPacketListener;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.CommonPacketTypes;
 //?}
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
@@ -306,22 +320,65 @@ public final class XaeroChannels {
 	}
 
 	/**
-	 * A message from the server on {@code channel}, before the mod that has the channel reads it.
-	 * On a channel a Xaero mod has, a level ID is taken as if Diorama had the channel; the body is
-	 * left as it was. Called on the network thread, by a mixin.
+	 * The level ID in a message from the server on {@code channel}, read before the mod that has
+	 * the channel reads the message: the ID if a Xaero mod has the channel and the message is one,
+	 * else null. The body is left as it was. Called on the network thread, by a mixin.
 	 */
-	public static void peek(Identifier channel, ByteBuf body) {
+	public static @Nullable Integer peek(Identifier channel, ByteBuf body) {
 		if (!CLAIMED.contains(channel) || body.readableBytes() < 5 || body.getByte(body.readerIndex()) != LEVEL_ID) {
-			return;
+			return null;
 		}
-		int id = body.getInt(body.readerIndex() + 1);
-		Minecraft mc = Minecraft.getInstance();
-		mc.execute(() -> {
-			// Unless the player left before the client got to it.
-			if (mc.getConnection() != null) {
-				WorldKey.serverLevelId(id);
-			}
-		});
+		return body.getInt(body.readerIndex() + 1);
+	}
+
+	//? if >=1.21.9 {
+	/**
+	 * Level IDs {@link #peek} read, by the message they came in. From 1.21.9 the client handles
+	 * packets in a queue of their own, ahead of its other tasks, so an ID handled as a task could
+	 * come after a world change the server sent after it, and name the wrong world. So it waits
+	 * for its message, and {@link #queuePeeked} puts it in the packet queue where the message is.
+	 */
+	private static final Map<Object, Integer> PEEKED = Collections.synchronizedMap(new WeakHashMap<>());
+
+	/** The message {@code payload} carries level ID {@code id}. Network thread, by a mixin. */
+	public static void peeked(Object payload, int id) {
+		PEEKED.put(payload, id);
+	}
+
+	/** The message {@code payload} is being handled, on the network thread. By a mixin. */
+	public static void queuePeeked(CustomPacketPayload payload, ClientCommonPacketListener listener) {
+		Integer id = PEEKED.remove(payload);
+		if (id != null) {
+			Minecraft.getInstance().packetProcessor().scheduleIfPossible(listener, new PeekedLevelId(id));
+		}
+	}
+
+	/** A level ID in the client's packet queue. */
+	private record PeekedLevelId(int id) implements Packet<ClientCommonPacketListener> {
+		@Override
+		public PacketType<ClientboundCustomPayloadPacket> type() {
+			return CommonPacketTypes.CLIENTBOUND_CUSTOM_PAYLOAD;
+		}
+
+		@Override
+		public void handle(ClientCommonPacketListener listener) {
+			levelId(this.id);
+		}
+	}
+	//?} else {
+	/*// The message carrying level ID id arrived. Before 1.21.9 packets and tasks share the client's
+	// one queue, so a task keeps the ID's place among the packets around it. Network thread, by a
+	// mixin.
+	public static void peeked(Object message, int id) {
+		Minecraft.getInstance().execute(() -> levelId(id));
+	}
+	*///?}
+
+	/** A level ID read off a channel a Xaero mod has, unless the player left before the client got to it. */
+	private static void levelId(int id) {
+		if (Minecraft.getInstance().getConnection() != null) {
+			WorldKey.serverLevelId(id);
+		}
 	}
 
 	/**

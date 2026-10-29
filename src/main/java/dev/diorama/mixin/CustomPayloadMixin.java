@@ -34,8 +34,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CustomPayloadMixin {
 	@WrapOperation(method = "decode", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/codec/StreamCodec;decode(Ljava/lang/Object;)Ljava/lang/Object;"))
 	private Object diorama$peek(StreamCodec<Object, Object> codec, Object input, Operation<Object> original, @Local Identifier channel) {
-		XaeroChannels.peek(channel, (ByteBuf) input);
-		return original.call(codec, input);
+		Integer id = XaeroChannels.peek(channel, (ByteBuf) input);
+		Object payload = original.call(codec, input);
+		if (id != null) {
+			XaeroChannels.peeked(payload, id);
+		}
+		return payload;
 	}
 }
 //?} else {
@@ -51,7 +55,10 @@ public abstract class CustomPayloadMixin {
 
 	@Inject(method = "<init>(Lnet/minecraft/network/FriendlyByteBuf;)V", at = @At("TAIL"))
 	private void diorama$peek(FriendlyByteBuf input, CallbackInfo ci) {
-		XaeroChannels.peek(this.identifier, this.data);
+		Integer id = XaeroChannels.peek(this.identifier, this.data);
+		if (id != null) {
+			XaeroChannels.peeked(this, id);
+		}
 	}
 }
 *///?}
