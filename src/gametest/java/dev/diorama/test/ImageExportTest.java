@@ -39,7 +39,15 @@ final class ImageExportTest {
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), 1.0, TileKey.SURFACE));
 		settle(context);
 
-		// The Export button above the zoom buttons opens the export screen.
+		// The Export button above the draw and zoom buttons, with its tooltip, opens the export screen.
+		double[] button = context.computeOnClient(mc -> {
+			double[] c = centre(((MapScreen) mc.gui.screen()).exportButton());
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {c[0] * scale, c[1] * scale};
+		});
+		context.getInput().setCursorPos(button[0], button[1]);
+		context.waitTicks(10);
+		context.takeScreenshot("image-export-00-button");
 		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
 		context.waitTicks(3);
 		if (!context.computeOnClient(mc -> mc.gui.screen() instanceof ExportScreen)) {

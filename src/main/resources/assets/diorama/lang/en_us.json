@@ -74,7 +74,7 @@
 	"diorama.export.blocks": "%s × %s blocks",
 	"diorama.export.too_big": "Over %s px on a side",
 	"diorama.export.save": "Save image",
-	"diorama.export.help": "Drag inside to move · Edges resize · Drag outside to pan · Scroll to zoom",
+	"diorama.export.help": "Drag inside to move · Edges resize · Outside pans",
 	"diorama.export.finding": "Finding what's explored…",
 	"diorama.export.nothing": "Nothing explored here yet",
 	"diorama.export.saving": "saving image %s%%",

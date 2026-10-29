@@ -214,15 +214,15 @@ public final class ExportScreen extends Screen {
 			ImageExport.Area area = ImageExport.Area.ofUnits(lod, box[0], box[1], box[2], box[3]);
 			graphics.text(this.font, Component.translatable("diorama.export.pixels", number(area.width()), number(area.height())), 6, 76, 0xFFFFFFFF, false);
 			graphics.text(this.font, size(ImageExport.estimateBytes(area)), 6, 88, MUTED, false);
-			// Blocks across and down, on level ground: a map unit down is less than a block south.
-			long across = Math.round(box[2] - box[0]);
-			long down = Math.round((box[3] - box[1]) / Projection.sin());
-			Component blocks = Component.translatable("diorama.export.blocks", number(across), number(down));
+			// In map units, a block each, so it reads against pixels per block.
+			Component blocks = Component.translatable("diorama.export.blocks", number(Math.round(box[2] - box[0])), number(Math.round(box[3] - box[1])));
 			graphics.fill(SIDEBAR + 4, 4, SIDEBAR + 10 + this.font.width(blocks), 16, DIM);
 			graphics.text(this.font, blocks, SIDEBAR + 7, 6, 0xFFFFFFFF, false);
 		}
 		if (!this.whole) {
-			graphics.text(this.font, Component.translatable("diorama.export.help"), SIDEBAR + 7, ph - 12, MUTED, true);
+			// Beside the buttons, not over what's being saved.
+			String help = this.font.plainSubstrByWidth(Component.translatable("diorama.export.help").getString(), Math.max(0, this.width - 164));
+			graphics.text(this.font, help, 158, ph + 10, MUTED, false);
 		}
 
 		super.extractRenderState(graphics, mouseX, mouseY, a);
