@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import dev.diorama.drawing.Drawing;
+import dev.diorama.drawing.DrawingOverlay;
 import dev.diorama.drawing.DrawingStore;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
@@ -52,6 +53,7 @@ public final class ExportScreen extends Screen {
 
 	private final MapScreen parent;
 	private final MapViewport viewport = new MapViewport();
+	private final DrawingOverlay drawingOverlay = new DrawingOverlay();
 	/** The middle of the preview, in map units, and its zoom in GUI pixels per unit. */
 	private double centerU;
 	private double centerV;
@@ -200,7 +202,12 @@ public final class ExportScreen extends Screen {
 		// One view over the whole screen, placed so the preview's middle is (centerU, centerV).
 		double fullU = this.centerU - (SIDEBAR / 2.0) / this.zoom;
 		double fullV = this.centerV + (FOOTER / 2.0) / this.zoom;
-		this.viewport.draw(graphics, session.map(), new MapViewport.View(0, 0, this.width, this.height, fullU, fullV, this.zoom, TileKey.SURFACE));
+		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, fullU, fullV, this.zoom, TileKey.SURFACE);
+		this.viewport.draw(graphics, session.map(), view);
+		if (this.withDrawings) {
+			// As they'll be in the image, so the preview is what gets saved.
+			this.drawingOverlay.draw(graphics, this.font, view, this.drawings(), null, null, true);
+		}
 
 		double[] box = this.box();
 		int pw = this.previewWidth();
