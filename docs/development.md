@@ -56,7 +56,7 @@ Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `ways
 
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 
-`./gradlew :1.21.1-neoforge:runClientGameTest` runs the same scenarios on NeoForge, all but the dedicated server ones, and `./gradlew :1.20.1-forge:runClientGameTest` on Forge. NeoForge has no client game test API, so they run on `src/gameshim`, the test-only stand-in for Fabric's that the Fabric jars before 1.21.4 use too.
+`./gradlew :1.21.1-neoforge:runClientGameTest` runs the same scenarios on NeoForge, and `./gradlew :1.20.1-forge:runClientGameTest` on Forge, all but the dedicated server ones (`multiplayer`, `server-id`, `tracked-players`, `realms`). NeoForge and Forge have no client game test API, so they run on `src/gameshim`, the test-only stand-in for Fabric's that the Fabric jars before 1.21.4 use too.
 
 `./gradlew :1.21.11:runProductionClientGameTest` runs the same tests against the remapped release jar in a normal install, with Fabric API as published. In development 1.21.11 uses Mojang's names, but a normal install uses intermediary ones, so anything that looks the game up by name only fails there.
 
