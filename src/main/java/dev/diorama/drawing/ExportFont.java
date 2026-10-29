@@ -121,12 +121,16 @@ final class ExportFont {
 					}
 				}
 				case "space" -> {
+					// All or nothing, as the game takes a provider: a bad entry drops the lot.
+					Map<Integer, Float> advances = new HashMap<>();
 					for (Map.Entry<String, JsonElement> advance : provider.getAsJsonObject("advances").entrySet()) {
-						int c = advance.getKey().codePointAt(0);
-						if (!this.has(c)) {
-							this.spaces.put(c, advance.getValue().getAsFloat());
-						}
+						advances.put(advance.getKey().codePointAt(0), advance.getValue().getAsFloat());
 					}
+					advances.forEach((c, advance) -> {
+						if (!this.has(c)) {
+							this.spaces.put(c, advance);
+						}
+					});
 				}
 				case "bitmap" -> this.bitmap(manager, provider);
 				case "unihex" -> this.unihex(manager, provider);
@@ -335,6 +339,30 @@ final class ExportFont {
 			width += space != null ? space : this.glyph(c).advance();
 		}
 		return width;
+	}
+
+	/**
+	 * How far the text's glyphs and shadows reach left and right of where it starts, in GUI
+	 * pixels: {left, right}. Negative spaces, which resource packs use, can move it left.
+	 */
+	float[] span(String text) {
+		float pen = 0;
+		float left = 0;
+		float right = 0;
+		for (int c : text.codePoints().toArray()) {
+			Float space = this.spaces.get(c);
+			if (space != null) {
+				pen += space;
+			} else {
+				Glyph glyph = this.glyph(c);
+				left = Math.min(left, pen);
+				right = Math.max(right, pen + glyph.width() * glyph.size() + glyph.shadow());
+				pen += glyph.advance();
+			}
+			left = Math.min(left, pen);
+			right = Math.max(right, pen);
+		}
+		return new float[] {left, right};
 	}
 
 	/** How far the text's glyphs and shadows reach above and below its top, in GUI pixels: {top, bottom}. */

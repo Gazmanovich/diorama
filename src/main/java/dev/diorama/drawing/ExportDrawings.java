@@ -96,30 +96,36 @@ public final class ExportDrawings implements ImageExport.Finish {
 		// be shaped into other glyphs (see ExportFont.shaped), so the canvas holds both.
 		String shaped = ExportFont.shaped(text);
 		int textWidth = (int) Math.ceil(font.width(text));
-		int drawnWidth = Math.max(textWidth, (int) Math.ceil(font.width(shaped)));
-		float[] written = font.extent(text);
-		float[] drawn = font.extent(shaped);
-		// The canvas, in GUI pixels from the text's top left: the plate, and whatever the glyphs reach past it.
-		int top = (int) Math.floor(Math.min(-2, Math.min(written[0], drawn[0])));
-		int bottom = (int) Math.ceil(Math.max(9, Math.max(written[1], drawn[1])));
-		int plateW = (textWidth + 3) * SCALE;
-		int w = (drawnWidth + 3) * SCALE;
+		// The game's plate, in GUI pixels from the text's top left; a negative width (negative
+		// spaces) turns it round, as the game's fill does.
+		int plateLeft = Math.min(-2, textWidth + 1);
+		int plateRight = Math.max(-2, textWidth + 1);
+		float[] written = font.span(text);
+		float[] drawn = font.span(shaped);
+		float[] writtenRows = font.extent(text);
+		float[] drawnRows = font.extent(shaped);
+		// The canvas: the plate, and whatever the glyphs reach past it.
+		int left = (int) Math.floor(Math.min(plateLeft, Math.min(written[0], drawn[0])));
+		int right = (int) Math.ceil(Math.max(plateRight, Math.max(written[1], drawn[1])));
+		int top = (int) Math.floor(Math.min(-2, Math.min(writtenRows[0], drawnRows[0])));
+		int bottom = (int) Math.ceil(Math.max(9, Math.max(writtenRows[1], drawnRows[1])));
+		int w = (right - left) * SCALE;
 		int h = (bottom - top) * SCALE;
 		int textX = Math.round(x - textWidth * SCALE / 2.0F);
 		int textY = Math.round(y - 4 * SCALE);
-		int left = textX - 2 * SCALE;
+		int canvasLeft = textX + left * SCALE;
 		int canvasTop = textY + top * SCALE;
-		if (left + w <= 0 || left >= this.width || canvasTop + h <= 0 || canvasTop >= this.height) {
+		if (w <= 0 || h <= 0 || canvasLeft + w <= 0 || canvasLeft >= this.width || canvasTop + h <= 0 || canvasTop >= this.height) {
 			// Not in this image at all: nothing to draw or keep.
 			return;
 		}
 		int[] argb = new int[w * h];
 		int plateTop = (-2 - top) * SCALE;
 		for (int row = plateTop; row < plateTop + 11 * SCALE; row++) {
-			Arrays.fill(argb, row * w, row * w + plateW, DrawingOverlay.PLATE);
+			Arrays.fill(argb, row * w + (plateLeft - left) * SCALE, row * w + (plateRight - left) * SCALE, DrawingOverlay.PLATE);
 		}
-		font.draw(argb, w, h, text, 2 * SCALE, -top * SCALE, SCALE, color & 0xFFFFFF);
-		this.plates.add(new Plate(argb, w, h, left, canvasTop));
+		font.draw(argb, w, h, text, -left * SCALE, -top * SCALE, SCALE, color & 0xFFFFFF);
+		this.plates.add(new Plate(argb, w, h, canvasLeft, canvasTop));
 	}
 
 	@Override
