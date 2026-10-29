@@ -576,26 +576,24 @@ public class DioramaClientTest implements FabricClientGameTest {
 			try (TestDedicatedServerConnection connection = server.connect()) {
 				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
 				String overworld = context.computeOnClient(mc -> WorldKey.current());
-				// The overworld's ID again, then the move to the Nether, sent while the client thread
-				// is held up, so both are waiting when it next handles packets, as when they reach a
-				// client mid-frame. The Nether's own ID comes after.
-				net.minecraft.server.MinecraftServer running = server.computeOnServer(s -> s);
-				Thread send = new Thread(() -> running.execute(() -> {
+				// The overworld's ID again, then the move to the Nether. The client only runs when the
+				// test lets it, so both are waiting when it next handles packets, as when they reach a
+				// client mid-frame. It handles them and opens the Nether's map, or waits for its ID,
+				// which comes after.
+				server.runOnServer(s -> {
 					net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
 						new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
-					running.getPlayerList().getPlayers().get(0).connection.send(bundled
+					s.getPlayerList().getPlayers().get(0).connection.send(bundled
 						? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
 						: id);
-					running.getCommands().performPrefixedCommand(running.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
-				}));
-				context.runOnClient(mc -> {
-					send.start();
-					try {
-						Thread.sleep(1500);
-					} catch (InterruptedException e) {
-						throw new AssertionError(e);
-					}
+					s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
 				});
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					throw new AssertionError(e);
+				}
+				context.waitTicks(5);
 				sendXaero(server, SURVIVAL_ID);
 				context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
 				String nether = context.computeOnClient(mc -> WorldKey.current());
