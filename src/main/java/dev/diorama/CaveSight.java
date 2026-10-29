@@ -7,7 +7,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -180,8 +179,8 @@ final class CaveSight {
 	}
 
 	private byte read(int x, int y, int z) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(this.level.getBlockState(this.pos.set(x, y, z)));
-		return id >= 0 && this.looks.kind[id] == BlockLooks.SOLID ? SOLID : OPEN;
+		int id = BlockLooks.id(this.level.getBlockState(this.pos.set(x, y, z)));
+		return id < this.looks.kind.length && this.looks.kind[id] == BlockLooks.SOLID ? SOLID : OPEN;
 	}
 
 	private static void reveal(SeenBlocks seen, int x, int y, int z, int[] box) {
