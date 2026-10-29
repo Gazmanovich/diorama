@@ -35,6 +35,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 //?}
 //? if >=1.21.9 {
+import net.minecraft.network.PacketProcessor;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.common.ClientCommonPacketListener;
@@ -345,11 +346,21 @@ public final class XaeroChannels {
 		PEEKED.put(payload, id);
 	}
 
-	/** The message {@code payload} is being handled, on the network thread. By a mixin. */
+	/**
+	 * The message {@code payload} is being handled: on the network thread, before the loader hands
+	 * it to the client thread, or on the client thread for a message in a bundle. By a mixin.
+	 */
 	public static void queuePeeked(CustomPacketPayload payload, ClientCommonPacketListener listener) {
 		Integer id = PEEKED.remove(payload);
-		if (id != null) {
-			Minecraft.getInstance().packetProcessor().scheduleIfPossible(listener, new PeekedLevelId(id));
+		if (id == null) {
+			return;
+		}
+		PacketProcessor packets = Minecraft.getInstance().packetProcessor();
+		if (packets.isSameThread()) {
+			// The client thread handles a bundle's packets one after another, so this is the ID's place.
+			levelId(id);
+		} else {
+			packets.scheduleIfPossible(listener, new PeekedLevelId(id));
 		}
 	}
 

@@ -538,7 +538,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String survivalWithXaero;
 		try {
 			survivalWithXaero = playOnServer(context, "diorama-shared", "id-survival-xaero", null, null, List.of("Survival Camp"), List.of("Old Camp", "Lobby Camp"), true, SURVIVAL_ID);
-			levelIdBeforeHop(context, address);
+			levelIdBeforeHop(context, address, false);
+			levelIdBeforeHop(context, address, true);
 		} finally {
 			dev.diorama.XaeroChannels.handOverForTests(false);
 		}
@@ -561,11 +562,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/**
 	 * A level ID the server sends just before moving the player to the Nether names the level it
-	 * came in, not the Nether, which waits for its own: the ID keeps its place among the packets.
-	 * Run while Xaero's mods hold the channels, where Diorama reads IDs on the way to them.
+	 * came in, not the Nether, which waits for its own: the ID keeps its place among the packets,
+	 * also in a bundle ({@code bundled}), whose packets the client handles on its own thread. Run
+	 * while Xaero's mods hold the channels, where Diorama reads IDs on the way to them.
 	 */
 	//? if >=1.21 && fabric {
-	private static void levelIdBeforeHop(ClientGameTestContext context, String address) {
+	private static void levelIdBeforeHop(ClientGameTestContext context, String address, boolean bundled) {
 		levelIdOnJoin = LOBBY_ID;
 		try (TestDedicatedServerContext server = context.worldBuilder()
 			.setUseConsistentSettings(false)
@@ -574,19 +576,32 @@ public class DioramaClientTest implements FabricClientGameTest {
 			try (TestDedicatedServerConnection connection = server.connect()) {
 				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
 				String overworld = context.computeOnClient(mc -> WorldKey.current());
-				// The overworld's ID again, then the Nether in the same tick, so both reach the
-				// client together. The Nether's own ID comes half a second later.
-				server.runOnServer(s -> {
-					sendXaero(s.getPlayerList().getPlayers().get(0), LOBBY_ID);
-					s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
+				// The overworld's ID again, then the move to the Nether, sent while the client thread
+				// is held up, so both are waiting when it next handles packets, as when they reach a
+				// client mid-frame. The Nether's own ID comes after.
+				net.minecraft.server.MinecraftServer running = server.computeOnServer(s -> s);
+				Thread send = new Thread(() -> running.execute(() -> {
+					net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+						new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
+					running.getPlayerList().getPlayers().get(0).connection.send(bundled
+						? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
+						: id);
+					running.getCommands().performPrefixedCommand(running.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
+				}));
+				context.runOnClient(mc -> {
+					send.start();
+					try {
+						Thread.sleep(1500);
+					} catch (InterruptedException e) {
+						throw new AssertionError(e);
+					}
 				});
-				context.waitTicks(10);
 				sendXaero(server, SURVIVAL_ID);
 				context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
 				String nether = context.computeOnClient(mc -> WorldKey.current());
 				levelIdOnJoin = null;
 				if (!overworld.equals(address + "-id-7c56d495") || !nether.equals(address + "-id-04adb1e4")) {
-					throw new AssertionError("The ID sent before the move to the Nether named the wrong level: overworld " + overworld + ", Nether " + nether);
+					throw new AssertionError("The ID sent " + (bundled ? "in a bundle " : "") + "before the move to the Nether named the wrong level: overworld " + overworld + ", Nether " + nether);
 				}
 			}
 		}

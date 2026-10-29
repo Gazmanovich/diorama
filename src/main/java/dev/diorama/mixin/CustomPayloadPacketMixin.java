@@ -24,8 +24,8 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(ClientboundCustomPayloadPacket.class)
 public abstract class CustomPayloadPacketMixin {
 	//? if >=1.21.9 {
-	// HEAD, on the network thread: the first call, before the loader hands the message to the
-	// client thread, which calls this again.
+	// HEAD: the first call, on the network thread before the loader hands the message to the client
+	// thread, which calls this again; or on the client thread for a message in a bundle.
 	@Inject(method = "handle(Lnet/minecraft/network/protocol/common/ClientCommonPacketListener;)V", at = @At("HEAD"))
 	private void diorama$queueLevelId(ClientCommonPacketListener listener, CallbackInfo ci) {
 		XaeroChannels.queuePeeked(((ClientboundCustomPayloadPacket) (Object) this).payload(), listener);
