@@ -6,6 +6,7 @@ import dev.diorama.MapExport;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
+import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ImageExport;
 import dev.diorama.drawing.Drawing;
@@ -169,6 +170,9 @@ final class ImageExportTest {
 			DrawingStore.get().add(made);
 			return made;
 		});
+		// Mob markers mustn't cover the note on the map.
+		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
+		context.runOnClient(mc -> Settings.get().radarOnMap = false);
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, 1.0, TileKey.SURFACE));
 		context.getInput().setCursorPos(0, 0);
@@ -193,6 +197,7 @@ final class ImageExportTest {
 		boolean[][] imageText = mask(read(file), (int) Math.floor(u * perUnit - area.x()), (int) Math.floor(v * perUnit - area.y()), ARABIC);
 
 		context.runOnClient(mc -> DrawingStore.get().remove(note));
+		context.runOnClient(mc -> Settings.get().radarOnMap = radar);
 		context.setScreen(() -> null);
 		DioramaClientTest.reloadPacks(context, mc -> {
 			mc.options.languageCode = language;
