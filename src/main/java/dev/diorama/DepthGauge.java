@@ -8,7 +8,6 @@ import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.tags.BlockTags;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
@@ -241,7 +240,7 @@ final class DepthGauge {
 		if (looks == null) {
 			return false;
 		}
-		byte kind = looks.kind[Block.BLOCK_STATE_REGISTRY.getId(state)];
+		byte kind = looks.kind[BlockLooks.id(state)];
 		return kind == BlockLooks.AIR || kind == BlockLooks.PLANT;
 	}
 
@@ -250,7 +249,7 @@ final class DepthGauge {
 		if (looks == null) {
 			return 0xFF7F7F7F;
 		}
-		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		int id = BlockLooks.id(state);
 		int base = top ? looks.top[id] : looks.side[id];
 		int tinted = top ? looks.topTinted[id] : looks.sideTinted[id];
 		float w = top ? looks.topTintWeight[id] : looks.sideTintWeight[id];

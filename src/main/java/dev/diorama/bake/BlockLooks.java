@@ -167,6 +167,23 @@ public final class BlockLooks {
 	}
 
 	/**
+	 * The state's id in the tables here. A state the game hasn't numbered, which some mods make
+	 * on the fly (Epic Fight's cracked ground, #180) and every state has for a moment while
+	 * NeoForge or Forge number them again on leaving a world, takes its block's default state's
+	 * id, or air's.
+	 */
+	public static int id(BlockState state) {
+		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		if (id < 0) {
+			id = Block.BLOCK_STATE_REGISTRY.getId(state.getBlock().defaultBlockState());
+		}
+		if (id < 0) {
+			id = Block.BLOCK_STATE_REGISTRY.getId(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+		}
+		return Math.max(id, 0);
+	}
+
+	/**
 	 * True when two states draw the same on the map. Leaves changing their distance property,
 	 * for example, is a block update nobody can see.
 	 */
