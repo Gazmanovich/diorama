@@ -138,6 +138,7 @@ stonecutter parameters {
 		"\\.getMissingBlockStateModel\\(\\)" to ".getMissingModel()",
 		// Chat click and hover events were one class each, with an action.
 		"\\bnew ClickEvent\\.RunCommand\\(" to "new ClickEvent(ClickEvent.Action.RUN_COMMAND, ",
+		"\\bnew ClickEvent\\.OpenFile\\(" to "new ClickEvent(ClickEvent.Action.OPEN_FILE, ",
 		"\\bnew HoverEvent\\.ShowText\\(" to "new HoverEvent(HoverEvent.Action.SHOW_TEXT, ",
 		// Placing an entity (the tests do) was moving it.
 		"\\.snapTo\\(" to ".moveTo(",

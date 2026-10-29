@@ -172,6 +172,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("enlarge")) {
 				enlarge(context);
 			}
+			if (tests.contains("image-export")) {
+				ImageExportTest.run(context, world);
+			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
 			}
@@ -5386,10 +5389,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "sub-maps", "multiplayer", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "image-export", "dimensions", "saved-map", "recreated-world", "sub-maps", "multiplayer", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "dimensions", "saved-map", "recreated-world", "sub-maps");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "fog-of-war", "settings", "overlays", "screens", "enlarge", "image-export", "dimensions", "saved-map", "recreated-world", "sub-maps");
 			*///?}
 		}
 		return Set.of(env.split(","));
