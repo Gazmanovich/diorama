@@ -2354,7 +2354,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("The fog-of-war scene wasn't built");
 		}
 		world.getServer().runCommand("tp @a 103.5 -40 116.5 -90 0");
-		context.waitFor(mc -> mc.level.getBlockState(new BlockPos(115, -39, 116)).isAir(), 600);
+		context.waitFor(mc -> mc.level.getBlockState(new BlockPos(115, -39, 116)).isAir()
+			&& mc.level.getBlockState(new BlockPos(115, -39, 118)).is(net.minecraft.world.level.block.Blocks.STONE), 600);
 		settle(context, 100);
 		context.takeScreenshot("diorama-07-fog-of-war-minimap");
 		// Down here the map opens on the cave, unless Caves underground is off.
