@@ -28,6 +28,8 @@ final class UnnumberedStatesTest {
 		context.waitTicks(20);
 		// Stone's states made again outside the registry, as a mod's own block states are.
 		StateDefinition<Block, BlockState> definition = new StateDefinition.Builder<Block, BlockState>(Blocks.STONE).create(Block::defaultBlockState, BlockState::new);
+		// The shapes the game works out for registered states at startup; such mods do the same.
+		definition.getPossibleStates().forEach(BlockState::initCache);
 		BlockState unnumbered = definition.any();
 		if (Block.BLOCK_STATE_REGISTRY.getId(unnumbered) >= 0) {
 			throw new AssertionError("The made-up stone state has an id");
