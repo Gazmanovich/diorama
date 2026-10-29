@@ -11,6 +11,7 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
@@ -74,7 +75,11 @@ final class DioramaForgeClient {
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, RegisterClientCommandsEvent.class, event -> WaypointShare.register(event.getDispatcher()));
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingOut.class, event -> joinedOrLeft());
 		// A network moving the player to another of its servers joins again without leaving.
-		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingIn.class, event -> joinedOrLeft());
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingIn.class, event -> {
+			joinedOrLeft();
+			// Forge syncs block ids from the server before this, which can number block states differently.
+			BlockLooks.invalidate();
+		});
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, GameShuttingDownEvent.class, event -> MapSession.close());
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, TickEvent.ClientTickEvent.class, event -> {
