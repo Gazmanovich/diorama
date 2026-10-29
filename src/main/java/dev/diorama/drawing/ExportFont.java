@@ -44,20 +44,36 @@ final class ExportFont {
 	private final Map<Integer, Float> spaces = new HashMap<>();
 	/** The characters to find; Unifont is only searched for these. */
 	private final Set<Integer> wanted;
+	/** The font options the player has on, by the names font filters use: "uniform", "jp". */
+	private final Set<String> options;
 
-	private ExportFont(Set<Integer> wanted) {
+	private ExportFont(Set<Integer> wanted, Set<String> options) {
 		this.wanted = wanted;
+		this.options = options;
 	}
 
-	/** The font, found for the characters of {@code texts}. */
-	static ExportFont load(ResourceManager manager, List<String> texts) {
+	/** The font, found for the characters of {@code texts}, with the player's font {@code options} on. */
+	static ExportFont load(ResourceManager manager, List<String> texts, Set<String> options) {
 		Set<Integer> wanted = new HashSet<>();
 		for (String text : texts) {
 			text.codePoints().forEach(wanted::add);
 		}
-		ExportFont font = new ExportFont(wanted);
+		ExportFont font = new ExportFont(wanted, options);
 		font.read(manager, Identifier.withDefaultNamespace("default"), new HashSet<>());
 		return font;
+	}
+
+	/** Whether a provider's filter lets it in: each option it names on or off as the player has it. */
+	private boolean passes(JsonObject provider) {
+		if (!provider.has("filter")) {
+			return true;
+		}
+		for (Map.Entry<String, JsonElement> entry : provider.getAsJsonObject("filter").entrySet()) {
+			if (this.options.contains(entry.getKey()) != entry.getValue().getAsBoolean()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private boolean has(int c) {
@@ -87,6 +103,10 @@ final class ExportFont {
 	private void provider(ResourceManager manager, JsonElement element, Set<Identifier> seen) {
 		try {
 			JsonObject provider = element.getAsJsonObject();
+			if (!this.passes(provider)) {
+				// A filter on a reference covers everything it brings in.
+				return;
+			}
 			switch (provider.get("type").getAsString()) {
 				case "reference" -> {
 					Identifier ref = Identifier.tryParse(provider.get("id").getAsString());
@@ -125,6 +145,8 @@ final class ExportFont {
 		if (resource.isEmpty() || rows.isEmpty()) {
 			return;
 		}
+		// Kept only once the whole sheet has read: a broken provider adds nothing.
+		Map<Integer, Glyph> read = new HashMap<>();
 		try (InputStream in = resource.get().open(); NativeImage image = NativeImage.read(in)) {
 			String first = rows.get(0).getAsString();
 			int columns = first.codePointCount(0, first.length());
@@ -138,7 +160,7 @@ final class ExportFont {
 				int[] points = rows.get(row).getAsString().codePoints().toArray();
 				for (int col = 0; col < points.length; col++) {
 					int c = points[col];
-					if (c == 0 || this.has(c)) {
+					if (c == 0 || this.has(c) || read.containsKey(c)) {
 						continue;
 					}
 					byte[] alpha = new byte[cellW * cellH];
@@ -152,10 +174,11 @@ final class ExportFont {
 							}
 						}
 					}
-					this.glyphs.put(c, new Glyph(alpha, cellW, cellH, scale, 7 - ascent, (int) (0.5 + width * scale) + 1, 1));
+					read.put(c, new Glyph(alpha, cellW, cellH, scale, 7 - ascent, (int) (0.5 + width * scale) + 1, 1));
 				}
 			}
 		}
+		this.glyphs.putAll(read);
 	}
 
 	/** Unifont's glyphs, from the hex files in its zip, for the wanted characters nothing before it has. */
@@ -179,31 +202,37 @@ final class ExportFont {
 				int to = range.get("to").getAsString().codePointAt(0);
 				for (int c : missing) {
 					if (c >= from && c <= to) {
-						sizes.put(c, new int[] {range.get("left").getAsInt(), range.get("right").getAsInt()});
+						// The first range a character is in sets its size, as in the game.
+						sizes.putIfAbsent(c, new int[] {range.get("left").getAsInt(), range.get("right").getAsInt()});
 					}
 				}
 			}
 		}
+		// A character listed twice keeps its last bitmap, as in the game, so every file is read.
+		Map<Integer, String> found = new HashMap<>();
 		try (InputStream in = resource.get().open(); ZipInputStream zip = new ZipInputStream(in)) {
 			ZipEntry entry;
-			while ((entry = zip.getNextEntry()) != null && !missing.isEmpty()) {
+			while ((entry = zip.getNextEntry()) != null) {
 				if (!entry.getName().endsWith(".hex")) {
 					continue;
 				}
 				// Not closed: that would close the zip.
 				BufferedReader lines = new BufferedReader(new InputStreamReader(zip, StandardCharsets.US_ASCII));
 				String line;
-				while ((line = lines.readLine()) != null && !missing.isEmpty()) {
+				while ((line = lines.readLine()) != null) {
 					int colon = line.indexOf(':');
 					if (colon < 4 || colon > 6) {
 						continue;
 					}
 					int c = Integer.parseInt(line.substring(0, colon), 16);
-					if (missing.remove(c)) {
-						this.hexGlyph(c, line.substring(colon + 1).trim(), sizes.get(c));
+					if (missing.contains(c)) {
+						found.put(c, line.substring(colon + 1).trim());
 					}
 				}
 			}
+		}
+		for (Map.Entry<Integer, String> glyph : found.entrySet()) {
+			this.hexGlyph(glyph.getKey(), glyph.getValue(), sizes.get(glyph.getKey()));
 		}
 	}
 

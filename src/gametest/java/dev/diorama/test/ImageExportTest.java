@@ -110,8 +110,11 @@ final class ImageExportTest {
 		if (countNear(areaFile, area, drawn[0], drawn[1] + 30, NOTE) < 40 || countNear(areaFile, area, drawn[0], drawn[1] + 30, (NOTE & 0xFCFCFC) >> 2) < 10) {
 			throw new AssertionError("The note isn't in " + areaFile.getFileName());
 		}
-		if (countNear(areaFile, area, drawn[0], drawn[1] - 30, CJK) < 30) {
-			throw new AssertionError("The note in Unifont characters isn't in " + areaFile.getFileName());
+		// Two Unifont characters are 8 GUI pixels across each; the game's box for a missing one is 5,
+		// so two boxes span 22 export pixels and the real glyphs about 31.
+		int[] cjk = spanNear(areaFile, area, drawn[0], drawn[1] - 30, CJK);
+		if (cjk[0] < 30 || cjk[1] < 28) {
+			throw new AssertionError("The note in Unifont characters isn't in " + areaFile.getFileName() + ": " + cjk[0] + " pixels over " + cjk[1]);
 		}
 
 		// Whole map: everything explored, boxed with clouds round it.
@@ -275,6 +278,27 @@ final class ImageExportTest {
 		int y = (int) Math.floor(at[1] * perUnit - area.y());
 		int rgb = image.getRGB(x, y) & 0xFFFFFF;
 		return close(rgb, LINE, 24);
+	}
+
+	/** Pixels near a point about a colour, and how wide a span they cover: {count, width}. */
+	private static int[] spanNear(Path file, ImageExport.Area area, double u, double v, int colour) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int cx = (int) Math.floor(u * perUnit - area.x());
+		int cy = (int) Math.floor(v * perUnit - area.y());
+		int count = 0;
+		int left = Integer.MAX_VALUE;
+		int right = Integer.MIN_VALUE;
+		for (int y = cy - 16; y <= cy + 16; y++) {
+			for (int x = cx - 30; x <= cx + 30; x++) {
+				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, colour, 12)) {
+					count++;
+					left = Math.min(left, x);
+					right = Math.max(right, x);
+				}
+			}
+		}
+		return new int[] {count, count == 0 ? 0 : right - left + 1};
 	}
 
 	/** How many pixels near a point are about a colour: a note's text, or its shadow. */

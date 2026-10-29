@@ -5,6 +5,7 @@ import dev.diorama.data.ImageExport;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.server.packs.resources.ResourceManager;
 
 /**
@@ -39,8 +40,11 @@ public final class ExportDrawings implements ImageExport.Finish {
 		this.coverage = ThreadLocal.withInitial(() -> new float[this.width]);
 	}
 
-	/** The drawings over {@code area}; the font for notes comes from the resource packs in {@code resources}. */
-	public static ExportDrawings build(List<Drawing> drawings, ImageExport.Area area, ResourceManager resources) {
+	/**
+	 * The drawings over {@code area}. The font for notes comes from the resource packs in
+	 * {@code resources}, with the font options the player has on ("uniform", "jp").
+	 */
+	public static ExportDrawings build(List<Drawing> drawings, ImageExport.Area area, ResourceManager resources, Set<String> fontOptions) {
 		ExportDrawings out = new ExportDrawings(area);
 		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
 		List<String> texts = new ArrayList<>();
@@ -49,7 +53,7 @@ public final class ExportDrawings implements ImageExport.Finish {
 				texts.add(drawing.text);
 			}
 		}
-		ExportFont font = texts.isEmpty() ? null : ExportFont.load(resources, texts);
+		ExportFont font = texts.isEmpty() ? null : ExportFont.load(resources, texts, fontOptions);
 		float reach = (DrawingOverlay.CORE + DrawingOverlay.RIM * 2) * SCALE;
 		for (Drawing drawing : drawings) {
 			if (!drawing.complete()) {

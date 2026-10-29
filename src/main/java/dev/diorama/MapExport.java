@@ -8,7 +8,9 @@ import dev.diorama.render.ExportFog;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
@@ -61,21 +63,32 @@ public final class MapExport {
 		MapExport export = new MapExport(file);
 		running = export;
 		List<Drawing> copied = List.copyOf(drawings);
-		Thread thread = new Thread(() -> export.run(store, area, smoke, copied), "diorama-export");
+		// The font options notes are drawn with, read here as the game reads them for its fonts.
+		Set<String> fontOptions = new HashSet<>();
+		if (mc.options.forceUnicodeFont().get()) {
+			fontOptions.add("uniform");
+		}
+		// 1.20.1 has no Japanese glyph variants.
+		//? if >=1.21 {
+		if (mc.options.japaneseGlyphVariants().get()) {
+			fontOptions.add("jp");
+		}
+		//?}
+		Thread thread = new Thread(() -> export.run(store, area, smoke, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings) {
+	private void run(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings, Set<String> fontOptions) {
 		Component message;
 		try {
 			store.catchUp();
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
 			ImageExport.Finish finish = ExportFog.build(store, area, smoke);
 			if (!drawings.isEmpty()) {
-				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager()));
+				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager(), fontOptions));
 			}
 			ImageExport.write(store, area, this.file, finish, p -> this.progress = p);
 			Path absolute = this.file.toAbsolutePath();
