@@ -457,6 +457,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!hasTileAt(mainFolder, 600) || tileFiles(mainFolder) < mainTiles) {
 				throw new AssertionError("Main lost tiles: " + mainTiles + " then " + tileFiles(mainFolder));
 			}
+			// And the map open now reads them: the place only Main mapped shows again.
+			context.setScreen(MapScreen::new);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(600, Projection.v(70, 0), 2.0, TileKey.SURFACE));
+			settle(context, 60);
+			context.runOnClient(mc -> {
+				MapTile east = MapSession.get().map().peek(new TileKey(TileKey.SURFACE, Math.floorDiv(600, Projection.TILE_UNITS),
+					(int) Math.floor(Projection.v(70, 0) / Projection.TILE_UNITS)));
+				if (east == null || !east.hasCoverage()) {
+					throw new AssertionError("Back on Main, the map doesn't show the place Main mapped 600 blocks east");
+				}
+			});
+			context.takeScreenshot("sub-maps-05b-main-again-east");
+			context.setScreen(() -> null);
 
 			// A third map, then deleting it from Main: its tiles and waypoint go, nothing else does.
 			String scratchId = context.computeOnClient(mc -> {

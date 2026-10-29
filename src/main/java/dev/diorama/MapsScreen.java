@@ -83,10 +83,13 @@ public final class MapsScreen extends Screen {
 	 * The Overworld, the Nether and the End always, then the player's dimension, then any other with
 	 * maps of its own.
 	 */
-	private void collectDimensions(@Nullable String here) {
+	private void collectDimensions(@Nullable String here, @Nullable Maps maps) {
 		LinkedHashSet<String> found = new LinkedHashSet<>(List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
 		if (here != null) {
 			found.add(here);
+		}
+		if (maps != null) {
+			found.addAll(maps.dimensions());
 		}
 		this.dimensions.clear();
 		this.dimensions.addAll(found);
@@ -106,8 +109,8 @@ public final class MapsScreen extends Screen {
 	@Override
 	protected void init() {
 		String here = this.minecraft.level == null ? null : this.minecraft.level.dimension().identifier().toString();
-		this.collectDimensions(here);
 		Maps maps = Maps.get();
+		this.collectDimensions(here, maps);
 		this.rows.clear();
 		this.sizes.clear();
 		if (maps != null) {

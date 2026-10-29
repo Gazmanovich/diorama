@@ -107,6 +107,11 @@ public final class Maps {
 		return this.worldKey;
 	}
 
+	/** The dimensions that have a map other than their main one, or had one. */
+	public List<String> dimensions() {
+		return List.copyOf(this.saved.dimensions.keySet());
+	}
+
 	/** The ID of the map in use in a dimension. */
 	public String active(String dimension) {
 		Dimension saved = this.saved.dimensions.get(dimension);
@@ -270,8 +275,9 @@ public final class Maps {
 		return this.list(dimension).stream().anyMatch(info -> info.id().equals(id));
 	}
 
+	/** The world's own loaded map and stores follow a switch, whichever copy of the list it was made through. */
 	private void changed(String dimension) {
-		if (current != this) {
+		if (!this.worldKey.equals(WorldKey.current())) {
 			return;
 		}
 		MapSession.mapChanged(dimension);
