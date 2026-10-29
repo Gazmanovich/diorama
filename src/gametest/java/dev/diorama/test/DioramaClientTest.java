@@ -4719,7 +4719,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(2);
 	}
 
-	private static void setGuiScale(ClientGameTestContext context, int scale) {
+	static void setGuiScale(ClientGameTestContext context, int scale) {
 		context.runOnClient(mc -> {
 			mc.options.guiScale().set(scale);
 			//? if >=26.1 {

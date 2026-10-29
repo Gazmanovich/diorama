@@ -18,6 +18,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import com.ibm.icu.text.ArabicShaping;
+import com.ibm.icu.text.ArabicShapingException;
+import com.ibm.icu.text.Bidi;
+import net.minecraft.locale.Language;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
@@ -57,6 +61,8 @@ final class ExportFont {
 		Set<Integer> wanted = new HashSet<>();
 		for (String text : texts) {
 			text.codePoints().forEach(wanted::add);
+			// Shaping swaps in other characters (Arabic's joined forms), drawn from the font too.
+			shaped(text).codePoints().forEach(wanted::add);
 		}
 		ExportFont font = new ExportFont(wanted, options);
 		font.read(manager, Identifier.withDefaultNamespace("default"), new HashSet<>());
@@ -303,6 +309,24 @@ final class ExportFont {
 		return glyph != null ? glyph : MISSING;
 	}
 
+	/**
+	 * Text as the game draws it: in a right-to-left language it shapes Arabic and puts the
+	 * characters in visual order first, as {@code Font.bidirectionalShaping} does. Measuring uses
+	 * the text as written, as the game's does.
+	 */
+	static String shaped(String text) {
+		if (!Language.getInstance().isDefaultRightToLeft()) {
+			return text;
+		}
+		try {
+			Bidi bidi = new Bidi(new ArabicShaping(ArabicShaping.LETTERS_SHAPE).shape(text), Bidi.LEVEL_DEFAULT_RTL);
+			bidi.setReorderingMode(Bidi.REORDER_DEFAULT);
+			return bidi.writeReordered(Bidi.DO_MIRRORING);
+		} catch (ArabicShapingException e) {
+			return text;
+		}
+	}
+
 	/** How wide a line of text is, in GUI pixels, as the game's font measures it. */
 	float width(String text) {
 		float width = 0;
@@ -333,6 +357,7 @@ final class ExportFont {
 	 * {@code rows} tall), its top left at ({@code x}, {@code y}), {@code scale} pixels to a GUI pixel.
 	 */
 	void draw(int[] pixels, int stride, int rows, String text, float x, float y, int scale, int rgb) {
+		text = shaped(text);
 		// The shadow: a quarter of the colour, offset by the glyph's shadow distance right and down.
 		this.drawPass(pixels, stride, rows, text, x, y, scale, (rgb & 0xFCFCFC) >> 2, true);
 		this.drawPass(pixels, stride, rows, text, x, y, scale, rgb, false);
