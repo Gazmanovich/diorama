@@ -26,10 +26,10 @@ A minimap and world map for Minecraft that draws your world at an angle, like a 
 
 ## Install
 
-1. Install [Fabric](https://fabricmc.net/use/) with [Fabric API](https://modrinth.com/mod/fabric-api), or [NeoForge](https://neoforged.net/).
+1. Install [Fabric](https://fabricmc.net/use/) with [Fabric API](https://modrinth.com/mod/fabric-api), [NeoForge](https://neoforged.net/), or [Forge](https://files.minecraftforge.net/) for 1.20.1.
 2. Download the Diorama file for your Minecraft version and loader, and put it in your `mods` folder.
 
-Diorama runs on Fabric for Minecraft 1.20.1, 1.21 to 1.21.11 and 26.1 to 26.3, and on NeoForge for every version NeoForge has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3.
+Diorama runs on Fabric for Minecraft 1.20.1, 1.21 to 1.21.11 and 26.1 to 26.3, and on NeoForge for every version NeoForge has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3. On Forge it runs on 1.20.1, with Forge 47.1 or later.
 
 It only runs in your game. Servers don't need it.
 

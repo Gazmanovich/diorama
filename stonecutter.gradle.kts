@@ -3,6 +3,7 @@ plugins {
 	id("net.fabricmc.fabric-loom") version "1.18-SNAPSHOT" apply false
 	id("net.fabricmc.fabric-loom-remap") version "1.18-SNAPSHOT" apply false
 	id("net.neoforged.moddev") version "2.0.148" apply false
+	id("net.neoforged.moddev.legacyforge") version "2.0.148" apply false
 }
 
 // The version the source files are written for. Keep it at the newest version: the renames below
@@ -11,9 +12,15 @@ plugins {
 stonecutter active "26.3"
 
 stonecutter parameters {
-	// The mod loader the jar is for, as //? if fabric and //? if neoforge conditions. Versions named
-	// <minecraft>-neoforge are NeoForge (settings.gradle.kts); the rest are Fabric.
-	constants.match(if (current.project.endsWith("-neoforge")) "neoforge" else "fabric", "fabric", "neoforge")
+	// The mod loader the jar is for, as //? if fabric, //? if neoforge and //? if forge conditions.
+	// Versions named <minecraft>-neoforge are NeoForge, <minecraft>-forge Forge (settings.gradle.kts);
+	// the rest are Fabric.
+	val loader = when {
+		current.project.endsWith("-neoforge") -> "neoforge"
+		current.project.endsWith("-forge") -> "forge"
+		else -> "fabric"
+	}
+	constants.match(loader, "fabric", "neoforge", "forge")
 
 	// Names that changed without changing behaviour, as regexes from the newer spelling to the
 	// older one, applied to every version before the rename. One-way: the reverse pattern never
@@ -123,8 +130,9 @@ stonecutter parameters {
 	}
 
 	// HUD elements implement Fabric API's interface, or the mod's own where Fabric API has none
-	// (before 1.21.6, where they draw from a callback) or isn't there at all (NeoForge, GUI layers).
-	replacements.regex(current.parsed < "1.21.6" || current.project.endsWith("-neoforge")) {
+	// (before 1.21.6, where they draw from a callback) or isn't there at all (NeoForge and Forge,
+	// GUI layers).
+	replacements.regex(current.parsed < "1.21.6" || loader != "fabric") {
 		replace("import net\\.fabricmc\\.fabric\\.api\\.client\\.rendering\\.v1\\.hud\\.HudElement;", "import dev.diorama.compat.HudElement;", "(?!)", "never")
 	}
 
@@ -206,6 +214,17 @@ stonecutter parameters {
 	for ((pattern, older) in before1_21) {
 		replacements.regex(current.parsed < "1.21") {
 			replace(pattern, older, "(?!)", "never")
+		}
+	}
+	// NeoForge forked from Forge in 1.20.1, so the NeoForge code in the else branches of //? if fabric
+	// blocks often works on Forge too, under Forge's package names.
+	val forgePackages = listOf(
+		"\\bnet\\.neoforged\\.fml\\." to "net.minecraftforge.fml.",
+		"\\bnet\\.neoforged\\.neoforge\\.client\\." to "net.minecraftforge.client.",
+	)
+	for ((pattern, forge) in forgePackages) {
+		replacements.regex(loader == "forge") {
+			replace(pattern, forge, "(?!)", "never")
 		}
 	}
 }

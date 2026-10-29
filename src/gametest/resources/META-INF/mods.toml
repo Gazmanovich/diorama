@@ -1,0 +1,19 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test"
+version = "1.0.0"
+displayName = "Diorama test"
+
+# The shim runs these, as Fabric runs fabric-client-gametest entrypoints.
+[modproperties.diorama_test]
+fabric-client-gametest = ["dev.diorama.test.DioramaClientTest"]
+
+[[dependencies.diorama_test]]
+modId = "diorama"
+mandatory = true
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"

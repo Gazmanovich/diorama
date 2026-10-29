@@ -84,11 +84,13 @@ public abstract class GameRendererMixin {
 	}
 	*///?}
 
-	// Waypoints in the world go under the whole GUI on Fabric before 1.21.6 too, as addFirst from
-	// 1.21.6 (and NeoForge's registerBelowAll) puts them. Fabric API's HUD layers there come after
-	// the nausea overlay and the totem animation, which this frame draws before the HUD, so they're
-	// drawn as the frame starts its GUI. The GUI depth-tests and vanilla draws some of it below zero
-	// (1.20.1's hotbar at -90), so the waypoints go further down than any of it.
+	// Waypoints in the world go under the whole GUI on Fabric before 1.21.6 and on Forge too, as
+	// addFirst from 1.21.6 (and NeoForge's registerBelowAll) puts them. Fabric API's HUD layers and
+	// Forge's GUI overlays there come after the nausea overlay and the totem animation, which this
+	// frame draws before the HUD, so they're drawn as the frame starts its GUI. The GUI depth-tests
+	// and vanilla draws some of it below zero (1.20.1's hotbar at -90), so the waypoints go further
+	// down than any of it: 5000 down, or 900 on Forge, whose GUI reaches only 1000 below zero
+	// (ForgeHooksClient.getGuiFarPlane) where vanilla's reaches 10000.
 	//? if fabric && >=1.21 && <1.21.6 {
 	/*@org.spongepowered.asm.mixin.Unique
 	private static final dev.diorama.waypoint.WaypointHud diorama$waypoints = new dev.diorama.waypoint.WaypointHud();
@@ -110,6 +112,18 @@ public abstract class GameRendererMixin {
 		var pose = graphics.pose();
 		pose.pushPose();
 		pose.translate(0, 0, -5000);
+		diorama$waypoints.extractRenderState(graphics, partialTick);
+		pose.popPose();
+	}
+	*///?} else if forge {
+	/*@org.spongepowered.asm.mixin.Unique
+	private static final dev.diorama.waypoint.WaypointHud diorama$waypoints = new dev.diorama.waypoint.WaypointHud();
+
+	@Inject(method = "render(FJZ)V", at = @At(value = "INVOKE_STRING", target = "Lnet/minecraft/util/profiling/ProfilerFiller;popPush(Ljava/lang/String;)V", args = "ldc=gui"))
+	private void diorama$waypointsUnderGui(CallbackInfo ci, @Local net.minecraft.client.gui.GuiGraphicsExtractor graphics, @Local(argsOnly = true, ordinal = 0) float partialTick) {
+		var pose = graphics.pose();
+		pose.pushPose();
+		pose.translate(0, 0, -900);
 		diorama$waypoints.extractRenderState(graphics, partialTick);
 		pose.popPose();
 	}

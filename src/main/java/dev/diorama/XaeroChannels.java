@@ -16,12 +16,22 @@ import net.minecraft.client.Minecraft;
 //? if fabric {
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
-//?} else {
+//?} else if neoforge {
 /*import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.PacketFlow;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+*///?} else {
+/*import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.network.ConnectionData;
+import net.minecraftforge.network.MCRegisterPacketHandler;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.network.NetworkRegistry;
 *///?}
 //? if fabric && >=1.21 {
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -157,6 +167,34 @@ public final class XaeroChannels {
 			});
 		}
 	}
+	*///?} else if forge {
+	/*// Listens on the channels no Xaero mod has. Call once, at startup.
+	public static void register() {
+		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
+			// Version "1.0" like the NeoForge jars, and any version accepted either way: Forge only
+			// lets a player in when both sides accept the other's version of every channel they
+			// share, and a server without the channel has none. Forge tells servers that aren't
+			// Forge about its channels as the player joins, which Paper needs before it passes
+			// messages on.
+			NetworkRegistry.newEventChannel(type.id(), () -> "1.0", version -> true, version -> true)
+				.<NetworkEvent.ServerCustomPayloadEvent>addListener(event -> {
+					if (event instanceof NetworkEvent.ServerCustomPayloadLoginEvent) {
+						return;
+					}
+					// Read here: the buffer is only good until this returns. Handled on the client thread,
+					// as on Fabric, unless the player has left by then.
+					Message message = read(type, event.getPayload());
+					NetworkEvent.Context context = event.getSource().get();
+					Connection connection = context.getNetworkManager();
+					context.enqueueWork(() -> {
+						if (connection.isConnected()) {
+							receive(message);
+						}
+					});
+					context.setPacketHandled(true);
+				});
+		}
+	}
 	*///?} else if >=1.21.6 {
 	/*// Listens on the channels no Xaero mod has. NeoForge calls it once, at startup.
 	public static void register(RegisterPayloadHandlersEvent event) {
@@ -281,11 +319,11 @@ public final class XaeroChannels {
 		if (modLoaded("xaeroworldmap")) {
 			return;
 		}
-		//? if neoforge {
+		//? if !fabric {
 		/*// NeoForge throws on a message to a server that didn't declare the channel. Servers that
 		// track players declare it, as they read the answer.
 		ClientPacketListener connection = Minecraft.getInstance().getConnection();
-		if (connection == null || !connection.hasChannel(channel)) {
+		if (connection == null || !hasChannel(connection, channel.id())) {
 			Diorama.LOGGER.info("The server sent a handshake on {} but doesn't listen there, so it isn't answered", channel.id());
 			return;
 		}
@@ -301,8 +339,12 @@ public final class XaeroChannels {
 		/*FriendlyByteBuf buf = PacketByteBufs.create();
 		write(buf, answer);
 		ClientPlayNetworking.send(channel.id(), buf);
-		*///?} else {
+		*///?} else if neoforge {
 		/*connection.send(answer);
+		*///?} else {
+		/*FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		write(buf, answer);
+		connection.send(new ServerboundCustomPayloadPacket(channel.id(), buf));
 		*///?}
 	}
 
@@ -402,7 +444,22 @@ public final class XaeroChannels {
 		return ClientPlayNetworking.canSend(MINIMAP.id()) || ClientPlayNetworking.canSend(WORLD_MAP.id()) || ClientPlayNetworking.canSend(WORLD_INFO);
 		//?} else {
 		/*ClientPacketListener connection = Minecraft.getInstance().getConnection();
-		return connection != null && (connection.hasChannel(MINIMAP) || connection.hasChannel(WORLD_MAP) || connection.hasChannel(WORLD_INFO));
+		return connection != null && (hasChannel(connection, MINIMAP.id()) || hasChannel(connection, WORLD_MAP.id()) || hasChannel(connection, WORLD_INFO));
 		*///?}
 	}
+
+	//? if neoforge {
+	/*private static boolean hasChannel(ClientPacketListener connection, Identifier channel) {
+		return connection.hasChannel(channel);
+	}
+	*///?} else if forge {
+	/*// Whether the server said it listens on the channel: a Forge server in the mod list it sends as
+	// the player logs in, any other server with minecraft:register. Forge's own channels check the same.
+	private static boolean hasChannel(ClientPacketListener connection, Identifier channel) {
+		Connection network = connection.getConnection();
+		ConnectionData forge = NetworkHooks.getConnectionData(network);
+		MCRegisterPacketHandler.ChannelList other = NetworkHooks.getChannelList(network);
+		return forge != null && forge.getChannels().containsKey(channel) || other != null && other.getRemoteLocations().contains(channel);
+	}
+	*///?}
 }

@@ -18,6 +18,7 @@ plugins {
 // minecraft_dep in versions/<version>/gradle.properties). Up to 1.21.11 the game ships obfuscated
 // and needs remapping to Mojang's names; from 26.1 it ships with those names already. Versions
 // named <minecraft>-neoforge build for NeoForge instead of Fabric; NeoForge runs on Mojang's names.
+// Versions named <minecraft>-forge build for Forge, which before 1.20.6 runs on its own (SRG) names.
 stonecutter {
 	create(rootProject) {
 		versions("1.20.1", "1.21.1", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.9", "1.21.11").buildscript("build.obfuscated.gradle.kts")
@@ -33,6 +34,7 @@ stonecutter {
 		version("26.1.2-neoforge", "26.1.2").buildscript("build.neoforge.gradle.kts")
 		version("26.2-neoforge", "26.2").buildscript("build.neoforge.gradle.kts")
 		version("26.3-neoforge", "26.3").buildscript("build.neoforge.gradle.kts")
+		version("1.20.1-forge", "1.20.1").buildscript("build.forge.gradle.kts")
 		vcsVersion = "26.3"
 	}
 }

@@ -79,12 +79,12 @@ dependencies {
 
 apply(from = rootProject.file("gradle/common.gradle.kts"))
 
-// Fabric's entrypoints and metadata go in the Fabric jars only.
+// The Fabric and Forge entrypoints and metadata go in their own jars.
 sourceSets.configureEach {
-	java.exclude("dev/diorama/**/fabric/**")
+	java.exclude("dev/diorama/**/fabric/**", "dev/diorama/**/forge/**")
 }
 tasks.withType<ProcessResources>().configureEach {
-	exclude("fabric.mod.json")
+	exclude("fabric.mod.json", "META-INF/mods.toml")
 }
 
 // The fog shader's program file, which only the versions that load shaders from json read: from

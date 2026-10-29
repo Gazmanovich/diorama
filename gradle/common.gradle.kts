@@ -5,12 +5,15 @@ val resourceProps = mapOf(
 	"minecraft" to project.property("minecraft_dep") as String,
 	"loader" to project.property("loader_version") as String,
 	"java" to javaVersion.toString(),
-) + listOfNotNull(project.findProperty("neoforge_dep")?.let { "neoforge" to it as String })
+) + listOfNotNull(
+	project.findProperty("neoforge_dep")?.let { "neoforge" to it as String },
+	project.findProperty("forge_dep")?.let { "forge" to it as String },
+)
 
 tasks.named<ProcessResources>("processResources") {
 	val props = resourceProps
 	inputs.properties(props)
-	filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml", "diorama.mixins.json")) {
+	filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml", "META-INF/mods.toml", "diorama.mixins.json")) {
 		expand(props)
 	}
 }

@@ -23,7 +23,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
  * game has loaded it runs every test on a thread of its own, writes {@code PASS} or {@code FAIL}
  * and the stack trace to {@code gameshim-result.txt} in the game directory, and closes the game
  * with exit code 0 if every test passed, 1 if one failed, and 2 if the game closed before they
- * finished. The loader's entrypoint ({@code fabric.FabricShim}, {@code neoforge.NeoForgeShim})
+ * finished. The loader's entrypoint ({@code fabric.FabricShim}, {@code neoforge.NeoForgeShim}, {@code forge.ForgeShim})
  * finds the tests and calls {@link #onTickEnd} every tick.
  */
 public final class GameShim {
