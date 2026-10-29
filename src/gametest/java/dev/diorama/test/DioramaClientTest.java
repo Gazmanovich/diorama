@@ -387,21 +387,31 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 60);
 			context.takeScreenshot("sub-maps-01-main");
 
-			// The player makes a new map through the Maps screen.
-			clickButton(context, "diorama.map.maps");
+			// The player makes a new map through the Maps screen, with the mouse (gliding, with GIF
+			// frames, under DIORAMA_GIF=1), and goes back to the map with Done.
+			holdFrames(context, 20);
+			glideClick(context, "diorama.map.maps");
 			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
-			context.waitTicks(20);
+			holdFrames(context, 20);
 			context.takeScreenshot("sub-maps-02-maps-screen");
-			clickButton(context, "diorama.maps.new");
+			glideClick(context, "diorama.maps.new");
 			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapNameScreen, 40);
 			String suggested = context.computeOnClient(mc -> editBoxes(mc.gui.screen()).get(0).getValue());
 			if (!suggested.equals("Map 2")) {
 				throw new AssertionError("A second map should be suggested as Map 2, not " + suggested);
 			}
-			typeInto(context, 0, "After the reset");
+			holdFrames(context, 15);
+			context.runOnClient(mc -> editBoxes(mc.gui.screen()).get(0).setValue(""));
+			for (char c : "After the reset".toCharArray()) {
+				context.getInput().typeChars(String.valueOf(c));
+				context.waitTick();
+				menuFrame(context);
+			}
+			holdFrames(context, 10);
 			context.takeScreenshot("sub-maps-03-name");
-			clickButton(context, "diorama.waypoint.save");
+			glideClick(context, "diorama.waypoint.save");
 			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			holdFrames(context, 25);
 			newId = context.computeOnClient(mc -> dev.diorama.Maps.get().active(overworld));
 			if (newId.equals(dev.diorama.Maps.MAIN)) {
 				throw new AssertionError("Saving a new map didn't switch the Overworld to it");
@@ -409,10 +419,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!context.computeOnClient(mc -> dev.diorama.Maps.get().active(nether)).equals(dev.diorama.Maps.MAIN)) {
 				throw new AssertionError("A new Overworld map switched the Nether's too");
 			}
+			context.takeScreenshot("sub-maps-04-maps-screen-two");
+			glideClick(context, "gui.done");
+			context.waitFor(mc -> mc.gui.screen() instanceof MapScreen, 40);
 			// The new map fills in from the chunks already loaded around the player, and only those.
+			for (int i = 0; i < 80; i++) {
+				context.waitTick();
+				menuFrame(context);
+			}
 			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 300, 600);
 			settle(context, 100);
-			context.takeScreenshot("sub-maps-04-maps-screen-two");
+			holdFrames(context, 1);
+			context.takeScreenshot("sub-maps-05-new-map");
 			java.nio.file.Path newFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(overworld, newId));
 			context.waitFor(mc -> tileFiles(newFolder) > 0, 600);
 			context.runOnClient(mc -> {
@@ -431,11 +449,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 				BlockPos at = mc.player.blockPosition();
 				WaypointStore.get().add(new Waypoint("New Base", at.getX(), at.getY(), at.getZ(), overworld, Waypoint.PALETTE[1]));
 			});
-			context.setScreen(() -> null);
-			context.setScreen(MapScreen::new);
-			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(300, Projection.v(70, 0), 0.45, TileKey.SURFACE));
-			settle(context, 60);
-			context.takeScreenshot("sub-maps-05-new-map");
 
 			// Back to Main: its tiles, waypoint and drawing are all there, the new map's waypoint isn't.
 			clickButton(context, "diorama.map.maps");
@@ -556,6 +569,32 @@ public class DioramaClientTest implements FabricClientGameTest {
 			return java.nio.file.Files.readString(file);
 		} catch (java.io.IOException e) {
 			throw new AssertionError(e);
+		}
+	}
+
+	/**
+	 * Clicks a button by its label's key with the mouse. Under DIORAMA_GIF=1 the cursor glides there
+	 * and each tick is a GIF frame (see moveCursor).
+	 */
+	private static void glideClick(ClientGameTestContext context, String translationKey) {
+		String label = net.minecraft.network.chat.Component.translatable(translationKey).getString();
+		double[] at = context.computeOnClient(mc -> {
+			var button = buttonLabelled(mc.gui.screen(), label);
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(button.getX() + button.getWidth() / 2.0) * scale, (button.getY() + button.getHeight() / 2.0) * scale};
+		});
+		moveCursor(context, at[0], at[1]);
+		holdFrames(context, 6);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+		holdFrames(context, 2);
+	}
+
+	/** Under DIORAMA_GIF=1, this many ticks of GIF frames with the cursor still. */
+	private static void holdFrames(ClientGameTestContext context, int frames) {
+		for (int i = 0; i < (MENU_GIF ? frames : 0); i++) {
+			context.waitTick();
+			menuFrame(context);
 		}
 	}
 
