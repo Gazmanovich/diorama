@@ -6,8 +6,11 @@ import dev.diorama.MapExport;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
+import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ImageExport;
+import dev.diorama.drawing.Drawing;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.data.TileStore;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -34,7 +37,26 @@ final class ImageExportTest {
 	private ImageExportTest() {
 	}
 
+	/** A drawn line through the player and a note under it, in colours the test world's ground doesn't have. */
+	private static final int LINE = 0xFF00FF;
+	private static final int NOTE = 0xFFFF55;
+	/** A note in Arabic, which the game shapes and reverses in a right-to-left language. */
+	private static final int ARABIC = 0xFF55FF;
+	/** A note in characters only Unifont has. */
+	private static final int CJK = 0x55FFFF;
+
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		List<Drawing> made = new java.util.ArrayList<>();
+		double[] drawn = context.computeOnClient(mc -> {
+			double u = mc.player.getX();
+			double v = Projection.v(mc.player.getY(), mc.player.getZ());
+			String dimension = mc.level.dimension().identifier().toString();
+			made.add(new Drawing(Drawing.Kind.STROKE, dimension, 0xFF000000 | LINE, new double[] {u - 20, v, u + 20, v}, ""));
+			made.add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | NOTE, new double[] {u, v + 30}, "Hi"));
+			made.add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | CJK, new double[] {u, v - 30}, "\u5730\u56fe"));
+			made.forEach(DrawingStore.get()::add);
+			return new double[] {u, v};
+		});
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), 1.0, TileKey.SURFACE));
 		settle(context);
@@ -85,7 +107,20 @@ final class ImageExportTest {
 		context.takeScreenshot("image-export-02-area-resized");
 		Path areaFile = save(context);
 		checkImage(areaFile, area);
-		matchesTiles(context, areaFile, area);
+		// The drawings are in, ticked by default: the line through the player, the note's text under it.
+		if (!lineAt(areaFile, area, drawn)) {
+			throw new AssertionError("The drawn line isn't in " + areaFile.getFileName());
+		}
+		// Its text in its colour, and the game's shadow, a quarter of it, behind.
+		if (countNear(areaFile, area, drawn[0], drawn[1] + 30, NOTE) < 40 || countNear(areaFile, area, drawn[0], drawn[1] + 30, (NOTE & 0xFCFCFC) >> 2) < 10) {
+			throw new AssertionError("The note isn't in " + areaFile.getFileName());
+		}
+		// Two Unifont characters are 8 GUI pixels across each; the game's box for a missing one is 5,
+		// so two boxes span 22 export pixels and the real glyphs about 31.
+		int[] cjk = spanNear(areaFile, area, drawn[0], drawn[1] - 30, CJK);
+		if (cjk[0] < 30 || cjk[1] < 28) {
+			throw new AssertionError("The note in Unifont characters isn't in " + areaFile.getFileName() + ": " + cjk[0] + " pixels over " + cjk[1]);
+		}
 
 		// Whole map: everything explored, boxed with clouds round it.
 		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
@@ -95,6 +130,8 @@ final class ImageExportTest {
 			return new double[] {tab[0], tab[1]};
 		}, false);
 		context.waitFor(mc -> mc.gui.screen() instanceof ExportScreen screen && screen.plannedArea() != null, 600);
+		// Untick Drawings: this one is the ground alone.
+		click(context, mc -> new double[] {16, 114}, false);
 		settle(context);
 		context.takeScreenshot("image-export-03-whole");
 		ImageExport.Area whole = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
@@ -102,7 +139,121 @@ final class ImageExportTest {
 		Path wholeFile = save(context);
 		checkImage(wholeFile, whole);
 		matchesTiles(context, wholeFile, whole);
+		if (lineAt(wholeFile, whole, drawn)) {
+			throw new AssertionError("Drawings were unticked, but the line is in " + wholeFile.getFileName());
+		}
+		// Only this test's drawings: other sections' stay as they left them.
+		context.runOnClient(mc -> DrawingStore.get().batch(() -> made.forEach(DrawingStore.get()::remove)));
+		noteMatchesMap(context, drawn);
 		context.setScreen(() -> null);
+	}
+
+	/**
+	 * A note in the image looks as it does on the map: the same glyphs in the same order, in a
+	 * right-to-left language too, where the game shapes Arabic and reverses the line. At GUI scale 2
+	 * a GUI pixel is 2 screen pixels, as it's 2 pixels in an export, so the note's text in a
+	 * screenshot of the map and in the image are compared pixel for pixel.
+	 */
+	private static void noteMatchesMap(ClientGameTestContext context, double[] at) {
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		String language = context.computeOnClient(mc -> mc.options.languageCode);
+		DioramaClientTest.setGuiScale(context, 2);
+		DioramaClientTest.reloadPacks(context, mc -> {
+			mc.options.languageCode = "ar_sa";
+			mc.getLanguageManager().setSelected("ar_sa");
+		});
+		double u = at[0];
+		double v = at[1] + 60;
+		Drawing note = context.computeOnClient(mc -> {
+			Drawing made = new Drawing(Drawing.Kind.NOTE, mc.level.dimension().identifier().toString(), 0xFF000000 | ARABIC, new double[] {u, v},
+				"\u0645\u0631\u062d\u0628\u0627 Diorama");
+			DrawingStore.get().add(made);
+			return made;
+		});
+		// Mob markers mustn't cover the note on the map.
+		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
+		context.runOnClient(mc -> Settings.get().radarOnMap = false);
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, 1.0, TileKey.SURFACE));
+		context.getInput().setCursorPos(0, 0);
+		settle(context);
+		double[] onScreen = context.computeOnClient(mc -> {
+			var view = ((MapScreen) mc.gui.screen()).view();
+			double g = mc.getWindow().getGuiScale();
+			return new double[] {view.screenX(u) * g, view.screenY(v) * g};
+		});
+		BufferedImage shot = read(context.takeScreenshot("image-export-04-arabic-note"));
+		boolean[][] mapText = mask(shot, (int) onScreen[0], (int) onScreen[1], ARABIC);
+
+		Set<Path> old = new HashSet<>(exports(context));
+		ImageExport.Area area = ImageExport.Area.ofUnits(2, u - 80, v - 30, u + 80, v + 30);
+		boolean started = context.computeOnClient(mc -> MapExport.start(MapSession.get().map().savedMap(), area, false, List.of(note)));
+		if (!started) {
+			throw new AssertionError("Another export was still running");
+		}
+		context.waitFor(mc -> MapExport.running() == null, 2400);
+		Path file = exports(context).stream().filter(p -> !old.contains(p)).findFirst().orElseThrow();
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		boolean[][] imageText = mask(read(file), (int) Math.floor(u * perUnit - area.x()), (int) Math.floor(v * perUnit - area.y()), ARABIC);
+
+		context.runOnClient(mc -> DrawingStore.get().remove(note));
+		context.runOnClient(mc -> Settings.get().radarOnMap = radar);
+		context.setScreen(() -> null);
+		DioramaClientTest.reloadPacks(context, mc -> {
+			mc.options.languageCode = language;
+			mc.getLanguageManager().setSelected(language);
+		});
+		DioramaClientTest.setGuiScale(context, scale);
+
+		int differ = 0;
+		int ink = 0;
+		if (mapText.length != imageText.length || mapText.length == 0 || mapText[0].length != imageText[0].length) {
+			throw new AssertionError("The Arabic note's text is " + size(imageText) + " in the image but " + size(mapText) + " on the map");
+		}
+		for (int y = 0; y < mapText.length; y++) {
+			for (int x = 0; x < mapText[0].length; x++) {
+				ink += mapText[y][x] ? 1 : 0;
+				differ += mapText[y][x] != imageText[y][x] ? 1 : 0;
+			}
+		}
+		if (ink < 60 || differ > ink / 20) {
+			throw new AssertionError("The Arabic note's text differs from the map's in " + differ + " of " + ink + " pixels");
+		}
+	}
+
+	/**
+	 * Pixels of a colour around a point, cut to the box they fill: a note's text. Within a few
+	 * levels: some versions draw text a shade off its colour (1.21.1 draws 0xFF55FF as 0xFC54FC).
+	 */
+	private static boolean[][] mask(BufferedImage image, int cx, int cy, int colour) {
+		int x0 = Integer.MAX_VALUE;
+		int y0 = Integer.MAX_VALUE;
+		int x1 = Integer.MIN_VALUE;
+		int y1 = Integer.MIN_VALUE;
+		for (int y = Math.max(0, cy - 24); y < Math.min(image.getHeight(), cy + 24); y++) {
+			for (int x = Math.max(0, cx - 120); x < Math.min(image.getWidth(), cx + 120); x++) {
+				if (close(image.getRGB(x, y) & 0xFFFFFF, colour, 8)) {
+					x0 = Math.min(x0, x);
+					y0 = Math.min(y0, y);
+					x1 = Math.max(x1, x);
+					y1 = Math.max(y1, y);
+				}
+			}
+		}
+		if (x1 < 0) {
+			return new boolean[0][0];
+		}
+		boolean[][] out = new boolean[y1 - y0 + 1][x1 - x0 + 1];
+		for (int y = y0; y <= y1; y++) {
+			for (int x = x0; x <= x1; x++) {
+				out[y - y0][x - x0] = close(image.getRGB(x, y) & 0xFFFFFF, colour, 8);
+			}
+		}
+		return out;
+	}
+
+	private static String size(boolean[][] mask) {
+		return mask.length == 0 ? "missing" : mask[0].length + "x" + mask.length;
 	}
 
 	/** Presses Save image, waits for the file, and returns it. */
@@ -228,6 +379,59 @@ final class ImageExportTest {
 		if (missing != null) {
 			throw new AssertionError("Whole map " + whole + " leaves out the mapped " + missing);
 		}
+	}
+
+	/** Whether the image is the line's colour where the line crosses the player, found from map units alone. */
+	private static boolean lineAt(Path file, ImageExport.Area area, double[] at) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int x = (int) Math.floor(at[0] * perUnit - area.x());
+		int y = (int) Math.floor(at[1] * perUnit - area.y());
+		int rgb = image.getRGB(x, y) & 0xFFFFFF;
+		return close(rgb, LINE, 24);
+	}
+
+	/** Pixels near a point about a colour, and how wide a span they cover: {count, width}. */
+	private static int[] spanNear(Path file, ImageExport.Area area, double u, double v, int colour) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int cx = (int) Math.floor(u * perUnit - area.x());
+		int cy = (int) Math.floor(v * perUnit - area.y());
+		int count = 0;
+		int left = Integer.MAX_VALUE;
+		int right = Integer.MIN_VALUE;
+		for (int y = cy - 16; y <= cy + 16; y++) {
+			for (int x = cx - 30; x <= cx + 30; x++) {
+				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, colour, 12)) {
+					count++;
+					left = Math.min(left, x);
+					right = Math.max(right, x);
+				}
+			}
+		}
+		return new int[] {count, count == 0 ? 0 : right - left + 1};
+	}
+
+	/** How many pixels near a point are about a colour: a note's text, or its shadow. */
+	private static int countNear(Path file, ImageExport.Area area, double u, double v, int colour) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int cx = (int) Math.floor(u * perUnit - area.x());
+		int cy = (int) Math.floor(v * perUnit - area.y());
+		int count = 0;
+		for (int y = cy - 16; y <= cy + 16; y++) {
+			for (int x = cx - 24; x <= cx + 24; x++) {
+				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, colour, 12)) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	private static boolean close(int rgb, int want, int within) {
+		return Math.abs((rgb >> 16 & 0xFF) - (want >> 16 & 0xFF)) <= within && Math.abs((rgb >> 8 & 0xFF) - (want >> 8 & 0xFF)) <= within
+			&& Math.abs((rgb & 0xFF) - (want & 0xFF)) <= within;
 	}
 
 	private static BufferedImage read(Path file) {

@@ -164,6 +164,14 @@ public final class ImageExport {
 		/** Changes the row's ABGR pixels in place: row {@code y} of the map from pixel {@code x0}. */
 		void row(int[] abgr, long y, long x0);
 
+		/** This, then {@code next}, on each row. */
+		default Finish then(Finish next) {
+			return (abgr, y, x0) -> {
+				this.row(abgr, y, x0);
+				next.row(abgr, y, x0);
+			};
+		}
+
 		/** The map over an opaque ARGB colour. */
 		static Finish over(int argb) {
 			return (abgr, y, x0) -> {
