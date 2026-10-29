@@ -500,9 +500,9 @@ public final class TileStore {
 	}
 
 	/**
-	 * Merges every bake handed over so far and rebuilds the overview tiles above them, so reads
-	 * at every level show everything mapped up to now. Waits for the writer; not on the render
-	 * thread.
+	 * Merges every bake handed over so far and rebuilds the overview tiles above them, and any
+	 * left out of date when the game last quit, so reads at every level show everything mapped up
+	 * to now. Waits for the writer; not on the render thread.
 	 */
 	public void catchUp() throws InterruptedException {
 		Future<?> done = WRITER.submit(() -> {
@@ -520,12 +520,37 @@ public final class TileStore {
 					}
 				}
 			}
+			this.findStaleOverviews();
 			this.rebuildOverviews();
 		});
 		try {
 			done.get();
 		} catch (ExecutionException e) {
 			Diorama.LOGGER.error("Couldn't bring the saved map up to date", e);
+		}
+	}
+
+	/**
+	 * Marks overview tiles missing or older on disk than a tile under them. A game that quit
+	 * between saving a tile and rebuilding the overviews above it, a couple of seconds later, leaves
+	 * them so, and nothing else would rebuild them. Writer thread.
+	 */
+	private void findStaleOverviews() {
+		for (int lod = 0; lod < TileKey.MAX_LOD; lod++) {
+			for (TileKey key : this.saved(lod)) {
+				Path child = this.file(key);
+				Path parent = this.file(key.parent());
+				try {
+					if (Files.isRegularFile(child) && (!Files.isRegularFile(parent)
+						|| Files.getLastModifiedTime(parent).compareTo(Files.getLastModifiedTime(child)) < 0)) {
+						synchronized (this) {
+							this.staleOverviews.add(key.parent());
+						}
+					}
+				} catch (IOException e) {
+					// Can't tell: leave it as it is.
+				}
+			}
 		}
 	}
 

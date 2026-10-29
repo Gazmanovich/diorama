@@ -346,10 +346,14 @@ public final class ExportScreen extends Screen {
 			return new double[] {units[0] - m, units[1] - m, units[2] + m, units[3] + m};
 		});
 		this.finding = found;
-		found.thenAcceptAsync(units -> {
+		found.whenCompleteAsync((units, failure) -> {
+			if (failure != null) {
+				Diorama.LOGGER.warn("Couldn't find what's explored for an export", failure);
+			}
 			if (this.finding == found) {
-				this.explored = units;
-				if (units == null) {
+				this.explored = failure != null ? null : units;
+				if (this.explored == null) {
+					// Nothing found, or the search failed: stop saying it's looking.
 					this.finding = null;
 				}
 			}
