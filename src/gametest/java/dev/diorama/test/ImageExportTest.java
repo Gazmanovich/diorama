@@ -8,6 +8,8 @@ import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ImageExport;
+import dev.diorama.drawing.Drawing;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.data.TileStore;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -34,7 +36,19 @@ final class ImageExportTest {
 	private ImageExportTest() {
 	}
 
+	/** A drawn line through the player and a note under it, in colours the test world's ground doesn't have. */
+	private static final int LINE = 0xFF00FF;
+	private static final int NOTE = 0xFFFF55;
+
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		double[] drawn = context.computeOnClient(mc -> {
+			double u = mc.player.getX();
+			double v = Projection.v(mc.player.getY(), mc.player.getZ());
+			String dimension = mc.level.dimension().identifier().toString();
+			DrawingStore.get().add(new Drawing(Drawing.Kind.STROKE, dimension, 0xFF000000 | LINE, new double[] {u - 20, v, u + 20, v}, ""));
+			DrawingStore.get().add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | NOTE, new double[] {u, v + 30}, "Hi"));
+			return new double[] {u, v};
+		});
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), 1.0, TileKey.SURFACE));
 		settle(context);
@@ -85,7 +99,13 @@ final class ImageExportTest {
 		context.takeScreenshot("image-export-02-area-resized");
 		Path areaFile = save(context);
 		checkImage(areaFile, area);
-		matchesTiles(context, areaFile, area);
+		// The drawings are in, ticked by default: the line through the player, the note's text under it.
+		if (!lineAt(areaFile, area, drawn)) {
+			throw new AssertionError("The drawn line isn't in " + areaFile.getFileName());
+		}
+		if (!noteNear(areaFile, area, drawn[0], drawn[1] + 30)) {
+			throw new AssertionError("The note isn't in " + areaFile.getFileName());
+		}
 
 		// Whole map: everything explored, boxed with clouds round it.
 		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
@@ -95,6 +115,8 @@ final class ImageExportTest {
 			return new double[] {tab[0], tab[1]};
 		}, false);
 		context.waitFor(mc -> mc.gui.screen() instanceof ExportScreen screen && screen.plannedArea() != null, 600);
+		// Untick Drawings: this one is the ground alone.
+		click(context, mc -> new double[] {16, 114}, false);
 		settle(context);
 		context.takeScreenshot("image-export-03-whole");
 		ImageExport.Area whole = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
@@ -102,6 +124,14 @@ final class ImageExportTest {
 		Path wholeFile = save(context);
 		checkImage(wholeFile, whole);
 		matchesTiles(context, wholeFile, whole);
+		if (lineAt(wholeFile, whole, drawn)) {
+			throw new AssertionError("Drawings were unticked, but the line is in " + wholeFile.getFileName());
+		}
+		context.runOnClient(mc -> DrawingStore.get().batch(() -> {
+			for (Drawing drawing : List.copyOf(DrawingStore.get().all())) {
+				DrawingStore.get().remove(drawing);
+			}
+		}));
 		context.setScreen(() -> null);
 	}
 
@@ -228,6 +258,37 @@ final class ImageExportTest {
 		if (missing != null) {
 			throw new AssertionError("Whole map " + whole + " leaves out the mapped " + missing);
 		}
+	}
+
+	/** Whether the image is the line's colour where the line crosses the player, found from map units alone. */
+	private static boolean lineAt(Path file, ImageExport.Area area, double[] at) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int x = (int) Math.floor(at[0] * perUnit - area.x());
+		int y = (int) Math.floor(at[1] * perUnit - area.y());
+		int rgb = image.getRGB(x, y) & 0xFFFFFF;
+		return close(rgb, LINE, 24);
+	}
+
+	/** Whether some pixel near a point is the note's colour: its text. */
+	private static boolean noteNear(Path file, ImageExport.Area area, double u, double v) {
+		BufferedImage image = read(file);
+		double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+		int cx = (int) Math.floor(u * perUnit - area.x());
+		int cy = (int) Math.floor(v * perUnit - area.y());
+		for (int y = cy - 16; y <= cy + 16; y++) {
+			for (int x = cx - 24; x <= cx + 24; x++) {
+				if (x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight() && close(image.getRGB(x, y) & 0xFFFFFF, NOTE, 12)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean close(int rgb, int want, int within) {
+		return Math.abs((rgb >> 16 & 0xFF) - (want >> 16 & 0xFF)) <= within && Math.abs((rgb >> 8 & 0xFF) - (want >> 8 & 0xFF)) <= within
+			&& Math.abs((rgb & 0xFF) - (want & 0xFF)) <= within;
 	}
 
 	private static BufferedImage read(Path file) {

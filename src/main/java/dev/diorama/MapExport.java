@@ -2,10 +2,13 @@ package dev.diorama;
 
 import dev.diorama.data.ImageExport;
 import dev.diorama.data.TileStore;
+import dev.diorama.drawing.Drawing;
+import dev.diorama.drawing.ExportDrawings;
 import dev.diorama.render.ExportFog;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
@@ -40,10 +43,10 @@ public final class MapExport {
 
 	/**
 	 * Starts saving {@code area} of the saved sky view with the map's clouds over unexplored
-	 * ground, or its smoke when {@code smoke} (the sky view under a roof). False if an export is
-	 * already running.
+	 * ground, or its smoke when {@code smoke} (the sky view under a roof), and {@code drawings} over
+	 * it. False if an export is already running.
 	 */
-	public static synchronized boolean start(TileStore store, ImageExport.Area area, boolean smoke) {
+	public static synchronized boolean start(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings) {
 		if (running != null) {
 			return false;
 		}
@@ -57,19 +60,24 @@ public final class MapExport {
 		}
 		MapExport export = new MapExport(file);
 		running = export;
-		Thread thread = new Thread(() -> export.run(store, area, smoke), "diorama-export");
+		List<Drawing> copied = List.copyOf(drawings);
+		Thread thread = new Thread(() -> export.run(store, area, smoke, copied), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke) {
+	private void run(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings) {
 		Component message;
 		try {
 			store.catchUp();
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
-			ImageExport.write(store, area, this.file, ExportFog.build(store, area, smoke), p -> this.progress = p);
+			ImageExport.Finish finish = ExportFog.build(store, area, smoke);
+			if (!drawings.isEmpty()) {
+				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager()));
+			}
+			ImageExport.write(store, area, this.file, finish, p -> this.progress = p);
 			Path absolute = this.file.toAbsolutePath();
 			Component link = Component.literal(absolute.getFileName().toString())
 				.withStyle(ChatFormatting.UNDERLINE)
