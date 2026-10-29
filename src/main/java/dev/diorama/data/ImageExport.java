@@ -117,7 +117,9 @@ public final class ImageExport {
 
 	/**
 	 * Everything mapped, at level {@code lod}: the smallest rectangle holding every known pixel,
-	 * found on a coarse overview level and so a few pixels generous. Null if nothing is mapped.
+	 * found on a coarse overview level and so a few pixels generous. Detailed tiles reaching past
+	 * it are read too: after the game quit unexpectedly a tile can be saved before the overview
+	 * above it caught up. Null if nothing is mapped.
 	 */
 	public static @Nullable Area explored(TileStore store, int lod) {
 		int coarse = Math.min(TileKey.MAX_LOD, lod + 3);
@@ -136,6 +138,33 @@ public final class ImageExport {
 					if ((pixels[y * TILE + x] >>> 24) != 0) {
 						long gx = (long) key.tileU() * TILE + x;
 						long gy = (long) key.tileV() * TILE + y;
+						minX = Math.min(minX, gx);
+						minY = Math.min(minY, gy);
+						maxX = Math.max(maxX, gx);
+						maxY = Math.max(maxY, gy);
+					}
+				}
+			}
+		}
+		// The detailed tiles not inside that, in coarse pixels; each is 2^coarse times smaller there.
+		int shrink = 1 << coarse;
+		for (TileKey key : store.saved(0)) {
+			long x0 = Math.floorDiv((long) key.tileU() * TILE, shrink);
+			long y0 = Math.floorDiv((long) key.tileV() * TILE, shrink);
+			long x1 = Math.floorDiv((long) (key.tileU() + 1) * TILE - 1, shrink);
+			long y1 = Math.floorDiv((long) (key.tileV() + 1) * TILE - 1, shrink);
+			if (x0 >= minX && y0 >= minY && x1 <= maxX && y1 <= maxY) {
+				continue;
+			}
+			int[] pixels = store.read(key);
+			if (pixels == null) {
+				continue;
+			}
+			for (int y = 0; y < TILE; y++) {
+				for (int x = 0; x < TILE; x++) {
+					if ((pixels[y * TILE + x] >>> 24) != 0) {
+						long gx = Math.floorDiv((long) key.tileU() * TILE + x, shrink);
+						long gy = Math.floorDiv((long) key.tileV() * TILE + y, shrink);
 						minX = Math.min(minX, gx);
 						minY = Math.min(minY, gy);
 						maxX = Math.max(maxX, gx);

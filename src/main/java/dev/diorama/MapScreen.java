@@ -367,8 +367,9 @@ public final class MapScreen extends Screen {
 
 	/**
 	 * The status line: whether the view is under the Nether's roof, the player's position, the
-	 * chunks mapped, whether baking is running and how far an image export is. It has {@code room} pixels before the buttons;
-	 * what doesn't fit is left out, the chunk count first, then baking, then the roof.
+	 * chunks mapped, whether baking is running and how far an image export is. It has {@code room}
+	 * pixels before the buttons; what doesn't fit is left out whole, the chunk count first, then
+	 * baking, the roof and the export.
 	 */
 	private String statusText(MapSession session, LocalPlayer player, boolean caves, int room) {
 		String roof = !caves && session.map().roofless() ? Component.translatable("diorama.map.under_roof").getString() : null;
@@ -383,7 +384,7 @@ public final class MapScreen extends Screen {
 				parts.add(part);
 			}
 		}
-		for (String dropped : new String[] {chunks, baking, roof}) {
+		for (String dropped : new String[] {chunks, baking, roof, saving}) {
 			if (this.font.width(String.join(STATUS_GAP, parts)) <= room) {
 				break;
 			}

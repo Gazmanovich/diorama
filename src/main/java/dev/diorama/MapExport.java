@@ -78,11 +78,13 @@ public final class MapExport {
 		} catch (Exception e) {
 			Diorama.LOGGER.error("Couldn't export the map to {}", this.file, e);
 			message = Component.translatable("diorama.export.failed", String.valueOf(e.getMessage()));
+		} finally {
+			// Whatever happened, the next export may start.
+			running = null;
 		}
 		Component shown = message;
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> {
-			running = null;
 			//? if >=26.1 {
 			mc.gui.hud.getChat().addClientSystemMessage(shown);
 			//?} else {
