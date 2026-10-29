@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import dev.diorama.Diorama;
+import dev.diorama.Maps;
 import dev.diorama.Settings;
 import dev.diorama.WorldKey;
 import java.io.IOException;
@@ -28,7 +29,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The waypoints of one world, saved as JSON in {@code .minecraft/diorama/<world>/waypoints.json}.
- * Temporary waypoints stay in memory only. Waystones' waystones ({@link Waystones}) aren't kept
+ * Each was made on one of its dimension's maps ({@link Maps}), and only those of the map in use in
+ * their dimension are listed and shown; the rest are kept aside and saved with them. Temporary
+ * waypoints stay in memory only. Waystones' waystones ({@link Waystones}) aren't kept
  * here, but show with this world's waypoints, and which of them are hidden is saved with the folders.
  * Client thread only.
  */
@@ -55,7 +58,10 @@ public final class WaypointStore {
 
 	private final String worldKey;
 	private final Path file;
+	/** The waypoints of the maps in use. */
 	private final List<Waypoint> waypoints = new ArrayList<>();
+	/** The waypoints of the dimensions' other maps, saved with the rest but not shown. */
+	private final List<Waypoint> elsewhere = new ArrayList<>();
 	private final Path foldersFile;
 	private Folders folders = new Folders();
 
@@ -105,6 +111,46 @@ public final class WaypointStore {
 	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests and tools. */
 	public static WaypointStore open(String worldKey) {
 		return new WaypointStore(worldKey);
+	}
+
+	/**
+	 * A dimension switched to another of its maps: its waypoints become that map's. Temporary ones
+	 * were set on the map that's gone, so they go with it.
+	 */
+	public static void mapChanged(String dimension) {
+		WaypointStore store = current;
+		if (store == null) {
+			return;
+		}
+		String active = Maps.of(store.worldKey).active(dimension);
+		store.waypoints.removeIf(w -> w.dimension.equals(dimension) && w.kind == Waypoint.Kind.TEMPORARY);
+		List<Waypoint> leaving = store.waypoints.stream().filter(w -> w.dimension.equals(dimension) && !Maps.id(w.map).equals(active)).toList();
+		List<Waypoint> coming = store.elsewhere.stream().filter(w -> w.dimension.equals(dimension) && Maps.id(w.map).equals(active)).toList();
+		store.waypoints.removeAll(leaving);
+		store.elsewhere.removeAll(coming);
+		store.elsewhere.addAll(leaving);
+		store.waypoints.addAll(coming);
+	}
+
+	/** A map was deleted: the waypoints made on it go too. */
+	public static void mapDeleted(String worldKey, String dimension, String map) {
+		WaypointStore store = current != null && current.worldKey.equals(worldKey) ? current : new WaypointStore(worldKey);
+		if (store.elsewhere.removeIf(w -> w.dimension.equals(dimension) && Maps.id(w.map).equals(map))) {
+			store.save();
+		}
+	}
+
+	/** How many waypoints a dimension's map has, for the Maps screen. */
+	public int count(String dimension, String map) {
+		int count = 0;
+		for (List<Waypoint> list : List.of(this.waypoints, this.elsewhere)) {
+			for (Waypoint waypoint : list) {
+				if (waypoint.dimension.equals(dimension) && Maps.id(waypoint.map).equals(map) && waypoint.kind != Waypoint.Kind.TEMPORARY) {
+					count++;
+				}
+			}
+		}
+		return count;
 	}
 
 	public List<Waypoint> all() {
@@ -215,7 +261,7 @@ public final class WaypointStore {
 			return false;
 		}
 		// Its waypoints first, while the old name still finds the folder however they spell it.
-		for (Waypoint waypoint : this.waypoints) {
+		for (Waypoint waypoint : this.everyWaypoint()) {
 			if (old.equals(this.folderName(waypoint.folder))) {
 				waypoint.folder = trimmed;
 			}
@@ -234,7 +280,7 @@ public final class WaypointStore {
 		if (!this.folders.custom.contains(name)) {
 			return;
 		}
-		for (Waypoint waypoint : this.waypoints) {
+		for (Waypoint waypoint : this.everyWaypoint()) {
 			if (name.equals(this.folderName(waypoint.folder))) {
 				waypoint.folder = "";
 			}
@@ -280,7 +326,9 @@ public final class WaypointStore {
 		return waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) <= limit;
 	}
 
+	/** Adds a waypoint to the map in use in its dimension. */
 	public void add(Waypoint waypoint) {
+		this.onMapInUse(waypoint);
 		this.waypoints.add(waypoint);
 		if (waypoint.kind == Waypoint.Kind.DEATH) {
 			List<Waypoint> deaths = new ArrayList<>(this.waypoints.stream().filter(w -> w.kind == Waypoint.Kind.DEATH).toList());
@@ -298,9 +346,21 @@ public final class WaypointStore {
 	 */
 	public void addAll(List<Waypoint> added) {
 		if (!added.isEmpty()) {
+			added.forEach(this::onMapInUse);
 			this.waypoints.addAll(added);
 			this.save();
 		}
+	}
+
+	private void onMapInUse(Waypoint waypoint) {
+		waypoint.map = Maps.noted(Maps.of(this.worldKey).active(waypoint.dimension));
+	}
+
+	/** The shown waypoints and the other maps' together, for changes that apply to all of them. */
+	private List<Waypoint> everyWaypoint() {
+		List<Waypoint> all = new ArrayList<>(this.waypoints);
+		all.addAll(this.elsewhere);
+		return all;
 	}
 
 	public void remove(Waypoint waypoint) {
@@ -323,6 +383,7 @@ public final class WaypointStore {
 			return;
 		}
 		boolean damaged = false;
+		Maps maps = Maps.of(this.worldKey);
 		try (Reader reader = Files.newBufferedReader(this.file, StandardCharsets.UTF_8)) {
 			JsonElement root = JsonParser.parseReader(reader);
 			if (!root.isJsonArray()) {
@@ -332,7 +393,7 @@ public final class WaypointStore {
 					try {
 						Waypoint waypoint = normalise(GSON.fromJson(element, Waypoint.class));
 						if (waypoint != null) {
-							this.waypoints.add(waypoint);
+							(Maps.id(waypoint.map).equals(maps.active(waypoint.dimension)) ? this.waypoints : this.elsewhere).add(waypoint);
 						} else {
 							damaged = true;
 						}
@@ -379,6 +440,9 @@ public final class WaypointStore {
 		}
 		if (waypoint.folder == null) {
 			waypoint.folder = "";
+		}
+		if (waypoint.map != null && waypoint.map.isEmpty()) {
+			waypoint.map = null;
 		}
 		return waypoint;
 	}
@@ -428,7 +492,7 @@ public final class WaypointStore {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("waypoints.json.tmp");
 			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-				GSON.toJson(this.waypoints.stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList(), writer);
+				GSON.toJson(this.everyWaypoint().stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList(), writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException | RuntimeException e) {

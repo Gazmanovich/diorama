@@ -8,6 +8,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import dev.diorama.Diorama;
+import dev.diorama.Maps;
 import dev.diorama.WorldKey;
 import java.io.IOException;
 import java.io.Reader;
@@ -23,7 +24,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The drawings of one world, saved as JSON in {@code .minecraft/diorama/<world>/drawings.json},
- * beside its waypoints. Every change is saved straight away. Client thread only.
+ * beside its waypoints. Like waypoints, each was drawn on one of its dimension's maps
+ * ({@link Maps}), and only those of the maps in use are listed; the rest are kept aside and saved
+ * with them. Every change is saved straight away. Client thread only.
  */
 public final class DrawingStore {
 	private static final Gson GSON = new GsonBuilder()
@@ -44,7 +47,10 @@ public final class DrawingStore {
 
 	private final String worldKey;
 	private final Path file;
+	/** The drawings of the maps in use, in drawing order. */
 	private final List<Drawing> drawings = new ArrayList<>();
+	/** The drawings of the dimensions' other maps, in drawing order, saved with the rest but not shown. */
+	private final List<Drawing> elsewhere = new ArrayList<>();
 	/** Inside {@link #batch}: changes wait to be saved together. */
 	private boolean batching;
 
@@ -56,7 +62,7 @@ public final class DrawingStore {
 
 	/**
 	 * The store for the world the client is in, loading it when the world changes; null while the
-	 * world isn't known. Nothing lives only in memory, so leaving a world needs no clean-up.
+	 * world isn't known.
 	 */
 	public static @Nullable DrawingStore get() {
 		String key = WorldKey.current();
@@ -69,9 +75,47 @@ public final class DrawingStore {
 		return current;
 	}
 
+	/**
+	 * Called on leaving a world. The drawings are all on disk, but which ones show depends on the
+	 * world's maps in use, so the next visit reads them again.
+	 */
+	public static void onLeave() {
+		current = null;
+	}
+
 	/** Opens the store saved under a world key, outside the usual current-world lookup. For tests. */
 	public static DrawingStore open(String worldKey) {
 		return new DrawingStore(worldKey);
+	}
+
+	/** A dimension switched to another of its maps: its drawings become that map's. */
+	public static void mapChanged(String dimension) {
+		DrawingStore store = current;
+		if (store != null) {
+			store.split(dimension);
+		}
+	}
+
+	/** A map was deleted: the drawings made on it go too. */
+	public static void mapDeleted(String worldKey, String dimension, String map) {
+		DrawingStore store = current != null && current.worldKey.equals(worldKey) ? current : new DrawingStore(worldKey);
+		if (store.elsewhere.removeIf(d -> d.dimension.equals(dimension) && Maps.id(d.map).equals(map))) {
+			store.save();
+		}
+	}
+
+	/**
+	 * Moves the dimension's drawings between the shown and kept-aside lists, each list keeping the
+	 * order they were drawn in, which is the order they draw in.
+	 */
+	private void split(String dimension) {
+		String active = Maps.of(this.worldKey).active(dimension);
+		List<Drawing> leaving = this.drawings.stream().filter(d -> d.dimension.equals(dimension) && !Maps.id(d.map).equals(active)).toList();
+		List<Drawing> coming = this.elsewhere.stream().filter(d -> d.dimension.equals(dimension) && Maps.id(d.map).equals(active)).toList();
+		this.drawings.removeAll(leaving);
+		this.elsewhere.removeAll(coming);
+		this.elsewhere.addAll(leaving);
+		this.drawings.addAll(coming);
 	}
 
 	/** The drawings in a dimension, oldest first, which is the order they draw in. */
@@ -89,13 +133,21 @@ public final class DrawingStore {
 		return this.drawings;
 	}
 
+	/** Adds a drawing to the map in use in its dimension. */
 	public void add(Drawing drawing) {
+		drawing.map = Maps.noted(Maps.of(this.worldKey).active(drawing.dimension));
 		this.drawings.add(drawing);
 		this.save();
 	}
 
 	/** Puts a removed drawing back where it was in the order, so it draws under the same things again. */
 	public void restore(Drawing drawing, int index) {
+		if (!Maps.id(drawing.map).equals(Maps.of(this.worldKey).active(drawing.dimension))) {
+			// Undone after switching maps: it goes back to the map it was drawn on.
+			this.elsewhere.add(drawing);
+			this.save();
+			return;
+		}
 		this.drawings.add(Math.max(0, Math.min(index, this.drawings.size())), drawing);
 		this.save();
 	}
@@ -140,7 +192,10 @@ public final class DrawingStore {
 					try {
 						Drawing drawing = GSON.fromJson(element, Drawing.class);
 						if (valid(drawing)) {
-							this.drawings.add(drawing);
+							if (drawing.map != null && drawing.map.isEmpty()) {
+								drawing.map = null;
+							}
+							(Maps.id(drawing.map).equals(Maps.of(this.worldKey).active(drawing.dimension)) ? this.drawings : this.elsewhere).add(drawing);
 						} else {
 							damaged = true;
 						}
@@ -188,7 +243,9 @@ public final class DrawingStore {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("drawings.json.tmp");
 			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-				GSON.toJson(this.drawings, writer);
+				List<Drawing> all = new ArrayList<>(this.drawings);
+				all.addAll(this.elsewhere);
+				GSON.toJson(all, writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException | RuntimeException e) {
