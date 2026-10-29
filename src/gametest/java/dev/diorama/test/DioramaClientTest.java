@@ -547,7 +547,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		String survival = playOnServer(context, "diorama-shared", "id-survival", null, "Survival Camp", List.of(), List.of("Old Camp", "Lobby Camp"), false, SURVIVAL_ID);
 		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(WORLD_INFO.id());
 		String lobbyAgain = playOnServer(context, "diorama-shared", "id-lobby-again", null, null, List.of("Lobby Camp"), List.of("Old Camp", "Survival Camp"), true, LOBBY_ID);
+		// With Xaero's mods installed, the channels are theirs and Diorama has no handler there,
+		// but it still reads the level ID on the way: survival opens its own folder again.
+		dev.diorama.XaeroChannels.handOverForTests(true);
+		String survivalWithXaero;
+		try {
+			survivalWithXaero = playOnServer(context, "diorama-shared", "id-survival-xaero", null, null, List.of("Survival Camp"), List.of("Old Camp", "Lobby Camp"), true, SURVIVAL_ID);
+			levelIdBeforeHop(context, address, false);
+			levelIdBeforeHop(context, address, true);
+		} finally {
+			dev.diorama.XaeroChannels.handOverForTests(false);
+		}
 		levelIdOnJoin = null;
+		if (!survivalWithXaero.equals(survival)) {
+			throw new AssertionError("With Xaero's mods holding the channels, survival opened " + survivalWithXaero + ", not " + survival);
+		}
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
 		}
@@ -557,6 +571,52 @@ public class DioramaClientTest implements FabricClientGameTest {
 		List<String> old = context.computeOnClient(mc -> WaypointStore.open(seeded).all().stream().map(w -> w.name).toList());
 		if (!old.equals(List.of("Old Camp"))) {
 			throw new AssertionError("The seed's folder lost its waypoint or took another world's: " + old);
+		}
+	}
+	//?}
+
+	/**
+	 * A level ID the server sends just before moving the player to the Nether names the level it
+	 * came in, not the Nether, which waits for its own: the ID keeps its place among the packets,
+	 * also in a bundle ({@code bundled}), whose packets the client handles on its own thread. Run
+	 * while Xaero's mods hold the channels, where Diorama reads IDs on the way to them.
+	 */
+	//? if >=1.21 && fabric {
+	private static void levelIdBeforeHop(ClientGameTestContext context, String address, boolean bundled) {
+		levelIdOnJoin = LOBBY_ID;
+		try (TestDedicatedServerContext server = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> s.setSeed("diorama-hop"))
+			.createServer(serverProperties())) {
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
+				String overworld = context.computeOnClient(mc -> WorldKey.current());
+				// The overworld's ID again, then the move to the Nether. The client only runs when the
+				// test lets it, so both are waiting when it next handles packets, as when they reach a
+				// client mid-frame. It handles them and opens the Nether's map, or waits for its ID,
+				// which comes after.
+				server.runOnServer(s -> {
+					net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket id = new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+						new dev.diorama.XaeroChannels.Message(dev.diorama.XaeroChannels.MINIMAP, LOBBY_ID[0], java.util.Arrays.copyOfRange(LOBBY_ID, 1, LOBBY_ID.length)));
+					s.getPlayerList().getPlayers().get(0).connection.send(bundled
+						? new net.minecraft.network.protocol.game.ClientboundBundlePacket(List.<net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener>>of(id))
+						: id);
+					s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), "execute in minecraft:the_nether run tp @a 0 100 0");
+				});
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					throw new AssertionError(e);
+				}
+				context.waitTicks(5);
+				sendXaero(server, SURVIVAL_ID);
+				context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && WorldKey.current() != null, 600);
+				String nether = context.computeOnClient(mc -> WorldKey.current());
+				levelIdOnJoin = null;
+				if (!overworld.equals(address + "-id-7c56d495") || !nether.equals(address + "-id-04adb1e4")) {
+					throw new AssertionError("The ID sent " + (bundled ? "in a bundle " : "") + "before the move to the Nether named the wrong level: overworld " + overworld + ", Nether " + nether);
+				}
+			}
 		}
 	}
 	//?}

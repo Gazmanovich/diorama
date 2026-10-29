@@ -7,6 +7,8 @@
 		"ChatComponentMixin",
 		"ClientChunkCacheMixin",
 		"ClientPacketListenerMixin",
+		"CustomPayloadMixin",
+		"CustomPayloadPacketMixin",
 		"DeathPacketMixin",
 		"FtbChunksUpdateMixin",
 		"GameRendererMixin",
