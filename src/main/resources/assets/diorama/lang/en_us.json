@@ -287,6 +287,7 @@
     "diorama.draw.measure.up": "%s up",
     "diorama.draw.measure.down": "%s down",
     "diorama.draw.measure.unknown": "The map hasn't seen the ground there",
+    "diorama.draw.measure.looking": "Measuring…",
     "diorama.draw.colour": "Colour",
     "diorama.draw.undo": "Undo (Ctrl+Z)",
     "diorama.draw.help.pen": "Drag to draw · Right-drag to pan · Esc to stop drawing",

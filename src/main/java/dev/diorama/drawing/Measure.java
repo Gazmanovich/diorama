@@ -22,23 +22,51 @@ public final class Measure {
 		CompletableFuture<@Nullable BlockPos> at(double screenX, double screenY);
 	}
 
+	/**
+	 * One end's block. Over saved map tiles the answer comes a moment later, off the render thread:
+	 * meanwhile the end keeps its last answer, so a drag reads on rather than flickering to unknown.
+	 */
+	private static final class End {
+		private @Nullable CompletableFuture<@Nullable BlockPos> pick;
+		/** The latest answer: a block, or null with {@link #answered} for ground the map hasn't seen. */
+		private @Nullable BlockPos block;
+		private boolean answered;
+
+		void ask(CompletableFuture<@Nullable BlockPos> pick) {
+			this.pick = pick;
+			this.refresh();
+		}
+
+		void refresh() {
+			CompletableFuture<@Nullable BlockPos> pending = this.pick;
+			if (pending == null || !pending.isDone()) {
+				return;
+			}
+			this.block = pending.isCompletedExceptionally() || pending.isCancelled() ? null : pending.join();
+			this.answered = true;
+			this.pick = null;
+		}
+	}
+
 	private double @Nullable [] from;
 	private double @Nullable [] to;
-	private @Nullable CompletableFuture<@Nullable BlockPos> fromPick;
-	private @Nullable CompletableFuture<@Nullable BlockPos> toPick;
+	private End fromEnd = new End();
+	private End toEnd = new End();
 	private boolean dragging;
 
 	void start(double[] mapPoint, CompletableFuture<@Nullable BlockPos> pick) {
 		this.from = mapPoint;
 		this.to = mapPoint;
-		this.fromPick = pick;
-		this.toPick = pick;
+		this.fromEnd = new End();
+		this.toEnd = new End();
+		this.fromEnd.ask(pick);
+		this.toEnd.ask(pick);
 		this.dragging = true;
 	}
 
 	void move(double[] mapPoint, CompletableFuture<@Nullable BlockPos> pick) {
 		this.to = mapPoint;
-		this.toPick = pick;
+		this.toEnd.ask(pick);
 	}
 
 	void end() {
@@ -56,28 +84,30 @@ public final class Measure {
 	void clear() {
 		this.from = null;
 		this.to = null;
-		this.fromPick = null;
-		this.toPick = null;
+		this.fromEnd = new End();
+		this.toEnd = new End();
 		this.dragging = false;
-	}
-
-	private static @Nullable BlockPos answer(@Nullable CompletableFuture<@Nullable BlockPos> pick) {
-		return pick == null || !pick.isDone() || pick.isCompletedExceptionally() ? null : pick.join();
 	}
 
 	/** Blocks across the ground between the ends, or -1 while either end isn't known. */
 	int blocks() {
-		BlockPos a = answer(this.fromPick);
-		BlockPos b = answer(this.toPick);
+		this.fromEnd.refresh();
+		this.toEnd.refresh();
+		BlockPos a = this.fromEnd.block;
+		BlockPos b = this.toEnd.block;
 		return a == null || b == null ? -1 : (int) Math.round(Math.hypot(b.getX() - a.getX(), b.getZ() - a.getZ()));
 	}
 
 	/** "143 blocks · 120 east, 78 north · 12 up". */
 	Component reading() {
-		BlockPos a = answer(this.fromPick);
-		BlockPos b = answer(this.toPick);
+		this.fromEnd.refresh();
+		this.toEnd.refresh();
+		BlockPos a = this.fromEnd.block;
+		BlockPos b = this.toEnd.block;
 		if (a == null || b == null) {
-			return Component.translatable("diorama.draw.measure.unknown");
+			// Still looking, or looked and found nothing.
+			boolean looking = a == null && !this.fromEnd.answered || b == null && !this.toEnd.answered;
+			return Component.translatable(looking ? "diorama.draw.measure.looking" : "diorama.draw.measure.unknown");
 		}
 		int dx = b.getX() - a.getX();
 		int dy = b.getY() - a.getY();
