@@ -3,6 +3,8 @@ package dev.diorama.test;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
+import dev.diorama.bake.BlockLooks;
+import dev.diorama.bake.VoxelReader;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
@@ -55,6 +57,11 @@ final class UnnumberedStatesTest {
 			}
 		});
 		settle(context, 60);
+		// The baker reads the column as stone, the block those states belong to.
+		int read = context.computeOnClient(mc -> new VoxelReader(MapSession.get().map(), BlockLooks.get()).state(40, top - 3, 40));
+		if (read != Block.BLOCK_STATE_REGISTRY.getId(Blocks.STONE.defaultBlockState())) {
+			throw new AssertionError("The baker read the unnumbered stone as state " + read);
+		}
 		context.takeScreenshot("unnumbered-states-cave-map");
 		context.setScreen(() -> null);
 	}
