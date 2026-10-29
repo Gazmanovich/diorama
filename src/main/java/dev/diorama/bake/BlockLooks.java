@@ -307,7 +307,7 @@ public final class BlockLooks {
 				looks.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
 				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
 					&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				looks.spawnOn[id] = false;
 				looks.spawnIn[id] = false;
 			}
@@ -473,7 +473,7 @@ public final class BlockLooks {
 		VoxelShape outline;
 		try {
 			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			return 0;
 		}
 		Integer known = byVoxels.get(outline);
@@ -551,7 +551,7 @@ public final class BlockLooks {
 			/*sprite = Minecraft.getInstance().getTextureAtlas(TextureAtlas.LOCATION_BLOCKS)
 				.apply(IClientFluidTypeExtensions.of(fluid).getStillTexture());
 			*///?}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			sprite = null;
 		}
 		if (sprite != null && isMissing(sprite)) {
@@ -575,9 +575,11 @@ public final class BlockLooks {
 		static Tint ask(TintProbe probe, IntSupplier inWorld, IntSupplier outOfWorld) {
 			probe.reset();
 			int color;
+			// Here and below, a LinkageError too: a mod's code can name a class from a mod that isn't
+			// installed, which fails only when it runs, and the map runs every block's code at once.
 			try {
 				color = inWorld.getAsInt();
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				color = -1;
 			}
 			byte kind = probe.kind();
@@ -587,7 +589,7 @@ public final class BlockLooks {
 			if (probe.askedForBiome() || color == -1) {
 				try {
 					color = outOfWorld.getAsInt();
-				} catch (RuntimeException e) {
+				} catch (RuntimeException | LinkageError e) {
 					return NONE;
 				}
 			}
@@ -621,7 +623,7 @@ public final class BlockLooks {
 			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
 			return Tint.ask(probe, () -> extensions.getTintColor(fluid, probe, BlockPos.ZERO), extensions::getTintColor);
 			*///?}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			return Tint.NONE;
 		}
 	}
@@ -672,7 +674,7 @@ public final class BlockLooks {
 	private static int mapColor(BlockState state) {
 		try {
 			return state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			return 0;
 		}
 	}
@@ -731,7 +733,7 @@ public final class BlockLooks {
 				TextureAtlasSprite sprite = atlas.getSprite(old.contents().name());
 				return sprite == old || sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation()) ? null : sprite;
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			// The atlas isn't filled, or a mod's atlas isn't a TextureAtlas.
 		}
 		return null;
