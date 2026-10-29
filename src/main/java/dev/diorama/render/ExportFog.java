@@ -20,6 +20,11 @@ public final class ExportFog implements ImageExport.Finish {
 	private static final float FOG_HEIGHT = 10;
 	private static final float BLUR_UNITS = 7;
 	private static final float NO_FOG_KNOWN = 0.95F;
+	/**
+	 * The most mask texels a side. Bigger exports get coarser texels, as the map's own fog does when
+	 * zoomed far out, so the mask stays tens of megabytes however big the image is.
+	 */
+	private static final int MAX_MASK = 2048;
 
 	private static float[] noiseR;
 	private static float[] noiseG;
@@ -79,6 +84,10 @@ public final class ExportFog implements ImageExport.Finish {
 		// About four export pixels per texel, as on screen, and never under the 2 units the screen stops at.
 		float texel = (float) Math.max(2, 1 << lod);
 		double margin = 64 + 24 * Math.pow(2, steps + 1);
+		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
+		while (span / texel > MAX_MASK) {
+			texel *= 2;
+		}
 		double u0 = area.x() / pixelsPerUnit - margin;
 		double v0 = area.y() / pixelsPerUnit - margin;
 		double u1 = (area.x() + area.width()) / pixelsPerUnit + margin;

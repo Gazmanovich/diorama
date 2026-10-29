@@ -62,6 +62,8 @@ public final class ExportScreen extends Screen {
 	/** Everything explored with a margin of clouds, once found; null until then or when nothing is. */
 	private double @Nullable [] explored;
 	private @Nullable CompletableFuture<double @Nullable []> finding;
+	/** The saved tiles {@link #explored} was found in. */
+	private @Nullable TileStore boundsStore;
 	/** The level chosen with the detail buttons, or -1 to follow the default. */
 	private int chosenLod = -1;
 	private final Button[] detail = new Button[4];
@@ -159,6 +161,12 @@ public final class ExportScreen extends Screen {
 		if (session == null || session.map().savedMap() == null || !ServerRules.minimapAllowed()) {
 			this.onClose();
 			return;
+		}
+		if (this.whole && session.map().savedMap() != this.boundsStore) {
+			// The map moved to other saved tiles (another dimension, or the view under the Nether's
+			// roof changed kind): what's explored has to be found again there.
+			this.whole = false;
+			this.showWhole(true);
 		}
 		if (this.whole && this.explored != null && this.finding != null) {
 			// Found just now: fit it into the preview.
@@ -322,6 +330,7 @@ public final class ExportScreen extends Screen {
 			return;
 		}
 		this.explored = null;
+		this.boundsStore = store;
 		CompletableFuture<double @Nullable []> found = CompletableFuture.supplyAsync(() -> {
 			try {
 				store.catchUp();
