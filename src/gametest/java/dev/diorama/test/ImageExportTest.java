@@ -8,6 +8,7 @@ import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ImageExport;
+import dev.diorama.data.TileStore;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -22,6 +23,7 @@ import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Exporting the map as an image, through the screen as a player does: the Export button, the
@@ -53,11 +55,17 @@ final class ImageExportTest {
 		if (!(grown[2] > before[2] + 30 && grown[3] > before[3] + 20 && Math.abs(grown[0] - before[0]) < 1)) {
 			throw new AssertionError("Dragging the box's corner didn't resize it: " + List.of(before[2], before[3]) + " -> " + List.of(grown[2], grown[3]));
 		}
+		ImageExport.Area beforePan = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
 		double[] outside = {grown[2] + 20, grown[1] + 10};
 		drag(context, outside[0], outside[1], -30, 0);
 		double[] panned = box(context);
-		if (!(Math.abs(panned[0] - (grown[0] - 30)) < 2 && Math.abs((panned[2] - panned[0]) - (grown[2] - grown[0])) < 1)) {
+		ImageExport.Area afterPan = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
+		if (!(Math.abs(panned[0] - (grown[0] - 30)) < 2)) {
 			throw new AssertionError("Dragging beside the box didn't pan the map under it");
+		}
+		if (!beforePan.equals(afterPan)) {
+			// Moving the box would also shift it on screen; panning leaves the ground it covers alone.
+			throw new AssertionError("Dragging beside the box moved what it saves: " + beforePan + " -> " + afterPan);
 		}
 
 		// 1 px per block, then Save image.
@@ -69,6 +77,7 @@ final class ImageExportTest {
 		context.takeScreenshot("image-export-02-area-resized");
 		Path areaFile = save(context);
 		checkImage(areaFile, area);
+		matchesTiles(context, areaFile, area);
 
 		// Whole map: everything explored, boxed with clouds round it.
 		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
@@ -81,13 +90,10 @@ final class ImageExportTest {
 		settle(context);
 		context.takeScreenshot("image-export-03-whole");
 		ImageExport.Area whole = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
-		int explored = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
-		// The test world has a few hundred chunks around spawn: the whole map is bigger than one screen.
-		if (whole.width() < 256 || whole.height() < 128) {
-			throw new AssertionError("Whole map is only " + whole + " with " + explored + " chunks mapped");
-		}
+		coversMappedChunks(context, whole);
 		Path wholeFile = save(context);
 		checkImage(wholeFile, whole);
+		matchesTiles(context, wholeFile, whole);
 		context.setScreen(() -> null);
 	}
 
@@ -122,12 +128,7 @@ final class ImageExportTest {
 
 	/** The PNG is the size the screen said, fully opaque (clouds where nothing is mapped), and not all cloud. */
 	private static void checkImage(Path file, ImageExport.Area area) {
-		BufferedImage image;
-		try {
-			image = ImageIO.read(file.toFile());
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+		BufferedImage image = read(file);
 		if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
 			throw new AssertionError(file.getFileName() + " is " + (image == null ? "unreadable" : image.getWidth() + "x" + image.getHeight())
 				+ ", but the screen said " + area.width() + "x" + area.height());
@@ -150,6 +151,83 @@ final class ImageExportTest {
 			throw new AssertionError(file.getFileName() + " has only " + colours.size() + " colours: no map in it?");
 		}
 		System.out.println("IMAGE-EXPORT " + file.getFileName() + " " + image.getWidth() + "x" + image.getHeight() + " " + colours.size() + " colours");
+	}
+
+	/**
+	 * Around the player, the image shows the saved tiles: their pixels, found here from the map
+	 * coordinates alone, match the image's. The fog leaves only a faint veil over mapped ground.
+	 */
+	private static void matchesTiles(ClientGameTestContext context, Path file, ImageExport.Area area) {
+		BufferedImage image = read(file);
+		int[] diff = context.computeOnClient(mc -> {
+			double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << area.lod());
+			long gx = (long) Math.floor(mc.player.getX() * perUnit);
+			long gy = (long) Math.floor(Projection.v(mc.player.getY(), mc.player.getZ()) * perUnit);
+			TileStore store = MapSession.get().map().savedMap();
+			int edge = Projection.TILE_PIXELS;
+			int worst = 0;
+			int compared = 0;
+			for (long y = gy - 6; y <= gy + 6; y += 2) {
+				for (long x = gx - 6; x <= gx + 6; x += 2) {
+					int[] tile = store.read(new TileKey(TileKey.SURFACE, (int) Math.floorDiv(x, edge), (int) Math.floorDiv(y, edge), area.lod()));
+					int ix = (int) (x - area.x());
+					int iy = (int) (y - area.y());
+					if (tile == null || ix < 0 || iy < 0 || ix >= image.getWidth() || iy >= image.getHeight()) {
+						continue;
+					}
+					int abgr = tile[(int) Math.floorMod(y, edge) * edge + (int) Math.floorMod(x, edge)];
+					if ((abgr >>> 24) != 0xFF) {
+						continue;
+					}
+					int argb = image.getRGB(ix, iy);
+					worst = Math.max(worst, Math.abs((abgr & 0xFF) - ((argb >> 16) & 0xFF)));
+					worst = Math.max(worst, Math.abs(((abgr >> 8) & 0xFF) - ((argb >> 8) & 0xFF)));
+					worst = Math.max(worst, Math.abs(((abgr >> 16) & 0xFF) - (argb & 0xFF)));
+					compared++;
+				}
+			}
+			return new int[] {worst, compared};
+		});
+		if (diff[1] < 20) {
+			throw new AssertionError(file.getFileName() + ": only " + diff[1] + " mapped pixels around the player to compare");
+		}
+		if (diff[0] > 16) {
+			throw new AssertionError(file.getFileName() + " doesn't show the saved map around the player: off by up to " + diff[0] + "/255");
+		}
+	}
+
+	/** Whole map's box holds the middle of every chunk the map has near the player, on its ground. */
+	private static void coversMappedChunks(ClientGameTestContext context, ImageExport.Area whole) {
+		String missing = context.computeOnClient(mc -> {
+			double[] units = whole.units();
+			int cx0 = mc.player.getBlockX() >> 4;
+			int cz0 = mc.player.getBlockZ() >> 4;
+			for (int cz = cz0 - 12; cz <= cz0 + 12; cz++) {
+				for (int cx = cx0 - 12; cx <= cx0 + 12; cx++) {
+					if (MapSession.get().map().chunk(cx, cz) == null) {
+						continue;
+					}
+					int x = cx * 16 + 8;
+					int z = cz * 16 + 8;
+					double v = Projection.v(mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z), z);
+					if (x < units[0] || x > units[2] || v < units[1] || v > units[3]) {
+						return "chunk " + cx + "," + cz;
+					}
+				}
+			}
+			return null;
+		});
+		if (missing != null) {
+			throw new AssertionError("Whole map " + whole + " leaves out the mapped " + missing);
+		}
+	}
+
+	private static BufferedImage read(Path file) {
+		try {
+			return ImageIO.read(file.toFile());
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	private static double[] box(ClientGameTestContext context) {

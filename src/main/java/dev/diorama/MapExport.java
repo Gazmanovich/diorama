@@ -49,6 +49,8 @@ public final class MapExport {
 		}
 		Minecraft mc = Minecraft.getInstance();
 		Path folder = mc.gameDirectory.toPath().resolve("screenshots");
+		// One left by a game that quit partway through an export.
+		ImageExport.deleteUnfinished(folder, "diorama_");
 		Path file = folder.resolve("diorama_" + LocalDateTime.now().format(NAME) + ".png");
 		for (int i = 1; file.toFile().exists(); i++) {
 			file = folder.resolve("diorama_" + LocalDateTime.now().format(NAME) + "_" + i + ".png");

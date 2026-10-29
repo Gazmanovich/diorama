@@ -296,11 +296,8 @@ public final class ExportFog implements ImageExport.Finish {
 		b += (1 - alpha) * floorFog * this.shade[2];
 		alpha += (1 - alpha) * floorFog;
 
-		float scale = 1 - 0.85F * smoothstep(0.45F, 0.95F, soft);
-		r *= scale;
-		g *= scale;
-		b *= scale;
-		alpha *= scale;
+		// Only the alpha, as the shader does: the colour it divides by alpha later stays as it was.
+		alpha *= 1 - 0.85F * smoothstep(0.45F, 0.95F, soft);
 
 		float empty = 1 - smoothstep(0.3F, 0.85F, this.knownAt(u, v, p));
 		float coverR;
@@ -328,11 +325,11 @@ public final class ExportFog implements ImageExport.Finish {
 		if (alpha <= 0.002F) {
 			return 0xFF000000 | channel(gb) << 16 | channel(gg) << 8 | channel(gr);
 		}
-		// The shader's grain, then its colour (premultiplied here) over the ground.
+		// The shader's grain, then its colour, which the render target clamps, blended over the ground.
 		float grain = (hash(y, x) - 0.5F) / 255F;
-		float or = r + grain + gr * (1 - alpha);
-		float og = g + grain + gg * (1 - alpha);
-		float ob = b + grain + gb * (1 - alpha);
+		float or = clamp((r + grain) / alpha) * alpha + gr * (1 - alpha);
+		float og = clamp((g + grain) / alpha) * alpha + gg * (1 - alpha);
+		float ob = clamp((b + grain) / alpha) * alpha + gb * (1 - alpha);
 		return 0xFF000000 | channel(ob) << 16 | channel(og) << 8 | channel(or);
 	}
 

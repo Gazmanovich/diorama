@@ -1,5 +1,6 @@
 package dev.diorama.data;
 
+import dev.diorama.Diorama;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
 import java.io.IOException;
@@ -225,7 +226,32 @@ public final class ImageExport {
 			Files.deleteIfExists(temp);
 			throw e;
 		}
-		Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+		try {
+			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+		} catch (IOException | RuntimeException e) {
+			Files.deleteIfExists(temp);
+			throw e;
+		}
+	}
+
+	/**
+	 * Deletes the half-written files exports leave in a folder when the game quits partway
+	 * through one: they're named after the image with ".tmp" on the end.
+	 */
+	public static void deleteUnfinished(Path folder, String prefix) {
+		if (!Files.isDirectory(folder)) {
+			return;
+		}
+		try (java.util.stream.Stream<Path> files = Files.list(folder)) {
+			for (Path file : files.toList()) {
+				String name = file.getFileName().toString();
+				if (name.startsWith(prefix) && name.endsWith(".png.tmp")) {
+					Files.deleteIfExists(file);
+				}
+			}
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't clear unfinished exports in {}", folder, e);
+		}
 	}
 
 	/** An ABGR pixel drawn over an opaque ARGB colour, as ABGR. */
