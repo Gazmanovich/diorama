@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
+import dev.diorama.Maps;
 import dev.diorama.MinimapHud;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
@@ -11,6 +12,7 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
 import dev.diorama.waypoint.WaypointShare;
@@ -93,6 +95,8 @@ final class DioramaForgeClient {
 	private static void joinedOrLeft() {
 		ServerRules.onDisconnect();
 		WaypointStore.onLeave();
+		Maps.onLeave();
+		DrawingStore.onLeave();
 		WorldKey.onJoinOrLeave();
 		XaeroChannels.onJoinOrLeave();
 		TrackedPlayers.clear();
