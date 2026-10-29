@@ -216,7 +216,10 @@ final class ImageExportTest {
 		}
 	}
 
-	/** Pixels of a colour around a point, cut to the box they fill: a note's text. */
+	/**
+	 * Pixels of a colour around a point, cut to the box they fill: a note's text. Within a few
+	 * levels: some versions draw text a shade off its colour (1.21.1 draws 0xFF55FF as 0xFC54FC).
+	 */
 	private static boolean[][] mask(BufferedImage image, int cx, int cy, int colour) {
 		int x0 = Integer.MAX_VALUE;
 		int y0 = Integer.MAX_VALUE;
@@ -224,7 +227,7 @@ final class ImageExportTest {
 		int y1 = Integer.MIN_VALUE;
 		for (int y = Math.max(0, cy - 24); y < Math.min(image.getHeight(), cy + 24); y++) {
 			for (int x = Math.max(0, cx - 120); x < Math.min(image.getWidth(), cx + 120); x++) {
-				if ((image.getRGB(x, y) & 0xFFFFFF) == colour) {
+				if (close(image.getRGB(x, y) & 0xFFFFFF, colour, 8)) {
 					x0 = Math.min(x0, x);
 					y0 = Math.min(y0, y);
 					x1 = Math.max(x1, x);
@@ -238,7 +241,7 @@ final class ImageExportTest {
 		boolean[][] out = new boolean[y1 - y0 + 1][x1 - x0 + 1];
 		for (int y = y0; y <= y1; y++) {
 			for (int x = x0; x <= x1; x++) {
-				out[y - y0][x - x0] = (image.getRGB(x, y) & 0xFFFFFF) == colour;
+				out[y - y0][x - x0] = close(image.getRGB(x, y) & 0xFFFFFF, colour, 8);
 			}
 		}
 		return out;
