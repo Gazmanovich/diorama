@@ -17,11 +17,12 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.StructureTags;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Drawing on the map (#154), with the mouse and keyboard as a player would: a pen stroke down the
  * road, a clicked-out line, an area round the castle and a note, in their colours, then erasing,
- * undoing, leaving draw mode, the far zoom and the minimap. Opt-in ({@code drawings}): it builds
+ * undoing, measuring, leaving draw mode, the far zoom and the minimap. Opt-in ({@code drawings}): it builds
  * {@link ShowcaseScene}'s castle. {@code DIORAMA_GIF=1} adds frames of the drawing.
  */
 final class DrawingTest {
@@ -155,6 +156,47 @@ final class DrawingTest {
 		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
 		List<Drawing> after = context.computeOnClient(mc -> DrawingStore.get().in(dimension));
 		expect(after.size() == before + 5 && after.get(before + 1).id.equals(clicked.id), "Undo puts the line back in its place");
+
+		// Measure 24 blocks along the courtyard's flat cross path, east to west of the gate path.
+		pickTool(context, 5);
+		float[] west = gui(context, cx - 12, base + 1, cz + 8);
+		float[] east = gui(context, cx + 12, base + 1, cz + 8);
+		moveTo(context, west[0], west[1]);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		for (int i = 1; i <= 6; i++) {
+			moveTo(context, west[0] + (east[0] - west[0]) * i / 6, west[1] + (east[1] - west[1]) * i / 6);
+		}
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int measured = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measured());
+		String reading = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measuredText());
+		expect(measured >= 23 && measured <= 25 && reading != null && reading.contains("east"), "about 24 blocks east across the courtyard, read " + reading);
+		frame(context);
+		context.takeScreenshot("drawing-01b-measure");
+		// The first Esc clears the reading and stays in draw mode.
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+		expect(context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().active() && ((MapScreen) mc.gui.screen()).drawMode().measured() == -1), "the first Esc clears the measurement and stays in draw mode");
+		// Then from the courtyard down to the road outside the walls: across the ground on a
+		// slant, south, and down to wherever the server's ground there is.
+		int roadY = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx + 1, cz + 40));
+		float[] yard = gui(context, cx - 12, base + 1, cz + 8);
+		float[] outside = gui(context, cx + 1, roadY, cz + 40);
+		moveTo(context, yard[0], yard[1]);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		for (int i = 1; i <= 6; i++) {
+			moveTo(context, yard[0] + (outside[0] - yard[0]) * i / 6, yard[1] + (outside[1] - yard[1]) * i / 6);
+		}
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		int slant = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measured());
+		String slantReading = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measuredText());
+		int climb = roadY - (base + 1);
+		String expectedClimb = climb == 0 ? null : Math.abs(climb) + (climb > 0 ? " up" : " down");
+		expect(Math.abs(slant - (int) Math.round(Math.hypot(13, 32))) <= 1 && slantReading != null && slantReading.contains("13 east") && slantReading.contains("32 south")
+			&& (expectedClimb == null ? !slantReading.contains(" up") && !slantReading.contains(" down") : slantReading.contains(expectedClimb)),
+			"about 35 blocks, 13 east, 32 south" + (expectedClimb == null ? "" : ", " + expectedClimb) + " down to the road, read " + slantReading);
+		context.takeScreenshot("drawing-01c-measure-slant");
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 
 		// Esc leaves draw mode but not the map.
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);

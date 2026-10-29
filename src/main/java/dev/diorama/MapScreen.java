@@ -172,7 +172,7 @@ public final class MapScreen extends Screen {
 			this.menu = null;
 			this.draw.toggle();
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.draw.button")).build());
-		this.draw.init(this.font, this::addRenderableWidget, this::setFocused);
+		this.draw.init(this.font, this::addRenderableWidget, this::setFocused, (x, y) -> this.spotAt(x, y, false).thenApply(MapLevel.Spot::pos));
 		this.placeControls();
 	}
 

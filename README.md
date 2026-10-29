@@ -17,7 +17,7 @@ A minimap and world map for Minecraft that draws your world at an angle, like a 
 - **A radar** that shows players and mobs as their own faces, outlined red, yellow or green for hostile, neutral or passive.
 - **Waypoints** on the map and floating in the world, with an icon or up to four letters on each pin, a marker where you died, a pin on the bed you last slept in, folders to sort them, a distance limit for when there are too many, and an [Add] link when someone shares one in chat.
 - **A right-click menu** on the map to add a waypoint, drop a temporary one, share the spot in chat, or teleport there if you're allowed to use `/tp`.
-- **Drawing on the map.** The pencil beside the zoom buttons lets you draw freehand, click out lines, mark areas and leave notes, in the waypoint colours. Drawings stay put at every zoom and show on the minimap too.
+- **Drawing on the map.** The pencil beside the zoom buttons lets you draw freehand, click out lines, mark areas, leave notes and measure how far apart two places are, in the waypoint colours. Drawings stay put at every zoom and show on the minimap too.
 
 | | |
 | --- | --- |

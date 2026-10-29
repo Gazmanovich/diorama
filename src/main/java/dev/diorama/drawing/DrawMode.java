@@ -31,13 +31,14 @@ import org.jspecify.annotations.Nullable;
  *   segment straight or diagonal.</li>
  *   <li>Note: click a spot and type; Enter keeps it.</li>
  *   <li>Erase: click or drag over drawings.</li>
+ *   <li>Measure: drag from one place to another; see {@link Measure}.</li>
  * </ul>
  * Right-drag pans with every tool, and left-drag too with the clicking tools. Ctrl+Z undoes, while
  * the map is open. Esc drops what's half drawn, then leaves draw mode.
  */
 public final class DrawMode {
 	public enum Tool {
-		PEN, LINE, AREA, NOTE, ERASE
+		PEN, LINE, AREA, NOTE, ERASE, MEASURE
 	}
 
 	/** Pixel art for the tool buttons, '#' lit, each centred on its button. */
@@ -47,6 +48,7 @@ public final class DrawMode {
 		{".#######...", ".#.....#...", ".#......#..", ".#.......#.", ".#.......#.", ".#......#..", ".########.."},
 		{"#########", "#...#...#", "....#....", "....#....", "....#....", "....#....", "...###..."},
 		{"....###..", "...#..##.", "..#..###.", ".#..###..", "#..###...", ".####....", "..#......", "...######"},
+		{"###########", "#.#.#.#.#.#", "#.#...#...#", "#.........#", "###########"},
 	};
 	private static final String[] UNDO_ICON = {"..#......", ".##......", "#######..", ".##....#.", "..#.....#", "........#", ".......#.", "...####.."};
 	public static final String[] PENCIL_ICON = {"......##.", ".....#..#", "....#..#.", "...#..#..", "..#..#...", ".#..#....", "#..#.....", "###......"};
@@ -73,6 +75,9 @@ public final class DrawMode {
 	private @Nullable EditBox noteBox;
 	private boolean paletteOpen;
 	private final DrawingOverlay overlay = new DrawingOverlay();
+	private final Measure measure = new Measure();
+	/** Finds the block under a screen point, for the measuring tool. */
+	private Measure.Picker picker = (x, y) -> java.util.concurrent.CompletableFuture.completedFuture(null);
 	/** Gives a widget the screen's keyboard focus. */
 	private Consumer<AbstractWidget> focus = w -> {
 	};
@@ -104,10 +109,11 @@ public final class DrawMode {
 	 * being drawn carries over: a note typed so far is kept, a pen stroke ends where it got to, an
 	 * erase stays undoable, and the points of a line or area stay (they're in map space).
 	 */
-	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus) {
+	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker) {
 		this.commitNote();
 		this.endGesture();
 		this.focus = focus;
+		this.picker = picker;
 		this.toolButtons.clear();
 		this.paletteOpen = false;
 		// The screen being rebuilt never sends the release a palette press was waiting for.
@@ -200,6 +206,7 @@ public final class DrawMode {
 	 * that would have had the release is being rebuilt.
 	 */
 	private void endGesture() {
+		this.measure.end();
 		if (this.penDown) {
 			this.penDown = false;
 			String dimension = currentDimension();
@@ -230,6 +237,7 @@ public final class DrawMode {
 	/** Drops anything half drawn. An erase cut short keeps what it erased undoable. */
 	private void cancel() {
 		this.points.clear();
+		this.measure.clear();
 		this.penDown = false;
 		this.paletteRelease = false;
 		this.erasing = false;
@@ -295,6 +303,7 @@ public final class DrawMode {
 	public boolean pans(int button) {
 		return !this.active || button == InputConstants.MOUSE_BUTTON_RIGHT || button == InputConstants.MOUSE_BUTTON_MIDDLE
 			|| tool == Tool.LINE || tool == Tool.AREA || tool == Tool.NOTE;
+		// The pen, the eraser and the measuring tool drag.
 	}
 
 	/** A press on the map (not on a control). True if draw mode took it. */
@@ -327,6 +336,10 @@ public final class DrawMode {
 			this.eraseAt(view, font, dimension, x, y);
 			return true;
 		}
+		if (tool == Tool.MEASURE) {
+			this.measure.start(mapPoint(view, x, y), this.picker.at(x, y));
+			return true;
+		}
 		return false;
 	}
 
@@ -341,6 +354,10 @@ public final class DrawMode {
 		}
 		if (this.erasing) {
 			this.eraseAt(view, font, dimension, x, y);
+			return true;
+		}
+		if (this.measure.dragging()) {
+			this.measure.move(mapPoint(view, x, y), this.picker.at(x, y));
 			return true;
 		}
 		return false;
@@ -361,6 +378,11 @@ public final class DrawMode {
 			double tolerance = PEN_TOLERANCE / view.zoom();
 			this.finish(new Drawing(Drawing.Kind.STROKE, dimension, color, thin(this.points, tolerance), ""));
 			this.points.clear();
+			return true;
+		}
+		if (this.measure.dragging() && button == InputConstants.MOUSE_BUTTON_LEFT) {
+			this.measure.move(mapPoint(view, x, y), this.picker.at(x, y));
+			this.measure.end();
 			return true;
 		}
 		if (this.erasing && button == InputConstants.MOUSE_BUTTON_LEFT) {
@@ -431,7 +453,7 @@ public final class DrawMode {
 		if (key == InputConstants.KEY_ESCAPE) {
 			if (this.paletteOpen) {
 				this.paletteOpen = false;
-			} else if (!this.points.isEmpty() || this.penDown) {
+			} else if (!this.points.isEmpty() || this.penDown || this.measure.shown()) {
 				this.cancel();
 			} else {
 				this.stop();
@@ -550,8 +572,13 @@ public final class DrawMode {
 			preview = new Drawing(tool == Tool.AREA ? Drawing.Kind.AREA : Drawing.Kind.STROKE, "", color, flatten(shown), "");
 		} else if (this.active && tool == Tool.ERASE && overMap) {
 			target = DrawingOverlay.under(font, view, drawings, mouseX, mouseY, true);
+		} else if (this.active && this.measure.shown()) {
+			preview = this.measure.line();
 		}
 		this.overlay.draw(graphics, font, view, drawings, preview, target, true);
+		if (this.active && this.measure.shown()) {
+			this.measure.drawReading(graphics, font, view);
+		}
 		if (this.active && this.notePoint != null) {
 			float sx = view.screenX(this.notePoint[0]);
 			float sy = view.screenY(this.notePoint[1]);
@@ -596,6 +623,16 @@ public final class DrawMode {
 				graphics.fill(x + 1, y + 1, x + SWATCH - 2, y + SWATCH - 2, c);
 			}
 		}
+	}
+
+	/** For tests: blocks across the ground the measuring tool reads, or -1 when it reads nothing. */
+	public int measured() {
+		return this.measure.shown() ? this.measure.blocks() : -1;
+	}
+
+	/** For tests: what the measuring tool shows, or null. */
+	public @Nullable String measuredText() {
+		return this.measure.shown() ? this.measure.reading().getString() : null;
 	}
 
 	/** For tests: the tool buttons, in {@link Tool} order. */
