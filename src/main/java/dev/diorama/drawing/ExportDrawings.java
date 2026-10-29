@@ -30,12 +30,14 @@ public final class ExportDrawings implements ImageExport.Finish {
 	private final List<Shape> shapes = new ArrayList<>();
 	private final List<Plate> plates = new ArrayList<>();
 	private final int width;
+	private final int height;
 	/** The area's first row, in map pixels: rows come numbered that way. */
 	private final long top;
 	private final ThreadLocal<float[]> coverage;
 
 	private ExportDrawings(ImageExport.Area area) {
 		this.width = area.width();
+		this.height = area.height();
 		this.top = area.y();
 		this.coverage = ThreadLocal.withInitial(() -> new float[this.width]);
 	}
@@ -97,13 +99,19 @@ public final class ExportDrawings implements ImageExport.Finish {
 		int bottom = (int) Math.ceil(Math.max(9, extent[1]));
 		int w = (textWidth + 3) * SCALE;
 		int h = (bottom - top) * SCALE;
+		int textX = Math.round(x - textWidth * SCALE / 2.0F);
+		int textY = Math.round(y - 4 * SCALE);
+		int left = textX - 2 * SCALE;
+		int canvasTop = textY + top * SCALE;
+		if (left + w <= 0 || left >= this.width || canvasTop + h <= 0 || canvasTop >= this.height) {
+			// Not in this image at all: nothing to draw or keep.
+			return;
+		}
 		int[] argb = new int[w * h];
 		int plateTop = (-2 - top) * SCALE;
 		Arrays.fill(argb, plateTop * w, (plateTop + 11 * SCALE) * w, DrawingOverlay.PLATE);
 		font.draw(argb, w, h, text, 2 * SCALE, -top * SCALE, SCALE, color & 0xFFFFFF);
-		int textX = Math.round(x - textWidth * SCALE / 2.0F);
-		int textY = Math.round(y - 4 * SCALE);
-		this.plates.add(new Plate(argb, w, h, textX - 2 * SCALE, textY + top * SCALE));
+		this.plates.add(new Plate(argb, w, h, left, canvasTop));
 	}
 
 	@Override
