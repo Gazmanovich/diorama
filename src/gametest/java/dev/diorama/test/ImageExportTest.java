@@ -43,13 +43,15 @@ final class ImageExportTest {
 	private static final int CJK = 0x55FFFF;
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		List<Drawing> made = new java.util.ArrayList<>();
 		double[] drawn = context.computeOnClient(mc -> {
 			double u = mc.player.getX();
 			double v = Projection.v(mc.player.getY(), mc.player.getZ());
 			String dimension = mc.level.dimension().identifier().toString();
-			DrawingStore.get().add(new Drawing(Drawing.Kind.STROKE, dimension, 0xFF000000 | LINE, new double[] {u - 20, v, u + 20, v}, ""));
-			DrawingStore.get().add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | NOTE, new double[] {u, v + 30}, "Hi"));
-			DrawingStore.get().add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | CJK, new double[] {u, v - 30}, "\u5730\u56fe"));
+			made.add(new Drawing(Drawing.Kind.STROKE, dimension, 0xFF000000 | LINE, new double[] {u - 20, v, u + 20, v}, ""));
+			made.add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | NOTE, new double[] {u, v + 30}, "Hi"));
+			made.add(new Drawing(Drawing.Kind.NOTE, dimension, 0xFF000000 | CJK, new double[] {u, v - 30}, "\u5730\u56fe"));
+			made.forEach(DrawingStore.get()::add);
 			return new double[] {u, v};
 		});
 		context.setScreen(MapScreen::new);
@@ -137,11 +139,8 @@ final class ImageExportTest {
 		if (lineAt(wholeFile, whole, drawn)) {
 			throw new AssertionError("Drawings were unticked, but the line is in " + wholeFile.getFileName());
 		}
-		context.runOnClient(mc -> DrawingStore.get().batch(() -> {
-			for (Drawing drawing : List.copyOf(DrawingStore.get().all())) {
-				DrawingStore.get().remove(drawing);
-			}
-		}));
+		// Only this test's drawings: other sections' stay as they left them.
+		context.runOnClient(mc -> DrawingStore.get().batch(() -> made.forEach(DrawingStore.get()::remove)));
 		context.setScreen(() -> null);
 	}
 
