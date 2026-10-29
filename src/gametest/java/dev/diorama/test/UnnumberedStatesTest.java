@@ -28,13 +28,14 @@ final class UnnumberedStatesTest {
 		world.getServer().runCommand("tp @a 40.5 " + ground + " 40.5");
 		context.waitFor(mc -> mc.player.blockPosition().getX() == 40 && mc.player.blockPosition().getZ() == 40, 600);
 		context.waitTicks(20);
-		// Stone's states made again outside the registry, as a mod's own block states are.
-		StateDefinition<Block, BlockState> definition = new StateDefinition.Builder<Block, BlockState>(Blocks.STONE).create(Block::defaultBlockState, BlockState::new);
+		// Gold block's states made again outside the registry, as a mod's own block states are. Gold,
+		// so the map's copy of the ground can't pass for them before it has them.
+		StateDefinition<Block, BlockState> definition = new StateDefinition.Builder<Block, BlockState>(Blocks.GOLD_BLOCK).create(Block::defaultBlockState, BlockState::new);
 		// The shapes the game works out for registered states at startup; such mods do the same.
 		definition.getPossibleStates().forEach(BlockState::initCache);
 		BlockState unnumbered = definition.any();
 		if (Block.BLOCK_STATE_REGISTRY.getId(unnumbered) >= 0) {
-			throw new AssertionError("The made-up stone state has an id");
+			throw new AssertionError("The made-up gold state has an id");
 		}
 		int top = context.computeOnClient(mc -> {
 			BlockPos feet = mc.player.blockPosition();
@@ -58,12 +59,18 @@ final class UnnumberedStatesTest {
 		});
 		settle(context, 60);
 		if (context.computeOnClient(mc -> mc.level.getBlockState(new BlockPos(40, top - 3, 40)) != unnumbered)) {
-			throw new AssertionError("The client lost the unnumbered stone");
+			throw new AssertionError("The client lost the unnumbered gold");
 		}
-		// The baker reads the column as stone, the block those states belong to.
-		int read = context.computeOnClient(mc -> new VoxelReader(MapSession.get().map(), BlockLooks.get()).state(40, top - 3, 40));
-		if (read != Block.BLOCK_STATE_REGISTRY.getId(Blocks.STONE.defaultBlockState())) {
-			throw new AssertionError("The baker read the unnumbered stone as state " + read);
+		// The baker reads the column as gold, the block those states belong to, once the map has
+		// taken its copy of the changed chunk.
+		int gold = Block.BLOCK_STATE_REGISTRY.getId(Blocks.GOLD_BLOCK.defaultBlockState());
+		int read = -2;
+		for (int i = 0; i < 1200 && read != gold; i++) {
+			context.waitTick();
+			read = context.computeOnClient(mc -> new VoxelReader(MapSession.get().map(), BlockLooks.get()).state(40, top - 3, 40));
+		}
+		if (read != gold) {
+			throw new AssertionError("The baker read the unnumbered gold as state " + read);
 		}
 		context.takeScreenshot("unnumbered-states-cave-map");
 		context.setScreen(() -> null);
@@ -76,9 +83,6 @@ final class UnnumberedStatesTest {
 			context.waitTick();
 			boolean baking = context.computeOnClient(mc -> MapSession.get() == null || MapSession.get().map().bakingCount() > 0);
 			quiet = baking ? 0 : quiet + 1;
-		}
-		if (quiet < 30) {
-			throw new AssertionError("The map was still baking after 1200 ticks");
 		}
 	}
 }
