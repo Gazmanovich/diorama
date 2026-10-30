@@ -35,6 +35,7 @@ final class FailingModelTest {
 			Object models = models(mc);
 			Field field = modelMap(models);
 			BlockLooks looks;
+			int[] thrown = {0};
 			try {
 				@SuppressWarnings("unchecked")
 				Map<BlockState, Object> byState = (Map<BlockState, Object>) field.get(models);
@@ -43,6 +44,7 @@ final class FailingModelTest {
 				swapped.put(gold, Proxy.newProxyInstance(modelType(field).getClassLoader(), new Class<?>[] {modelType(field)}, (proxy, method, args) -> {
 					for (Class<?> parameter : method.getParameterTypes()) {
 						if (parameter == RandomSource.class) {
+							thrown[0]++;
 							throw new NullPointerException("A stand-in for a mod's model that needs its block entity's data");
 						}
 					}
@@ -62,6 +64,9 @@ final class FailingModelTest {
 				throw new AssertionError(e);
 			} finally {
 				BlockLooks.build();
+			}
+			if (thrown[0] == 0) {
+				throw new AssertionError("The table never asked the stand-in model for its faces");
 			}
 			if (looks.kind[id] != real.kind[id] || looks.top[id] != real.top[id] || looks.side[id] != real.side[id]) {
 				throw new AssertionError(String.format("Gold with a failing model looks %d #%06x/#%06x, not %d #%06x/#%06x",
