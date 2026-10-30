@@ -332,6 +332,7 @@ public final class BlockLooks {
 		Map<String, Integer> shapeByBoxes = new HashMap<>();
 		List<float[]> shapes = new ArrayList<>();
 		shapes.add(new float[0]);
+		int failedModels = 0;
 		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
 		//?} else if >=1.21.5 {
@@ -364,47 +365,63 @@ public final class BlockLooks {
 			}
 
 			//? if >=26.1 {
-			parts.clear();
-			random.setSeed(42L);
 			BlockStateModel model = models.get(state);
-			model.collectParts(random, parts);
 			//?} else if >=1.21.5 {
-			/*parts.clear();
-			random.setSeed(42L);
-			BlockStateModel model = models.getBlockModel(state);
-			model.collectParts(random, parts);
+			/*BlockStateModel model = models.getBlockModel(state);
 			*///?} else {
 			/*BakedModel model = models.getBlockModel(state);
-			List<LegacyPart> parts = List.of(new LegacyPart(model, state, random));
 			*///?}
 			FaceColor topFace = new FaceColor();
 			FaceColor sideFace = new FaceColor();
-			//? if >=26.1 {
-			for (BlockStateModelPart part : parts) {
-			//?} else if >=1.21.5 {
-			/*for (BlockModelPart part : parts) {
-			*///?} else {
-			/*for (LegacyPart part : parts) {
-			*///?}
-				accumulate(topFace, part.getQuads(Direction.UP), spriteCache);
-				accumulate(sideFace, part.getQuads(Direction.SOUTH), spriteCache);
-				if (sideFace.isEmpty()) {
-					accumulate(sideFace, part.getQuads(Direction.NORTH), spriteCache);
+			// A mod's model can fail when asked for its faces without its block entity's data, as
+			// Immersive Engineering's mirrored multiblock parts do. Such a block falls back below like
+			// one with no faces, instead of the failure stopping the table and crashing the game.
+			try {
+				//? if >=1.21.5 {
+				parts.clear();
+				random.setSeed(42L);
+				model.collectParts(random, parts);
+				//?} else {
+				/*List<LegacyPart> parts = List.of(new LegacyPart(model, state, random));
+				*///?}
+				//? if >=26.1 {
+				for (BlockStateModelPart part : parts) {
+				//?} else if >=1.21.5 {
+				/*for (BlockModelPart part : parts) {
+				*///?} else {
+				/*for (LegacyPart part : parts) {
+				*///?}
+					accumulate(topFace, part.getQuads(Direction.UP), spriteCache);
+					accumulate(sideFace, part.getQuads(Direction.SOUTH), spriteCache);
+					if (sideFace.isEmpty()) {
+						accumulate(sideFace, part.getQuads(Direction.NORTH), spriteCache);
+					}
+					// Cross-shaped plants and other unculled geometry.
+					List<BakedQuad> loose = part.getQuads(null);
+					if (!loose.isEmpty()) {
+						accumulateLoose(topFace, sideFace, loose, spriteCache);
+					}
 				}
-				// Cross-shaped plants and other unculled geometry.
-				List<BakedQuad> loose = part.getQuads(null);
-				if (!loose.isEmpty()) {
-					accumulateLoose(topFace, sideFace, loose, spriteCache);
+			} catch (RuntimeException | LinkageError e) {
+				topFace = new FaceColor();
+				sideFace = new FaceColor();
+				if (failedModels++ == 0) {
+					Diorama.LOGGER.warn("The model of {} failed when asked for its faces ({}); such blocks take their particle texture or map colour", state, e.toString());
 				}
 			}
 			if (topFace.isEmpty() && sideFace.isEmpty()) {
 				// Block entities (chests, signs, beds) have no block model; use the particle texture.
-				//? if >=26.1 {
-				TextureAtlasSprite particle = model.particleMaterial().sprite();
-				//?} else {
-				/*TextureAtlasSprite particle = model.particleIcon();
-				*///?}
-				if (!isMissing(particle)) {
+				TextureAtlasSprite particle;
+				try {
+					//? if >=26.1 {
+					particle = model.particleMaterial().sprite();
+					//?} else {
+					/*particle = model.particleIcon();
+					*///?}
+				} catch (RuntimeException | LinkageError e) {
+					particle = null;
+				}
+				if (particle != null && !isMissing(particle)) {
 					float[] avg = spriteAverage(particle, spriteCache);
 					topFace.add(avg, -1);
 					sideFace.add(avg, -1);
@@ -493,6 +510,9 @@ public final class BlockLooks {
 		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
 		builtFrom = mc.getModelManager().getMissingBlockStateModel();
 		*///?}
+		if (failedModels > 1) {
+			Diorama.LOGGER.warn("{} block models in all failed when asked for their faces", failedModels);
+		}
 		Diorama.LOGGER.info("Built block colors for {} states in {} ms", size, (System.nanoTime() - start) / 1_000_000);
 		return looks;
 	}
