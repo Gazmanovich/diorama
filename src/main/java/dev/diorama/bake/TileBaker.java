@@ -415,12 +415,22 @@ public final class TileBaker {
 			return;
 		}
 		// Crafts' shadows cross a small block at its base, so a fence doesn't break their edge up by its rows of pixels.
-		if (partial && !this.cave) {
+		if (partial && !this.cave && this.smallFootprint(id)) {
 			this.surfaceY = by;
 		}
 		this.shade(id, x, by, bz, fx, hitY, hitZ, top, partial, 0);
 		this.surfaceShaded = this.cave ? 0 : this.withoutSun();
 		this.surfaceTop = top;
+	}
+
+	/** Whether a shaped block leaves most of its cell open from above, as a fence does and a slab or stairs don't. */
+	private boolean smallFootprint(int id) {
+		float[] boxes = this.looks.shapes[this.looks.shape[id]];
+		float area = 0;
+		for (int i = 0; i < boxes.length; i += 6) {
+			area += (boxes[i + 3] - boxes[i]) * (boxes[i + 5] - boxes[i + 2]);
+		}
+		return area < 0.5F;
 	}
 
 	/** A baker only for {@link #sunBlocked}. */
