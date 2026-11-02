@@ -49,7 +49,8 @@ import org.jspecify.annotations.Nullable;
  */
 public final class MapLevel implements ChunkSource {
 	private static final int MAX_CHUNKS = 4096;
-	private static final int MAX_GPU_TILES = 192;
+	/** Tiles kept on the GPU, about 1.4 MB each. A 1080p map zoomed out shows up to about 200, at the finer overview level. */
+	static final int MAX_GPU_TILES = 256;
 	/** A changed tile waits this long for more changes before re-baking... */
 	private static final long QUIET_MS = 350;
 	/** ...but never longer than this. */

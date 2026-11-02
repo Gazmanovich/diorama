@@ -144,7 +144,7 @@ for (sourceSet in listOf(main, gameshim, gametest)) {
 	sourceSet.resources.srcDir(generatePackMetadata)
 }
 
-// The fog shader's program file: 1.20.1 loads it from the minecraft namespace, by name.
+// The fog and tile shaders' program files: 1.20.1 loads them from the minecraft namespace, by name.
 tasks.named<ProcessResources>("processResources") {
-	exclude("assets/diorama/shaders/core/fog.json")
+	exclude("assets/diorama/shaders/core/fog.json", "assets/diorama/shaders/core/tile.json")
 }
