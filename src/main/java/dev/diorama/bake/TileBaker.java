@@ -644,7 +644,8 @@ public final class TileBaker {
 		if (seed != null) {
 			int cx = this.hitX >> 4;
 			int cz = this.hitZ >> 4;
-			if (this.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, cx, cz))) {
+			dev.diorama.Facing facing = Projection.facing();
+			if (this.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, facing.worldBlockX(cx, cz), facing.worldBlockZ(cx, cz)))) {
 				bits |= Overlays.SLIME;
 			}
 		}

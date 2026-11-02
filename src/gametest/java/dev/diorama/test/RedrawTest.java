@@ -148,7 +148,7 @@ final class RedrawTest {
 		pillarPixel = py * size + px;
 		pillarTile = new TileKey(TileKey.SURFACE, Math.floorDiv(pillarX, Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		// Read from the folder itself: it isn't the map's right now.
-		String folder = new TileLabel(false, Math.round(Settings.get().style().pitchDegrees()), false).folder();
+		String folder = new TileLabel(false, Math.round(Settings.get().style().pitchDegrees()), false, Projection.facing()).folder();
 		TileStore first = new TileStore(context.computeOnClient(mc -> MapSession.get().map().importFolder()).resolveSibling(folder));
 		int[] pixels = first.read(pillarTile);
 		first.close();

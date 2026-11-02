@@ -68,8 +68,8 @@ public final class ExportDrawings implements ImageExport.Finish {
 			float left = Float.MAX_VALUE;
 			float right = -Float.MAX_VALUE;
 			for (int k = 0; k < n; k++) {
-				p[k * 2] = (float) (drawing.points[k * 2] * perUnit - area.x());
-				p[k * 2 + 1] = (float) (drawing.points[k * 2 + 1] * perUnit - area.y());
+				p[k * 2] = (float) (drawing.shown()[k * 2] * perUnit - area.x());
+				p[k * 2 + 1] = (float) (drawing.shown()[k * 2 + 1] * perUnit - area.y());
 				left = Math.min(left, p[k * 2]);
 				right = Math.max(right, p[k * 2]);
 				top = Math.min(top, p[k * 2 + 1]);

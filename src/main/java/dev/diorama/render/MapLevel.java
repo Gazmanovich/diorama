@@ -2,6 +2,7 @@ package dev.diorama.render;
 
 import dev.diorama.Claims;
 import dev.diorama.Diorama;
+import dev.diorama.Facing;
 import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.ChunkSource;
@@ -45,7 +46,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Everything the map knows about one dimension: chunk snapshots, baked tiles, and which tiles
  * need baking. Tiles are baked on demand when a view asks for them, and re-baked shortly after
- * the chunks under them change.
+ * the chunks under them change. As a {@link ChunkSource} it answers in turned space, which is what
+ * bakes and picks read; {@link #world()} has the world's own chunks.
  */
 public final class MapLevel implements ChunkSource {
 	private static final int MAX_CHUNKS = 4096;
@@ -232,8 +234,52 @@ public final class MapLevel implements ChunkSource {
 
 	@Override
 	public @Nullable ChunkSnapshot chunk(int chunkX, int chunkZ) {
+		Facing facing = Projection.facing();
+		ChunkSnapshot chunk = this.worldChunk(facing.worldBlockX(chunkX, chunkZ), facing.worldBlockZ(chunkX, chunkZ));
+		return chunk == null ? null : chunk.turned(facing);
+	}
+
+	/** The chunk at a place in the world, as it is. */
+	public @Nullable ChunkSnapshot worldChunk(int chunkX, int chunkZ) {
 		return this.chunks.get(ChunkSnapshot.key(chunkX, chunkZ));
 	}
+
+	/** This map's chunks at their places in the world. */
+	public ChunkSource world() {
+		return this.world;
+	}
+
+	private final ChunkSource world = new ChunkSource() {
+		@Override
+		public @Nullable ChunkSnapshot chunk(int chunkX, int chunkZ) {
+			return MapLevel.this.worldChunk(chunkX, chunkZ);
+		}
+
+		@Override
+		public int minY() {
+			return MapLevel.this.minY;
+		}
+
+		@Override
+		public int maxY() {
+			return MapLevel.this.maxY;
+		}
+
+		@Override
+		public int topY() {
+			return MapLevel.this.topY;
+		}
+
+		@Override
+		public int roof() {
+			return MapLevel.this.roof;
+		}
+
+		@Override
+		public boolean isSeen(int x, int y, int z) {
+			return MapLevel.this.seen.isSeen(x, y, z);
+		}
+	};
 
 	@Override
 	public int minY() {
@@ -266,7 +312,8 @@ public final class MapLevel implements ChunkSource {
 
 	@Override
 	public boolean isSeen(int x, int y, int z) {
-		return this.seen.isSeen(x, y, z);
+		Facing facing = Projection.facing();
+		return this.seen.isSeen(facing.worldBlockX(x, z), y, facing.worldBlockZ(x, z));
 	}
 
 	public SeenBlocks seen() {
@@ -328,7 +375,7 @@ public final class MapLevel implements ChunkSource {
 
 	/** The folder the sky view's tiles are saved in; see {@link TileLabel}. */
 	private String storeName() {
-		return new TileLabel(this.roofless(), Math.round(dev.diorama.MapStyle.get().pitchDegrees()), this.roofless() && this.fogOfWar).folder();
+		return new TileLabel(this.roofless(), Math.round(dev.diorama.MapStyle.get().pitchDegrees()), this.roofless() && this.fogOfWar, Projection.facing()).folder();
 	}
 
 	/** Moves to another folder if how tiles are baked changed, and queues everything loaded to be saved there. */
@@ -460,7 +507,12 @@ public final class MapLevel implements ChunkSource {
 	 * cave slices. {@code terrain} is
 	 * false when only light changed: the sky view's pixels stay the same, so nothing to save.
 	 */
-	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int caveY1, int z1, boolean visibleFromSky, boolean terrain) {
+	private void invalidate(int worldX0, int y0, int caveY0, int worldZ0, int worldX1, int y1, int caveY1, int worldZ1, boolean visibleFromSky, boolean terrain) {
+		Facing facing = Projection.facing();
+		int x0 = Math.min(facing.blockX(worldX0, worldZ0), facing.blockX(worldX1, worldZ1));
+		int x1 = Math.max(facing.blockX(worldX0, worldZ0), facing.blockX(worldX1, worldZ1));
+		int z0 = Math.min(facing.blockZ(worldX0, worldZ0), facing.blockZ(worldX1, worldZ1));
+		int z1 = Math.max(facing.blockZ(worldX0, worldZ0), facing.blockZ(worldX1, worldZ1));
 		Set<Integer> layers = new HashSet<>();
 		for (TileKey key : this.tiles.keySet()) {
 			layers.add(key.layer());
@@ -581,8 +633,9 @@ public final class MapLevel implements ChunkSource {
 			return false;
 		}
 		double units = Projection.TILE_UNITS;
-		int x0 = snapshot.chunkX << 4;
-		int z0 = snapshot.chunkZ << 4;
+		ChunkSnapshot turned = snapshot.turned(Projection.facing());
+		int x0 = turned.chunkX << 4;
+		int z0 = turned.chunkZ << 4;
 		int tu0 = (int) Math.floor(x0 / units);
 		int tu1 = (int) Math.floor((x0 + 16) / units);
 		// Under a roof the chunk's height is the roof's: what shows can be anywhere down to the floor.
@@ -1113,10 +1166,12 @@ public final class MapLevel implements ChunkSource {
 		TileKey key = new TileKey(layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		WorldSavePick world = readWorld ? WorldSavePick.current() : null;
 		boolean fog = this.fogOfWar;
+		Facing facing = Projection.facing();
 		return CompletableFuture.supplyAsync(() -> {
 			int[] spots = store.spots(key);
 			if (TileSpots.known(key, spots, u, v)) {
-				return CompletableFuture.completedFuture(new Spot(TileSpots.spot(key, spots, u, v), false));
+				BlockPos spot = TileSpots.spot(key, spots, u, v);
+				return CompletableFuture.completedFuture(new Spot(spot == null ? null : facing.worldPos(spot), false));
 			}
 			if (!drawn(store.read(key), key, u, v)) {
 				return CompletableFuture.completedFuture(Spot.NOTHING);
@@ -1125,7 +1180,7 @@ public final class MapLevel implements ChunkSource {
 				return CompletableFuture.completedFuture(new Spot(null, true));
 			}
 			// Nothing found in the save, where the map shows something: say to come back, not that nothing's there.
-			return world.pick(this, looks, u, v, fog).thenApply(pos -> new Spot(pos, pos == null));
+			return world.pick(this.world, facing, looks, u, v, fog).thenApply(pos -> new Spot(pos, pos == null));
 		}).thenCompose(spot -> spot).exceptionally(t -> {
 			Diorama.LOGGER.warn("Couldn't read the saved spots of tile {}", key, t);
 			return Spot.NOTHING;
@@ -1161,10 +1216,15 @@ public final class MapLevel implements ChunkSource {
 		}
 		// The chunks the tile could show, and the columns past its sides that its edges look at:
 		// its columns, and the rows' ground anywhere from the bottom of the world to the top.
-		int cx0 = Math.floorDiv((int) Math.floor(key.minU()), 16) - 1;
-		int cx1 = Math.floorDiv((int) Math.ceil(key.minU() + key.units()), 16) + 1;
-		int cz0 = Math.floorDiv((int) Math.floor(Projection.zAt(key.minV(), this.minY)), 16);
-		int cz1 = Math.floorDiv((int) Math.ceil(Projection.zAt(key.minV() + key.units(), this.maxY)), 16);
+		int tx0 = Math.floorDiv((int) Math.floor(key.minU()), 16) - 1;
+		int tx1 = Math.floorDiv((int) Math.ceil(key.minU() + key.units()), 16) + 1;
+		int tz0 = Math.floorDiv((int) Math.floor(Projection.zAt(key.minV(), this.minY)), 16);
+		int tz1 = Math.floorDiv((int) Math.ceil(Projection.zAt(key.minV() + key.units(), this.maxY)), 16);
+		Facing facing = Projection.facing();
+		int cx0 = Math.min(facing.worldBlockX(tx0, tz0), facing.worldBlockX(tx1, tz1));
+		int cx1 = Math.max(facing.worldBlockX(tx0, tz0), facing.worldBlockX(tx1, tz1));
+		int cz0 = Math.min(facing.worldBlockZ(tx0, tz0), facing.worldBlockZ(tx1, tz1));
+		int cz1 = Math.max(facing.worldBlockZ(tx0, tz0), facing.worldBlockZ(tx1, tz1));
 		boolean near = claims.mayHaveAny(cx0, cz0, cx1, cz1);
 		boolean changed = painted == null ? near : claims.differsIn(painted, cx0, cz0, cx1, cz1);
 		if (!changed && !(moved && near)) {
@@ -1511,7 +1571,7 @@ public final class MapLevel implements ChunkSource {
 			return false;
 		}
 		// As for a live bake to be saved: the pixels and the spots have to see the same chunks.
-		ChunkSource source = new PinnedSource(save);
+		ChunkSource source = new PinnedSource(new dev.diorama.bake.TurnedSource(save, Projection.facing()));
 		int generation = this.generation(key);
 		this.savedTilesRaced.remove(key);
 		this.savedTilesBaking.add(key);

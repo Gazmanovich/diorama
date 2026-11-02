@@ -125,7 +125,7 @@ final class MapPiece {
 			graphics.fill(left, top, left + this.width, top + this.depth + this.side, 0xFF6E8B4A);
 			return;
 		}
-		MapViewport.View view = new MapViewport.View(left, top, this.width, this.depth, viewer.getX(), Projection.v(viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE);
+		MapViewport.View view = new MapViewport.View(left, top, this.width, this.depth, Projection.u(viewer.getX(), viewer.getZ()), Projection.v(viewer.getX(), viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE);
 		MapSession session = MapSession.get();
 		MapLevel map = session != null ? session.map() : null;
 		if (map != null && MapViewport.showsAnything(map, view)) {
@@ -170,7 +170,7 @@ final class MapPiece {
 				// Where the map shows nothing, an ordinary column: grass, a few blocks of dirt, then stone.
 				BlockState state;
 				if (hit != null) {
-					pos.set(bx, hit[0] - row, hit[1]);
+					pos.set(facing(bx, hit[1], true), hit[0] - row, facing(bx, hit[1], false));
 					state = level.getBlockState(pos);
 				} else {
 					pos.set(bx, player.getY() - 1 - row, player.getZ());
@@ -220,9 +220,11 @@ final class MapPiece {
 		} else {
 			// Start a little above the ground the heightmap finds along the ray, to save walking
 			// down from the sky; a few rounds settle where the ray meets it.
-			int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, (int) Math.floor(v / sin));
+			int z = (int) Math.floor(v / sin);
+			int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, facing(x, z, true), facing(x, z, false));
 			for (int i = 0; i < 4; i++) {
-				y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, (int) Math.floor((v + y * cos) / sin));
+				z = (int) Math.floor((v + y * cos) / sin);
+				y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, facing(x, z, true), facing(x, z, false));
 			}
 			if (y <= minY) {
 				return null;
@@ -237,7 +239,7 @@ final class MapPiece {
 			int zIn = (int) Math.floor((v + (y + 1) * cos) / sin);
 			int zOut = (int) Math.floor((v + y * cos) / sin);
 			for (int z = zIn; z >= zOut; z--) {
-				BlockState state = level.getBlockState(pos.set(x, y, z));
+				BlockState state = level.getBlockState(pos.set(facing(x, z, true), y, facing(x, z, false)));
 				if (!underRoof) {
 					if (state.isAir()) {
 						underRoof = true;
@@ -250,6 +252,11 @@ final class MapPiece {
 			}
 		}
 		return null;
+	}
+
+	/** The world's x, or z, of a column of the map. */
+	private static int facing(int x, int z, boolean worldX) {
+		return worldX ? Projection.facing().worldBlockX(x, z) : Projection.facing().worldBlockZ(x, z);
 	}
 
 	private static boolean ground(BlockLooks looks, BlockState state) {

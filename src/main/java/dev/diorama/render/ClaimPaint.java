@@ -34,6 +34,7 @@ final class ClaimPaint {
 	 */
 	static int @Nullable [] paint(TileKey key, byte[] chunks, byte @Nullable [] north, byte @Nullable [] south, Claims.Snapshot claims) {
 		int size = Projection.TILE_PIXELS;
+		dev.diorama.Facing facing = Projection.facing();
 		int[] chunkX = new int[size];
 		for (int px = 0; px < size; px++) {
 			chunkX[px] = TileChunks.chunkX(key, px);
@@ -60,7 +61,7 @@ final class ClaimPaint {
 				if (cx != lastX || cz != lastZ) {
 					lastX = cx;
 					lastZ = cz;
-					Claims.Claim claim = claims.at(cx, cz);
+					Claims.Claim claim = claims.at(facing.worldBlockX(cx, cz), facing.worldBlockZ(cx, cz));
 					if (claim == null) {
 						lastId = 0;
 					} else {

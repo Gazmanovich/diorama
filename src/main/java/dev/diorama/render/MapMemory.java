@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import dev.diorama.Diorama;
+import dev.diorama.Facing;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.TileLabel;
@@ -82,6 +83,9 @@ public final class MapMemory {
 	private final TileStore store;
 	private final double sin;
 	private final double cos;
+	/** Which way the remembered map faces, and how far the map has turned from it. */
+	private final Facing facing;
+	private final int quarterTurns;
 	private final LinkedHashMap<TileKey, Entry> tiles = new LinkedHashMap<>(16, 0.75F, true);
 	private final Set<TileKey> loading = new HashSet<>();
 	private final ConcurrentLinkedQueue<Loaded> loaded = new ConcurrentLinkedQueue<>();
@@ -93,6 +97,8 @@ public final class MapMemory {
 		this.store = new TileStore(folder);
 		this.sin = Math.sin(Math.toRadians(label.pitch()));
 		this.cos = Math.cos(Math.toRadians(label.pitch()));
+		this.facing = label.facing();
+		this.quarterTurns = Math.floorMod(Projection.facing().turns - label.facing().turns, 4);
 	}
 
 	/**
@@ -213,13 +219,18 @@ public final class MapMemory {
 		this.evict(now);
 		int lod = lod(view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
-		double minV = this.oldV(view.minV());
-		double maxV = this.oldV(view.minV() + view.height() / view.zoom());
-		int tu1 = (int) Math.floor((view.minU() + view.width() / view.zoom()) / units);
-		int tv1 = (int) Math.floor(maxV / units);
+		double maxU = view.minU() + view.width() / view.zoom();
+		double maxV = view.minV() + view.height() / view.zoom();
+		// The view's corners in the old map, which may lie on its side.
+		double[] a = this.toOld(view.minU(), view.minV());
+		double[] b = this.toOld(maxU, maxV);
+		int tu0 = (int) Math.floor(Math.min(a[0], b[0]) / units);
+		int tu1 = (int) Math.floor(Math.max(a[0], b[0]) / units);
+		int tv0 = (int) Math.floor(Math.min(a[1], b[1]) / units);
+		int tv1 = (int) Math.floor(Math.max(a[1], b[1]) / units);
 		Circle circle = view.round() ? Circle.in(view) : null;
-		for (int tu = (int) Math.floor(view.minU() / units); tu <= tu1; tu++) {
-			for (int tv = (int) Math.floor(minV / units); tv <= tv1; tv++) {
+		for (int tu = tu0; tu <= tu1; tu++) {
+			for (int tv = tv0; tv <= tv1; tv++) {
 				TileKey key = new TileKey(TileKey.SURFACE, tu, tv, lod);
 				Entry entry = this.tiles.get(key);
 				if (entry == null) {
@@ -229,10 +240,12 @@ public final class MapMemory {
 					continue;
 				}
 				entry.drawnMs = now;
-				float x0 = view.screenX(tu * units);
-				float x1 = view.screenX((tu + 1) * units);
-				float y0 = view.screenY(this.newV(tv * units));
-				float y1 = view.screenY(this.newV((tv + 1) * units));
+				double[] from = this.fromOld(tu * units, tv * units);
+				double[] to = this.fromOld((tu + 1) * units, (tv + 1) * units);
+				float x0 = view.screenX(Math.min(from[0], to[0]));
+				float x1 = view.screenX(Math.max(from[0], to[0]));
+				float y0 = view.screenY(Math.min(from[1], to[1]));
+				float y1 = view.screenY(Math.max(from[1], to[1]));
 				if (circle == null) {
 					canvas.rect(entry.texture, Sampling.TILE_SMOOTH, x0, y0, x1, y1, 0, 0, 1, 1, tint);
 				} else {
@@ -249,15 +262,15 @@ public final class MapMemory {
 	float known(MapViewport.View view, double u, double v) {
 		int lod = lod(view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
-		double oldV = this.oldV(v);
-		int tu = (int) Math.floor(u / units);
-		int tv = (int) Math.floor(oldV / units);
+		double[] old = this.toOld(u, v);
+		int tu = (int) Math.floor(old[0] / units);
+		int tv = (int) Math.floor(old[1] / units);
 		Entry entry = this.tiles.get(new TileKey(TileKey.SURFACE, tu, tv, lod));
 		if (entry == null || entry.known == null) {
 			return 0;
 		}
-		int x = (int) Math.min(EDGE - 1L, (long) ((u - tu * units) / units * EDGE));
-		int y = (int) Math.min(EDGE - 1L, (long) ((oldV - tv * units) / units * EDGE));
+		int x = (int) Math.min(EDGE - 1L, (long) ((old[0] - tu * units) / units * EDGE));
+		int y = (int) Math.min(EDGE - 1L, (long) ((old[1] - tv * units) / units * EDGE));
 		return (entry.known[y * EDGE + x] & 0xFF) / 255.0F;
 	}
 
@@ -269,8 +282,10 @@ public final class MapMemory {
 		int x0 = chunkX << 4;
 		int z0 = chunkZ << 4;
 		for (int[] at : new int[][] {{8, 8}, {0, 0}, {15, 0}, {0, 15}, {15, 15}}) {
-			double u = x0 + at[0] + 0.5;
-			double v = (z0 + at[1] + 0.5) * this.sin - top * this.cos;
+			double worldX = x0 + at[0] + 0.5;
+			double worldZ = z0 + at[1] + 0.5;
+			double u = this.facing.x(worldX, worldZ);
+			double v = this.facing.z(worldX, worldZ) * this.sin - top * this.cos;
 			TileKey key = new TileKey(TileKey.SURFACE, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 			int[] pixels = this.store.read(key);
 			if (pixels != null) {
@@ -285,13 +300,21 @@ public final class MapMemory {
 		return false;
 	}
 
-	/** The old map's row at a row of the map as it's drawn now. */
-	private double oldV(double v) {
-		return Projection.zAt(v, FIT_Y) * this.sin - FIT_Y * this.cos;
+	/** A point of the map as it's drawn now, in the old map, for ground at {@link #FIT_Y}. */
+	private double[] toOld(double u, double v) {
+		Facing now = Projection.facing();
+		double z = Projection.zAt(v, FIT_Y);
+		double worldX = now.worldX(u, z);
+		double worldZ = now.worldZ(u, z);
+		return new double[] {this.facing.x(worldX, worldZ), this.facing.z(worldX, worldZ) * this.sin - FIT_Y * this.cos};
 	}
 
-	private double newV(double oldV) {
-		return Projection.v(FIT_Y, (oldV + FIT_Y * this.cos) / this.sin);
+	/** A point of the old map on the map as it's drawn now. */
+	private double[] fromOld(double u, double v) {
+		double z = (v + FIT_Y * this.cos) / this.sin;
+		double worldX = this.facing.worldX(u, z);
+		double worldZ = this.facing.worldZ(u, z);
+		return new double[] {Projection.u(worldX, worldZ), Projection.v(worldX, FIT_Y, worldZ)};
 	}
 
 	private void load(TileKey key) {
@@ -305,7 +328,7 @@ public final class MapMemory {
 				int[] saved = this.closed ? null : this.store.read(key);
 				if (saved != null) {
 					known = new byte[EDGE * EDGE];
-					pixels = shrink(saved, known);
+					pixels = turned(shrink(saved, known), this.quarterTurns);
 				}
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Couldn't load the remembered tile {}", key, e);
@@ -344,6 +367,26 @@ public final class MapMemory {
 					out[y * EDGE + x] = alpha << 24 | mute(blue, grey) << 16 | mute(green, grey) << 8 | mute(red, grey);
 					known[y * EDGE + x] = (byte) alpha;
 				}
+			}
+		}
+		return out;
+	}
+
+	/** A square picture turned clockwise by this many quarter turns. */
+	private static int[] turned(int[] pixels, int quarterTurns) {
+		if (quarterTurns == 0) {
+			return pixels;
+		}
+		int[] out = new int[pixels.length];
+		int last = EDGE - 1;
+		for (int y = 0; y < EDGE; y++) {
+			for (int x = 0; x < EDGE; x++) {
+				int to = switch (quarterTurns) {
+					case 1 -> x * EDGE + last - y;
+					case 2 -> (last - y) * EDGE + last - x;
+					default -> (last - x) * EDGE + y;
+				};
+				out[to] = pixels[y * EDGE + x];
 			}
 		}
 		return out;
