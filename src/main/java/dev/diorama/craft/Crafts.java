@@ -18,7 +18,7 @@ import java.util.function.Consumer;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -87,7 +87,7 @@ public final class Crafts {
 	}
 
 	/** Keeps the crafts in step with the level. Client thread, every tick. */
-	public void tick(@Nullable LocalPlayer player, long tick) {
+	public void tick(@Nullable Entity viewer, long tick) {
 		BlockLooks looks = BlockLooks.get();
 		if (looks == null) {
 			return;
@@ -160,10 +160,10 @@ public final class Crafts {
 				craft.nearSince = -1;
 				this.dirty = true;
 			}
-			if (craft.parked && player != null) {
+			if (craft.parked && viewer != null) {
 				double[] c = craft.center(craft.pose);
-				double dx = c[0] - player.getX();
-				double dz = c[2] - player.getZ();
+				double dx = c[0] - viewer.getX();
+				double dz = c[2] - viewer.getZ();
 				if (dx * dx + dz * dz < NEAR * NEAR) {
 					if (craft.nearSince < 0) {
 						craft.nearSince = tick;

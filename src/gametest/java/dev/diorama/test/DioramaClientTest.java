@@ -187,6 +187,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("minimap-zoom")) {
+				MinimapZoomTest.ruler(context, world);
+			}
 			if (tests.contains("enlarge")) {
 				enlarge(context);
 			}
@@ -205,6 +208,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("saved-chunks")) {
 				savedChunksGround = SavedChunksTest.run(context, world);
 			}
+			if (tests.contains("redraw")) {
+				RedrawTest.run(context, world);
+			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
 			}
@@ -216,6 +222,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("pixelmon")) {
 				PixelmonTest.run(context, world);
+			}
+			if (tests.contains("spectate")) {
+				SpectateTest.run(context, world);
 			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
@@ -229,10 +238,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks")) && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
+				}
+				if (tests.contains("redraw")) {
+					RedrawTest.reopened(context);
+					RedrawTest.underRoof(context, reopened);
 				}
 				if (tests.contains("waypoints")) {
 					temporaryGone(context);
@@ -267,6 +280,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		//? if >=1.21.4 && fabric {
 		if (tests.contains("game-time-server")) {
 			GameTimeTest.onServer(context);
+		}
+		if (tests.contains("spectate-server")) {
+			SpectateTest.onServer(context);
 		}
 		//?}
 		// The server's side of Xaero's channels goes through Fabric API networking, so these run on
@@ -5787,7 +5803,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
 			s.minimapSize = 176;
-			s.minimapZoom = 1;
+			s.minimapPixelsPerBlock = 1;
 			s.save();
 		});
 		settle(context, 20);
@@ -5807,7 +5823,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
 			s.minimapSize = 96;
-			s.minimapZoom = 3;
+			s.minimapPixelsPerBlock = 2;
 			s.save();
 		});
 		world.getServer().runCommand("effect give @a speed 60 0");
@@ -5825,13 +5841,35 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError(e);
 			}
 			Settings s = Settings.reload();
-			if (s.minimapZoom != 0 || s.radarRange != Settings.RANGES[0] || s.minimapOpacity != Settings.MIN_OPACITY) {
-				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.minimapZoom + ", range " + s.radarRange + ", opacity " + s.minimapOpacity);
+			if (s.zoom() != 0.75 || s.radarRange != Settings.RANGES[0] || s.minimapOpacity != Settings.MIN_OPACITY) {
+				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.zoom() + ", range " + s.radarRange + ", opacity " + s.minimapOpacity);
 			}
 			s.minimapOpacity = Settings.MAX_OPACITY;
-			s.minimapZoom = 3;
+			s.minimapPixelsPerBlock = 2;
 			s.radarRange = 32;
 			s.save();
+		});
+		// Files from when the zoom was saved as a place in the steps keep the zoom they had.
+		context.runOnClient(mc -> {
+			java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
+			double[] zooms = {0.75, 1, 1.5, 2, 3, 4};
+			for (int place = 0; place < zooms.length; place++) {
+				try {
+					java.nio.file.Files.writeString(file, "{\"minimapZoom\": " + place + "}");
+				} catch (java.io.IOException e) {
+					throw new AssertionError(e);
+				}
+				Settings s = Settings.reload();
+				if (s.zoom() != zooms[place]) {
+					throw new AssertionError("A saved zoom of " + place + " loaded as " + s.zoom());
+				}
+				s.save();
+				if (Settings.reload().zoom() != zooms[place]) {
+					throw new AssertionError("A saved zoom of " + place + " moved on saving again: " + Settings.get().zoom());
+				}
+			}
+			Settings.get().minimapPixelsPerBlock = 2;
+			Settings.get().save();
 		});
 		// Settings saved before Size was a slider keep their size, and odd sizes snap to the slider's steps.
 		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "96"}};
@@ -6068,10 +6106,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
@@ -6207,7 +6245,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Waits until no tile has been baking for a while. */
-	private static void settle(ClientGameTestContext context, int minTicks) {
+	static void settle(ClientGameTestContext context, int minTicks) {
 		context.waitTicks(minTicks);
 		try (WorldPause paused = WorldPause.pause(context)) {
 			int quiet = 0;
