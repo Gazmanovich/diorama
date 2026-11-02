@@ -180,6 +180,7 @@ public final class SavedChunkImport {
 	private boolean remembered(int chunkX, int chunkZ, int top) {
 		MapMemory memory = this.map.memory();
 		return memory != null && this.remembered.computeIfAbsent(ChunkSnapshot.key(chunkX, chunkZ), k -> memory.showsChunk(chunkX, chunkZ, top));
+	}
 
 	/** How many chunks are left to draw. */
 	public int chunksLeft() {
