@@ -46,7 +46,7 @@ final class FacingTest {
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition()).offset(16, 0, 0);
-		int y0 = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, at.getX(), at.getZ())) + 6;
+		int y0 = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, at.getX(), at.getZ())) + 24;
 		int x0 = at.getX();
 		int z0 = at.getZ();
 		int x1 = x0 + SIZE - 1;
