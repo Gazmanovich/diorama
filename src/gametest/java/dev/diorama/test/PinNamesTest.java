@@ -39,7 +39,7 @@ final class PinNamesTest {
 		int z = at.getZ() - 12;
 		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " obsidian");
 		world.getServer().runCommand("fill " + (x + 1) + " " + (y + 1) + " " + z + " " + (x + 2) + " " + (y + 3) + " " + z + " nether_portal[axis=x]");
-		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL), 400);
+		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> mine(w, Waypoint.Kind.NETHER_PORTAL, x, z)), 400);
 
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
@@ -51,7 +51,7 @@ final class PinNamesTest {
 		context.takeScreenshot("pin-names-2-list-ru_ru");
 		Waypoint bed = pin(context, Waypoint.Kind.BED);
 		Waypoint death = pin(context, Waypoint.Kind.DEATH);
-		Waypoint portal = pin(context, Waypoint.Kind.NETHER_PORTAL);
+		Waypoint portal = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> mine(w, Waypoint.Kind.NETHER_PORTAL, x, z)).findFirst().orElseThrow());
 		expectShown(context, bed, "Кровать");
 		String time = context.computeOnClient(mc -> death.name.substring("Death ".length()));
 		expectShown(context, death, "Смерть " + time);
@@ -79,10 +79,27 @@ final class PinNamesTest {
 		expectShown(context, portal, "Nether Portal");
 		DioramaClientTest.reloadPacks(context, mc -> mc.getResourcePackRepository().removePack("file/" + PACK));
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+
+		// Gone again, for the sections after this one, which count pins.
+		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
+		BlockPos head = at.offset(3, 0, 0);
+		world.getServer().runCommand("fill " + head.getX() + " " + head.getY() + " " + head.getZ() + " " + head.getX() + " " + head.getY() + " " + (head.getZ() + 1) + " air");
+		context.runOnClient(mc -> {
+			WaypointStore.get().remove(bed);
+			WaypointStore.get().remove(death);
+			WaypointStore.get().remove(portal);
+		});
 	}
 
+	/** The pin on the portal this test lit, not one another section left. */
+	private static boolean mine(Waypoint waypoint, Waypoint.Kind kind, int x, int z) {
+		return waypoint.kind == kind && Math.abs(waypoint.x - x) <= 4 && Math.abs(waypoint.z - z) <= 4;
+	}
+
+	/** The newest pin of a kind: the one this test just made. */
 	private static Waypoint pin(ClientGameTestContext context, Waypoint.Kind kind) {
-		return context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == kind).findFirst().orElseThrow());
+		return context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == kind)
+			.max(java.util.Comparator.comparingLong(w -> w.created)).orElseThrow());
 	}
 
 	private static void expectShown(ClientGameTestContext context, Waypoint waypoint, String expected) {
