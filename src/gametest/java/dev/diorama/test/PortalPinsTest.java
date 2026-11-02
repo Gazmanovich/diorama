@@ -120,17 +120,20 @@ final class PortalPinsTest {
 		context.waitTicks(40);
 		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(false));
 
-		// Two portals sharing a pin: when the one it stands on goes, it moves to the other.
+		// Three portals in a row sharing a pin: when the middle one goes, the pin moves to one of the
+		// others, and the one out of its reach from there gets its own.
 		int pair = at.getX() - 110;
 		netherPortal(world, pair, y, z, 2, 3);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the first of a close pair");
 		netherPortal(world, pair + 20, y, z, 2, 3);
+		netherPortal(world, pair - 20, y, z, 2, 3);
 		context.waitTicks(40);
-		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the second of a close pair");
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "two portals beside it");
 		frameBroken(world, pair, y, z);
-		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && Math.abs(w.x - (pair + 20)) < 8), PIN_TICKS);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 4, "breaking the portal between two others");
 		frameBroken(world, pair + 20, y, z);
-		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking the last of a close pair");
+		frameBroken(world, pair - 20, y, z);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking the two left");
 
 		// The same with both in one chunk, where a portal of the kind is still there. A pin moves
 		// and is kept whatever the player did to it, so a deleted one doesn't come back.
