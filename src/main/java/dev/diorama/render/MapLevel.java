@@ -1567,15 +1567,16 @@ public final class MapLevel implements ChunkSource {
 	 * any bake, and waits for the render thread to take it. Returns whether it did; see
 	 * {@link #tileFromSave}. Any thread, one bake per tile at a time.
 	 */
-	boolean bakeFromSave(TileKey key, ChunkSource save, BlockLooks looks) {
+	boolean bakeFromSave(TileKey key, ChunkSource save, BlockLooks looks, Facing facing) {
 		TileStore store = this.store;
-		if (store == null) {
+		// The facing after the store: it changes first, so a store still current when the tile is
+		// taken was read with the facing it's for. A map turned since the tile was asked for
+		// wants another tile: what asked has to hear it wasn't drawn.
+		if (store == null || Projection.facing() != facing) {
 			return false;
 		}
-		// As for a live bake to be saved: the pixels and the spots have to see the same chunks. The
-		// facing after the store: it changes first, so a store that's still current when the tile
-		// is taken was read with the facing it's for.
-		ChunkSource source = new PinnedSource(new dev.diorama.bake.TurnedSource(save, Projection.facing()));
+		// As for a live bake to be saved: the pixels and the spots have to see the same chunks.
+		ChunkSource source = new PinnedSource(new dev.diorama.bake.TurnedSource(save, facing));
 		int generation = this.generation(key);
 		this.savedTilesRaced.remove(key);
 		this.savedTilesBaking.add(key);

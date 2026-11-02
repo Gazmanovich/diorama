@@ -401,7 +401,7 @@ public final class SavedChunkImport {
 		this.source.clear();
 		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
 		Plan plan = this.plans.get(region);
-		if (plan == null || plan.onlyRemembered != this.onlyRemembered) {
+		if (plan == null || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing()) {
 			plan = this.plan(region, progress);
 			if (plan == null) {
 				return;
@@ -416,14 +416,14 @@ public final class SavedChunkImport {
 		boolean leaving = false;
 		RuntimeException failure = null;
 		while (running > 0 || !leaving && !plan.order.isEmpty()) {
-			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered;
+			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing();
 			while (!leaving && running < this.workersNow() && !this.save.serverBehind()
 				&& this.map.unwrittenTiles() < MAX_UNWRITTEN && !memoryTight()) {
 				TileKey viewTile = this.nextViewTile(inProgress);
 				if (viewTile != null) {
 					inProgress.add(viewTile);
 					forViews.add(viewTile);
-					this.submit(drawing, viewTile, looks);
+					this.submit(drawing, viewTile, looks, plan.facing);
 					running++;
 					continue;
 				}
@@ -444,7 +444,7 @@ public final class SavedChunkImport {
 				plan.order.remove(plan.order.size() - 1);
 				if (this.needsDrawing(key, plan.tiles.get(key), plan, progress)) {
 					inProgress.add(key);
-					this.submit(drawing, key, looks);
+					this.submit(drawing, key, looks, plan.facing);
 					running++;
 				} else {
 					this.tileDone(key, plan, progress);
@@ -540,11 +540,11 @@ public final class SavedChunkImport {
 		return true;
 	}
 
-	private void submit(CompletionService<Drawn> drawing, TileKey key, BlockLooks looks) {
+	private void submit(CompletionService<Drawn> drawing, TileKey key, BlockLooks looks, Facing facing) {
 		drawing.submit(() -> {
 			long start = System.nanoTime();
 			try {
-				boolean taken = this.map.bakeFromSave(key, this.source, looks);
+				boolean taken = this.map.bakeFromSave(key, this.source, looks, facing);
 				long nanos = System.nanoTime() - start;
 				if (PACED && playing()) {
 					this.pause(3 * nanos / 1_000_000);
@@ -613,7 +613,7 @@ public final class SavedChunkImport {
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
 		int[] times = this.regions.get(region);
-		Plan plan = new Plan(this.onlyRemembered);
+		Plan plan = new Plan(this.onlyRemembered, Projection.facing());
 		MapMemory memory = plan.onlyRemembered ? this.map.memory() : null;
 		for (int i = 0; i < 1024; i++) {
 			int time = times[i];
@@ -644,7 +644,7 @@ public final class SavedChunkImport {
 			}
 			long chunk = ChunkSnapshot.key(cx, cz);
 			plan.times.put(chunk, time);
-			for (TileKey key : this.tilesShowing(cx, cz, summary)) {
+			for (TileKey key : this.tilesShowing(cx, cz, summary, plan.facing)) {
 				plan.tiles.computeIfAbsent(key, k -> new HashSet<>()).add(chunk);
 				plan.waiting.merge(chunk, 1, Integer::sum);
 			}
@@ -660,8 +660,7 @@ public final class SavedChunkImport {
 	 * The sky view tiles a chunk can show in, as {@link MapLevel} works it out for a newly loaded
 	 * chunk: its own blocks, plus the shadows and sky occlusion they cast on blocks nearby.
 	 */
-	private List<TileKey> tilesShowing(int cx, int cz, SavedChunks.Summary summary) {
-		Facing facing = Projection.facing();
+	private List<TileKey> tilesShowing(int cx, int cz, SavedChunks.Summary summary, Facing facing) {
 		int x0 = facing.blockX(cx, cz) << 4;
 		int z0 = facing.blockZ(cx, cz) << 4;
 		int x1 = x0 + 15;
@@ -695,6 +694,8 @@ public final class SavedChunkImport {
 	private static final class Plan {
 		/** Made for redrawing only what's remembered; a change of mind makes a new plan. */
 		final boolean onlyRemembered;
+		/** Which way the tiles below face: a chunk shows in others from another side, so a turn makes a new plan. */
+		final Facing facing;
 		/** Tiles left to draw; taken from the end. */
 		final List<TileKey> order = new ArrayList<>();
 		/** The region's new or changed chunks each tile shows. */
@@ -704,8 +705,9 @@ public final class SavedChunkImport {
 		/** When the save last wrote each of those chunks. */
 		final Map<Long, Integer> times = new HashMap<>();
 
-		Plan(boolean onlyRemembered) {
+		Plan(boolean onlyRemembered, Facing facing) {
 			this.onlyRemembered = onlyRemembered;
+			this.facing = facing;
 		}
 	}
 
