@@ -8,10 +8,15 @@ import dev.diorama.Settings;
 import dev.diorama.WorldKey;
 import dev.diorama.bake.TileKey;
 import dev.diorama.waypoint.Waypoint;
+import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointStore;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.world.level.levelgen.Heightmap;
 
@@ -101,11 +106,7 @@ final class PortalPinsTest {
 		frameBroken(world, third, y, z);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking a portal");
 		// A pin the player renamed is theirs, and stays.
-		context.runOnClient(mc -> {
-			Waypoint renamed = pinNowNear(second);
-			renamed.name = "Home gate";
-			WaypointStore.get().changed();
-		});
+		rename(context, pinNear(context, second), "Home gate");
 		frameBroken(world, second, y, z);
 		context.waitTicks(40);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking a renamed pin's portal");
@@ -120,8 +121,8 @@ final class PortalPinsTest {
 		context.waitTicks(40);
 		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(false));
 
-		// Three portals in a row sharing a pin: when the middle one goes, the pin moves to one of the
-		// others, and the one out of its reach from there gets its own.
+		// Three portals in a row sharing a pin: when the middle one goes, so does the pin, and each
+		// of the others gets its own.
 		int pair = at.getX() - 110;
 		netherPortal(world, pair, y, z, 2, 3);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the first of a close pair");
@@ -135,8 +136,8 @@ final class PortalPinsTest {
 		frameBroken(world, pair - 20, y, z);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking the two left");
 
-		// The same with both in one chunk, where a portal of the kind is still there. A pin moves
-		// and is kept whatever the player did to it, so a deleted one doesn't come back.
+		// The same with both in one chunk, where a portal of the kind is still there. It goes for a
+		// deleted pin too: the portal left was never the one the player deleted.
 		int chunk = (at.getX() - 140) & ~15;
 		netherPortal(world, chunk, y, z, 2, 3);
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the first portal in a chunk");
@@ -150,8 +151,9 @@ final class PortalPinsTest {
 		context.waitTicks(40);
 		frameBroken(world, chunk + 8, y, z);
 		context.waitTicks(40);
-		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking a portal with a deleted pin on it");
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "breaking a portal with a deleted pin on it");
 		frameBroken(world, chunk, y, z);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking the last in the chunk");
 
 		fromTheSave(context, world);
 
@@ -191,6 +193,27 @@ final class PortalPinsTest {
 			context.runOnClient(mc -> MapSession.get().savedChunks().rescanSoon());
 			context.waitFor(mc -> MapSession.get().savedChunks().idle(), 3600);
 			context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && w.x >> 9 == SAVED_X >> 9 && w.z >> 9 == SAVED_Z >> 9), PIN_TICKS);
+		}
+	}
+
+	/** Types a new name in the waypoint editor and presses Save, as the player does. */
+	private static void rename(ClientGameTestContext context, Waypoint waypoint, String name) {
+		context.setScreen(() -> new WaypointEditScreen(null, waypoint, false));
+		context.waitTicks(3);
+		double[] save = context.computeOnClient(mc -> {
+			mc.gui.screen().children().stream().filter(EditBox.class::isInstance).map(EditBox.class::cast).findFirst().orElseThrow().setValue(name);
+			Button button = mc.gui.screen().children().stream().filter(Button.class::isInstance).map(Button.class::cast)
+				.filter(b -> b.getMessage().getString().equals(Component.translatable("diorama.waypoint.save").getString())).findFirst().orElseThrow();
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {(button.getX() + button.getWidth() / 2.0) * scale, (button.getY() + button.getHeight() / 2.0) * scale};
+		});
+		context.getInput().setCursorPos(save[0], save[1]);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(3);
+		String saved = context.computeOnClient(mc -> waypoint.name);
+		if (!saved.equals(name)) {
+			throw new AssertionError("The editor didn't rename the pin: " + saved);
 		}
 	}
 
@@ -256,6 +279,7 @@ final class PortalPinsTest {
 			Settings.get().radarNeutral = false;
 			Settings.get().radarPassive = false;
 			Settings.get().radarItems = false;
+			Settings.get().portalMarkers = false;
 		});
 		world.getServer().runCommand("time set noon");
 		int px = cx - 10;

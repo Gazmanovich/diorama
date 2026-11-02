@@ -11,6 +11,7 @@ import dev.diorama.render.SavedChunkImport;
 import dev.diorama.waypoint.Portals;
 import dev.diorama.waypoint.WaypointStore;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -412,14 +413,21 @@ public final class MapSession {
 		return Minecraft.getInstance();
 	}
 
-	/** Starts or stops filling in from the save with the setting. */
+	/**
+	 * Starts or stops drawing from the save: filling the map in, with the setting, and redrawing what
+	 * a map remembers, which every map needs, but only as far as it remembers without the setting.
+	 */
 	private void updateSavedChunks(Minecraft mc) {
-		boolean on = Settings.get().mapSavedChunks && this.mainMap && mc.getSingleplayerServer() != null;
+		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
+		boolean on = (fill || this.map.memory() != null) && mc.getSingleplayerServer() != null;
 		if (on && this.savedChunks == null) {
 			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
 		} else if (!on && this.savedChunks != null) {
 			this.savedChunks.stop();
 			this.savedChunks = null;
+		}
+		if (this.savedChunks != null) {
+			this.savedChunks.onlyRemembered(!fill);
 		}
 	}
 
@@ -444,10 +452,12 @@ public final class MapSession {
 		String dimension = this.level.dimension().identifier().toString();
 		// Under fog of war only what the player has seen shows, and these aren't that.
 		WaypointStore pins = fog ? null : WaypointStore.get();
+		List<Portals.Spot> saved = new ArrayList<>();
 		for (Portals.Spot spot; (spot = this.savedPortals.poll()) != null; ) {
-			if (pins != null) {
-				Portals.add(List.of(spot), dimension, pins);
-			}
+			saved.add(spot);
+		}
+		if (pins != null) {
+			Portals.add(saved, dimension, pins);
 		}
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();

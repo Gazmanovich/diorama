@@ -89,26 +89,24 @@ public final class Portals {
 	}
 
 	/**
-	 * A chunk of the live world came in: pins any new portal, and sees to pins whose portal went. Such
-	 * a pin stood for every portal near it, so it moves to one that's left, deleted or not, and goes
-	 * only with the last. A pin the player renamed stays where it is, as it's theirs now; a language
-	 * change counts as that too. {@code around} is the chunks the map has.
+	 * A chunk of the live world came in: pins any new portal, and takes pins off portals that are
+	 * gone. A pin belongs to the portal under it. The others it stood for get pins of their own when
+	 * it goes, as new portals, from {@code around}, the chunks the map has. One the player renamed or
+	 * moved is theirs, and stays.
 	 */
 	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store, ChunkSource around) {
 		add(find(chunk), dimension, store);
 		for (Waypoint pin : store.withHidden(dimension)) {
-			if (pin.kind.isPortal() && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ
-				&& !onPortal(pin, chunk) && (pin.deleted || pin.name.equals(name(pin.kind)))) {
-				List<Spot> left = nearby(pin, around);
-				if (left.isEmpty()) {
-					store.forget(pin);
-				} else {
-					pin.x = left.get(0).x();
-					pin.y = left.get(0).y();
-					pin.z = left.get(0).z();
-					store.changed();
-					// Another of them may be out of its reach from here.
-					add(left, dimension, store);
+			if (pin.kind.isPortal() && !pin.edited && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ && !onPortal(pin, chunk)) {
+				store.forget(pin);
+				int reach = (SAME_PORTAL + 15) >> 4;
+				for (int dx = -reach; dx <= reach; dx++) {
+					for (int dz = -reach; dz <= reach; dz++) {
+						ChunkSnapshot near = around.chunk(chunk.chunkX + dx, chunk.chunkZ + dz);
+						if (near != null) {
+							add(find(near), dimension, store);
+						}
+					}
 				}
 			}
 		}
@@ -121,28 +119,16 @@ public final class Portals {
 		return section != null && kind(section.get(pin.x & 15, pin.y & 15, pin.z & 15).getBlock()) == pin.kind;
 	}
 
-	/** The portals of the pin's kind that it covers, in the chunks the map has. */
-	private static List<Spot> nearby(Waypoint pin, ChunkSource around) {
-		List<Spot> spots = new ArrayList<>();
-		int reach = (SAME_PORTAL + 15) >> 4;
-		for (int dx = -reach; dx <= reach; dx++) {
-			for (int dz = -reach; dz <= reach; dz++) {
-				ChunkSnapshot chunk = around.chunk((pin.x >> 4) + dx, (pin.z >> 4) + dz);
-				for (Spot spot : chunk == null ? List.<Spot>of() : find(chunk)) {
-					if (spot.kind() == pin.kind && Math.abs(spot.x() - pin.x) <= SAME_PORTAL && Math.abs(spot.z() - pin.z) <= SAME_PORTAL) {
-						spots.add(spot);
-					}
-				}
-			}
-		}
-		return spots;
-	}
-
-	/** Pins the spots no pin covers yet. A waypoint the player gave the portal icon counts. Client thread. */
+	/** Pins the spots no pin covers yet, with one save. A waypoint the player gave the portal icon counts. Client thread. */
 	public static void add(List<Spot> spots, String dimension, WaypointStore store) {
+		if (spots.isEmpty()) {
+			return;
+		}
+		List<Waypoint> known = new ArrayList<>(store.withHidden(dimension));
+		List<Waypoint> pins = new ArrayList<>();
 		for (Spot spot : spots) {
 			boolean pinned = false;
-			for (Waypoint waypoint : store.withHidden(dimension)) {
+			for (Waypoint waypoint : known) {
 				boolean marksPortals = waypoint.kind == spot.kind() || !waypoint.kind.isPortal() && waypoint.icon.equals(WaypointIcons.PORTAL);
 				pinned |= marksPortals && Math.abs(waypoint.x - spot.x()) <= SAME_PORTAL && Math.abs(waypoint.z - spot.z()) <= SAME_PORTAL;
 			}
@@ -151,9 +137,11 @@ public final class Portals {
 				Waypoint pin = new Waypoint(name(spot.kind()), spot.x(), spot.y(), spot.z(), dimension, color);
 				pin.kind = spot.kind();
 				pin.icon = WaypointIcons.PORTAL;
-				store.add(pin);
+				known.add(pin);
+				pins.add(pin);
 			}
 		}
+		store.addAll(pins);
 	}
 
 	/** The game's own name for the block, in the player's language. */

@@ -565,6 +565,8 @@ public final class WaypointEditScreen extends Screen {
 			this.onClose();
 			return;
 		}
+		this.waypoint.edited |= this.waypoint.kind.isPortal() && (!shown.name.equals(this.waypoint.name)
+			|| shown.x != this.waypoint.x || shown.y != this.waypoint.y || shown.z != this.waypoint.z);
 		this.waypoint.name = shown.name;
 		this.waypoint.initials = this.initials.getValue().trim();
 		this.waypoint.x = shown.x;

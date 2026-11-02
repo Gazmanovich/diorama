@@ -58,6 +58,8 @@ public final class Waypoint {
 	public @org.jspecify.annotations.Nullable String map;
 	/** A portal pin the player deleted: kept out of sight, so finding the portal again doesn't bring it back. */
 	public boolean deleted;
+	/** A portal pin the player renamed or moved: it's theirs now, and stays when the portal goes. */
+	public boolean edited;
 
 	public Waypoint() {
 	}
