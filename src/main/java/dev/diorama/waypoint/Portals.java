@@ -134,7 +134,7 @@ public final class Portals {
 			}
 			if (!pinned) {
 				int color = spot.kind() == Waypoint.Kind.NETHER_PORTAL ? NETHER_COLOR : END_COLOR;
-				Waypoint pin = new Waypoint(name(spot.kind()), spot.x(), spot.y(), spot.z(), dimension, color);
+				Waypoint pin = new Waypoint(savedName(spot.kind()), spot.x(), spot.y(), spot.z(), dimension, color);
 				pin.kind = spot.kind();
 				pin.icon = WaypointIcons.PORTAL;
 				known.add(pin);
@@ -144,9 +144,13 @@ public final class Portals {
 		store.addAll(pins);
 	}
 
-	/** The game's own name for the block, in the player's language. */
-	private static String name(Waypoint.Kind kind) {
-		Block block = kind == Waypoint.Kind.NETHER_PORTAL ? Blocks.NETHER_PORTAL : kind == Waypoint.Kind.END_PORTAL ? Blocks.END_PORTAL : Blocks.END_GATEWAY;
-		return block.getName().getString();
+	/** The block a portal pin marks; {@link Waypoint#shownName} shows its name in the player's language. */
+	static Block block(Waypoint.Kind kind) {
+		return kind == Waypoint.Kind.NETHER_PORTAL ? Blocks.NETHER_PORTAL : kind == Waypoint.Kind.END_PORTAL ? Blocks.END_PORTAL : Blocks.END_GATEWAY;
+	}
+
+	/** The block's English name, which a new pin is saved under (see {@link Waypoint#BED_NAME}). */
+	static String savedName(Waypoint.Kind kind) {
+		return kind == Waypoint.Kind.NETHER_PORTAL ? "Nether Portal" : kind == Waypoint.Kind.END_PORTAL ? "End Portal" : "End Gateway";
 	}
 }
