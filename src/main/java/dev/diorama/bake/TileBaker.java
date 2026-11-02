@@ -1063,7 +1063,7 @@ public final class TileBaker {
 			// Light through water loses the colours the water doesn't have: red goes first, so
 			// shallows over sand turn turquoise. The floor is gone a few blocks down, and the
 			// water keeps darkening with depth, so shelves and trenches still read.
-			float peak = Math.max(wr, Math.max(wg, wb));
+			float peak = Math.max(1e-4F, Math.max(wr, Math.max(wg, wb)));
 			float tr = (float) Math.exp(-depth * (0.45 * (1 - wr / peak) + 0.25));
 			float tg = (float) Math.exp(-depth * (0.45 * (1 - wg / peak) + 0.25));
 			float tb = (float) Math.exp(-depth * (0.45 * (1 - wb / peak) + 0.25));
