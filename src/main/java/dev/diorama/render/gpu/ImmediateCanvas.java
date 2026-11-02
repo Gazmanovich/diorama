@@ -39,7 +39,7 @@ final class ImmediateCanvas implements MapCanvas {
 		}
 		((LegacyTexture) texture).bind(0, sampling);
 		// Without the shader the tile is sampled the way it's bound, a little softer.
-		if (sampling == Sampling.TILE_EXACT && LegacyShaders.tileReady()) {
+		if (sampling == Sampling.TILE_AREA && LegacyShaders.tileReady()) {
 			LegacyShaders.drawTile(mesh.buildOrThrow());
 		} else {
 			LegacyShaders.draw(LegacyShaders.TEXTURED, mesh.buildOrThrow());

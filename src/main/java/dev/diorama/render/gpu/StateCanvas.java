@@ -30,7 +30,7 @@ final class StateCanvas implements MapCanvas {
 	@Override
 	public void quad(MapTexture texture, Sampling sampling, float[] corners, float[] uvs, int argb) {
 		this.graphics.guiRenderState.addGuiElement(QuadElement.of(
-			sampling == Sampling.TILE_EXACT ? DioramaPipelines.TILE : RenderPipelines.GUI_TEXTURED,
+			sampling == Sampling.TILE_AREA ? DioramaPipelines.TILE : RenderPipelines.GUI_TEXTURED,
 			((StateTexture) texture).single(sampling),
 			new Matrix3x2f(this.graphics.pose()),
 			corners,

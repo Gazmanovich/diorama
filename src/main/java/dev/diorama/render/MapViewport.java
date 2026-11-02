@@ -73,6 +73,7 @@ public final class MapViewport {
 	 * under a moving player would still be fog. This is as far as the game usually has chunks.
 	 */
 	private static final int NEAR_TILES = 2;
+	private static final int NEAR_TILE_COUNT = (2 * NEAR_TILES + 1) * (2 * NEAR_TILES + 1);
 
 	/** The most the fog shader's opacity code can say: it has five spare bits. */
 	private static final int OPACITY_CODES = 31;
@@ -137,13 +138,16 @@ public final class MapViewport {
 		while (lod < TileKey.MAX_LOD && Projection.PIXELS_PER_UNIT / (double) (2 << lod) >= screenPixelsPerUnit) {
 			lod++;
 		}
-		return lod > 0 && tilesFor(view, lod - 1) <= MapLevel.MAX_GPU_TILES ? lod - 1 : lod;
+		return lod > 0 && mostTilesFor(view, lod - 1) <= MapLevel.KEPT_TILES - NEAR_TILE_COUNT ? lod - 1 : lod;
 	}
 
-	/** How many tiles of an overview level a view of this size keeps ready: what it shows, and a tile all round. */
-	private static double tilesFor(View view, int lod) {
+	/**
+	 * The most tiles of an overview level a view of this size asks for, wherever it pans: those it
+	 * shows, up to one more each way than it spans, and a tile all round, as {@link #drawTiles} asks.
+	 */
+	private static double mostTilesFor(View view, int lod) {
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
-		return (view.width() / view.zoom() / units + 3) * (view.height() / view.zoom() / units + 3);
+		return (Math.ceil(view.width() / view.zoom() / units) + 3) * (Math.ceil(view.height() / view.zoom() / units) + 3);
 	}
 
 	/**
@@ -160,7 +164,7 @@ public final class MapViewport {
 
 	/** How a tile's own pixels are sampled; what's drawn over them has no mip levels for the tile shader. */
 	private static Sampling tileSampling(Sampling sampling) {
-		return sampling == Sampling.TILE_SMOOTH ? Sampling.TILE_EXACT : sampling;
+		return sampling == Sampling.TILE_SMOOTH ? Sampling.TILE_AREA : sampling;
 	}
 
 	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */

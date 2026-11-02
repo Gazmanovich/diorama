@@ -51,9 +51,12 @@ final class TileFilterTest {
 			TileStore store = context.computeOnClient(mc -> MapSession.get().map().savedMap());
 			BufferedImage shot = read(context.takeScreenshot(String.format("tile-filter-%.1f", span)));
 			double[] result = compare(shot, view, store, zoom);
-			System.out.printf("TILE-FILTER span %.1f: median error %.3f over %.0f pixels%n", span, result[0], result[1]);
+			System.out.printf("TILE-FILTER span %.1f: median error %.3f over %.0f pixels, colour scale %.3f%n", span, result[0], result[1], result[2]);
 			if (result[1] < 20_000) {
 				throw new AssertionError("Only " + result[1] + " pixels of known ground to compare");
+			}
+			if (result[2] < 0.9 || result[2] > 1.15) {
+				throw new AssertionError("The frame's colours scale to the tiles' by " + result[2] + ", not about 1: is the map drawn at all?");
 			}
 			if (result[0] > check[1]) {
 				throw new AssertionError("Tile pixels aren't averaged exactly at " + span + " per screen pixel: median error " + result[0]);
@@ -65,8 +68,8 @@ final class TileFilterTest {
 	}
 
 	/**
-	 * The median difference from the exact average, over a stretch of map beside the player, and the
-	 * pixels compared. The frame is a few percent lighter than the tiles under the fog's veil, so each
+	 * The median difference from the exact average, over a stretch of map beside the player, the
+	 * pixels compared, and the smallest scale fitted to a colour channel. The frame is a few percent lighter than the tiles under the fog's veil, so each
 	 * channel of the average is first scaled and offset to fit the frame as well as it can.
 	 */
 	private static double[] compare(BufferedImage shot, MapViewport.View view, TileStore store, double zoom) {
@@ -100,7 +103,8 @@ final class TileFilterTest {
 			errors.add(error / 3);
 		}
 		errors.sort(null);
-		return new double[] {errors.isEmpty() ? 0 : errors.get(errors.size() / 2), errors.size()};
+		double scale = Math.min(fit[0][0], Math.min(fit[1][0], fit[2][0]));
+		return new double[] {errors.isEmpty() ? 0 : errors.get(errors.size() / 2), errors.size(), scale};
 	}
 
 	/** Least squares gain and offset taking channel {@code c} of the averages to the frame's. */

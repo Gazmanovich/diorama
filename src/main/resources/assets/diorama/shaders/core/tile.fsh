@@ -5,9 +5,9 @@
 
 // A map tile shown no larger than its pixels are crisp at. The GPU's own filter blurs here: it
 // blends two mip levels and reads each between its pixels, so a map shrunk to fit looks soft. This
-// gives each screen pixel the exact average of the tile pixels under it instead, from a level
-// fine enough for the average to fall where the pixel does. Averages don't sparkle while panning,
-// as sharpening or reading a finer level with a single tap would.
+// gives each screen pixel the average of the area of the tile under it instead, from a mip level
+// at least twice as fine as the pixel, so the average falls where the pixel does. Averages don't
+// sparkle while panning, as sharpening or reading a finer level with a single tap would.
 
 // A tile with its mip levels, drawn with linear filtering.
 uniform sampler2D Sampler0;
