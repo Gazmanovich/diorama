@@ -105,7 +105,13 @@ final class FacingTest {
 			context.takeScreenshot("facing-" + facing.id());
 
 			// What the right-click reads off a saved tile: the wall, wherever the map looks from.
+			// The pixels and the spots under them are saved together, but the bake that put the wall in
+			// can come a moment after one that didn't have its chunk yet: give it a few tries.
 			BlockPos spot = savedSpot(context, u, v);
+			for (int i = 0; i < 10 && (spot == null || Math.abs(spot.getZ() + 0.5 - face[1]) > 2.5 || Math.abs(spot.getX() + 0.5 - face[0]) > 2.5); i++) {
+				context.waitTicks(20);
+				spot = savedSpot(context, u, v);
+			}
 			if (spot == null || Math.abs(spot.getX() + 0.5 - face[0]) > 2.5 || Math.abs(spot.getZ() + 0.5 - face[1]) > 2.5) {
 				throw new AssertionError("Facing " + facing + ", the map finds " + spot + " at the wall by " + face[0] + ", " + face[1]);
 			}
