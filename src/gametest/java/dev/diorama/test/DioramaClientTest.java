@@ -169,6 +169,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("portal-pins")) {
 				PortalPinsTest.checks(context, world);
 			}
+			if (tests.contains("pin-names")) {
+				PinNamesTest.run(context, world);
+			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
@@ -971,7 +974,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
-	private static void switchLanguage(ClientGameTestContext context, String language) {
+	static void switchLanguage(ClientGameTestContext context, String language) {
 		reloadPacks(context, mc -> {
 			mc.getLanguageManager().setSelected(language);
 			mc.options.languageCode = language;

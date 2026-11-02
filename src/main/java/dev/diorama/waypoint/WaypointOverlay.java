@@ -94,11 +94,12 @@ public final class WaypointOverlay {
 			// Icons say what a place is, so their names wait for the cursor.
 			boolean named = pin == hovered || view.zoom() >= 2 && !Pins.showsIcon(waypoint);
 			if (fullscreen && !pin.clamped() && named) {
-				int w = font.width(waypoint.name);
+				String name = waypoint.shownName();
+				int w = font.width(name);
 				graphics.pose().pushMatrix();
 				graphics.pose().translate(pin.x() - w / 2.0F, pin.y() + Pins.SHADOW * pin.scale());
 				graphics.fill(-2, -1, w + 2, 9, 0x90000000);
-				graphics.text(font, waypoint.name, 0, 0, 0xFFFFFFFF, false);
+				graphics.text(font, name, 0, 0, 0xFFFFFFFF, false);
 				graphics.pose().popMatrix();
 			}
 		}
@@ -129,6 +130,6 @@ public final class WaypointOverlay {
 		int distance = (int) Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ()));
 		int dy = (int) Math.round(waypoint.y - viewer.getY());
 		String height = dy > 2 ? " · " + dy + " above" : dy < -2 ? " · " + (-dy) + " below" : "";
-		return Component.literal(waypoint.name + " · " + distance + " m" + height);
+		return Component.literal(waypoint.shownName() + " · " + distance + " m" + height);
 	}
 }
