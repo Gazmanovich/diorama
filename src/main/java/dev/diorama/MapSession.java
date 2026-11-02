@@ -247,8 +247,10 @@ public final class MapSession {
 			return;
 		}
 		BlockLooks looks = BlockLooks.get();
-		int oldId = Block.BLOCK_STATE_REGISTRY.getId(oldState);
-		int newId = Block.BLOCK_STATE_REGISTRY.getId(newState);
+		// As the map sees them: a change that looks the same from the north can show from another side.
+		Facing facing = Projection.facing();
+		int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
+		int newId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(newState));
 		if (looks != null && oldId >= 0 && newId >= 0 && looks.sameLook(oldId, newId)) {
 			return;
 		}

@@ -361,6 +361,10 @@ public final class MapScreen extends Screen {
 		Projection.setFacing(now);
 		this.closeOtherMap();
 		MapSession.facingChanged();
+		// The block under the mouse was the old facing's.
+		this.spotU = Integer.MIN_VALUE;
+		this.spot = null;
+		this.spotRequest = null;
 		this.centerU = Projection.u(worldX, worldZ);
 		this.centerV = Projection.v(worldX, USUAL_GROUND_Y, worldZ);
 		this.facingButton.setMessage(facingLetter());
@@ -1163,7 +1167,8 @@ public final class MapScreen extends Screen {
 			view.centerV() + ((top + bottom) / 2.0 - view.y() - view.height() / 2.0) / view.zoom(),
 			view.zoom(), view.layer());
 		List<WaypointOverlay.Pin> pins = WaypointOverlay.layout(clear, waypoints, true);
-		int bx0 = this.zoomIn.getX() - 2;
+		// The column of buttons, and the facing button left of recenter.
+		int bx0 = (this.facingButton.visible ? this.facingButton.getX() : this.zoomIn.getX()) - 2;
 		// From the export (or draw) button down to recenter.
 		int by0 = (this.export.visible ? this.export.getY() : this.drawButton.getY()) - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
@@ -1350,7 +1355,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}

@@ -442,11 +442,12 @@ public final class MapViewport {
 		}
 		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		if (memory != null) {
+			int memoryLod = memory.lod(view, lod);
 			// Alpha is 255 less the share of a remembered map under the fog, which thins it there.
 			for (int j = 0; j < MASK; j++) {
 				double v = originV + (j + 0.5) * texel;
 				for (int i = 0; i < MASK; i++) {
-					int remembered = Math.round(memory.known(lod, originU + (i + 0.5) * texel, v) * 255);
+					int remembered = Math.round(memory.known(memoryLod, originU + (i + 0.5) * texel, v) * 255);
 					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
 				}
 			}

@@ -173,7 +173,8 @@ final class MapPiece {
 					pos.set(facing(bx, hit[1], true), hit[0] - row, facing(bx, hit[1], false));
 					state = level.getBlockState(pos);
 				} else {
-					pos.set(bx, player.getY() - 1 - row, player.getZ());
+					int pz = Projection.facing().blockZ(player.getX(), player.getZ());
+					pos.set(facing(bx, pz, true), player.getY() - 1 - row, facing(bx, pz, false));
 					state = (row == 0 ? Blocks.GRASS_BLOCK : row <= 3 ? Blocks.DIRT : Blocks.STONE).defaultBlockState();
 				}
 				for (int t = 0; t < TEXELS_PER_ROW; t++) {

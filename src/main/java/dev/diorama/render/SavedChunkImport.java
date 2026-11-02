@@ -636,10 +636,12 @@ public final class SavedChunkImport {
 			if (summary == null || !summary.finished()) {
 				// Nothing to draw yet. Once it's finished, the save writes it again.
 				progress.mark(regionX, regionZ, i, time);
+				this.chunksDone++;
 				continue;
 			}
 			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
 				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
+				this.chunksDone++;
 				continue;
 			}
 			long chunk = ChunkSnapshot.key(cx, cz);

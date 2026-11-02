@@ -53,6 +53,7 @@ public final class MapMemory {
 	private static final int MAX_TILES = 64;
 	private static final long IN_USE_MS = 1000;
 	private static final int UPLOADS_PER_FRAME = 4;
+	private static final int MAX_LOADING = 8;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
 
@@ -208,9 +209,30 @@ public final class MapMemory {
 	 * Draws the memories under a view, and asks for the ones that aren't here yet: at the overview
 	 * level the real tiles are drawn at, and sampled as they are.
 	 */
-	void draw(MapCanvas canvas, MapViewport.View view, int tint, int lod, Sampling sampling) {
+	/**
+	 * The overview level a view draws memories at: the real tiles' {@code lod}, or coarser where
+	 * that would take more tiles than are kept, as a big screen zoomed in can.
+	 */
+	int lod(MapViewport.View view, int lod) {
+		double maxU = view.minU() + view.width() / view.zoom();
+		double maxV = view.minV() + view.height() / view.zoom();
+		double[] a = this.toOld(view.minU(), view.minV());
+		double[] b = this.toOld(maxU, maxV);
+		while (lod < TileKey.MAX_LOD) {
+			double units = (double) Projection.TILE_UNITS * (1 << lod);
+			double tiles = (Math.abs(a[0] - b[0]) / units + 2) * (Math.abs(a[1] - b[1]) / units + 2);
+			if (tiles <= MAX_TILES * 3 / 4) {
+				break;
+			}
+			lod++;
+		}
+		return lod;
+	}
+
+	void draw(MapCanvas canvas, MapViewport.View view, int tint, int realLod, Sampling sampling) {
 		long now = System.currentTimeMillis();
 		this.takeLoaded(now);
+		int lod = this.lod(view, realLod);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double maxU = view.minU() + view.width() / view.zoom();
 		double maxV = view.minV() + view.height() / view.zoom();
@@ -315,7 +337,8 @@ public final class MapMemory {
 	}
 
 	private void load(TileKey key) {
-		if (!this.loading.add(key)) {
+		// A few at a time: each waits as a megabyte and a third until it's uploaded.
+		if (this.loading.size() >= MAX_LOADING || !this.loading.add(key)) {
 			return;
 		}
 		LOADER.execute(() -> {
