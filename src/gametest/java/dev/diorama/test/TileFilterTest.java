@@ -26,10 +26,11 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 final class TileFilterTest {
 	private static final int GUI_SCALE = 3;
 	/**
-	 * Median difference per colour channel, out of 255, once the light veil the fog leaves over
-	 * mapped ground is taken out. The shader leaves about 1.0 on boat.dev's software renderer, and the GPU's own filter 1.4 and 2.0 at the two sizes this compares.
+	 * Tile pixels per screen pixel, each with the most median difference per colour channel, out of
+	 * 255, once the light veil the fog leaves over mapped ground is taken out. On boat.dev's software
+	 * renderer the shader leaves 1.0 to 1.25 across versions, and the GPU's own filter 1.4 and 2.0.
 	 */
-	private static final double MOST_ERROR = Double.parseDouble(System.getProperty("diorama.tileFilterMostError", "1.25"));
+	private static final double[][] SPANS = {{1.6, 1.2}, {2.7, 1.6}};
 
 	private TileFilterTest() {
 	}
@@ -41,7 +42,8 @@ final class TileFilterTest {
 		DioramaClientTest.setGuiScale(context, GUI_SCALE);
 		context.setScreen(MapScreen::new);
 		// Both read the tile itself, shrunk by little and by more.
-		for (double span : new double[] {1.6, 2.7}) {
+		for (double[] check : SPANS) {
+			double span = check[0];
 			double zoom = Projection.PIXELS_PER_UNIT / span / GUI_SCALE;
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), zoom, TileKey.SURFACE));
 			DioramaClientTest.settle(context, 20);
@@ -53,7 +55,7 @@ final class TileFilterTest {
 			if (result[1] < 20_000) {
 				throw new AssertionError("Only " + result[1] + " pixels of known ground to compare");
 			}
-			if (result[0] > MOST_ERROR) {
+			if (result[0] > check[1]) {
 				throw new AssertionError("Tile pixels aren't averaged exactly at " + span + " per screen pixel: median error " + result[0]);
 			}
 		}
