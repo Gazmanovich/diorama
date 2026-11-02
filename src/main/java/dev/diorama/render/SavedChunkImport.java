@@ -167,6 +167,8 @@ public final class SavedChunkImport {
 			this.rescanAsked = true;
 			// A tile spans many chunks: those next to what's remembered mustn't come with it.
 			this.remembered.clear();
+			// What was drawn before left out what's allowed now, or the other way round.
+			this.drawn.clear();
 			this.source.allow(only ? this::remembered : (chunkX, chunkZ, top) -> true);
 		}
 	}
