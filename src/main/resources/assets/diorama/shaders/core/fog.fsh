@@ -101,9 +101,11 @@ const int LAYERS = 8;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
 const int FAST_LAYERS = 2;
 // Over a remembered map the fog lies low: banks this share of the height, with gaps between
-// them, and never quite opaque, so the old picture shows under them, too little to read in detail.
-const float MEMORY_HEIGHT = 0.45;
-const float MEMORY_MOST = 0.82;
+// them where the noise is low, never thicker than MEMORY_MOST and never thinner than a haze, so
+// the old picture shows under them, too little to read in detail.
+const float MEMORY_HEIGHT = 0.4;
+const float MEMORY_MOST = 0.7;
+const float MEMORY_HAZE = 0.16;
 // How much of a remembered map is under this pixel, set once in main.
 float memory = 0.0;
 
@@ -190,8 +192,9 @@ float thicknessFrom(float known, float n) {
     float unknown = 1.0 - known;
     // Noise only shapes the edge; where everything is known there is no fog at all.
     float edge = smoothstep(0.0, 0.35, unknown);
-    // Over memory the noise opens gaps in the banks as well as shaping their edge.
-    float amount = smoothstep(mix(0.12, 0.42, memory), 0.75, unknown + (n - 0.5) * mix(1.5, 2.4, memory) * edge);
+    float amount = smoothstep(0.12, 0.75, unknown + (n - 0.5) * 1.5 * edge);
+    // Over memory the noise alone makes banks, with gaps where it's low.
+    amount = mix(amount, smoothstep(0.47, 0.66, n) * edge, memory);
     return fogHeight * mix(1.0, MEMORY_HEIGHT, memory) * amount * (0.45 + 0.75 * n);
 }
 
@@ -296,9 +299,16 @@ void main() {
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
 
+    if (memory > 0.0) {
+        vec3 straight = alpha > 0.002 ? color / alpha : mix(shade, lit, 0.75);
+        float low = mix(alpha, clamp(alpha, MEMORY_HAZE, MEMORY_MOST), memory);
+        color = straight * low;
+        alpha = low;
+    }
+
     if (alpha <= 0.002) {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    fragColor = vec4(color / alpha, min(alpha, mix(1.0, MEMORY_MOST, memory)) * fogOpacity) * ColorModulator;
+    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
 }
