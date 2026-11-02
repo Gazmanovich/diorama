@@ -59,14 +59,14 @@ tasks.withType<ProcessResources>().configureEach {
 	exclude("META-INF/neoforge.mods.toml", "META-INF/mods.toml")
 }
 
-// The fog shader's program file, which only the versions that load shaders from json read: from
+// The fog and tile shaders' program files, which only the versions that load shaders from json read: from
 // the mod's namespace on 1.21.2-1.21.4, from the minecraft namespace (by name) before.
 tasks.named<ProcessResources>("processResources") {
 	if (sc.current.parsed >= "1.21.2") {
-		exclude("assets/minecraft/shaders/core/diorama_fog.json")
+		exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/minecraft/shaders/core/diorama_tile.json")
 	}
 	if (sc.current.parsed < "1.21.2" || sc.current.parsed >= "1.21.5") {
-		exclude("assets/diorama/shaders/core/fog.json")
+		exclude("assets/diorama/shaders/core/fog.json", "assets/diorama/shaders/core/tile.json")
 	}
 }
 

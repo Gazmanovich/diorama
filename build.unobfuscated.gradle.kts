@@ -41,7 +41,8 @@ tasks.withType<ProcessResources>().configureEach {
 	exclude("META-INF/neoforge.mods.toml", "META-INF/mods.toml")
 }
 
-// Fog shader program files that only versions before 1.21.5 read.
+// Shader program files that only versions before 1.21.5 read.
 tasks.named<ProcessResources>("processResources") {
 	exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/diorama/shaders/core/fog.json")
+	exclude("assets/minecraft/shaders/core/diorama_tile.json", "assets/diorama/shaders/core/tile.json")
 }
