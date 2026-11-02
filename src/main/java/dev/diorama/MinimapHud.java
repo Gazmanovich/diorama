@@ -264,10 +264,14 @@ public final class MinimapHud implements HudElement {
 
 	/** Letters on the frame. The map always faces north, so they never move. */
 	private void compass(GuiGraphicsExtractor graphics, Font font, int x, int y, int size) {
-		this.letter(graphics, font, "N", x + size / 2, y + 1, 0xFFFF6B6B);
-		this.letter(graphics, font, "S", x + size / 2, y + size - 9, 0xFFFFFFFF);
-		this.letter(graphics, font, "W", x + 5, y + size / 2 - 4, 0xFFFFFFFF);
-		this.letter(graphics, font, "E", x + size - 5, y + size / 2 - 4, 0xFFFFFFFF);
+		// The letters by which way the map faces: top, right, bottom, left.
+		int turns = Projection.facing().turns;
+		int[][] at = {{x + size / 2, y + 1}, {x + size - 5, y + size / 2 - 4}, {x + size / 2, y + size - 9}, {x + 5, y + size / 2 - 4}};
+		String[] letters = {"N", "E", "S", "W"};
+		for (int i = 0; i < 4; i++) {
+			int[] place = at[Math.floorMod(i - turns, 4)];
+			this.letter(graphics, font, letters[i], place[0], place[1], i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF);
+		}
 	}
 
 	private void letter(GuiGraphicsExtractor graphics, Font font, String letter, int cx, int y, int color) {
