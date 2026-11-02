@@ -132,6 +132,8 @@ final class FacingTest {
 		context.setScreen(() -> null);
 		context.waitTicks(40);
 		context.takeScreenshot("facing-minimap-west");
+		heldLight(context, world);
+
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(1));
 		context.waitTicks(10);
@@ -156,6 +158,32 @@ final class FacingTest {
 		});
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + x0 + " " + (y0 + HEIGHT + 2) + " " + z0);
 		context.waitFor(mc -> MapSession.get() != null && !MapSession.get().map().roofless(), 2400);
+	}
+
+	/** A torch in a dark room lights the turned map where the player stands: to look at, as no number says it. */
+	private static void heldLight(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("tp @a 900 100 900");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == 900, 400);
+		for (int i = 0; i < 600 && !world.getServer().computeOnServer(server -> server.overworld().isLoaded(new BlockPos(880, 0, 880))
+			&& server.overworld().isLoaded(new BlockPos(920, 0, 920))); i++) {
+			context.waitTick();
+		}
+		world.getServer().runCommand("fill 880 -42 880 920 -34 920 minecraft:stone");
+		world.getServer().runCommand("fill 884 -40 884 916 -37 916 minecraft:air");
+		world.getServer().runCommand("fill 896 -40 896 904 -37 904 minecraft:stone");
+		world.getServer().runCommand("tp @a 890.5 -40 900.5 -90 0");
+		context.waitFor(mc -> mc.player.blockPosition().getY() == -40, 400);
+		context.waitTicks(120);
+		int layer = context.computeOnClient(mc -> MapSession.caveLayerFor(mc.player.getY()));
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(mc.player.getX(), mc.player.getZ()), Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 4, layer));
+		context.waitTicks(80);
+		context.takeScreenshot("facing-west-cave-dark");
+		world.getServer().runCommand("item replace entity @a weapon.mainhand with minecraft:torch");
+		context.waitTicks(100);
+		context.takeScreenshot("facing-west-cave-torch");
+		world.getServer().runCommand("item replace entity @a weapon.mainhand with minecraft:air");
+		context.setScreen(() -> null);
 	}
 
 	/** After the world is reopened: it opens the way the player left it, and goes back to north for what runs next. */
