@@ -240,6 +240,17 @@ public final class MapSession {
 				session.schedule(around.chunkX, around.chunkZ, CHANGE_DELAY_MS, strip);
 			}
 		}
+	}
+
+	private static boolean sameFromEverySide(BlockLooks looks, BlockState oldState, BlockState newState) {
+		for (Facing facing : Facing.values()) {
+			int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
+			int newId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(newState));
+			if (oldId < 0 || newId < 0 || !looks.sameLook(oldId, newId)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public static void blockChanged(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
@@ -247,11 +258,8 @@ public final class MapSession {
 			return;
 		}
 		BlockLooks looks = BlockLooks.get();
-		// As the map sees them: a change that looks the same from the north can show from another side.
-		Facing facing = Projection.facing();
-		int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
-		int newId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(newState));
-		if (looks != null && oldId >= 0 && newId >= 0 && looks.sameLook(oldId, newId)) {
+		// Only a change no side shows: the snapshot is kept for every facing the map can turn to.
+		if (looks != null && sameFromEverySide(looks, oldState, newState)) {
 			return;
 		}
 		if (DEBUG_CHANGES) {
