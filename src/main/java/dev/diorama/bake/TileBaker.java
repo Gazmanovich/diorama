@@ -1064,18 +1064,18 @@ public final class TileBaker {
 			// shallows over sand turn turquoise. The floor is gone a few blocks down, and the
 			// water keeps darkening with depth, so shelves and trenches still read.
 			float peak = Math.max(1e-4F, Math.max(wr, Math.max(wg, wb)));
-			float tr = (float) Math.exp(-depth * (0.45 * (1 - wr / peak) + 0.25));
-			float tg = (float) Math.exp(-depth * (0.45 * (1 - wg / peak) + 0.25));
-			float tb = (float) Math.exp(-depth * (0.45 * (1 - wb / peak) + 0.25));
+			float tr = (float) Math.exp(-depth * (0.45 * (1 - wr / peak) + 0.16));
+			float tg = (float) Math.exp(-depth * (0.45 * (1 - wg / peak) + 0.16));
+			float tb = (float) Math.exp(-depth * (0.45 * (1 - wb / peak) + 0.16));
 			float deep = light * (float) (0.3 + 0.7 * Math.exp(-depth / 18));
-			float deepR = wr * deep;
-			float deepG = wg * deep;
-			float deepB = wb * deep;
-			// A little sky reflected off the surface.
-			float sheen = 0.03F * light;
-			this.outR = this.outR * tr + deepR * (1 - tr) + sheen;
-			this.outG = this.outG * tg + deepG * (1 - tg) + sheen;
-			this.outB = this.outB * tb + deepB * (1 - tb) + sheen * 1.2F;
+			// A little richer than the water's own colour, to sit beside grass.
+			float l = luminance(wr, wg, wb);
+			float deepR = Math.max(0, l + (wr - l) * 1.2F) * deep;
+			float deepG = Math.max(0, l + (wg - l) * 1.2F) * deep;
+			float deepB = Math.max(0, l + (wb - l) * 1.2F) * deep;
+			this.outR = this.outR * tr + deepR * (1 - tr);
+			this.outG = this.outG * tg + deepG * (1 - tg);
+			this.outB = this.outB * tb + deepB * (1 - tb);
 			return;
 		}
 		float a = (float) Math.max(0.5, Math.min(0.94, 1 - Math.exp(-0.2 * depth)));

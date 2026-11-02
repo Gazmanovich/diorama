@@ -41,10 +41,10 @@ vec3 mix_water(vec3 under, vec4 water, float depth) {
     float light = water.a;
     if (Grade.w > 0.5) {
         float peak = max(1e-4, max(w.r, max(w.g, w.b)));
-        vec3 t = exp(-depth * (0.45 * (1.0 - w / peak) + 0.25));
-        vec3 deep = w * light * (0.3 + 0.7 * exp(-depth / 18.0));
-        float sheen = 0.03 * light;
-        return under * t + deep * (1.0 - t) + vec3(sheen, sheen, sheen * 1.2);
+        vec3 t = exp(-depth * (0.45 * (1.0 - w / peak) + 0.16));
+        float l = luminance(w);
+        vec3 deep = max(vec3(0.0), vec3(l) + (w - vec3(l)) * 1.2) * light * (0.3 + 0.7 * exp(-depth / 18.0));
+        return under * t + deep * (1.0 - t);
     }
     float a = clamp(1.0 - exp(-0.2 * depth), 0.5, 0.94);
     return under * (1.0 - a) + w * light * a;
