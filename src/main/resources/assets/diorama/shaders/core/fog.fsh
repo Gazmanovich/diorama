@@ -301,7 +301,8 @@ void main() {
 
     if (memory > 0.0) {
         vec3 straight = alpha > 0.002 ? color / alpha : mix(shade, lit, 0.75);
-        float low = mix(alpha, clamp(alpha, MEMORY_HAZE, MEMORY_MOST), memory);
+        // The haze only where the new map isn't yet: it goes as tiles land.
+        float low = mix(alpha, clamp(alpha, MEMORY_HAZE * (1.0 - soft), MEMORY_MOST), memory);
         color = straight * low;
         alpha = low;
     }

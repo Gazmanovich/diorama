@@ -52,6 +52,7 @@ public final class MapMemory {
 	/** Remembered tiles kept on the GPU, a megabyte and a half each, unless more are in use: as many as a big view shows. */
 	private static final int MAX_TILES = 64;
 	private static final long IN_USE_MS = 1000;
+	private static final int UPLOADS_PER_FRAME = 4;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
 
@@ -74,7 +75,8 @@ public final class MapMemory {
 		}
 	}
 
-	private record Loaded(TileKey key, int @Nullable [] pixels, byte @Nullable [] known) {
+	/** A tile read off the disk: its mip levels, made on the loader thread, and what's known of it. */
+	private record Loaded(TileKey key, int @Nullable [] @Nullable [] mips, byte @Nullable [] known) {
 	}
 
 	private final TileStore store;
@@ -207,9 +209,8 @@ public final class MapMemory {
 	 * level the real tiles are drawn at, and sampled as they are.
 	 */
 	void draw(MapCanvas canvas, MapViewport.View view, int tint, int lod, Sampling sampling) {
-		this.takeLoaded();
 		long now = System.currentTimeMillis();
-		this.evict(now);
+		this.takeLoaded(now);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double maxU = view.minU() + view.width() / view.zoom();
 		double maxV = view.minV() + view.height() / view.zoom();
@@ -228,10 +229,14 @@ public final class MapMemory {
 				if (entry == null) {
 					this.load(key);
 				}
-				if (entry == null || entry.texture == null) {
+				if (entry == null) {
 					continue;
 				}
+				// In view, even with nothing on it: it stays, or it would be read again every frame.
 				entry.drawnMs = now;
+				if (entry.texture == null) {
+					continue;
+				}
 				double[] from = this.fromOld(tu * units, tv * units);
 				double[] to = this.fromOld((tu + 1) * units, (tv + 1) * units);
 				float x0 = view.screenX(Math.min(from[0], to[0]));
@@ -248,6 +253,7 @@ public final class MapMemory {
 				}
 			}
 		}
+		this.evict(now);
 	}
 
 	/** Which share of map point {@code (u, v)} a view's memory shows, 0 to 1, with what's loaded so far. */
@@ -313,18 +319,18 @@ public final class MapMemory {
 			return;
 		}
 		LOADER.execute(() -> {
-			int[] pixels = null;
+			int[][] mips = null;
 			byte[] known = null;
 			try {
 				int[] saved = this.closed ? null : this.store.read(key);
 				if (saved != null) {
 					known = known(saved);
-					pixels = turned(saved, this.quarterTurns);
+					mips = Mipmaps.build(turned(saved, this.quarterTurns), EDGE);
 				}
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Couldn't load the remembered tile {}", key, e);
 			}
-			this.loaded.add(new Loaded(key, pixels, known));
+			this.loaded.add(new Loaded(key, mips, known));
 		});
 	}
 
@@ -368,20 +374,25 @@ public final class MapMemory {
 		return out;
 	}
 
-	private void takeLoaded() {
+	/** Uploads what the loader finished, a few tiles a frame: each is a megabyte and a third. */
+	private void takeLoaded(long now) {
+		int uploads = 0;
 		Loaded done;
-		while ((done = this.loaded.poll()) != null) {
+		while (uploads < UPLOADS_PER_FRAME && (done = this.loaded.poll()) != null) {
 			this.loading.remove(done.key());
 			MapTexture texture = null;
-			if (done.pixels() != null && !this.closed) {
+			if (done.mips() != null && !this.closed) {
 				texture = MapTexture.create("diorama map memory", EDGE, Mipmaps.LEVELS);
-				int[][] mips = Mipmaps.build(done.pixels(), EDGE);
 				for (int level = 0; level < Mipmaps.LEVELS; level++) {
-					texture.write(level, 0, 0, EDGE >> level, mips[level]);
+					texture.write(level, 0, 0, EDGE >> level, done.mips()[level]);
 				}
 				this.shown++;
+				uploads++;
 			}
-			this.tiles.put(done.key(), new Entry(texture, done.known()));
+			Entry entry = new Entry(texture, done.known());
+			// As if drawn now: a view that asked for it hasn't drawn it yet, and mustn't lose it first.
+			entry.drawnMs = now;
+			this.tiles.put(done.key(), entry);
 			this.version++;
 		}
 	}
