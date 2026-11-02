@@ -36,6 +36,8 @@ public final class WaypointEditScreen extends Screen {
 	/** Vanilla's colour for a number field it can't read, from the game rules screen. */
 	private static final int INVALID_TEXT = 0xFFFF0000;
 	private static final int LABEL = 0xFFA0A0A0;
+	/** The most characters a waypoint name can have. */
+	private static final int MAX_NAME = 32;
 
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
@@ -96,7 +98,7 @@ public final class WaypointEditScreen extends Screen {
 		int top = this.top();
 		int cx = left + FORM / 2;
 		// Resizing the window or changing GUI scale runs init() again: keep what's typed, not the saved waypoint.
-		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.shownName()), "diorama.waypoint.name", 32);
+		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.shownName()), "diorama.waypoint.name", MAX_NAME);
 		this.iconButton = this.addRenderableWidget(Button.builder(this.iconLabel(), b -> this.pickIcon())
 			.bounds(left + 116, top + 16, 40, 20).build());
 		// A death marker always shows its headstone.
@@ -522,11 +524,14 @@ public final class WaypointEditScreen extends Screen {
 
 	/**
 	 * The name field's text, or the saved name while the field is empty or still shows it, so an
-	 * automatic pin saved without a rename keeps following the player's language.
+	 * automatic pin saved without a rename keeps following the player's language. The field holds
+	 * {@link #MAX_NAME} characters, so a longer translation shows cut, and the cut text counts too.
 	 */
 	private String typedName() {
 		String typed = this.name.getValue().trim();
-		return typed.isEmpty() || typed.equals(this.waypoint.shownName()) ? this.waypoint.name : typed;
+		String shown = this.waypoint.shownName();
+		shown = shown.length() > MAX_NAME ? shown.substring(0, MAX_NAME) : shown;
+		return typed.isEmpty() || typed.equals(shown.trim()) ? this.waypoint.name : typed;
 	}
 
 	/** The waypoint as the fields show it now, edits included, without saving; null while a coordinate isn't a number. */

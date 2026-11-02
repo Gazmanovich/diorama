@@ -29,8 +29,10 @@ final class PinNamesTest {
 
 		world.getServer().runCommand("gamerule show_death_messages false");
 		world.getServer().runCommand("gamerule immediate_respawn true");
+		// Earlier sections leave death pins behind: wait for a new one.
+		java.util.Set<java.util.UUID> before = context.computeOnClient(mc -> WaypointStore.get().all().stream().map(w -> w.id).collect(java.util.stream.Collectors.toSet()));
 		world.getServer().runCommand("kill @a");
-		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.DEATH), 200);
+		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.DEATH && !before.contains(w.id)), 200);
 		context.waitFor(mc -> mc.player != null && mc.player.isAlive(), 200);
 		world.getServer().runCommand("gamerule immediate_respawn false");
 
@@ -50,7 +52,7 @@ final class PinNamesTest {
 		context.waitTicks(5);
 		context.takeScreenshot("pin-names-2-list-ru_ru");
 		Waypoint bed = pin(context, Waypoint.Kind.BED);
-		Waypoint death = pin(context, Waypoint.Kind.DEATH);
+		Waypoint death = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH && !before.contains(w.id)).findFirst().orElseThrow());
 		Waypoint portal = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> mine(w, Waypoint.Kind.NETHER_PORTAL, x, z)).findFirst().orElseThrow());
 		expectShown(context, bed, "Кровать");
 		String time = context.computeOnClient(mc -> death.name.substring("Death ".length()));
@@ -66,6 +68,10 @@ final class PinNamesTest {
 		context.setScreen(() -> new WaypointEditScreen(null, bed, false));
 		context.waitTicks(5);
 		context.takeScreenshot("pin-names-3-bed-editor-ru_ru");
+		String field = context.computeOnClient(mc -> DioramaClientTest.editBoxes(mc.gui.screen()).get(0).getValue());
+		if (!field.equals("Кровать")) {
+			throw new AssertionError("The Bed pin's editor shows " + field);
+		}
 		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
 		context.setScreen(() -> new WaypointEditScreen(null, death, false));
 		context.waitTicks(5);

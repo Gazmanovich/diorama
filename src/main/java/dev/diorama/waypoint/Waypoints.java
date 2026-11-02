@@ -3,7 +3,6 @@ package dev.diorama.waypoint;
 import dev.diorama.MapSession;
 import dev.diorama.Settings;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.Minecraft;
