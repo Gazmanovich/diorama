@@ -8,10 +8,16 @@ import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.SavedChunkImport;
+import dev.diorama.waypoint.Portals;
+import dev.diorama.waypoint.WaypointStore;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -55,6 +61,8 @@ public final class MapSession {
 	private final boolean mainMap;
 	/** Fills the main map in from the world's save, in singleplayer; null elsewhere and when turned off. */
 	private @Nullable SavedChunkImport savedChunks;
+	/** Portals found in the save, waiting for the client thread to pin them. */
+	private final Queue<Portals.Spot> savedPortals = new ConcurrentLinkedQueue<>();
 	private final Lights lights;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
@@ -422,7 +430,7 @@ public final class MapSession {
 		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
 		boolean on = (fill || this.map.memory() != null) && mc.getSingleplayerServer() != null;
 		if (on && this.savedChunks == null) {
-			this.savedChunks = SavedChunkImport.start(this.map, this.level);
+			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
 		} else if (!on && this.savedChunks != null) {
 			this.savedChunks.stop();
 			this.savedChunks = null;
@@ -449,6 +457,17 @@ public final class MapSession {
 		int playerChunkX = viewer == null ? 0 : viewer.blockPosition().getX() >> 4;
 		int playerChunkZ = viewer == null ? 0 : viewer.blockPosition().getZ() >> 4;
 		long now = System.currentTimeMillis();
+		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER);
+		String dimension = this.level.dimension().identifier().toString();
+		// Under fog of war only what the player has seen shows, and these aren't that.
+		WaypointStore pins = fog ? null : WaypointStore.get();
+		List<Portals.Spot> saved = new ArrayList<>();
+		for (Portals.Spot spot; (spot = this.savedPortals.poll()) != null; ) {
+			saved.add(spot);
+		}
+		if (pins != null) {
+			Portals.add(saved, dimension, pins);
+		}
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();
 		while (it.hasNext() && budget > 0) {
@@ -466,11 +485,14 @@ public final class MapSession {
 			Object loaded = this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
 			if (loaded instanceof LevelChunk chunk) {
 				boolean known = this.map.worldChunk(cx, cz) != null;
-				this.map.put(ChunkSnapshot.take(chunk, this.level), known ? p.box : null, playerChunkX, playerChunkZ);
+				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level);
+				this.map.put(snapshot, known ? p.box : null, playerChunkX, playerChunkZ);
+				if (pins != null) {
+					Portals.chunkSeen(snapshot, dimension, pins, this.map.world());
+				}
 				budget--;
 			}
 		}
-		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER);
 		if (Diorama.DEBUG && fog != this.map.fogOfWar()) {
 			Diorama.LOGGER.info("Fog of war {}; underground={}", fog, this.underground);
 		}
