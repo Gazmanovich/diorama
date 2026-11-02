@@ -65,7 +65,8 @@ public record MapStyle(
 		.withSunElevation(38)
 		.withLight(0.34F, 0.62F)
 		.withHeightShade(0.22F)
-		.withCornerOcclusion(1.5F);
+		.withCornerOcclusion(1.5F)
+		.withClearWater(true);
 
 	/** {@link #FLAT}, then {@link #DEFAULT} with one part of the depth look taken back each, for comparing. */
 	public static final List<MapStyle> VARIANTS = List.of(

@@ -1057,18 +1057,22 @@ public final class TileBaker {
 			}
 		}
 		double depth = Math.max(0, tHit - tEntry);
+		// The water's surface is flat, so the floor under it draws no outlines.
+		this.outDepth = (float) (-(this.sin * (y0 - tEntry * this.sin) + this.cos * (z0 - tEntry * this.cos)) - this.depthOrigin);
 		if (this.style.clearWater()) {
 			// Light through water loses the colours the water doesn't have: red goes first, so
-			// shallows over sand turn turquoise and deep water ends up the water's own blue.
+			// shallows over sand turn turquoise. The floor is gone a few blocks down, and the
+			// water keeps darkening with depth, so shelves and trenches still read.
 			float peak = Math.max(wr, Math.max(wg, wb));
-			float tr = (float) Math.exp(-depth * 0.45 * (1 - wr / peak) - depth * 0.04);
-			float tg = (float) Math.exp(-depth * 0.45 * (1 - wg / peak) - depth * 0.04);
-			float tb = (float) Math.exp(-depth * 0.45 * (1 - wb / peak) - depth * 0.04);
-			float deepR = wr * 0.55F * light;
-			float deepG = wg * 0.55F * light;
-			float deepB = wb * 0.55F * light;
+			float tr = (float) Math.exp(-depth * (0.45 * (1 - wr / peak) + 0.25));
+			float tg = (float) Math.exp(-depth * (0.45 * (1 - wg / peak) + 0.25));
+			float tb = (float) Math.exp(-depth * (0.45 * (1 - wb / peak) + 0.25));
+			float deep = light * (float) (0.3 + 0.7 * Math.exp(-depth / 18));
+			float deepR = wr * deep;
+			float deepG = wg * deep;
+			float deepB = wb * deep;
 			// A little sky reflected off the surface.
-			float sheen = 0.05F * light;
+			float sheen = 0.03F * light;
 			this.outR = this.outR * tr + deepR * (1 - tr) + sheen;
 			this.outG = this.outG * tg + deepG * (1 - tg) + sheen;
 			this.outB = this.outB * tb + deepB * (1 - tb) + sheen * 1.2F;

@@ -41,9 +41,9 @@ vec3 mix_water(vec3 under, vec4 water, float depth) {
     float light = water.a;
     if (Grade.w > 0.5) {
         float peak = max(w.r, max(w.g, w.b));
-        vec3 t = exp(-depth * 0.45 * (1.0 - w / peak) - depth * 0.04);
-        vec3 deep = w * 0.55 * light;
-        float sheen = 0.05 * light;
+        vec3 t = exp(-depth * (0.45 * (1.0 - w / peak) + 0.25));
+        vec3 deep = w * light * (0.3 + 0.7 * exp(-depth / 18.0));
+        float sheen = 0.03 * light;
         return under * t + deep * (1.0 - t) + vec3(sheen, sheen, sheen * 1.2);
     }
     float a = clamp(1.0 - exp(-0.2 * depth), 0.5, 0.94);
@@ -58,7 +58,8 @@ float pixel_depth(ivec2 pixel) {
     for (int i = 0; i < 4; i++) {
         ivec2 s = pixel * 2 + ivec2(i & 1, i >> 1);
         if (texelFetch(SceneColor, s, 0).a > 0.5) {
-            sum += bake_depth(texelFetch(SceneDepth, s, 0).r);
+            // Reversed depth: the larger is the nearer, so water's flat surface wins over the floor.
+            sum += bake_depth(max(texelFetch(SceneDepth, s, 0).r, texelFetch(WaterDepth, s, 0).r));
             known++;
         }
     }
