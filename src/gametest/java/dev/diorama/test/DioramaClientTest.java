@@ -214,11 +214,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("saved-chunks")) {
 				savedChunksGround = SavedChunksTest.run(context, world);
 			}
-			if (tests.contains("facing")) {
-				FacingTest.run(context, world);
-			}
 			if (tests.contains("redraw")) {
 				RedrawTest.run(context, world);
+			}
+			if (tests.contains("facing")) {
+				FacingTest.run(context, world);
 			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);

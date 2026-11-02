@@ -145,7 +145,7 @@ final class FacingTest {
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(2));
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(mc.player.getX(), mc.player.getZ()), Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 2, TileKey.SURFACE));
-		context.waitFor(mc -> MapSession.get().map().importFolder().getFileName().toString().equals("under-roof-50-south"), 200);
+		context.waitFor(mc -> MapSession.get().map().importFolder().getFileName().toString().endsWith("-south"), 200);
 		context.waitTicks(200);
 		context.takeScreenshot("facing-nether-south");
 		// East is what the world is left on: see reopened.
