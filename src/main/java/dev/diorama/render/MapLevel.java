@@ -810,7 +810,7 @@ public final class MapLevel implements ChunkSource {
 		}
 		SavedTile savedTile;
 		while ((savedTile = this.fromSave.poll()) != null) {
-			savedTile.taken().complete(this.tileFromSave(savedTile.image()));
+			savedTile.taken().complete(this.tileFromSave(savedTile.image(), savedTile.store()));
 		}
 		PaintedClaims painted;
 		while ((painted = this.paintedClaims.poll()) != null) {
@@ -941,10 +941,11 @@ public final class MapLevel implements ChunkSource {
 	 * A live bake that's only due is no reason: it starts from this tile, and re-bakes what changed.
 	 * Render thread.
 	 */
-	private boolean tileFromSave(TileImage image) {
+	private boolean tileFromSave(TileImage image, TileStore drawnFor) {
 		TileKey key = image.key();
 		TileStore store = this.store;
-		if (store == null || this.closed || image.generation() != this.generation(key) || this.savedTilesRaced.contains(key) || this.inFlight.contains(key)) {
+		// A map turned while this was drawn has another store: the tile looks the old way.
+		if (store != drawnFor || this.closed || image.generation() != this.generation(key) || this.savedTilesRaced.contains(key) || this.inFlight.contains(key)) {
 			return false;
 		}
 		MapTile tile = this.tiles.get(key);
@@ -1486,7 +1487,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/** A sky view tile {@link SavedChunkImport} drew, and the answer to whether the map took it. */
-	private record SavedTile(TileImage image, CompletableFuture<Boolean> taken) {
+	private record SavedTile(TileImage image, TileStore store, CompletableFuture<Boolean> taken) {
 	}
 
 	/**
@@ -1571,7 +1572,9 @@ public final class MapLevel implements ChunkSource {
 		if (store == null) {
 			return false;
 		}
-		// As for a live bake to be saved: the pixels and the spots have to see the same chunks.
+		// As for a live bake to be saved: the pixels and the spots have to see the same chunks. The
+		// facing after the store: it changes first, so a store that's still current when the tile
+		// is taken was read with the facing it's for.
 		ChunkSource source = new PinnedSource(new dev.diorama.bake.TurnedSource(save, Projection.facing()));
 		int generation = this.generation(key);
 		this.savedTilesRaced.remove(key);
@@ -1581,7 +1584,7 @@ public final class MapLevel implements ChunkSource {
 			TileImage image = this.drawFromSave(key, source, looks, saved);
 			image = image.withSpots(TileSpots.pick(image, source, looks, false, store.spots(key))).withGeneration(generation);
 			CompletableFuture<Boolean> taken = new CompletableFuture<>();
-			this.fromSave.add(new SavedTile(image, taken));
+			this.fromSave.add(new SavedTile(image, store, taken));
 			Boolean accepted = this.awaitWhileOpen(taken);
 			return accepted != null && accepted;
 		} finally {

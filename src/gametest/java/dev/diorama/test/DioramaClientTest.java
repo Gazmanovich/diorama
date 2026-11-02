@@ -247,10 +247,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw")) && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
+				}
+				if (tests.contains("facing")) {
+					FacingTest.reopened(context);
 				}
 				if (tests.contains("redraw")) {
 					RedrawTest.reopened(context);

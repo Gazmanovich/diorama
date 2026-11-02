@@ -132,7 +132,6 @@ final class FacingTest {
 		context.setScreen(() -> null);
 		context.waitTicks(40);
 		context.takeScreenshot("facing-minimap-west");
-		// Back round to north for what runs next.
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(1));
 		context.waitTicks(10);
@@ -149,13 +148,28 @@ final class FacingTest {
 		context.waitFor(mc -> MapSession.get().map().importFolder().getFileName().toString().equals("under-roof-50-south"), 200);
 		context.waitTicks(200);
 		context.takeScreenshot("facing-nether-south");
-		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(2));
+		// East is what the world is left on: see reopened.
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(-1));
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			DrawingStore.get().remove(note);
 		});
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + x0 + " " + (y0 + HEIGHT + 2) + " " + z0);
 		context.waitFor(mc -> MapSession.get() != null && !MapSession.get().map().roofless(), 2400);
+	}
+
+	/** After the world is reopened: it opens the way the player left it, and goes back to north for what runs next. */
+	static void reopened(ClientGameTestContext context) {
+		context.waitFor(mc -> MapSession.get() != null, 2400);
+		if (Projection.facing() != Facing.EAST) {
+			throw new AssertionError("The world reopened facing " + Projection.facing());
+		}
+		if (!context.computeOnClient(mc -> MapSession.get().map().importFolder()).getFileName().toString().endsWith("-east")) {
+			throw new AssertionError("The reopened world's map isn't its east one");
+		}
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(-1));
+		context.setScreen(() -> null);
 	}
 
 	private static BlockPos savedSpot(ClientGameTestContext context, double u, double v) {

@@ -375,7 +375,10 @@ public final class MapMemory {
 		return out;
 	}
 
-	/** A square picture turned clockwise by this many quarter turns. */
+	/**
+	 * A square picture turned for a map turned this many quarter turns: the map turns one way, so
+	 * what's on it turns the other, counter-clockwise.
+	 */
 	private static int[] turned(int[] pixels, int quarterTurns) {
 		if (quarterTurns == 0) {
 			return pixels;
@@ -385,9 +388,9 @@ public final class MapMemory {
 		for (int y = 0; y < EDGE; y++) {
 			for (int x = 0; x < EDGE; x++) {
 				int to = switch (quarterTurns) {
-					case 1 -> x * EDGE + last - y;
+					case 1 -> (last - x) * EDGE + y;
 					case 2 -> (last - y) * EDGE + last - x;
-					default -> (last - x) * EDGE + y;
+					default -> x * EDGE + last - y;
 				};
 				out[to] = pixels[y * EDGE + x];
 			}

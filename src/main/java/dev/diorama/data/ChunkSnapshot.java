@@ -137,7 +137,11 @@ public final class ChunkSnapshot {
 					int z = at[k] >> 4 & 15;
 					at[k] = at[k] & ~0xFF | (facing.blockZ(x, z) & 15) << 4 | facing.blockX(x, z) & 15;
 				}
-				out[i] = new SectionCopycats(at, copycats[i].material());
+				BlockState[] materials = copycats[i].material().clone();
+				for (int k = 0; k < materials.length; k++) {
+					materials[k] = facing.turned(materials[k]);
+				}
+				out[i] = new SectionCopycats(at, materials);
 			}
 		}
 		return out;

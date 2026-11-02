@@ -68,6 +68,13 @@ public final class Drawing {
 		return this.shown;
 	}
 
+	/** A copy fixed on the map as it faces now, for work that goes on after the map could turn. */
+	public Drawing fixed() {
+		Drawing copy = new Drawing(this.kind, this.dimension, this.color, this.shown().clone(), this.text);
+		copy.turns = dev.diorama.Projection.facing().turns;
+		return copy;
+	}
+
 	public Drawing(Kind kind, String dimension, int color, double[] points, String text) {
 		this.kind = kind;
 		this.dimension = dimension;
