@@ -127,7 +127,8 @@ public final class MapViewport {
 	 * screen pixel, or one finer where that many tiles fit in memory, as a tile looks sharper shrunk
 	 * further. Overviews only exist for the saved surface map, and are only used below
 	 * {@link #DETAILED_ZOOM}: above it the live tiles' own mipmaps look the same and never lag
-	 * behind recent changes.
+	 * behind recent changes. Stepping one finer, the full map can reach the live tiles a little below
+	 * it too.
 	 */
 	public static int lodFor(MapLevel level, View view) {
 		if (view.layer() != TileKey.SURFACE || !level.hasOverviews() || view.zoom() >= DETAILED_ZOOM) {
@@ -138,7 +139,10 @@ public final class MapViewport {
 		while (lod < TileKey.MAX_LOD && Projection.PIXELS_PER_UNIT / (double) (2 << lod) >= screenPixelsPerUnit) {
 			lod++;
 		}
-		return lod > 0 && mostTilesFor(view, lod - 1) <= MapLevel.KEPT_TILES - NEAR_TILE_COUNT ? lod - 1 : lod;
+		// A following view stays on overviews: detailed tiles all over a minimap would bake again as
+		// the player moves, and the middle, which needs them, gets them from drawNear.
+		boolean finer = lod > 1 || lod == 1 && !view.follows();
+		return finer && mostTilesFor(view, lod - 1) <= MapLevel.KEPT_TILES - NEAR_TILE_COUNT ? lod - 1 : lod;
 	}
 
 	/**
