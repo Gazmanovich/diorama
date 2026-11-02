@@ -3,6 +3,7 @@ package dev.diorama.render;
 import dev.diorama.Diorama;
 import dev.diorama.Facing;
 import dev.diorama.Projection;
+import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.TileLabel;
 import dev.diorama.data.TileStore;
@@ -27,7 +28,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What a map remembers while it's redrawn after its tiles' label changed: the tiles it had before,
- * fitted to the new view, soft and muted, under the map's clouds. The clouds go as real tiles land
+ * fitted to the new view, sharp, under low clouds you can see through. The clouds go as real tiles land
  * on top. A memory can't be right in detail, since the old tiles show the world from another view,
  * so it stays too soft to pass for the map; nothing that needs an exact place reads it.
  *
@@ -43,20 +44,16 @@ public final class MapMemory {
 	private static final String NOTE = "redraw-from";
 	/** When the map moved away from a folder, in seconds; see {@link #noteLeft}. */
 	static final String LEFT = "left-at";
-	/** Texture pixels per tile edge. */
-	private static final int EDGE = Projection.TILE_PIXELS / 4;
-	private static final int SHRINK = Projection.TILE_PIXELS / EDGE;
-	/** Remembered tiles kept on the GPU, each a tenth of a megabyte or so, unless more are in use. */
-	private static final int MAX_TILES = 96;
+	/** Texture pixels per tile edge: a remembered tile is shown as sharp as it was saved. */
+	private static final int EDGE = Projection.TILE_PIXELS;
+	/** Cells per edge of what's known of a tile, for the fog mask, which reads it far coarser. */
+	private static final int KNOWN_EDGE = EDGE / 4;
+	private static final int SHRINK = EDGE / KNOWN_EDGE;
+	/** Remembered tiles kept on the GPU, a megabyte and a half each, unless more are in use: as many as a big view shows. */
+	private static final int MAX_TILES = 64;
 	private static final long IN_USE_MS = 1000;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
-	/** Screen pixels a memory's pixel spans at least, for softness. */
-	private static final double SOFT_PIXELS = 3;
-	/** The least overview level drawn, however far in the view is. */
-	private static final int MIN_LOD = 2;
-	/** How much of its colour a memory keeps, so it reads as a memory next to real tiles. */
-	private static final float COLOUR = 0.5F;
 
 	private static final ExecutorService LOADER = Executors.newSingleThreadExecutor(task -> {
 		Thread thread = new Thread(task, "diorama-map-memory");
@@ -195,16 +192,6 @@ public final class MapMemory {
 		}
 	}
 
-	/** The overview level a view draws memories from. */
-	private static int lod(MapViewport.View view) {
-		double blocksPerPixel = SOFT_PIXELS / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale());
-		int lod = MIN_LOD;
-		while (lod < TileKey.MAX_LOD && (1 << lod) < blocksPerPixel) {
-			lod++;
-		}
-		return lod;
-	}
-
 	/** Goes up when more of the memory becomes known, for a fog mask built on it. */
 	long version() {
 		return this.version;
@@ -215,12 +202,14 @@ public final class MapMemory {
 		return this.shown;
 	}
 
-	/** Draws the memories under a view, and asks for the ones that aren't here yet. */
-	void draw(MapCanvas canvas, MapViewport.View view, int tint) {
+	/**
+	 * Draws the memories under a view, and asks for the ones that aren't here yet: at the overview
+	 * level the real tiles are drawn at, and sampled as they are.
+	 */
+	void draw(MapCanvas canvas, MapViewport.View view, int tint, int lod, Sampling sampling) {
 		this.takeLoaded();
 		long now = System.currentTimeMillis();
 		this.evict(now);
-		int lod = lod(view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double maxU = view.minU() + view.width() / view.zoom();
 		double maxV = view.minV() + view.height() / view.zoom();
@@ -250,11 +239,11 @@ public final class MapMemory {
 				float y0 = view.screenY(Math.min(from[1], to[1]));
 				float y1 = view.screenY(Math.max(from[1], to[1]));
 				if (circle == null) {
-					canvas.rect(entry.texture, Sampling.TILE_SMOOTH, x0, y0, x1, y1, 0, 0, 1, 1, tint);
+					canvas.rect(entry.texture, sampling, x0, y0, x1, y1, 0, 0, 1, 1, tint);
 				} else {
 					Circle.Quads inside = circle.clip(x0, y0, x1, y1, 0, 0, 1, 1);
 					if (inside != null) {
-						canvas.quad(entry.texture, Sampling.TILE_SMOOTH, inside.corners(), inside.uvs(), tint);
+						canvas.quad(entry.texture, sampling, inside.corners(), inside.uvs(), tint);
 					}
 				}
 			}
@@ -262,8 +251,7 @@ public final class MapMemory {
 	}
 
 	/** Which share of map point {@code (u, v)} a view's memory shows, 0 to 1, with what's loaded so far. */
-	float known(MapViewport.View view, double u, double v) {
-		int lod = lod(view);
+	float known(int lod, double u, double v) {
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double[] old = this.toOld(u, v);
 		int tu = (int) Math.floor(old[0] / units);
@@ -272,9 +260,9 @@ public final class MapMemory {
 		if (entry == null || entry.known == null) {
 			return 0;
 		}
-		int x = (int) Math.min(EDGE - 1L, (long) ((old[0] - tu * units) / units * EDGE));
-		int y = (int) Math.min(EDGE - 1L, (long) ((old[1] - tv * units) / units * EDGE));
-		return (entry.known[y * EDGE + x] & 0xFF) / 255.0F;
+		int x = (int) Math.min(KNOWN_EDGE - 1L, (long) ((old[0] - tu * units) / units * KNOWN_EDGE));
+		int y = (int) Math.min(KNOWN_EDGE - 1L, (long) ((old[1] - tv * units) / units * KNOWN_EDGE));
+		return (entry.known[y * KNOWN_EDGE + x] & 0xFF) / 255.0F;
 	}
 
 	/**
@@ -330,8 +318,8 @@ public final class MapMemory {
 			try {
 				int[] saved = this.closed ? null : this.store.read(key);
 				if (saved != null) {
-					known = new byte[EDGE * EDGE];
-					pixels = turned(shrink(saved, known), this.quarterTurns);
+					known = known(saved);
+					pixels = turned(saved, this.quarterTurns);
 				}
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Couldn't load the remembered tile {}", key, e);
@@ -340,48 +328,30 @@ public final class MapMemory {
 		});
 	}
 
-	/** A tile at {@link #EDGE} pixels, with its colour muted, and how much of each pixel is known. */
-	private static int[] shrink(int[] tile, byte[] known) {
-		int size = Projection.TILE_PIXELS;
-		int[] out = new int[EDGE * EDGE];
-		for (int y = 0; y < EDGE; y++) {
-			for (int x = 0; x < EDGE; x++) {
-				long r = 0;
-				long g = 0;
-				long b = 0;
-				long a = 0;
+	/** How much of each of a tile's {@link #KNOWN_EDGE} cells is known. */
+	private static byte[] known(int[] tile) {
+		byte[] known = new byte[KNOWN_EDGE * KNOWN_EDGE];
+		for (int y = 0; y < KNOWN_EDGE; y++) {
+			for (int x = 0; x < KNOWN_EDGE; x++) {
+				int a = 0;
 				for (int dy = 0; dy < SHRINK; dy++) {
-					int row = (y * SHRINK + dy) * size + x * SHRINK;
 					for (int dx = 0; dx < SHRINK; dx++) {
-						int pixel = tile[row + dx];
-						int alpha = pixel >>> 24;
-						r += (pixel & 0xFF) * alpha;
-						g += (pixel >> 8 & 0xFF) * alpha;
-						b += (pixel >> 16 & 0xFF) * alpha;
-						a += alpha;
+						a += tile[(y * SHRINK + dy) * EDGE + x * SHRINK + dx] >>> 24;
 					}
 				}
-				if (a > 0) {
-					float red = (float) r / a;
-					float green = (float) g / a;
-					float blue = (float) b / a;
-					float grey = (red + green + blue) / 3;
-					int alpha = (int) (a / (SHRINK * SHRINK));
-					out[y * EDGE + x] = alpha << 24 | mute(blue, grey) << 16 | mute(green, grey) << 8 | mute(red, grey);
-					known[y * EDGE + x] = (byte) alpha;
-				}
+				known[y * KNOWN_EDGE + x] = (byte) (a / (SHRINK * SHRINK));
 			}
 		}
-		return out;
+		return known;
 	}
 
 	/**
 	 * A square picture turned for a map turned this many quarter turns: the map turns one way, so
-	 * what's on it turns the other, counter-clockwise.
+	 * what's on it turns the other, counter-clockwise. A copy either way: the saved one isn't ours.
 	 */
 	private static int[] turned(int[] pixels, int quarterTurns) {
 		if (quarterTurns == 0) {
-			return pixels;
+			return pixels.clone();
 		}
 		int[] out = new int[pixels.length];
 		int last = EDGE - 1;
@@ -398,18 +368,17 @@ public final class MapMemory {
 		return out;
 	}
 
-	private static int mute(float channel, float grey) {
-		return Math.round(grey + (channel - grey) * COLOUR);
-	}
-
 	private void takeLoaded() {
 		Loaded done;
 		while ((done = this.loaded.poll()) != null) {
 			this.loading.remove(done.key());
 			MapTexture texture = null;
 			if (done.pixels() != null && !this.closed) {
-				texture = MapTexture.create("diorama map memory", EDGE, 1);
-				texture.write(0, 0, 0, EDGE, done.pixels());
+				texture = MapTexture.create("diorama map memory", EDGE, Mipmaps.LEVELS);
+				int[][] mips = Mipmaps.build(done.pixels(), EDGE);
+				for (int level = 0; level < Mipmaps.LEVELS; level++) {
+					texture.write(level, 0, 0, EDGE >> level, mips[level]);
+				}
 				this.shown++;
 			}
 			this.tiles.put(done.key(), new Entry(texture, done.known()));

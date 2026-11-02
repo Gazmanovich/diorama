@@ -100,8 +100,12 @@ const float COS_PITCH = 0.643;
 const int LAYERS = 8;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
 const int FAST_LAYERS = 2;
-// How much of the fog a remembered map shows through.
-const float MEMORY_SHOWS = 0.62;
+// Over a remembered map the fog lies low: banks this share of the height, with gaps between
+// them, and never quite opaque, so the old picture shows under them, too little to read in detail.
+const float MEMORY_HEIGHT = 0.45;
+const float MEMORY_MOST = 0.82;
+// How much of a remembered map is under this pixel, set once in main.
+float memory = 0.0;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -186,8 +190,9 @@ float thicknessFrom(float known, float n) {
     float unknown = 1.0 - known;
     // Noise only shapes the edge; where everything is known there is no fog at all.
     float edge = smoothstep(0.0, 0.35, unknown);
-    float amount = smoothstep(0.12, 0.75, unknown + (n - 0.5) * 1.5 * edge);
-    return fogHeight * amount * (0.45 + 0.75 * n);
+    // Over memory the noise opens gaps in the banks as well as shaping their edge.
+    float amount = smoothstep(mix(0.12, 0.42, memory), 0.75, unknown + (n - 0.5) * mix(1.5, 2.4, memory) * edge);
+    return fogHeight * mix(1.0, MEMORY_HEIGHT, memory) * amount * (0.45 + 0.75 * n);
 }
 
 // From this known share up there is no fog whatever the noise: unknown + 0.75 * edge stays below
@@ -229,6 +234,7 @@ void main() {
     blurUnits = cave ? 2.5 : 7.0;
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
     vec4 flags = texelFetch(Sampler0, texel, 0);
+    memory = 1.0 - texture(Sampler0, maskUv).a;
     clear = flags.g > 0.5;
     deep = flags.b > 0.5;
 
@@ -273,7 +279,7 @@ void main() {
 
     // The ground under a thick bank is never visible.
     float soft = knownSoft(maskUv);
-    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft));
+    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * (1.0 - memory);
     color += (1.0 - alpha) * floorFog * shade;
     alpha += (1.0 - alpha) * floorFog;
 
@@ -285,7 +291,7 @@ void main() {
     // Where there is no map at all, nothing should show through, or the edge of the data would
     // read as a hard line inside the bank.
     // The cover takes the colour the layers already have here, so it doesn't show as a band.
-    float empty = 1.0 - smoothstep(0.3, 0.85, knownAt(maskUv));
+    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * (1.0 - memory);
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
@@ -294,6 +300,5 @@ void main() {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    float memory = 1.0 - texture(Sampler0, maskUv).a;
-    fragColor = vec4(color / alpha, alpha * fogOpacity * (1.0 - MEMORY_SHOWS * memory)) * ColorModulator;
+    fragColor = vec4(color / alpha, min(alpha, mix(1.0, MEMORY_MOST, memory)) * fogOpacity) * ColorModulator;
 }

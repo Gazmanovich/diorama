@@ -115,7 +115,7 @@ public final class MapViewport {
 
 		MapMemory memory = cave ? null : level.memory();
 		if (memory != null) {
-			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF);
+			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF, lodFor(level, view), tileSampling(sampling(view)));
 		}
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit);
 		this.drawFog(graphics, level, view);
@@ -167,7 +167,7 @@ public final class MapViewport {
 	}
 
 	/** How a tile's own pixels are sampled; what's drawn over them has no mip levels for the tile shader. */
-	private static Sampling tileSampling(Sampling sampling) {
+	static Sampling tileSampling(Sampling sampling) {
 		return sampling == Sampling.TILE_SMOOTH ? Sampling.TILE_AREA : sampling;
 	}
 
@@ -446,7 +446,7 @@ public final class MapViewport {
 			for (int j = 0; j < MASK; j++) {
 				double v = originV + (j + 0.5) * texel;
 				for (int i = 0; i < MASK; i++) {
-					int remembered = Math.round(memory.known(view, originU + (i + 0.5) * texel, v) * 255);
+					int remembered = Math.round(memory.known(lod, originU + (i + 0.5) * texel, v) * 255);
 					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
 				}
 			}
