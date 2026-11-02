@@ -132,7 +132,9 @@ final class ClaimPaint {
 		if (value == TileChunks.NONE) {
 			return own;
 		}
-		Claims.Claim claim = claims.at(chunkX, base + value);
+		// Turned space, as the tile's chunks are: claims are the world's.
+		dev.diorama.Facing facing = Projection.facing();
+		Claims.Claim claim = claims.at(facing.worldBlockX(chunkX, base + value), facing.worldBlockZ(chunkX, base + value));
 		if (claim == null) {
 			return 0;
 		}
