@@ -867,10 +867,12 @@ public final class BlockLooks {
 						continue;
 					}
 					double wa = a / 255.0;
-					// Average in linear light so bright and dark pixels mix the way they look.
-					r += srgbToLinear((argb >> 16) & 0xFF) * wa;
-					g += srgbToLinear((argb >> 8) & 0xFF) * wa;
-					b += srgbToLinear(argb & 0xFF) * wa;
+					// Average the stored (sRGB) values, as Xaero's World Map and JourneyMap do. In linear
+					// light the bright pixels outweigh the dark ones: a casing that is a dark panel in a
+					// brass frame came out the frame's colour, and an enchanting table's red top grey.
+					r += ((argb >> 16) & 0xFF) * wa;
+					g += ((argb >> 8) & 0xFF) * wa;
+					b += (argb & 0xFF) * wa;
 					weight += wa;
 					visible++;
 				}
@@ -883,18 +885,9 @@ public final class BlockLooks {
 			return new float[] {0.0F, 0.0F, 0.0F, 0.0F};
 		}
 		return new float[] {
-			(float) linearToSrgb(r / weight), (float) linearToSrgb(g / weight), (float) linearToSrgb(b / weight),
+			(float) (r / weight / 255), (float) (g / weight / 255), (float) (b / weight / 255),
 			(float) visible / (w * h)
 		};
-	}
-
-	private static double srgbToLinear(int c) {
-		double v = c / 255.0;
-		return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-	}
-
-	private static double linearToSrgb(double v) {
-		return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
 	}
 
 	/** Running average of the quads that make up one face direction. */

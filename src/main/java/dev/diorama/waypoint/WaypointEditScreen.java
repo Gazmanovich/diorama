@@ -36,6 +36,8 @@ public final class WaypointEditScreen extends Screen {
 	/** Vanilla's colour for a number field it can't read, from the game rules screen. */
 	private static final int INVALID_TEXT = 0xFFFF0000;
 	private static final int LABEL = 0xFFA0A0A0;
+	/** The most characters a waypoint name can have. */
+	private static final int MAX_NAME = 32;
 
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
@@ -96,7 +98,7 @@ public final class WaypointEditScreen extends Screen {
 		int top = this.top();
 		int cx = left + FORM / 2;
 		// Resizing the window or changing GUI scale runs init() again: keep what's typed, not the saved waypoint.
-		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.name), "diorama.waypoint.name", 32);
+		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.shownName()), "diorama.waypoint.name", MAX_NAME);
 		this.iconButton = this.addRenderableWidget(Button.builder(this.iconLabel(), b -> this.pickIcon())
 			.bounds(left + 116, top + 16, 40, 20).build());
 		// A death marker always shows its headstone.
@@ -178,7 +180,7 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	private void pickIcon() {
-		this.preview.name = this.name.getValue().trim().isEmpty() ? this.waypoint.name : this.name.getValue().trim();
+		this.preview.name = this.typedName();
 		this.preview.initials = this.initials.getValue().trim();
 		this.preview.color = this.color;
 		this.minecraft.gui.setScreen(new WaypointIconScreen(this, this.preview, this.icon, id -> {
@@ -431,7 +433,7 @@ public final class WaypointEditScreen extends Screen {
 		int y1 = this.previewBottom();
 		graphics.text(this.font, Component.translatable("diorama.waypoint.preview"), x0, this.top() + 5, LABEL, true);
 		ScreenArt.list(graphics, x0, y0, x1, y1);
-		this.preview.name = this.name.getValue().trim().isEmpty() ? this.waypoint.name : this.name.getValue().trim();
+		this.preview.name = this.typedName();
 		this.preview.initials = this.initials.getValue().trim();
 		this.preview.color = this.color;
 		this.preview.kind = this.waypoint.kind;
@@ -520,6 +522,18 @@ public final class WaypointEditScreen extends Screen {
 		return this.waypoint;
 	}
 
+	/**
+	 * The name field's text, or the saved name while the field is empty or still shows it, so an
+	 * automatic pin saved without a rename keeps following the player's language. The field holds
+	 * {@link #MAX_NAME} characters, so a longer translation shows cut, and the cut text counts too.
+	 */
+	private String typedName() {
+		String typed = this.name.getValue().trim();
+		String shown = this.waypoint.shownName();
+		shown = shown.length() > MAX_NAME ? shown.substring(0, MAX_NAME) : shown;
+		return typed.isEmpty() || typed.equals(shown.trim()) ? this.waypoint.name : typed;
+	}
+
 	/** The waypoint as the fields show it now, edits included, without saving; null while a coordinate isn't a number. */
 	private @Nullable Waypoint shown() {
 		Integer x = parse(this.x.getValue());
@@ -528,8 +542,8 @@ public final class WaypointEditScreen extends Screen {
 		if (x == null || y == null || z == null) {
 			return null;
 		}
-		String name = this.name.getValue().trim();
-		Waypoint shown = new Waypoint(name.isEmpty() ? this.waypoint.name : name, x, y, z, this.waypoint.dimension, this.color);
+		Waypoint shown = new Waypoint(this.typedName(), x, y, z, this.waypoint.dimension, this.color);
+		shown.kind = this.waypoint.kind;
 		String initials = this.initials.getValue().trim();
 		shown.initials = initials.isEmpty() ? shown.initials : initials;
 		return shown;

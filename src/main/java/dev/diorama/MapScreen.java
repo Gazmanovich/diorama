@@ -496,7 +496,7 @@ public final class MapScreen extends Screen {
 			} else if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
 				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
 			} else if (hoveredPin != null) {
-				Component described = elsewhere ? Component.literal(hoveredPin.waypoint().name) : WaypointOverlay.describe(hoveredPin.waypoint(), viewer);
+				Component described = elsewhere ? Component.literal(hoveredPin.waypoint().shownName()) : WaypointOverlay.describe(hoveredPin.waypoint(), viewer);
 				graphics.setTooltipForNextFrame(this.font, described, mouseX, mouseY);
 			} else if (hovered != null) {
 				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
@@ -917,7 +917,7 @@ public final class MapScreen extends Screen {
 
 	private List<MapMenu.Item> waypointItems(Waypoint waypoint) {
 		List<MapMenu.Item> items = new ArrayList<>();
-		items.add(MapMenu.Item.title(Component.literal(waypoint.name)));
+		items.add(MapMenu.Item.title(Component.literal(waypoint.shownName())));
 		items.add(MapMenu.Item.info(this.where(waypoint.x, waypoint.y, waypoint.z)));
 		if (waypoint.editable()) {
 			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->

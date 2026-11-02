@@ -86,6 +86,7 @@
 	"diorama.share.add": "[Add]",
 	"diorama.share.add_hover": "Add %s at %s, %s, %s to your waypoints",
 	"diorama.waypoint.temporary": "Temporary",
+	"diorama.waypoint.death": "Death %s",
 	"diorama.menu.where": "%s, %s, %s · %s m",
 	"diorama.menu.where_rough": "About %s, %s · %s m",
 	"diorama.menu.not_mapped": "Nothing mapped here",
