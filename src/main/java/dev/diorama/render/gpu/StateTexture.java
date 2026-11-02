@@ -93,7 +93,7 @@ final class StateTexture implements MapTexture {
 	//? if >=1.21.11 {
 	private static GpuSampler sampler(Sampling sampling) {
 		return switch (sampling) {
-			case TILE_SMOOTH, TILE_CRISP -> RenderSystem.getSamplerCache().getSampler(
+			case TILE_SMOOTH, TILE_AREA, TILE_CRISP -> RenderSystem.getSamplerCache().getSampler(
 				AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, sampling.crisp() ? FilterMode.NEAREST : FilterMode.LINEAR, true
 			);
 			case CLAMP_LINEAR -> RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);

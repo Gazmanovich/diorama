@@ -42,8 +42,9 @@ import com.mojang.blaze3d.vertex.BufferUploader;
 //
 // A mod shader that fails to compile through the game's normal path takes the player's resource
 // packs (1.21.2-1.21.4) or the whole resource reload (1.21.1, 1.21.5) down with it, so the fog's
-// program only ever comes through a side door; fogReady() says whether it may be drawn. A resource
-// reload can change the shader's sources, so the fog is checked again after each one.
+// and tile programs only ever come through a side door; fogReady() and tileReady() say whether each
+// may be drawn. A resource reload can change the shaders' sources, so they're checked again after
+// each one.
 //? if >=1.21 {
 final class LegacyShaders {
 //?} else {
@@ -90,11 +91,25 @@ final class LegacyShaders extends RenderType {
 		.withCull(false)
 		.build();
 
+	private static final RenderPipeline TILE_PIPELINE = RenderPipeline.builder(RenderPipelines.MATRICES_COLOR_SNIPPET)
+		.withLocation(Diorama.id("pipeline/tile"))
+		.withVertexShader(Diorama.id("core/fog"))
+		.withFragmentShader(Diorama.id("core/tile"))
+		.withSampler("Sampler0")
+		.withBlend(BlendFunction.TRANSLUCENT)
+		.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
+		.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+		.withDepthWrite(false)
+		.withCull(false)
+		.build();
+
 	static final RenderType TEXTURED = RenderType.create("diorama_textured", 1536, TEXTURED_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
 	static final RenderType SOLID = RenderType.create("diorama_solid", 1536, SOLID_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
 	static final RenderType FOG = RenderType.create("diorama_fog", 1536, FOG_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
+	private static final RenderType TILE = RenderType.create("diorama_tile", 1536, TILE_PIPELINE, RenderType.CompositeState.builder().createCompositeState(false));
 
 	private static boolean fogFailed;
+	private static boolean tileFailed;
 
 	static boolean fogReady() {
 		// Compiled at most once per resource reload (the device clears its pipeline cache then).
@@ -106,6 +121,15 @@ final class LegacyShaders extends RenderType {
 		return ready;
 	}
 
+	static boolean tileReady() {
+		boolean ready = RenderSystem.getDevice().precompilePipeline(TILE_PIPELINE).isValid();
+		if (!ready && !tileFailed) {
+			tileFailed = true;
+			LOGGER.error("Diorama's tile shader didn't compile; the map draws a little softer");
+		}
+		return ready;
+	}
+
 	static void draw(RenderType type, MeshData mesh) {
 		type.draw(mesh);
 	}
@@ -113,27 +137,42 @@ final class LegacyShaders extends RenderType {
 	static void drawFog(MeshData mesh) {
 		FOG.draw(mesh);
 	}
+
+	static void drawTile(MeshData mesh) {
+		TILE.draw(mesh);
+	}
 	//?} else {
 	//? if >=1.21.2 {
 	private static final ShaderProgram FOG_PROGRAM = new ShaderProgram(Diorama.id("core/fog"), DefaultVertexFormat.POSITION_TEX_COLOR, ShaderDefines.EMPTY);
+	private static final ShaderProgram TILE_PROGRAM = new ShaderProgram(Diorama.id("core/tile"), DefaultVertexFormat.POSITION_TEX_COLOR, ShaderDefines.EMPTY);
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(CoreShaders.POSITION_TEX_COLOR);
 	// No shader shard: drawFog sets the program fogReady() got through the side door. A shard would
 	// fetch it through the normal path, which on a compile failure clears the player's resource packs.
 	private static final RenderStateShard.ShaderStateShard FOG_SHADER = RenderStateShard.NO_SHADER;
 	private static CompiledShaderProgram fogProgram;
+	private static CompiledShaderProgram tileProgram;
 	//?} else {
 	private static ShaderInstance fogShader;
+	private static ShaderInstance tileShader;
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(GameRenderer::getPositionTexColorShader);
 	private static final RenderStateShard.ShaderStateShard FOG_SHADER = new RenderStateShard.ShaderStateShard(() -> fogShader);
+	private static final RenderStateShard.ShaderStateShard TILE_SHADER = new RenderStateShard.ShaderStateShard(() -> tileShader);
 	//?}
 	// Each resource reload makes new instances of vanilla's own programs; this is the one seen at the
 	// last check, so a different one means the fog has to be checked again.
 	private static Object fogReload;
+	private static Object tileReload;
 	private static boolean fogFailed;
+	private static boolean tileFailed;
 
 	static final RenderType TEXTURED = create("diorama_textured", DefaultVertexFormat.POSITION_TEX_COLOR, TEXTURED_SHADER);
 	static final RenderType SOLID = create("diorama_solid", DefaultVertexFormat.POSITION_COLOR, RenderStateShard.POSITION_COLOR_SHADER);
 	static final RenderType FOG = create("diorama_fog", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_SHADER);
+	//? if >=1.21.2 {
+	private static final RenderType TILE = create("diorama_tile", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_SHADER);
+	//?} else {
+	private static final RenderType TILE = create("diorama_tile", DefaultVertexFormat.POSITION_TEX_COLOR, TILE_SHADER);
+	//?}
 
 	private static RenderType create(String name, VertexFormat format, RenderStateShard.ShaderStateShard shader) {
 		// The form vanilla makes public. The one without the two flags (false here) does the same,
@@ -199,6 +238,49 @@ final class LegacyShaders extends RenderType {
 		//?}
 	}
 
+	// As fogReady, for the tile shader.
+	static boolean tileReady() {
+		//? if >=1.21.2 {
+		ShaderManager shaders = Minecraft.getInstance().getShaderManager();
+		Object reload = shaders.getProgram(CoreShaders.POSITION_TEX_COLOR);
+		if (reload != tileReload) {
+			tileReload = reload;
+			tileFailed = false;
+		}
+		tileProgram = null;
+		if (tileFailed) {
+			return false;
+		}
+		try {
+			tileProgram = shaders.getProgramForLoading(TILE_PROGRAM);
+			return true;
+		} catch (Exception e) {
+			tileFailed = true;
+			LOGGER.error("Diorama's tile shader didn't compile; the map draws a little softer", e);
+			return false;
+		}
+		//?} else {
+		ShaderInstance reload = GameRenderer.getPositionTexColorShader();
+		if (reload != tileReload) {
+			tileReload = reload;
+			tileFailed = false;
+			if (tileShader != null) {
+				tileShader.close();
+				tileShader = null;
+			}
+		}
+		if (tileShader == null && !tileFailed) {
+			try {
+				tileShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "diorama_tile", DefaultVertexFormat.POSITION_TEX_COLOR);
+			} catch (Exception e) {
+				tileFailed = true;
+				LOGGER.error("Diorama's tile shader didn't compile; the map draws a little softer", e);
+			}
+		}
+		return tileShader != null;
+		//?}
+	}
+
 	// The depth test shard for "always" leaves depth testing as it found it, and before 1.21.2 the
 	// GUI's flush turns it on, so earlier GUI shapes could hide parts of the map. Off for the draw,
 	// then back as it was.
@@ -231,6 +313,22 @@ final class LegacyShaders extends RenderType {
 		}
 		//?} else {
 		draw(FOG, mesh);
+		//?}
+	}
+
+	static void drawTile(MeshData mesh) {
+		//? if >=1.21.2 {
+		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+		TILE.setupRenderState();
+		RenderSystem.disableDepthTest();
+		RenderSystem.setShader(tileProgram);
+		BufferUploader.drawWithShader(mesh);
+		TILE.clearRenderState();
+		if (depth) {
+			RenderSystem.enableDepthTest();
+		}
+		//?} else {
+		draw(TILE, mesh);
 		//?}
 	}
 	//?}

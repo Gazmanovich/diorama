@@ -49,7 +49,10 @@ import org.jspecify.annotations.Nullable;
  */
 public final class MapLevel implements ChunkSource {
 	private static final int MAX_CHUNKS = 4096;
-	private static final int MAX_GPU_TILES = 192;
+	/** Tiles kept on the GPU, about 1.4 MB each; past this, the least recently drawn go down to {@link #KEPT_TILES}. */
+	private static final int MAX_GPU_TILES = 256;
+	/** As many tiles as stay on the GPU for certain: a view that wants more loses some now and then. */
+	static final int KEPT_TILES = MAX_GPU_TILES * 3 / 4;
 	/** A changed tile waits this long for more changes before re-baking... */
 	private static final long QUIET_MS = 350;
 	/** ...but never longer than this. */
@@ -1345,7 +1348,7 @@ public final class MapLevel implements ChunkSource {
 		while (it.hasNext()) {
 			Map.Entry<TileKey, MapTile> e = it.next();
 			boolean stale = this.frame - e.getValue().lastDrawn > 3600;
-			if (resident <= MAX_GPU_TILES * 3 / 4 && !stale) {
+			if (resident <= KEPT_TILES && !stale) {
 				break;
 			}
 			if (!e.getValue().isEmpty()) {

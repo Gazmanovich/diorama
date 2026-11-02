@@ -73,6 +73,7 @@ public final class MapViewport {
 	 * under a moving player would still be fog. This is as far as the game usually has chunks.
 	 */
 	private static final int NEAR_TILES = 2;
+	private static final int NEAR_TILE_COUNT = (2 * NEAR_TILES + 1) * (2 * NEAR_TILES + 1);
 
 	/** The most the fog shader's opacity code can say: it has five spare bits. */
 	private static final int OPACITY_CODES = 31;
@@ -123,9 +124,11 @@ public final class MapViewport {
 
 	/**
 	 * The overview level to draw: the coarsest one that still has at least one texture pixel per
-	 * screen pixel. Overviews only exist for the saved surface map, and are only used below
+	 * screen pixel, or one finer where that many tiles fit in memory, as a tile looks sharper shrunk
+	 * further. Overviews only exist for the saved surface map, and are only used below
 	 * {@link #DETAILED_ZOOM}: above it the live tiles' own mipmaps look the same and never lag
-	 * behind recent changes.
+	 * behind recent changes. Stepping one finer, the full map can reach the live tiles a little below
+	 * it too.
 	 */
 	public static int lodFor(MapLevel level, View view) {
 		if (view.layer() != TileKey.SURFACE || !level.hasOverviews() || view.zoom() >= DETAILED_ZOOM) {
@@ -136,7 +139,19 @@ public final class MapViewport {
 		while (lod < TileKey.MAX_LOD && Projection.PIXELS_PER_UNIT / (double) (2 << lod) >= screenPixelsPerUnit) {
 			lod++;
 		}
-		return lod;
+		// A following view stays on overviews: detailed tiles all over a minimap would bake again as
+		// the player moves, and the middle, which needs them, gets them from drawNear.
+		boolean finer = lod > 1 || lod == 1 && !view.follows();
+		return finer && mostTilesFor(view, lod - 1) <= MapLevel.KEPT_TILES - NEAR_TILE_COUNT ? lod - 1 : lod;
+	}
+
+	/**
+	 * The most tiles of an overview level a view of this size asks for, wherever it pans: those it
+	 * shows, up to one more each way than it spans, and a tile all round, as {@link #drawTiles} asks.
+	 */
+	private static double mostTilesFor(View view, int lod) {
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
+		return (Math.ceil(view.width() / view.zoom() / units) + 3) * (Math.ceil(view.height() / view.zoom() / units) + 3);
 	}
 
 	/**
@@ -149,6 +164,11 @@ public final class MapViewport {
 	public static Sampling sampling(View view) {
 		double screenPixelsPerPixel = view.zoom() * Minecraft.getInstance().getWindow().getGuiScale() / Projection.PIXELS_PER_UNIT;
 		return view.zoom() >= Projection.PIXELS_PER_UNIT || screenPixelsPerPixel >= CRISP_FROM ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+	}
+
+	/** How a tile's own pixels are sampled; what's drawn over them has no mip levels for the tile shader. */
+	private static Sampling tileSampling(Sampling sampling) {
+		return sampling == Sampling.TILE_SMOOTH ? Sampling.TILE_AREA : sampling;
 	}
 
 	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */
@@ -206,6 +226,7 @@ public final class MapViewport {
 		int tu1 = (int) Math.floor(u1 / units);
 		int tv1 = (int) Math.floor(v1 / units);
 		Sampling sampling = sampling(view);
+		Sampling tiles = tileSampling(sampling);
 		MapCanvas canvas = MapCanvas.of(graphics);
 		float size = (float) (units * view.zoom());
 		Circle circle = view.round() ? Circle.in(view) : null;
@@ -231,7 +252,7 @@ public final class MapViewport {
 				if (circle != null) {
 					Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
 					if (inside != null) {
-						canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
+						canvas.quad(tile.texture(), tiles, inside.corners(), inside.uvs(), tint);
 						if (claimed != null) {
 							above.add(() -> canvas.quad(claimed, sampling, inside.corners(), inside.uvs(), tint));
 						}
@@ -241,7 +262,7 @@ public final class MapViewport {
 					}
 					continue;
 				}
-				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
+				canvas.rect(tile.texture(), tiles, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
 				if (claimed != null) {
 					above.add(() -> canvas.rect(claimed, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint));
 				}
@@ -251,7 +272,7 @@ public final class MapViewport {
 			}
 		}
 		if (this.drawsNear(view, lod)) {
-			drawNear(level, view, canvas, sampling, circle, tint);
+			drawNear(level, view, canvas, tiles, circle, tint);
 		}
 		if (lit != null) {
 			lit.run();
