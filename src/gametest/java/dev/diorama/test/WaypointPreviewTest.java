@@ -53,7 +53,7 @@ final class WaypointPreviewTest {
 			}
 			return server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, FAR, FAR);
 		});
-		world.getServer().runCommand("fill " + (FAR - CLEARING) + " " + ground + " " + (FAR - CLEARING) + " " + (FAR + CLEARING) + " " + (ground + 40) + " air");
+		world.getServer().runCommand("fill " + (FAR - CLEARING) + " " + ground + " " + (FAR - CLEARING) + " " + (FAR + CLEARING) + " " + (ground + 40) + " " + (FAR + CLEARING) + " air");
 		world.getServer().runCommand("fill " + (FAR - 7) + " " + (ground - 1) + " " + (FAR - 7) + " " + (FAR + 7) + " " + (ground - 1) + " " + (FAR + 7) + " gold_block");
 		world.getServer().runCommand("tp @a " + FAR + " " + ground + " " + FAR);
 		context.waitFor(mc -> mc.player.blockPosition().closerThan(new BlockPos(FAR, ground, FAR), 4) && MapSession.get() != null
