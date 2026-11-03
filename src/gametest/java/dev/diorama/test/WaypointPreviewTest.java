@@ -34,12 +34,8 @@ final class WaypointPreviewTest {
 	}
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
-		context.runOnClient(mc -> List.copyOf(WaypointStore.get().all()).forEach(WaypointStore.get()::remove));
 		BlockPos home = context.computeOnClient(mc -> mc.player.blockPosition());
-		context.setScreen(() -> new WaypointListScreen(null));
-		context.waitTicks(10);
-		context.takeScreenshot("waypoint-preview-0-empty-list");
-		context.setScreen(() -> null);
+		emptyList(context, "waypoint-preview-0-empty-list");
 
 		// Far off in the Overworld: a gold platform the map bakes, with a waypoint on it, in a
 		// clearing so no tree hangs over it. Held loaded, as fill skips everything if a chunk isn't,
@@ -97,11 +93,9 @@ final class WaypointPreviewTest {
 		BufferedImage typedShot = shoot(context, "waypoint-preview-6b-typed-position");
 		context.setScreen(() -> null);
 
-		context.runOnClient(mc -> List.copyOf(WaypointStore.get().all()).forEach(WaypointStore.get()::remove));
-		context.setScreen(() -> new WaypointListScreen(null));
-		context.waitTicks(10);
-		context.takeScreenshot("waypoint-preview-7-empty-list-after");
-		context.setScreen(() -> null);
+		// Only this section's own: the waypoints section checks its kept ones after rejoining.
+		context.runOnClient(mc -> List.of(gold, nether, roof, near, unmapped).forEach(WaypointStore.get()::remove));
+		emptyList(context, "waypoint-preview-7-empty-list-after");
 
 		// Checked after every picture is taken, so a failure still leaves them all.
 		List<String> wrong = new ArrayList<>();
@@ -128,6 +122,21 @@ final class WaypointPreviewTest {
 		if (!wrong.isEmpty()) {
 			throw new AssertionError("Waypoint editor previews: " + String.join("; ", wrong));
 		}
+	}
+
+	/**
+	 * The empty list's piece of map, still the ground around the player. Only when this section
+	 * runs alone: the others leave waypoints behind, and some of them check theirs later.
+	 */
+	private static void emptyList(ClientGameTestContext context, String name) {
+		if (context.computeOnClient(mc -> !WaypointStore.get().all().isEmpty())) {
+			return;
+		}
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(10);
+		context.takeScreenshot(name);
+		context.setScreen(() -> null);
 	}
 
 	private static Waypoint add(ClientGameTestContext context, Waypoint waypoint) {
