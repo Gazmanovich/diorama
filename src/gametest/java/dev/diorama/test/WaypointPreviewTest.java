@@ -1,0 +1,200 @@
+package dev.diorama.test;
+
+import dev.diorama.MapSession;
+import dev.diorama.waypoint.Waypoint;
+import dev.diorama.waypoint.WaypointEditScreen;
+import dev.diorama.waypoint.WaypointListScreen;
+import dev.diorama.waypoint.WaypointStore;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import javax.imageio.ImageIO;
+import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.levelgen.Heightmap;
+
+/**
+ * The waypoint editor's preview stands the pin on the waypoint's own ground (opt-in:
+ * {@code waypoint-preview}, issue #258): a waypoint far off in the Overworld on a gold platform, one
+ * on the Nether's floor and one on its roof, and one where the map has never been, each edited
+ * while standing at spawn in the Overworld. The empty list's piece of map stays the player's.
+ */
+final class WaypointPreviewTest {
+	/** Blue, so the pin is told apart from the Nether's red, the grass and the gold. */
+	private static final int PIN = 0xFF3355FF;
+	private static final int FAR = 1512;
+	/** How far around the platform trees are cleared. */
+	private static final int CLEARING = 12;
+
+	private WaypointPreviewTest() {
+	}
+
+	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.runOnClient(mc -> List.copyOf(WaypointStore.get().all()).forEach(WaypointStore.get()::remove));
+		BlockPos home = context.computeOnClient(mc -> mc.player.blockPosition());
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(10);
+		context.takeScreenshot("waypoint-preview-0-empty-list");
+		context.setScreen(() -> null);
+
+		// Far off in the Overworld: a gold platform the map bakes, with a waypoint on it, in a
+		// clearing so no tree hangs over it. Held loaded, as fill skips everything if a chunk isn't,
+		// and generated first: an unloaded column's height reads as the bottom of the world.
+		world.getServer().runCommand("forceload add " + (FAR - CLEARING) + " " + (FAR - CLEARING) + " " + (FAR + CLEARING) + " " + (FAR + CLEARING));
+		int ground = world.getServer().computeOnServer(server -> {
+			for (int cx = (FAR - CLEARING) >> 4; cx <= (FAR + CLEARING) >> 4; cx++) {
+				for (int cz = (FAR - CLEARING) >> 4; cz <= (FAR + CLEARING) >> 4; cz++) {
+					server.overworld().getChunk(cx, cz);
+				}
+			}
+			return server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, FAR, FAR);
+		});
+		world.getServer().runCommand("fill " + (FAR - CLEARING) + " " + ground + " " + (FAR - CLEARING) + " " + (FAR + CLEARING) + " " + (ground + 40) + " air");
+		world.getServer().runCommand("fill " + (FAR - 7) + " " + (ground - 1) + " " + (FAR - 7) + " " + (FAR + 7) + " " + (ground - 1) + " " + (FAR + 7) + " gold_block");
+		world.getServer().runCommand("tp @a " + FAR + " " + ground + " " + FAR);
+		context.waitFor(mc -> mc.player.blockPosition().closerThan(new BlockPos(FAR, ground, FAR), 4) && MapSession.get() != null
+			&& MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
+		world.getServer().runCommand("forceload remove all");
+		Waypoint gold = add(context, new Waypoint("Gold", FAR, ground, FAR, "minecraft:overworld", PIN));
+
+		// The Nether: one on the floor where the player arrives, one on the roof above it.
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
+			&& MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
+		BlockPos floor = context.computeOnClient(mc -> mc.player.blockPosition());
+		Waypoint nether = add(context, new Waypoint("Nether", floor.getX(), floor.getY(), floor.getZ(), "minecraft:the_nether", PIN));
+		Waypoint roof = add(context, new Waypoint("Roof", floor.getX(), 128, floor.getZ(), "minecraft:the_nether", PIN));
+		// Standing on the roof, as in the issue's comment.
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + floor.getX() + " 128 " + floor.getZ());
+		context.waitTicks(40);
+		DioramaClientTest.settle(context, 40);
+		edit(context, roof, "waypoint-preview-1-roof-from-roof");
+
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + home.getX() + " " + home.getY() + " " + home.getZ());
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		DioramaClientTest.settle(context, 100);
+		Waypoint near = add(context, new Waypoint("Near", home.getX(), home.getY(), home.getZ(), "minecraft:overworld", PIN));
+		Waypoint unmapped = add(context, new Waypoint("Nowhere", 20000, 70, 20000, "minecraft:overworld", PIN));
+
+		BufferedImage nearShot = edit(context, near, "waypoint-preview-2-near");
+		BufferedImage goldShot = edit(context, gold, "waypoint-preview-3-far-gold");
+		BufferedImage netherShot = edit(context, nether, "waypoint-preview-4-nether-from-overworld");
+		edit(context, roof, "waypoint-preview-5-roof-from-overworld");
+		BufferedImage unmappedShot = edit(context, unmapped, "waypoint-preview-6-never-mapped");
+		// The preview follows the position as it's typed: the waypoint at spawn, moved to the platform.
+		context.setScreen(() -> new WaypointEditScreen(null, near, false));
+		context.waitTicks(5);
+		DioramaClientTest.typeInto(context, 2, Integer.toString(FAR));
+		DioramaClientTest.typeInto(context, 3, Integer.toString(ground));
+		DioramaClientTest.typeInto(context, 4, Integer.toString(FAR));
+		BufferedImage typedShot = shoot(context, "waypoint-preview-6b-typed-position");
+		context.setScreen(() -> null);
+
+		context.runOnClient(mc -> List.copyOf(WaypointStore.get().all()).forEach(WaypointStore.get()::remove));
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(10);
+		context.takeScreenshot("waypoint-preview-7-empty-list-after");
+		context.setScreen(() -> null);
+
+		// Checked after every picture is taken, so a failure still leaves them all.
+		List<String> wrong = new ArrayList<>();
+		Share nearShare = share(context, nearShot);
+		Share goldShare = share(context, goldShot);
+		Share netherShare = share(context, netherShot);
+		Share unmappedShare = share(context, unmappedShot);
+		Share typedShare = share(context, typedShot);
+		if (nearShare.green < 0.1) {
+			wrong.add("the waypoint at spawn doesn't stand on spawn's grass: " + nearShare);
+		}
+		if (goldShare.gold < 0.03) {
+			wrong.add("the far waypoint doesn't stand on its gold platform: " + goldShare);
+		}
+		if (netherShare.red < 0.1 || netherShare.green > 0.02) {
+			wrong.add("the Nether waypoint doesn't stand on the Nether: " + netherShare);
+		}
+		if (unmappedShare.green > 0.02 || unmappedShare.gold > 0.01) {
+			wrong.add("the never-mapped waypoint shows ground: " + unmappedShare);
+		}
+		if (typedShare.gold < 0.03) {
+			wrong.add("the preview didn't follow the typed position to the gold platform: " + typedShare);
+		}
+		if (!wrong.isEmpty()) {
+			throw new AssertionError("Waypoint editor previews: " + String.join("; ", wrong));
+		}
+	}
+
+	private static Waypoint add(ClientGameTestContext context, Waypoint waypoint) {
+		context.runOnClient(mc -> WaypointStore.get().add(waypoint));
+		return waypoint;
+	}
+
+	/** Opens the editor on a waypoint, waits for the map's tiles to load and takes its picture. */
+	private static BufferedImage edit(ClientGameTestContext context, Waypoint waypoint, String name) {
+		context.setScreen(() -> new WaypointEditScreen(null, waypoint, false));
+		BufferedImage shot = shoot(context, name);
+		context.setScreen(() -> null);
+		return shot;
+	}
+
+	private static BufferedImage shoot(ClientGameTestContext context, String name) {
+		// Opening a screen leaves the cursor in the middle, over a colour swatch whose tooltip
+		// would cover the preview.
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(10);
+		DioramaClientTest.settle(context, 40);
+		return read(context.takeScreenshot(name));
+	}
+
+	/** How much of the preview panel is grass green, netherrack red and gold, as fractions of its pixels. */
+	private record Share(double green, double red, double gold) {
+	}
+
+	/** The preview panel, right of the form, from the editor's own layout. */
+	private static Share share(ClientGameTestContext context, BufferedImage shot) {
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		int guiWidth = context.computeOnClient(mc -> mc.getWindow().getGuiScaledWidth());
+		int guiHeight = context.computeOnClient(mc -> mc.getWindow().getGuiScaledHeight());
+		int left = guiWidth / 2 - 146 + 212;
+		int top = guiHeight / 2 - 92 + 16;
+		int x0 = (int) (left * scale);
+		int x1 = (int) ((left + 80) * scale);
+		int y0 = (int) (top * scale);
+		int y1 = (int) ((top + 82) * scale);
+		int green = 0;
+		int red = 0;
+		int gold = 0;
+		int all = 0;
+		for (int y = y0; y < Math.min(y1, shot.getHeight()); y++) {
+			for (int x = x0; x < Math.min(x1, shot.getWidth()); x++) {
+				int rgb = shot.getRGB(x, y);
+				int r = rgb >> 16 & 0xFF;
+				int g = rgb >> 8 & 0xFF;
+				int b = rgb & 0xFF;
+				all++;
+				if (g > r * 1.1 && g > b * 1.2 && g > 50) {
+					green++;
+				} else if (r > 150 && g > 120 && b < g * 0.6) {
+					gold++;
+				} else if (r > g * 1.35 && r > b * 1.35 && r > 50) {
+					red++;
+				}
+			}
+		}
+		return new Share(green / (double) all, red / (double) all, gold / (double) all);
+	}
+
+	private static BufferedImage read(Path file) {
+		try {
+			return ImageIO.read(file.toFile());
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+}

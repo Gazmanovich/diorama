@@ -18,8 +18,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Creates or edits one waypoint: name, initials, position, colour, folder and whether it shows. A
- * preview on the right stands its pin on a piece of the map, as the map will draw it, and follows
- * the colour and initials as they change; the folder, Share in chat and Teleport sit under it. The footer is only
+ * preview on the right stands its pin on the piece of the map where it is, in its own dimension, as
+ * the map will draw it, and follows the position, colour and initials as they change; the folder,
+ * Share in chat and Teleport sit under it. The footer is only
  * the two ways out, Save and Cancel. Deleting lives on the list's rows and the map's menu.
  */
 public final class WaypointEditScreen extends Screen {
@@ -423,8 +424,8 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	/**
-	 * The pin as the map will draw it, standing on the same piece of map as the empty list, in a
-	 * list panel of its own. The pin's head rises above the piece, so the two are centred together.
+	 * The pin as the map will draw it, standing on its own piece of the map, in a list panel of its
+	 * own. The pin's head rises above the piece, so the two are centred together.
 	 */
 	private void drawPreview(GuiGraphicsExtractor graphics) {
 		int x0 = this.left() + PREVIEW_LEFT;
@@ -445,7 +446,8 @@ public final class WaypointEditScreen extends Screen {
 		int total = rise + this.piece.outerHeight();
 		int pieceX = (x0 + x1) / 2 - this.piece.outerWidth() / 2;
 		int pieceY = y0 + (y1 - y0 - total) / 2 + rise;
-		this.piece.draw(graphics, pieceX, pieceY);
+		this.piece.draw(graphics, pieceX, pieceY, new MapPiece.Place(this.waypoint.dimension,
+			typed(this.x, this.waypoint.x), typed(this.y, this.waypoint.y), typed(this.z, this.waypoint.z)));
 		// The caption of the folder button under the panel.
 		graphics.text(this.font, Component.translatable("diorama.waypoint.folder_caption"), x0, y1 + 3, LABEL, true);
 		graphics.pose().pushMatrix();
@@ -603,12 +605,24 @@ public final class WaypointEditScreen extends Screen {
 		this.onClose();
 	}
 
+	/** A coordinate as typed, or the saved one while the field doesn't read as a number. */
+	private static int typed(EditBox box, int saved) {
+		Integer value = parse(box.getValue());
+		return value == null ? saved : value;
+	}
+
 	private static @Nullable Integer parse(String text) {
 		try {
 			return Integer.parseInt(text.trim());
 		} catch (NumberFormatException e) {
 			return null;
 		}
+	}
+
+	@Override
+	public void tick() {
+		super.tick();
+		this.piece.tick();
 	}
 
 	@Override
