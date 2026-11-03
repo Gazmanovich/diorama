@@ -70,7 +70,15 @@ final class WaypointPreviewTest {
 		world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + floor.getX() + " 128 " + floor.getZ());
 		context.waitTicks(40);
 		DioramaClientTest.settle(context, 40);
-		edit(context, roof, "waypoint-preview-1-roof-from-roof");
+		BufferedImage roofHereShot = edit(context, roof, "waypoint-preview-1-roof-from-roof");
+		// With fog of war, ground the player hasn't seen is fog on the map, and a plain face under
+		// it: not the netherrack the loaded world has there.
+		Waypoint unseen = add(context, new Waypoint("Unseen", floor.getX() + 120, floor.getY(), floor.getZ(), "minecraft:the_nether", PIN));
+		context.runOnClient(mc -> dev.diorama.ServerRules.setAlwaysFogOfWar(true));
+		DioramaClientTest.settle(context, 40);
+		BufferedImage unseenShot = edit(context, unseen, "waypoint-preview-1b-unseen-fog-of-war");
+		context.runOnClient(mc -> dev.diorama.ServerRules.setAlwaysFogOfWar(false));
+		DioramaClientTest.settle(context, 40);
 
 		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + home.getX() + " " + home.getY() + " " + home.getZ());
 		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
@@ -82,7 +90,7 @@ final class WaypointPreviewTest {
 		BufferedImage nearShot = edit(context, near, "waypoint-preview-2-near");
 		BufferedImage goldShot = edit(context, gold, "waypoint-preview-3-far-gold");
 		BufferedImage netherShot = edit(context, nether, "waypoint-preview-4-nether-from-overworld");
-		edit(context, roof, "waypoint-preview-5-roof-from-overworld");
+		BufferedImage roofShot = edit(context, roof, "waypoint-preview-5-roof-from-overworld");
 		BufferedImage unmappedShot = edit(context, unmapped, "waypoint-preview-6-never-mapped");
 		// The preview follows the position as it's typed: the waypoint at spawn, moved to the platform.
 		context.setScreen(() -> new WaypointEditScreen(null, near, false));
@@ -94,7 +102,7 @@ final class WaypointPreviewTest {
 		context.setScreen(() -> null);
 
 		// Only this section's own: the waypoints section checks its kept ones after rejoining.
-		context.runOnClient(mc -> List.of(gold, nether, roof, near, unmapped).forEach(WaypointStore.get()::remove));
+		context.runOnClient(mc -> List.of(gold, nether, roof, unseen, near, unmapped).forEach(WaypointStore.get()::remove));
 		emptyList(context, "waypoint-preview-7-empty-list-after");
 
 		// Checked after every picture is taken, so a failure still leaves them all.
@@ -104,6 +112,9 @@ final class WaypointPreviewTest {
 		Share netherShare = share(context, netherShot);
 		Share unmappedShare = share(context, unmappedShot);
 		Share typedShare = share(context, typedShot);
+		Share roofHereShare = share(context, roofHereShot);
+		Share roofShare = share(context, roofShot);
+		Share unseenShare = share(context, unseenShot);
 		if (nearShare.green < 0.1) {
 			wrong.add("the waypoint at spawn doesn't stand on spawn's grass: " + nearShare);
 		}
@@ -113,7 +124,16 @@ final class WaypointPreviewTest {
 		if (netherShare.red < 0.1 || netherShare.green > 0.02) {
 			wrong.add("the Nether waypoint doesn't stand on the Nether: " + netherShare);
 		}
-		if (unmappedShare.green > 0.02 || unmappedShare.gold > 0.01) {
+		if (roofHereShare.red < 0.1 || roofHereShare.green > 0.02) {
+			wrong.add("the roof waypoint, edited on the roof, doesn't stand on the Nether: " + roofHereShare);
+		}
+		if (roofShare.red < 0.1 || roofShare.green > 0.02) {
+			wrong.add("the roof waypoint, edited from the Overworld, doesn't stand on the Nether: " + roofShare);
+		}
+		if (unseenShare.red > 0.02) {
+			wrong.add("ground the player hasn't seen shows through fog of war: " + unseenShare);
+		}
+		if (unmappedShare.cloud < 0.15 || unmappedShare.green > 0.02 || unmappedShare.gold > 0.01) {
 			wrong.add("the never-mapped waypoint shows ground: " + unmappedShare);
 		}
 		if (typedShare.gold < 0.03) {
@@ -161,8 +181,8 @@ final class WaypointPreviewTest {
 		return read(context.takeScreenshot(name));
 	}
 
-	/** How much of the preview panel is grass green, netherrack red and gold, as fractions of its pixels. */
-	private record Share(double green, double red, double gold) {
+	/** How much of the preview panel is grass green, netherrack red, gold and white cloud, as fractions of its pixels. */
+	private record Share(double green, double red, double gold, double cloud) {
 	}
 
 	/** The preview panel, right of the form, from the editor's own layout. */
@@ -179,6 +199,7 @@ final class WaypointPreviewTest {
 		int green = 0;
 		int red = 0;
 		int gold = 0;
+		int cloud = 0;
 		int all = 0;
 		for (int y = y0; y < Math.min(y1, shot.getHeight()); y++) {
 			for (int x = x0; x < Math.min(x1, shot.getWidth()); x++) {
@@ -193,10 +214,12 @@ final class WaypointPreviewTest {
 					gold++;
 				} else if (r > g * 1.35 && r > b * 1.35 && r > 50) {
 					red++;
+				} else if (Math.min(r, Math.min(g, b)) > 180 && Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) < 40) {
+					cloud++;
 				}
 			}
 		}
-		return new Share(green / (double) all, red / (double) all, gold / (double) all);
+		return new Share(green / (double) all, red / (double) all, gold / (double) all, cloud / (double) all);
 	}
 
 	private static BufferedImage read(Path file) {

@@ -90,7 +90,7 @@ final class MapPiece {
 	/** Another dimension's saved map, opened for a place shown there. */
 	private @Nullable SavedMap saved;
 
-	private record FaceKey(ClientLevel level, int x0, int columns, long edge, MapStyle style, @Nullable BlockLooks looks, boolean madeUp) {
+	private record FaceKey(ClientLevel level, int x0, int columns, long edge, MapStyle style, @Nullable BlockLooks looks, boolean madeUp, boolean fogged) {
 	}
 
 	/** A dimension's saved map, and what it was opened for: a change to either opens it again. */
@@ -181,7 +181,9 @@ final class MapPiece {
 		int x0 = (int) Math.floor(view.minU());
 		int columns = Math.min(FACE_TEXTURE, (int) Math.floor(view.minU() + this.width / ZOOM) - x0 + 1);
 		double edge = view.minV() + this.depth / ZOOM;
-		MapTexture texture = this.face(level, looks, style, x0, columns, edge, ground, place == null);
+		// Under a roof with fog of war, the map hides ground the player hasn't seen, and so does the face.
+		MapLevel fogged = place != null && map != null && map.roofless() && map.fogOfWar() ? map : null;
+		MapTexture texture = this.face(level, looks, style, x0, columns, edge, ground, place == null, fogged);
 		graphics.enableScissor(left, faceTop, left + this.width, faceTop + this.side);
 		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_CRISP, view.screenX(x0), faceTop, view.screenX(x0 + columns), faceTop + this.side,
 			0, 0, columns / (float) FACE_TEXTURE, this.side * TEXELS_PER_ROW / (float) FACE_TEXTURE, 0xFFFFFFFF);
@@ -191,13 +193,15 @@ final class MapPiece {
 	/**
 	 * The cut face's texture, built again when the piece has moved or the map's look changed.
 	 * Where nothing is loaded a column is grass, dirt and stone if {@code madeUp}, standing in for
-	 * the player's own ground until it arrives, and {@link #UNKNOWN} otherwise.
+	 * the player's own ground until it arrives, and {@link #UNKNOWN} otherwise. So is a column whose
+	 * ground the player hasn't seen on a {@code fogged} map.
 	 */
-	private MapTexture face(ClientLevel level, BlockLooks looks, MapStyle style, int x0, int columns, double edge, BlockPos player, boolean madeUp) {
+	private MapTexture face(ClientLevel level, BlockLooks looks, MapStyle style, int x0, int columns, double edge, BlockPos player, boolean madeUp,
+		@Nullable MapLevel fogged) {
 		if (this.face == null) {
 			this.face = MapTexture.create("diorama map piece", FACE_TEXTURE, 1);
 		}
-		FaceKey key = new FaceKey(level, x0, columns, Math.round(edge * 8), style, looks, madeUp);
+		FaceKey key = new FaceKey(level, x0, columns, Math.round(edge * 8), style, looks, madeUp, fogged != null);
 		long now = System.currentTimeMillis();
 		if (key.equals(this.faceKey) && now - this.faceBuilt < FACE_REFRESH_MS) {
 			return this.face;
@@ -209,6 +213,9 @@ final class MapPiece {
 		for (int c = 0; c < columns; c++) {
 			int bx = x0 + c;
 			int[] hit = surface(level, looks, bx, edge);
+			if (hit != null && fogged != null && !fogged.isSeen(bx, hit[0], hit[1])) {
+				hit = null;
+			}
 			if (hit == null && !madeUp) {
 				for (int row = 0; row < this.side; row++) {
 					int plain = abgr(row == this.side - 1 ? closed(UNKNOWN) : UNKNOWN);
