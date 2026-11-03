@@ -172,6 +172,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("pin-names")) {
 				PinNamesTest.run(context, world);
 			}
+			if (tests.contains("waypoint-preview")) {
+				WaypointPreviewTest.run(context, world);
+			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
