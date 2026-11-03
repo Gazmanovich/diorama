@@ -454,7 +454,9 @@ public final class MapViewport {
 					this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
 				}
 			}
-			this.liftTargets();
+			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
+			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
+			this.liftTargets(centerI, centerJ);
 			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
 			// view has its texels in new places, so the old heights mean nothing there.
 			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
@@ -488,14 +490,20 @@ public final class MapViewport {
 	 * the fog over land never explored: a texel's lift is its distance from the redrawn land over
 	 * that plus its distance from the unexplored. Lift 1 is the fog as it always is; a texel with
 	 * no remembered map under it has 1. With nothing unexplored in the view the slope runs out
-	 * over the view's width.
+	 * over the view's width; with nothing redrawn yet it starts at the middle of the view, where
+	 * the redraw starts.
 	 */
-	private void liftTargets() {
+	private void liftTargets(int centerI, int centerJ) {
 		int far = MASK * 3;
+		boolean anyRedrawn = false;
 		for (int k = 0; k < MASK * MASK; k++) {
 			boolean redrawn = (this.maskPixels[k] & 0xFF) >= 128;
+			anyRedrawn |= redrawn;
 			this.toRedrawn[k] = redrawn ? 0 : Integer.MAX_VALUE / 2;
 			this.toUnexplored[k] = !redrawn && this.remembered[k] < 0.5F ? 0 : Integer.MAX_VALUE / 2;
+		}
+		if (!anyRedrawn) {
+			this.toRedrawn[Math.max(0, Math.min(MASK - 1, centerJ)) * MASK + Math.max(0, Math.min(MASK - 1, centerI))] = 0;
 		}
 		chamfer(this.toRedrawn);
 		chamfer(this.toUnexplored);
