@@ -69,7 +69,8 @@ layout(std140) uniform DynamicTransforms {
 
 // Share of known ground per mask texel, in the red channel. Green is 1 where every texel this
 // shader can read from a pixel in that texel is fully known, blue is 1 where every one is fully
-// unknown. Alpha is 1 less the share of a remembered map under the fog.
+// unknown. Alpha is how tall the fog stands, as a share of its height: 1 but over a remembered
+// map, where it rolls up from the land already redrawn to the full height at the unexplored.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
@@ -100,14 +101,11 @@ const float COS_PITCH = 0.643;
 const int LAYERS = 8;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
 const int FAST_LAYERS = 2;
-// Over a remembered map the fog lies low: banks this share of the height, with gaps between
-// them where the noise is low, never thicker than MEMORY_MOST and never thinner than a haze, so
-// the old picture shows under them, too little to read in detail.
-const float MEMORY_HEIGHT = 0.4;
-const float MEMORY_MOST = 0.7;
-const float MEMORY_HAZE = 0.16;
-// How much of a remembered map is under this pixel, set once in main.
-float memory = 0.0;
+// Next to land already redrawn the fog over a remembered map stands this share of its height,
+// low enough to see the old map between its hills.
+const float LOWEST = 0.12;
+// The fog's lift right here, set once in main.
+float liftHere = 1.0;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -188,14 +186,12 @@ float noiseAt(vec2 uv) {
     return mix(fine, noiseLayer(coarse), scaleFraction);
 }
 
-float thicknessFrom(float known, float n) {
+float thicknessFrom(float known, float n, float lift) {
     float unknown = 1.0 - known;
     // Noise only shapes the edge; where everything is known there is no fog at all.
     float edge = smoothstep(0.0, 0.35, unknown);
     float amount = smoothstep(0.12, 0.75, unknown + (n - 0.5) * 1.5 * edge);
-    // Over memory the noise alone makes banks, with gaps where it's low.
-    amount = mix(amount, smoothstep(0.47, 0.66, n) * edge, memory);
-    return fogHeight * mix(1.0, MEMORY_HEIGHT, memory) * amount * (0.45 + 0.75 * n);
+    return fogHeight * mix(LOWEST, 1.0, lift) * amount * (0.45 + 0.75 * n);
 }
 
 // From this known share up there is no fog whatever the noise: unknown + 0.75 * edge stays below
@@ -203,7 +199,7 @@ float thicknessFrom(float known, float n) {
 const float NO_FOG_KNOWN = 0.95;
 
 float thicknessAt(vec2 uv, float known) {
-    return known >= NO_FOG_KNOWN ? 0.0 : thicknessFrom(known, noiseAt(uv));
+    return known >= NO_FOG_KNOWN ? 0.0 : thicknessFrom(known, noiseAt(uv), texture(Sampler0, uv).a);
 }
 
 float thickness(vec2 uv) {
@@ -237,7 +233,7 @@ void main() {
     blurUnits = cave ? 2.5 : 7.0;
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
     vec4 flags = texelFetch(Sampler0, texel, 0);
-    memory = 1.0 - texture(Sampler0, maskUv).a;
+    liftHere = texture(Sampler0, maskUv).a;
     clear = flags.g > 0.5;
     deep = flags.b > 0.5;
 
@@ -282,7 +278,8 @@ void main() {
 
     // The ground under a thick bank is never visible.
     float soft = knownSoft(maskUv);
-    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * (1.0 - memory);
+    // Low fog over a remembered map keeps the old map under it.
+    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * smoothstep(0.3, 0.9, liftHere);
     color += (1.0 - alpha) * floorFog * shade;
     alpha += (1.0 - alpha) * floorFog;
 
@@ -294,18 +291,11 @@ void main() {
     // Where there is no map at all, nothing should show through, or the edge of the data would
     // read as a hard line inside the bank.
     // The cover takes the colour the layers already have here, so it doesn't show as a band.
-    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * (1.0 - memory);
+    // A remembered map is only covered up as its fog reaches the full height.
+    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * smoothstep(0.7, 1.0, liftHere);
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
-
-    if (memory > 0.0) {
-        vec3 straight = alpha > 0.002 ? color / alpha : mix(shade, lit, 0.75);
-        // The haze only where the new map isn't yet: it goes as tiles land.
-        float low = mix(alpha, clamp(alpha, MEMORY_HAZE * (1.0 - soft), MEMORY_MOST), memory);
-        color = straight * low;
-        alpha = low;
-    }
 
     if (alpha <= 0.002) {
         discard;

@@ -387,8 +387,12 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
+			if (this.lifting) {
+				this.easeLift();
+			}
 			return;
 		}
+		MaskInputs before = this.maskInputs;
 		this.maskInputs = inputs;
 		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
@@ -441,18 +445,137 @@ public final class MapViewport {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
+		this.lifting = false;
 		if (memory != null) {
 			int memoryLod = memory.lod(view, lod);
-			// Alpha is 255 less the share of a remembered map under the fog, which thins it there.
 			for (int j = 0; j < MASK; j++) {
 				double v = originV + (j + 0.5) * texel;
 				for (int i = 0; i < MASK; i++) {
-					int remembered = Math.round(memory.known(memoryLod, originU + (i + 0.5) * texel, v) * 255);
-					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
+					this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
 				}
 			}
+			this.liftTargets();
+			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
+			// view has its texels in new places, so the old heights mean nothing there.
+			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
+				|| before.lod() != lod || before.layer() != view.layer();
+			if (moved) {
+				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
+			} else {
+				this.lifting = true;
+			}
+			this.liftMs = System.currentTimeMillis();
+			this.writeLift();
 		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+	}
+
+	/** How much of a remembered map is under each mask texel, 0 to 1. */
+	private final float[] remembered = new float[MASK * MASK];
+	/** How tall the fog stands over each texel, as a share of its full height: {@link #liftTargets}. */
+	private final float[] liftTarget = new float[MASK * MASK];
+	/** The heights drawn, easing toward the targets. */
+	private final float[] liftShown = new float[MASK * MASK];
+	private final int[] toRedrawn = new int[MASK * MASK];
+	private final int[] toUnexplored = new int[MASK * MASK];
+	private boolean lifting;
+	private long liftMs;
+	/** Lift a second the fog's height can change by while easing. */
+	private static final float LIFT_PER_SECOND = 0.6F;
+
+	/**
+	 * The fog over a remembered map rolls up from the land already redrawn to the full height of
+	 * the fog over land never explored: a texel's lift is its distance from the redrawn land over
+	 * that plus its distance from the unexplored. Lift 1 is the fog as it always is; a texel with
+	 * no remembered map under it has 1. With nothing unexplored in the view the slope runs out
+	 * over the view's width.
+	 */
+	private void liftTargets() {
+		int far = MASK * 3;
+		for (int k = 0; k < MASK * MASK; k++) {
+			boolean redrawn = (this.maskPixels[k] & 0xFF) >= 128;
+			this.toRedrawn[k] = redrawn ? 0 : Integer.MAX_VALUE / 2;
+			this.toUnexplored[k] = !redrawn && this.remembered[k] < 0.5F ? 0 : Integer.MAX_VALUE / 2;
+		}
+		chamfer(this.toRedrawn);
+		chamfer(this.toUnexplored);
+		for (int k = 0; k < MASK * MASK; k++) {
+			float redrawn = Math.min(this.toRedrawn[k], far);
+			float unexplored = Math.min(this.toUnexplored[k], far);
+			float ramp = redrawn + unexplored == 0 ? 1 : redrawn / (redrawn + unexplored);
+			this.liftTarget[k] = 1 - this.remembered[k] * (1 - ramp);
+		}
+	}
+
+	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer: two passes over the grid. */
+	private static void chamfer(int[] d) {
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				int k = j * MASK + i;
+				int v = d[k];
+				if (i > 0) {
+					v = Math.min(v, d[k - 1] + 3);
+				}
+				if (j > 0) {
+					v = Math.min(v, d[k - MASK] + 3);
+					if (i > 0) {
+						v = Math.min(v, d[k - MASK - 1] + 4);
+					}
+					if (i < MASK - 1) {
+						v = Math.min(v, d[k - MASK + 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
+		for (int j = MASK - 1; j >= 0; j--) {
+			for (int i = MASK - 1; i >= 0; i--) {
+				int k = j * MASK + i;
+				int v = d[k];
+				if (i < MASK - 1) {
+					v = Math.min(v, d[k + 1] + 3);
+				}
+				if (j < MASK - 1) {
+					v = Math.min(v, d[k + MASK] + 3);
+					if (i < MASK - 1) {
+						v = Math.min(v, d[k + MASK + 1] + 4);
+					}
+					if (i > 0) {
+						v = Math.min(v, d[k + MASK - 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
+	}
+
+	/** Steps the drawn heights toward the targets, for the time since the last step. */
+	private void easeLift() {
+		long now = System.currentTimeMillis();
+		float step = Math.max(0.001F, (now - this.liftMs) / 1000.0F * LIFT_PER_SECOND);
+		this.liftMs = now;
+		boolean done = true;
+		for (int k = 0; k < MASK * MASK; k++) {
+			float diff = this.liftTarget[k] - this.liftShown[k];
+			if (Math.abs(diff) <= step) {
+				this.liftShown[k] = this.liftTarget[k];
+			} else {
+				this.liftShown[k] += Math.signum(diff) * step;
+				done = false;
+			}
+		}
+		this.lifting = !done;
+		this.writeLift();
+		if (this.maskTexture != null) {
+			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+		}
+	}
+
+	/** The drawn heights into the mask's alpha. */
+	private void writeLift() {
+		for (int k = 0; k < MASK * MASK; k++) {
+			this.maskPixels[k] = this.maskPixels[k] & 0xFFFFFF | Math.round(this.liftShown[k] * 255) << 24;
+		}
 	}
 
 	/**
