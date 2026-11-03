@@ -2,7 +2,9 @@ package dev.diorama.waypoint;
 
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
+import dev.diorama.Maps;
 import dev.diorama.Projection;
+import dev.diorama.ServerRules;
 import dev.diorama.bake.BiomeTints;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.TileKey;
@@ -11,6 +13,7 @@ import dev.diorama.render.MapViewport;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
+import java.nio.file.Path;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -33,6 +36,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Where the map has nothing around the player yet (a world just made), the top is plain grass
  * lit like the map's, until the map's tiles there have baked.
+ *
+ * <p>The waypoint editor shows a {@link Place} instead: the waypoint's own spot, from the map of
+ * its dimension, even one the player isn't in. Ground the map has never seen is fog, clouds or a
+ * roof's smoke, as on the map. The cut face shows blocks only where the game has them loaded;
+ * elsewhere it is {@link #UNKNOWN}, a plain face that claims no blocks.
  */
 final class MapPiece {
 	/** GUI pixels per block across, close to what the full map shows by default. */
@@ -45,6 +53,8 @@ final class MapPiece {
 	private static final int SHADOW = 0x40000000;
 	/** Air behind the cut: a cave, seen into. */
 	private static final int CAVE = 0xFF1C1E24;
+	/** The cut face of ground the game hasn't loaded: no blocks to show, so none are made up. */
+	private static final int UNKNOWN = 0xFF3B3A39;
 	/** The sun's direction across the ground, as the map's baker has it (west, a little south). */
 	private static final double SUN_AZIMUTH_Z = 0.479;
 	/** How much of the sky an open south face sees. */
@@ -77,7 +87,18 @@ final class MapPiece {
 	private @Nullable FaceKey faceKey;
 	private long faceBuilt;
 
-	private record FaceKey(ClientLevel level, int x0, int columns, long edge, MapStyle style, @Nullable BlockLooks looks) {
+	/** Another dimension's saved map, opened for a place shown there. */
+	private @Nullable SavedMap saved;
+
+	private record FaceKey(ClientLevel level, int x0, int columns, long edge, MapStyle style, @Nullable BlockLooks looks, boolean madeUp, boolean fogged) {
+	}
+
+	/** A dimension's saved map, and what it was opened for: a change to either opens it again. */
+	private record SavedMap(Path folder, MapStyle style, MapLevel map) {
+	}
+
+	/** A waypoint's spot, in its own dimension's coordinates, for the piece to stand under it. */
+	record Place(String dimension, int x, int y, int z) {
 	}
 
 	/**
@@ -110,8 +131,13 @@ final class MapPiece {
 		return 1 + this.depth / 2;
 	}
 
-	/** Draws the piece with its outline's top left at (x, y); the shadow reaches 3 further east. */
+	/** Draws the piece around the player, with its outline's top left at (x, y); the shadow reaches 3 further east. */
 	void draw(GuiGraphicsExtractor graphics, int x, int y) {
+		this.draw(graphics, x, y, null);
+	}
+
+	/** Same, around {@code place} instead if there is one, which can be in another dimension. */
+	void draw(GuiGraphicsExtractor graphics, int x, int y, @Nullable Place place) {
 		graphics.fill(x + 3, y - 1, x + this.outerWidth() + 3, y + this.outerHeight() - 1, SHADOW);
 		graphics.fill(x, y, x + this.outerWidth(), y + this.outerHeight(), OUTLINE);
 		int left = x + 1;
@@ -125,36 +151,57 @@ final class MapPiece {
 			graphics.fill(left, top, left + this.width, top + this.depth + this.side, 0xFF6E8B4A);
 			return;
 		}
-		MapViewport.View view = new MapViewport.View(left, top, this.width, this.depth, viewer.getX(), Projection.v(viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE);
 		MapSession session = MapSession.get();
-		MapLevel map = session != null ? session.map() : null;
-		if (map != null && MapViewport.showsAnything(map, view)) {
+		// In the player's dimension the live map has the place, and the loaded world its blocks.
+		boolean here = place == null || place.dimension().equals(level.dimension().identifier().toString());
+		MapLevel map = !here ? this.savedMap(place.dimension()) : session != null ? session.map() : null;
+		MapViewport.View view = place == null
+			? new MapViewport.View(left, top, this.width, this.depth, viewer.getX(), Projection.v(viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE)
+			// Where the map stands a waypoint's pin: the middle of its block's top.
+			: new MapViewport.View(left, top, this.width, this.depth, place.x() + 0.5, Projection.v(place.y(), place.z() + 0.5), ZOOM, TileKey.SURFACE);
+		BlockPos ground = place == null ? viewer.blockPosition() : new BlockPos(place.x(), place.y(), place.z());
+		if (map != null && (place != null || MapViewport.showsAnything(map, view))) {
+			// Under a waypoint, ground the map has never seen is fog, as on the map.
 			this.viewport.draw(graphics, map, view);
 		} else {
 			if (map != null) {
 				// Asks for the tiles, so the real map takes over once they've baked.
 				MapViewport.ready(map, view);
 			}
-			graphics.fill(left, top, left + this.width, top + this.depth, argb(grassTop(looks, level, viewer.blockPosition(), style)));
+			graphics.fill(left, top, left + this.width, top + this.depth, argb(grassTop(looks, level, ground, style)));
 		}
 
+		int faceTop = top + this.depth;
+		if (!here) {
+			// Nothing of another dimension is loaded.
+			graphics.fill(left, faceTop, left + this.width, faceTop + this.side - 1, UNKNOWN);
+			graphics.fill(left, faceTop + this.side - 1, left + this.width, faceTop + this.side, closed(UNKNOWN));
+			return;
+		}
 		int x0 = (int) Math.floor(view.minU());
 		int columns = Math.min(FACE_TEXTURE, (int) Math.floor(view.minU() + this.width / ZOOM) - x0 + 1);
 		double edge = view.minV() + this.depth / ZOOM;
-		MapTexture texture = this.face(level, looks, style, x0, columns, edge, viewer.blockPosition());
-		int faceTop = top + this.depth;
+		// Under a roof with fog of war, the map hides ground the player hasn't seen, and so does the face.
+		MapLevel fogged = place != null && map != null && map.roofless() && map.fogOfWar() ? map : null;
+		MapTexture texture = this.face(level, looks, style, x0, columns, edge, ground, place == null, fogged);
 		graphics.enableScissor(left, faceTop, left + this.width, faceTop + this.side);
 		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_CRISP, view.screenX(x0), faceTop, view.screenX(x0 + columns), faceTop + this.side,
 			0, 0, columns / (float) FACE_TEXTURE, this.side * TEXELS_PER_ROW / (float) FACE_TEXTURE, 0xFFFFFFFF);
 		graphics.disableScissor();
 	}
 
-	/** The cut face's texture, built again when the piece has moved or the map's look changed. */
-	private MapTexture face(ClientLevel level, BlockLooks looks, MapStyle style, int x0, int columns, double edge, BlockPos player) {
+	/**
+	 * The cut face's texture, built again when the piece has moved or the map's look changed.
+	 * Where nothing is loaded a column is grass, dirt and stone if {@code madeUp}, standing in for
+	 * the player's own ground until it arrives, and {@link #UNKNOWN} otherwise. So is a column whose
+	 * ground the player hasn't seen on a {@code fogged} map.
+	 */
+	private MapTexture face(ClientLevel level, BlockLooks looks, MapStyle style, int x0, int columns, double edge, BlockPos player, boolean madeUp,
+		@Nullable MapLevel fogged) {
 		if (this.face == null) {
 			this.face = MapTexture.create("diorama map piece", FACE_TEXTURE, 1);
 		}
-		FaceKey key = new FaceKey(level, x0, columns, Math.round(edge * 8), style, looks);
+		FaceKey key = new FaceKey(level, x0, columns, Math.round(edge * 8), style, looks, madeUp, fogged != null);
 		long now = System.currentTimeMillis();
 		if (key.equals(this.faceKey) && now - this.faceBuilt < FACE_REFRESH_MS) {
 			return this.face;
@@ -166,6 +213,18 @@ final class MapPiece {
 		for (int c = 0; c < columns; c++) {
 			int bx = x0 + c;
 			int[] hit = surface(level, looks, bx, edge);
+			if (hit != null && fogged != null && !fogged.isSeen(bx, hit[0], hit[1])) {
+				hit = null;
+			}
+			if (hit == null && !madeUp) {
+				for (int row = 0; row < this.side; row++) {
+					int plain = abgr(row == this.side - 1 ? closed(UNKNOWN) : UNKNOWN);
+					for (int t = 0; t < TEXELS_PER_ROW; t++) {
+						this.facePixels[(row * TEXELS_PER_ROW + t) * FACE_TEXTURE + c] = plain;
+					}
+				}
+				continue;
+			}
 			for (int row = 0; row < this.side; row++) {
 				// Where the map shows nothing, an ordinary column: grass, a few blocks of dirt, then stone.
 				BlockState state;
@@ -331,6 +390,47 @@ final class MapPiece {
 		return 0xFF000000 | Math.round(rgb[2] * 255) << 16 | Math.round(rgb[1] * 255) << 8 | Math.round(rgb[0] * 255);
 	}
 
+	/** A colour as the face's last row has it, darker, closing the cut. */
+	private static int closed(int argb) {
+		int r = Math.round(((argb >> 16) & 0xFF) * 0.75F);
+		int g = Math.round(((argb >> 8) & 0xFF) * 0.75F);
+		int b = Math.round((argb & 0xFF) * 0.75F);
+		return 0xFF000000 | r << 16 | g << 8 | b;
+	}
+
+	/**
+	 * The saved map in use in another dimension, opened again when the player switches it or the
+	 * look changes, as the full map's dimension button does.
+	 */
+	private @Nullable MapLevel savedMap(String dimension) {
+		Maps maps = Maps.get();
+		if (maps == null) {
+			this.closeSaved();
+			return null;
+		}
+		Path folder = maps.tileFolder(dimension, maps.active(dimension));
+		if (this.saved == null || !this.saved.folder().equals(folder) || this.saved.style() != MapStyle.get()) {
+			this.closeSaved();
+			this.saved = new SavedMap(folder, MapStyle.get(), MapLevel.saved(folder));
+		}
+		this.saved.map().setFogOfWar(ServerRules.fogOfWar(dimension.equals("minecraft:the_nether")));
+		return this.saved.map();
+	}
+
+	/** Takes in the saved map's loaded tiles; the session does this for the live map. Call every tick. */
+	void tick() {
+		if (this.saved != null) {
+			this.saved.map().update();
+		}
+	}
+
+	private void closeSaved() {
+		if (this.saved != null) {
+			this.saved.map().close();
+			this.saved = null;
+		}
+	}
+
 	/** ARGB to ABGR and back: the same swap. */
 	private static int abgr(int argb) {
 		return (argb & 0xFF00FF00) | (argb & 0xFF) << 16 | (argb >> 16) & 0xFF;
@@ -352,6 +452,7 @@ final class MapPiece {
 	/** Frees the GPU textures. The piece can still draw afterwards; it makes them again. */
 	void close() {
 		this.viewport.close();
+		this.closeSaved();
 		if (this.face != null) {
 			this.face.close();
 			this.face = null;
