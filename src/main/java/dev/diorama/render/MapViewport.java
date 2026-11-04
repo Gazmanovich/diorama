@@ -31,7 +31,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
 	}
 
 	/**
@@ -385,7 +385,9 @@ public final class MapViewport {
 		boolean drawsNear = this.drawsNear(view, lod);
 		int nearU = drawsNear ? (int) Math.floor(view.centerU() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
+		// The memory's level can change with the zoom while the real tiles' doesn't.
+		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
@@ -442,7 +444,6 @@ public final class MapViewport {
 		}
 		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		if (memory != null) {
-			int memoryLod = memory.lod(view, lod);
 			// Alpha is 255 less the share of a remembered map under the fog, which thins it there.
 			for (int j = 0; j < MASK; j++) {
 				double v = originV + (j + 0.5) * texel;
