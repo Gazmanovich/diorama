@@ -69,8 +69,7 @@ layout(std140) uniform DynamicTransforms {
 
 // Share of known ground per mask texel, in the red channel. Green is 1 where every texel this
 // shader can read from a pixel in that texel is fully known, blue is 1 where every one is fully
-// unknown. Alpha is how tall the fog stands, as a share of its height: 1 but over a remembered
-// map, where it rolls up from the land already redrawn to the full height at the unexplored.
+// unknown. Alpha is 1 less the share of a remembered map under the fog.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
@@ -99,62 +98,16 @@ const float NOISE_PERIOD = 512.0;
 // The default camera angle (50 degrees). At other angles the banks sit slightly too far north or south.
 const float COS_PITCH = 0.643;
 const int LAYERS = 8;
-// How much of the soft fog is drawn over the cloud terraces.
-const float FOG_MIX = 0.5;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
 const int FAST_LAYERS = 2;
-// Next to land already redrawn the soft fog stands this share of its height, and covers this much
-// of the old map under it; both rise to the full fog toward the unexplored.
-const float LOWEST = 0.12;
-const float MEMORY_COVER = 0.0;
-// How much each height layer adds, and how dark the side of a bank or a level away from the sun gets.
-const float LAYER_ALPHA = 0.45;
-const float SHADOW = 1.6;
-// How much of a remembered map under the clouds shows through them.
-const float MEMORY_SEE = 0.15;
-// The fog's lift right here, set once in main.
-float liftHere = 1.0;
-
-// Over the surface the fog is drawn as terraced clouds, like a crater stepping down to the revealed
-// map: a grid of cells CLOUD_CELL map units across (doubling as the map zooms out), each at a level
-// that rises with distance from the revealed land, every level a slab stacked on the one below.
-// A slab's cells blend so runs of them read as one with round corners, and it bulges at its middle
-// height and rounds off toward its top and bottom, so the stacked levels read as layered pillows.
-// Lit like a sunny day's clouds: warm sunlight on the upper parts, cool sky light under, hazier the
-// deeper a level is.
-// 80 cells to the 1024 * 2^steps map units the noise offset wraps over, and every noise scale the
-// clouds read a whole fraction of that too, so nothing jumps where the offset wraps.
-const float CLOUD_CELL = 12.8;
-const float CLOUD_LEVELS = 5.0;
-// A level's thickness as a share of a cell, and how much noise breaks up the stairs.
-const float LEVEL_THICK = 0.9;
-const float STAIR_NOISE = 0.6;
-// How sharply cells meet (smaller is boxier), the see-through fringe at a slab's edge, and how a
-// slab rounds off toward its top and bottom (higher is boxier).
-const float ROUND = 0.45;
-const float EDGE_SOFT = 0.5;
-const float PROFILE = 4.0;
-const float CLOUD_ALPHA = 0.95;
-// How much drifting noise eats a level's edges into wisps, and how far into a level it reaches.
-const float WISP = 1.5;
-// How much a level's edge frays into strands.
-const float STRANDS = 1.0;
-// How far swirling noise pushes a level's edges, in cells.
-const float WARP = 2.0;
-// Sky light and sunlight, and how much the level above darkens what's under it toward the sun.
-const float AMBIENT = 1.0;
-const float SUN = 1.0;
-// Sky-coloured haze over the deeper levels, and round the revealed map at the bottom.
-const float HAZE = 0.5;
-const float HALO = 0.25;
-// How much darker the lowest level is than the highest.
-const float DEPTH_DARK = 0.65;
-// How much a level's top is shaded like a pillow, 0 for flat.
-const float PILLOW = 1.0;
-// How dark the clouds' shadow is on the revealed map.
-const float GROUND_SHADOW = 0.3;
-// Map units at uv 0, from the noise origin, so cells stay put as the view moves.
-vec2 originMap;
+// Over a remembered map the fog lies low: banks this share of the height, with gaps between
+// them where the noise is low, never thicker than MEMORY_MOST and never thinner than a haze, so
+// the old picture shows under them, too little to read in detail.
+const float MEMORY_HEIGHT = 0.4;
+const float MEMORY_MOST = 0.7;
+const float MEMORY_HAZE = 0.16;
+// How much of a remembered map is under this pixel, set once in main.
+float memory = 0.0;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -235,12 +188,14 @@ float noiseAt(vec2 uv) {
     return mix(fine, noiseLayer(coarse), scaleFraction);
 }
 
-float thicknessFrom(float known, float n, float lift) {
+float thicknessFrom(float known, float n) {
     float unknown = 1.0 - known;
     // Noise only shapes the edge; where everything is known there is no fog at all.
     float edge = smoothstep(0.0, 0.35, unknown);
     float amount = smoothstep(0.12, 0.75, unknown + (n - 0.5) * 1.5 * edge);
-    return fogHeight * mix(LOWEST, 1.0, lift) * amount * (0.45 + 0.75 * n);
+    // Over memory the noise alone makes banks, with gaps where it's low.
+    amount = mix(amount, smoothstep(0.47, 0.66, n) * edge, memory);
+    return fogHeight * mix(1.0, MEMORY_HEIGHT, memory) * amount * (0.45 + 0.75 * n);
 }
 
 // From this known share up there is no fog whatever the noise: unknown + 0.75 * edge stays below
@@ -248,150 +203,11 @@ float thicknessFrom(float known, float n, float lift) {
 const float NO_FOG_KNOWN = 0.95;
 
 float thicknessAt(vec2 uv, float known) {
-    return known >= NO_FOG_KNOWN ? 0.0 : thicknessFrom(known, noiseAt(uv), texture(Sampler0, uv).a);
+    return known >= NO_FOG_KNOWN ? 0.0 : thicknessFrom(known, noiseAt(uv));
 }
 
 float thickness(vec2 uv) {
     return thicknessAt(uv, knownSoft(uv));
-}
-
-// The level of a cloud cell: 0 over revealed land, else 1 to CLOUD_LEVELS, from the mask's climb.
-float cellLevel(vec2 cell, float size) {
-    vec2 pos = (cell + 0.5) * size;
-    vec4 m = texture(Sampler0, (pos - originMap) / unitsPerUv);
-    if (m.r >= 0.5) {
-        return 0.0;
-    }
-    float n = texture(Sampler1, pos / (size * 20.0) + 0.21).r;
-    return clamp(ceil(m.a * CLOUD_LEVELS + (n - 0.5) * STAIR_NOISE), 1.0, CLOUD_LEVELS);
-}
-
-// How much of a point is under cells at level k or above: the four nearest cells blended, with the
-// blend squeezed into a band at each cell's edge, so runs of cells read as one with round corners.
-float levelCover(vec2 p, float size, float k) {
-    vec2 g = p / size - 0.5;
-    vec2 i = floor(g);
-    vec2 f = smoothstep(0.5 - ROUND, 0.5 + ROUND, g - i);
-    float a = step(k, cellLevel(i, size));
-    float b = step(k, cellLevel(i + vec2(1.0, 0.0), size));
-    float c = step(k, cellLevel(i + vec2(0.0, 1.0), size));
-    float d = step(k, cellLevel(i + vec2(1.0, 1.0), size));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-// Drifting noise for wisps, 0 to 1, a few times finer than a cell.
-float wispAt(vec2 p, float size) {
-    vec2 n = p / (size * 4.0);
-    float a = texture(Sampler1, n + vec2(5.0, 2.0) * seconds / 1200.0).g;
-    float b = texture(Sampler1, n * 2.0 + vec2(-7.0, 4.0) * seconds / 1200.0).b;
-    return a * 0.6 + b * 0.4;
-}
-
-// A point pushed about by swirling noise, so a level's edges curl and trail into wisps instead of
-// running straight. Less at the lowest level, whose edge is the revealed map's.
-vec2 warped(vec2 p, float size, float k) {
-    vec2 n = p / (size * 2.5);
-    float drift = seconds / 1200.0;
-    vec2 a = vec2(texture(Sampler1, n + vec2(3.0, 1.0) * drift).g, texture(Sampler1, n + 0.37 + vec2(-2.0, 3.0) * drift).b) - 0.5;
-    vec2 b = vec2(texture(Sampler1, n * 3.0 + 0.11).a, texture(Sampler1, n * 3.0 + 0.71).g) - 0.5;
-    float amount = WARP * size * (k <= 1.0 ? 0.35 : 1.0);
-    return p + (a + b * 0.45) * amount;
-}
-
-// Level cover with wisps eaten out of its edges: the noise only takes away, and only where the
-// cover is thinning, so the middle of a level stays whole and revealed land stays clear.
-float wispCover(vec2 p, float size, float k) {
-    float cover = levelCover(warped(p, size, k), size, k);
-    float bite = smoothstep(0.35, 0.75, wispAt(p, size));
-    return cover - WISP * bite * (1.0 - cover) * cover * 2.0;
-}
-
-// Above 0 inside a cloud. A level's slab needs a quarter of cover at its middle height, three
-// quarters at its top and bottom, so each slab rounds off there.
-float terraceInside(vec2 p, float h, float size, float level) {
-    float k = clamp(ceil(h / level), 1.0, CLOUD_LEVELS);
-    float t = pow(clamp(abs(h - (k - 0.5) * level) / (0.5 * level), 0.0, 1.0), PROFILE);
-    return wispCover(p, size, k) - (0.25 + 0.5 * t);
-}
-
-// The colour of the cloud surface met at height h over a point, and how solid it is there.
-vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float jitter) {
-    vec3 sky = vec3(0.56, 0.65, 0.77) * AMBIENT;
-    vec3 sunlight = vec3(1.0, 0.93, 0.82) * SUN;
-    vec3 haze = vec3(0.64, 0.75, 0.9);
-    float k = clamp(ceil(h / level), 1.0, CLOUD_LEVELS);
-    float up = pow(clamp(h / level - (k - 1.0), 0.0, 1.0), 0.8);
-    // Two looks toward the sun: a level as high or higher there darkens this point, less near a slab's top.
-    vec2 toward = normalize(vec2(-1.0, -0.4)) * size * 0.4;
-    float blocked = levelCover(p + toward * (1.0 + jitter * 0.5), size, k) + levelCover(p + toward * (2.0 + jitter * 0.5), size, k + 1.0);
-    float shading = (0.12 + 0.5 * up) * (2.0 - SHADOW * blocked * (1.0 - up * up));
-    // A level's top is a pillow: lit along the edges that face the sun, shaded along the ones
-    // that face away.
-    vec2 sunward = normalize(vec2(-1.0, -0.4)) * size * 0.35;
-    float sunEdge = 1.0 - levelCover(p + sunward, size, k);
-    float farEdge = 1.0 - levelCover(p - sunward, size, k);
-    shading *= mix(1.0, 1.0 + PILLOW * (0.3 * sunEdge - 0.45 * farEdge), up);
-    vec3 color = sky * (1.0 - 0.35 * shading) + sunlight * 0.5 * (0.1 + shading);
-    // Higher levels catch more light, deeper ones sit in haze: that's what reads as depth.
-    color *= mix(DEPTH_DARK, 1.0, k / CLOUD_LEVELS);
-    color = min(color, vec3(1.0));
-    color = mix(color, haze, HAZE * pow(1.0 - h / hTop, 1.5));
-    // Solid inside; toward the edge it frays into strands drawn out along the wind.
-    float cover = wispCover(p, size, k);
-    float fringe = cover - 0.25;
-    float edge = 1.0 - smoothstep(0.55, 0.95, levelCover(warped(p, size, k), size, k));
-    vec2 along = vec2(p.x * 0.35, p.y * 1.4);
-    float strands = smoothstep(0.25, 0.75, wispAt(along + 53.0, size * 0.5));
-    float alpha = CLOUD_ALPHA * smoothstep(0.0, EDGE_SOFT, fringe) * mix(1.0, strands, edge * STRANDS);
-    return vec4(color, alpha);
-}
-
-// Clouds over a ground point at one cell size: premultiplied colour, and how much shows through.
-// The line of sight goes on past the first surface to the next one down, so a level under a
-// thin one shows faintly through it.
-vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
-    float level = size * LEVEL_THICK;
-    float hTop = CLOUD_LEVELS * level;
-    int steps = int(CLOUD_LEVELS) * (fast ? 2 : 3);
-    float dh = hTop / float(steps);
-    float last = hTop;
-    bool wasInside = false;
-    int surfaces = 0;
-    float through = 1.0;
-    vec3 glow = vec3(0.0);
-    for (int s = 0; s < steps; s++) {
-        float h = hTop - (float(s) + 0.5 + jitter * 0.9) * dh;
-        bool inside = terraceInside(vec2(p0.x, p0.y + h * COS_PITCH), h, size, level) > 0.0;
-        if (inside && !wasInside) {
-            // Close in on the surface between the last point outside and this one.
-            float above = last;
-            float below = h;
-            for (int r = 0; r < 3; r++) {
-                float mid = 0.5 * (above + below);
-                if (terraceInside(vec2(p0.x, p0.y + mid * COS_PITCH), mid, size, level) > 0.0) {
-                    below = mid;
-                } else {
-                    above = mid;
-                }
-            }
-            vec4 hit = terraceSurface(vec2(p0.x, p0.y + below * COS_PITCH), below, size, level, hTop, jitter);
-            glow += through * hit.a * hit.rgb;
-            through *= 1.0 - hit.a;
-            surfaces++;
-            if (surfaces >= 2 || through < 0.1) {
-                break;
-            }
-        }
-        wasInside = inside;
-        last = h;
-    }
-    return vec4(glow, through);
-}
-
-// The clouds' shadow on the revealed map under a point, 0 to 1.
-float groundShadow(vec2 p0, float size) {
-    vec2 toward = normalize(vec2(-1.0, -0.4));
-    return smoothstep(0.3, 0.6, levelCover(p0 + toward * size * LEVEL_THICK * 1.5, size, 1.0));
 }
 
 float hash(vec2 p) {
@@ -416,13 +232,12 @@ void main() {
     scaleFraction = mod(fogCode, 16.0) / 16.0;
     fogScale = exp2(scaleSteps + scaleFraction);
     // MapViewport.fogReach repeats how far the reads below can reach (these sizes, the blur taps,
-    // the layer shift, the sun probe, and the clouds' cells, curls and southward lean), to know where
-    // the clear and deep flags are safe. Change both together.
+    // the layer shift and the sun probe), to know where the clear and deep flags are safe. Change both together.
     fogHeight = cave ? 4.0 : 10.0;
     blurUnits = cave ? 2.5 : 7.0;
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
     vec4 flags = texelFetch(Sampler0, texel, 0);
-    liftHere = texture(Sampler0, maskUv).a;
+    memory = 1.0 - texture(Sampler0, maskUv).a;
     clear = flags.g > 0.5;
     deep = flags.b > 0.5;
 
@@ -434,57 +249,6 @@ void main() {
         shade = vec3(0.07, 0.055, 0.055);
     }
     vec2 toSun = vec2(-1.0, -0.4) * (9.0 * fogScale / unitsPerUv);
-
-    bool cloudy = false;
-    vec3 cloudGlow = vec3(0.0);
-    float cloudCover = 0.0;
-    if (!cave && !smoke) {
-        originMap = noiseOrigin * NOISE_PERIOD * exp2(scaleSteps + 1.0);
-        vec2 p0 = originMap + maskUv * unitsPerUv;
-        float size = CLOUD_CELL * exp2(scaleSteps);
-        float jitter = hash(gl_FragCoord.xy) - 0.5;
-        // Cells double in size halfway between two zoom steps, handing over quickly: two layouts
-        // blended for long would show as ghost clouds.
-        float handover = smoothstep(0.42, 0.58, scaleFraction);
-        if (handover >= 1.0) {
-            size *= 2.0;
-        }
-        vec4 c;
-        float shadow = 0.0;
-        if (clear) {
-            // Everything the clouds could reach from here is explored: none here.
-            c = vec4(0.0, 0.0, 0.0, 1.0);
-            handover = 0.0;
-        } else if (deep) {
-            // Never explored and plain all around: the highest level's flat top.
-            float hTop = CLOUD_LEVELS * size * LEVEL_THICK;
-            vec4 hit = terraceSurface(vec2(p0.x, p0.y + hTop * COS_PITCH), hTop * 0.98, size, size * LEVEL_THICK, hTop, jitter);
-            c = vec4(hit.rgb * hit.a, 1.0 - hit.a);
-            handover = 0.0;
-        } else {
-            c = clouds(p0, size, lit, shade, jitter);
-            shadow = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size);
-        }
-        if (handover > 0.0 && handover < 1.0) {
-            vec4 c2 = clouds(p0, size * 2.0, lit, shade, jitter);
-            float shadow2 = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size * 2.0);
-            c = mix(c, c2, handover);
-            shadow = mix(shadow, shadow2, handover);
-        }
-        vec3 glow = c.rgb;
-        float through = c.a;
-        // Round the revealed map at the bottom, a soft sky-coloured haze against the cloud walls;
-        // where there's no map at all, the same haze fills what the rounded edges leave.
-        float soft = knownSoft(maskUv);
-        float halo = HALO * (1.0 - smoothstep(0.55, 1.0, soft));
-        float empty = 1.0 - smoothstep(0.3, 0.85, knownAt(maskUv));
-        float mist = max(halo, empty);
-        glow += through * mist * vec3(0.64, 0.75, 0.9);
-        through *= 1.0 - mist;
-        cloudGlow = glow;
-        cloudCover = 1.0 - through * (1.0 - shadow);
-        cloudy = true;
-    }
 
     vec3 color = vec3(0.0);
     float alpha = 0.0;
@@ -505,10 +269,10 @@ void main() {
             float toward = thicknessAt(probe, clear ? 1.0 : knownAt(probe));
             occlusion = clamp((toward - th) / fogHeight * 2.2, 0.0, 1.0);
         }
-        float light = clamp(0.2 + 0.7 * (h / fogHeight) + 0.3 - occlusion * SHADOW, 0.0, 1.0);
+        float light = clamp(0.2 + 0.7 * (h / fogHeight) + 0.3 - occlusion * 0.7, 0.0, 1.0);
         vec3 layerColor = mix(shade, lit, light);
         // Fewer layers each carry more, so the bank stays as thick.
-        float layerAlpha = a * (fast ? 0.85 : LAYER_ALPHA);
+        float layerAlpha = a * (fast ? 0.85 : 0.45);
         color += (1.0 - alpha) * layerAlpha * layerColor;
         alpha += (1.0 - alpha) * layerAlpha;
         if (alpha > 0.985) {
@@ -518,8 +282,7 @@ void main() {
 
     // The ground under a thick bank is never visible.
     float soft = knownSoft(maskUv);
-    // Low fog over a remembered map keeps the old map under it.
-    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * smoothstep(0.3, 0.9, liftHere);
+    float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * (1.0 - memory);
     color += (1.0 - alpha) * floorFog * shade;
     alpha += (1.0 - alpha) * floorFog;
 
@@ -531,24 +294,19 @@ void main() {
     // Where there is no map at all, nothing should show through, or the edge of the data would
     // read as a hard line inside the bank.
     // The cover takes the colour the layers already have here, so it doesn't show as a band.
-    // A remembered map is only covered up as its fog reaches the full height.
-    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * mix(MEMORY_COVER, 1.0, smoothstep(0.7, 1.0, liftHere));
+    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * (1.0 - memory);
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
 
-    if (cloudy) {
-        // The fog rolls over the cloud terraces: its premultiplied colour over theirs.
-        float a = alpha * FOG_MIX;
-        vec3 premul = color * FOG_MIX + (1.0 - a) * cloudGlow;
-        alpha = 1.0 - (1.0 - a) * (1.0 - cloudCover);
-        color = premul;
-        // A remembered map shows through a little: its share is in green where that isn't the clear flag.
-        float remembered = clear ? 0.0 : clamp(flags.g / 0.4, 0.0, 1.0);
-        float keep = 1.0 - MEMORY_SEE * remembered;
-        color *= keep;
-        alpha *= keep;
+    if (memory > 0.0) {
+        vec3 straight = alpha > 0.002 ? color / alpha : mix(shade, lit, 0.75);
+        // The haze only where the new map isn't yet: it goes as tiles land.
+        float low = mix(alpha, clamp(alpha, MEMORY_HAZE * (1.0 - soft), MEMORY_MOST), memory);
+        color = straight * low;
+        alpha = low;
     }
+
     if (alpha <= 0.002) {
         discard;
     }
