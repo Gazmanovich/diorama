@@ -74,6 +74,8 @@ public final class MapScreen extends Screen {
 	private static final double NETHER_SCALE = 8;
 	/** How far out the saved surface map zooms; overview tiles make it cheap. */
 	private static final double MIN_ZOOM = 0.04;
+	/** How long the open map keeps the layer on screen while the one the player moved into bakes; as the minimap. */
+	private static final long FOLLOW_HOLD_MS = 3000;
 
 	private static final double MAX_ZOOM = 16;
 
@@ -103,6 +105,11 @@ public final class MapScreen extends Screen {
 	private int layer;
 	/** Set once the player picks a layer with the map open: auto caves stops following them then. */
 	private boolean layerPicked;
+	/**
+	 * When following the player moved them onto a layer whose tiles aren't there yet, since when
+	 * the old one has stayed on screen; -1 when not waiting. See {@link #followLayer}.
+	 */
+	private long followHoldStart = -1;
 	private boolean following = true;
 	private List<Radar.Blip> blips = List.of();
 	private List<WaypointOverlay.Pin> pins = List.of();
@@ -273,6 +280,7 @@ public final class MapScreen extends Screen {
 		this.gauge.cancel();
 		this.following = true;
 		this.layerPicked = false;
+		this.followHoldStart = -1;
 		this.layer = this.otherDimension == null ? this.layerOnOpening() : TileKey.SURFACE;
 		this.spotU = Integer.MIN_VALUE;
 		this.spot = null;
@@ -427,14 +435,6 @@ public final class MapScreen extends Screen {
 		if (session == null || viewer == null) {
 			return;
 		}
-		// Follow the player between the surface and caves, until they pick a layer themselves. Not
-		// while looking at another dimension, which the player isn't standing in.
-		if (!this.layerPicked && this.otherDimension == null && Settings.get().autoCaves) {
-			int auto = session.autoLayer(viewer);
-			if (auto != this.layer) {
-				this.layer = auto;
-			}
-		}
 		MapLevel shown = this.shownMap(session);
 		boolean elsewhere = this.otherDimension != null;
 		Vec3 pos = viewer.getPosition(a);
@@ -445,6 +445,7 @@ public final class MapScreen extends Screen {
 			this.centerU = playerU;
 			this.centerV = playerV;
 		}
+		this.followLayer(session, viewer);
 		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
 		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
@@ -727,6 +728,9 @@ public final class MapScreen extends Screen {
 			if (tab >= 0) {
 				if ((tab == 1) != (this.layer != TileKey.SURFACE)) {
 					this.toggleCaves();
+				} else if (this.otherDimension == null) {
+					// The tab already shown, clicked: a pick too, so the map stops following.
+					this.layerPicked = true;
 				}
 				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 				widgetTook = true;
@@ -1642,9 +1646,43 @@ public final class MapScreen extends Screen {
 	}
 
 	/** Cave slices and unsaved maps have no overview tiles, so they stop at the detailed zoom. */
+	/**
+	 * Follows the player between the surface and caves, until they pick a layer themselves. Not
+	 * while looking at another dimension, which the player isn't standing in. As on the minimap,
+	 * the layer on screen stays until the new one has its tiles, or for {@link #FOLLOW_HOLD_MS},
+	 * so climbing past a slice edge doesn't swap a map for fog.
+	 */
+	private void followLayer(MapSession session, Entity viewer) {
+		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves) {
+			this.followHoldStart = -1;
+			return;
+		}
+		int auto = session.autoLayer(viewer);
+		if (auto == this.layer) {
+			this.followHoldStart = -1;
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (this.followHoldStart < 0) {
+			this.followHoldStart = now;
+		}
+		MapLevel level = session.map();
+		MapViewport.View wanted = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, Math.max(this.minZoom(auto), this.zoom), auto);
+		MapViewport.View current = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
+		// The old layer only helps if it has something to show: after a teleport it doesn't.
+		if (MapViewport.ready(level, wanted) || now - this.followHoldStart > FOLLOW_HOLD_MS || !MapViewport.showsAnything(level, current)) {
+			this.layer = auto;
+			this.followHoldStart = -1;
+		}
+	}
+
 	private double minZoom() {
+		return this.minZoom(this.layer);
+	}
+
+	private double minZoom(int layer) {
 		MapSession session = MapSession.get();
-		boolean overviews = this.layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
+		boolean overviews = layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
 		return overviews ? MIN_ZOOM : MapViewport.DETAILED_ZOOM;
 	}
 
