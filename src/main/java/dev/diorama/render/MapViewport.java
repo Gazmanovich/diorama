@@ -9,6 +9,7 @@ import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -287,8 +288,9 @@ public final class MapViewport {
 
 	/**
 	 * Draws a tile that hasn't loaded from one that has: the coarser tile over the same ground,
-	 * magnified, else the four finer tiles under it, shrunk. Blurry or rough, but the ground doesn't
-	 * vanish while the right tile loads, which on a big map takes a while. Draws nothing if neither is in memory.
+	 * magnified, else the finer tiles under it, shrunk, from up to {@link #FINER_STAND_INS} levels
+	 * down. Blurry or rough, but the ground doesn't vanish while the right tile loads, which on a big
+	 * map takes a while. Draws nothing if none is in memory.
 	 */
 	private static void drawStandIn(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint) {
 		TileKey above = key;
@@ -303,15 +305,30 @@ public final class MapViewport {
 				return;
 			}
 		}
-		if (key.lod() == 0) {
+		drawFiner(level, key, canvas, sampling, circle, sx, sy, size, tint, FINER_STAND_INS);
+	}
+
+	/**
+	 * How many levels finer a stand-in can come from. One notch of the wheel zooms 1.25 times and a
+	 * level is twice the zoom, so a quick scroll crosses two levels before the one between has loaded,
+	 * and the tiles last drawn are then two levels finer.
+	 */
+	private static final int FINER_STAND_INS = 2;
+
+	/** Draws the four tiles one level finer than {@code key}, and in place of any not in memory, theirs. */
+	private static void drawFiner(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint, int levels) {
+		if (key.lod() == 0 || levels == 0) {
 			return;
 		}
 		float half = size / 2;
 		for (int dv = 0; dv < 2; dv++) {
 			for (int du = 0; du < 2; du++) {
-				MapTile tile = level.standIn(new TileKey(key.layer(), key.tileU() * 2 + du, key.tileV() * 2 + dv, key.lod() - 1));
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + du, key.tileV() * 2 + dv, key.lod() - 1);
+				MapTile tile = level.standIn(child);
 				if (tile != null && tile.texture() != null) {
 					drawPart(canvas, tile, sampling, circle, sx + du * half, sy + dv * half, half, 0, 0, 1, 1, tint);
+				} else if (tile == null) {
+					drawFiner(level, child, canvas, sampling, circle, sx + du * half, sy + dv * half, half, tint, levels - 1);
 				}
 			}
 		}
@@ -449,9 +466,12 @@ public final class MapViewport {
 		MapTile tile = null;
 		MapTile above = null;
 		TileKey aboveKey = null;
-		MapTile child = null;
-		int lastChildTu = Integer.MIN_VALUE;
-		int lastChildTv = Integer.MIN_VALUE;
+		// The finer tiles under the last point read, one level down and the next, as drawTiles stands them in.
+		MapTile[] finer = new MapTile[FINER_STAND_INS];
+		int[] lastFinerTu = new int[FINER_STAND_INS];
+		int[] lastFinerTv = new int[FINER_STAND_INS];
+		Arrays.fill(lastFinerTu, Integer.MIN_VALUE);
+		Arrays.fill(lastFinerTv, Integer.MIN_VALUE);
 		int lastNearTu = Integer.MIN_VALUE;
 		int lastNearTv = Integer.MIN_VALUE;
 		MapTile nearTile = null;
@@ -491,21 +511,28 @@ public final class MapViewport {
 					int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - aboveKey.tileU() * aboveSpan) / aboveCell)));
 					int aboveY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - aboveKey.tileV() * aboveSpan) / aboveCell)));
 					known = above.coverage(cellX, aboveY);
-				} else if (lod > 0) {
-					// Or the finer tile under this spot, as drawTiles shrinks it in.
-					double half = units / 2;
-					int childTu = (int) Math.floor(u / half);
-					int childTv = (int) Math.floor(v / half);
-					if (childTu != lastChildTu || childTv != lastChildTv) {
-						child = level.peek(new TileKey(view.layer(), childTu, childTv, lod - 1));
-						lastChildTu = childTu;
-						lastChildTv = childTv;
-					}
-					if (child != null && child.hasCoverage()) {
-						double childCell = half / Projection.COVERAGE_CELLS;
-						int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - childTu * half) / childCell)));
-						int childY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - childTv * half) / childCell)));
-						known = child.coverage(cellX, childY);
+				} else {
+					// Or a finer tile under this spot, as drawTiles shrinks it in: the next level down
+					// if it's in memory, else the one below that.
+					for (int down = 1; down <= FINER_STAND_INS && lod - down >= 0; down++) {
+						double span = units / (1 << down);
+						int finerTu = (int) Math.floor(u / span);
+						int finerTv = (int) Math.floor(v / span);
+						if (finerTu != lastFinerTu[down - 1] || finerTv != lastFinerTv[down - 1]) {
+							finer[down - 1] = level.peek(new TileKey(view.layer(), finerTu, finerTv, lod - down));
+							lastFinerTu[down - 1] = finerTu;
+							lastFinerTv[down - 1] = finerTv;
+						}
+						MapTile under = finer[down - 1];
+						if (under != null) {
+							if (under.hasCoverage()) {
+								double finerCell = span / Projection.COVERAGE_CELLS;
+								int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - finerTu * span) / finerCell)));
+								int finerY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - finerTv * span) / finerCell)));
+								known = under.coverage(cellX, finerY);
+							}
+							break;
+						}
 					}
 				}
 				// Ground the overviews don't have yet can be on a detailed tile drawn over them.
