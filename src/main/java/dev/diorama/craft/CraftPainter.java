@@ -1,6 +1,7 @@
 package dev.diorama.craft;
 
 import dev.diorama.Diorama;
+import dev.diorama.Facing;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
@@ -131,6 +132,8 @@ final class CraftPainter {
 			if (craft.body == null || !craft.body.pose(blocks.min(), partialTick, pose)) {
 				System.arraycopy(craft.pose, 0, pose, 0, 12);
 			}
+			// The map and its tiles are in turned space (see Facing), so the craft turns with the world.
+			turn(pose, Projection.facing());
 			CraftBlocks b = blocks.blocks();
 			double[] box = b.box(pose);
 			if (!surface && !(box[1] <= view.layer() && box[4] >= view.layer() - TileBaker.CAVE_DEPTH)) {
@@ -162,6 +165,16 @@ final class CraftPainter {
 		}
 		if (!drawn.isEmpty() || !shades.isEmpty()) {
 			this.paint(graphics, view, drawn, shades, surface, opacity);
+		}
+	}
+
+	/** Turns a world pose into the map's turned space: its corner as a point, its steps as directions. */
+	static void turn(double[] pose, Facing facing) {
+		for (int i = 0; i < 12; i += 3) {
+			double x = pose[i];
+			double z = pose[i + 2];
+			pose[i] = facing.x(x, z);
+			pose[i + 2] = facing.z(x, z);
 		}
 	}
 
