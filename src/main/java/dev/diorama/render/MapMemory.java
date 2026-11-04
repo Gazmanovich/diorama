@@ -14,9 +14,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -54,6 +58,12 @@ public final class MapMemory {
 	private static final long IN_USE_MS = 1000;
 	private static final int UPLOADS_PER_FRAME = 4;
 	private static final int MAX_LOADING = 8;
+	/**
+	 * What's known of this many remembered tiles is kept, 16 KB each: the fog mask reaches well past
+	 * the view, and a view's mask takes a few hundred at most.
+	 */
+	private static final int MAX_KNOWN = 768;
+	private static final int MAX_KNOWN_LOADING = 16;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
 
@@ -66,18 +76,20 @@ public final class MapMemory {
 
 	private static final class Entry {
 		final @Nullable MapTexture texture;
-		final byte @Nullable [] known;
 		/** When a view last drew it: a frame may still hold it for a moment after. */
 		long drawnMs;
 
-		Entry(@Nullable MapTexture texture, byte @Nullable [] known) {
+		Entry(@Nullable MapTexture texture) {
 			this.texture = texture;
-			this.known = known;
 		}
 	}
 
 	/** A tile read off the disk: its mip levels, made on the loader thread, and what's known of it. */
 	private record Loaded(TileKey key, int @Nullable [] @Nullable [] mips, byte @Nullable [] known) {
+	}
+
+	/** The remembered tiles saved at an overview level, listed on the loader thread. */
+	private record Listed(int lod, Set<TileKey> keys) {
 	}
 
 	private final TileStore store;
@@ -89,6 +101,19 @@ public final class MapMemory {
 	private final LinkedHashMap<TileKey, Entry> tiles = new LinkedHashMap<>(16, 0.75F, true);
 	private final Set<TileKey> loading = new HashSet<>();
 	private final ConcurrentLinkedQueue<Loaded> loaded = new ConcurrentLinkedQueue<>();
+	/**
+	 * What's known of remembered tiles, kept apart from their textures: the fog mask reads it around
+	 * the view too, where no texture is drawn. Most recently read last.
+	 */
+	private final LinkedHashMap<TileKey, byte[]> knownTiles = new LinkedHashMap<>(16, 0.75F, true);
+	private final Set<TileKey> knownLoading = new HashSet<>();
+	private final ConcurrentLinkedQueue<Loaded> knownLoaded = new ConcurrentLinkedQueue<>();
+	/** Which tiles the remembered map has at each overview level, once listed. */
+	private final Map<Integer, Set<TileKey>> savedTiles = new HashMap<>();
+	private final Set<Integer> listing = new HashSet<>();
+	private final ConcurrentLinkedQueue<Listed> listed = new ConcurrentLinkedQueue<>();
+	private @Nullable TileKey lastKnownKey;
+	private byte @Nullable [] lastKnown;
 	private long version;
 	private long shown;
 	private volatile boolean closed;
@@ -278,19 +303,93 @@ public final class MapMemory {
 		this.evict(now);
 	}
 
-	/** Which share of map point {@code (u, v)} a view's memory shows, 0 to 1, with what's loaded so far. */
+	/**
+	 * Which share of map point {@code (u, v)} the memory shows at overview level {@code lod}, 0 to 1,
+	 * or NaN where that isn't read yet: the remembered map has a tile there, or may have. A tile not
+	 * read yet is no sign of a tile with nothing on it, so NaN mustn't be taken for 0. {@link #ask}
+	 * reads them.
+	 */
 	float known(int lod, double u, double v) {
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double[] old = this.toOld(u, v);
 		int tu = (int) Math.floor(old[0] / units);
 		int tv = (int) Math.floor(old[1] / units);
-		Entry entry = this.tiles.get(new TileKey(TileKey.SURFACE, tu, tv, lod));
-		if (entry == null || entry.known == null) {
-			return 0;
+		TileKey key = new TileKey(TileKey.SURFACE, tu, tv, lod);
+		byte[] known;
+		if (key.equals(this.lastKnownKey)) {
+			known = this.lastKnown;
+		} else {
+			Set<TileKey> saved = this.savedTiles.get(lod);
+			if (saved == null) {
+				return Float.NaN;
+			}
+			if (!saved.contains(key)) {
+				return 0;
+			}
+			known = this.knownTiles.get(key);
+			if (known == null) {
+				return Float.NaN;
+			}
+			this.lastKnownKey = key;
+			this.lastKnown = known;
 		}
 		int x = (int) Math.min(KNOWN_EDGE - 1L, (long) ((old[0] - tu * units) / units * KNOWN_EDGE));
 		int y = (int) Math.min(KNOWN_EDGE - 1L, (long) ((old[1] - tv * units) / units * KNOWN_EDGE));
-		return (entry.known[y * KNOWN_EDGE + x] & 0xFF) / 255.0F;
+		return (known[y * KNOWN_EDGE + x] & 0xFF) / 255.0F;
+	}
+
+	/**
+	 * Reads what's known of the remembered tiles over a part of the map as drawn now, at overview
+	 * level {@code lod}, nearest its middle first, for {@link #known}: a few at a time, and
+	 * {@link #version} goes up as they land, for the caller to ask again. Asks for nothing over a part
+	 * with more tiles than are kept.
+	 */
+	void ask(int lod, double minU, double minV, double maxU, double maxV) {
+		Set<TileKey> saved = this.savedTiles.get(lod);
+		if (saved == null) {
+			if (this.listing.add(lod)) {
+				LOADER.execute(() -> this.listed.add(new Listed(lod, this.closed ? Set.of() : this.store.saved(lod))));
+			}
+			return;
+		}
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
+		double[] a = this.toOld(minU, minV);
+		double[] b = this.toOld(maxU, maxV);
+		int tu0 = (int) Math.floor(Math.min(a[0], b[0]) / units);
+		int tu1 = (int) Math.floor(Math.max(a[0], b[0]) / units);
+		int tv0 = (int) Math.floor(Math.min(a[1], b[1]) / units);
+		int tv1 = (int) Math.floor(Math.max(a[1], b[1]) / units);
+		if ((long) (tu1 - tu0 + 1) * (tv1 - tv0 + 1) > MAX_KNOWN / 2) {
+			return;
+		}
+		double midU = (tu0 + tu1 + 1) * 0.5;
+		double midV = (tv0 + tv1 + 1) * 0.5;
+		List<TileKey> wanted = new ArrayList<>();
+		for (int tu = tu0; tu <= tu1; tu++) {
+			for (int tv = tv0; tv <= tv1; tv++) {
+				TileKey key = new TileKey(TileKey.SURFACE, tu, tv, lod);
+				if (saved.contains(key) && !this.knownTiles.containsKey(key) && !this.knownLoading.contains(key) && !this.loading.contains(key)) {
+					wanted.add(key);
+				}
+			}
+		}
+		wanted.sort(Comparator.comparingDouble(key -> Math.hypot(key.tileU() + 0.5 - midU, key.tileV() + 0.5 - midV)));
+		for (TileKey key : wanted) {
+			if (this.knownLoading.size() >= MAX_KNOWN_LOADING) {
+				break;
+			}
+			this.knownLoading.add(key);
+			LOADER.execute(() -> {
+				byte[] known = null;
+				try {
+					int[] pixels = this.closed ? null : this.store.read(key);
+					known = pixels == null ? new byte[KNOWN_EDGE * KNOWN_EDGE] : known(pixels);
+				} catch (RuntimeException e) {
+					Diorama.LOGGER.warn("Couldn't load the remembered tile {}", key, e);
+				}
+				this.knownLoaded.add(new Loaded(key, null, known));
+			});
+		}
 	}
 
 	/**
@@ -399,8 +498,19 @@ public final class MapMemory {
 
 	/** Uploads what the loader finished, a few tiles a frame: each is a megabyte and a third. */
 	private void takeLoaded(long now) {
-		int uploads = 0;
+		Listed list;
+		while ((list = this.listed.poll()) != null) {
+			this.savedTiles.put(list.lod(), list.keys());
+			this.version++;
+		}
 		Loaded done;
+		while ((done = this.knownLoaded.poll()) != null) {
+			this.knownLoading.remove(done.key());
+			if (done.known() != null) {
+				this.keepKnown(done.key(), done.known());
+			}
+		}
+		int uploads = 0;
 		while (uploads < UPLOADS_PER_FRAME && (done = this.loaded.poll()) != null) {
 			this.loading.remove(done.key());
 			MapTexture texture = null;
@@ -412,11 +522,25 @@ public final class MapMemory {
 				this.shown++;
 				uploads++;
 			}
-			Entry entry = new Entry(texture, done.known());
+			if (done.known() != null) {
+				this.keepKnown(done.key(), done.known());
+			}
+			Entry entry = new Entry(texture);
 			// As if drawn now: a view that asked for it hasn't drawn it yet, and mustn't lose it first.
 			entry.drawnMs = now;
 			this.tiles.put(done.key(), entry);
 			this.version++;
+		}
+	}
+
+	private void keepKnown(TileKey key, byte[] known) {
+		this.knownTiles.put(key, known);
+		this.lastKnownKey = null;
+		this.version++;
+		Iterator<TileKey> it = this.knownTiles.keySet().iterator();
+		while (this.knownTiles.size() > MAX_KNOWN && it.hasNext()) {
+			it.next();
+			it.remove();
 		}
 	}
 

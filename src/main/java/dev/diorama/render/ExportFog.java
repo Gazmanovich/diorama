@@ -24,6 +24,8 @@ public final class ExportFog implements ImageExport.Finish {
 	private static final float FOG_MIX = 0.5F;
 	private static final float LOWEST = 0.12F;
 	private static final float SHADOW = 1.6F;
+	/** The sun shading of fog without clouds: smoke's. */
+	private static final float FOG_SHADOW = 0.7F;
 	private static final float CLOUD_CELL = 12.8F;
 	private static final float CLOUD_LEVELS = 5;
 	private static final float LEVEL_THICK = 0.9F;
@@ -114,6 +116,11 @@ public final class ExportFog implements ImageExport.Finish {
 		// About four export pixels per texel, as on screen, and never under the 2 units the screen stops at.
 		float texel = (float) Math.max(2, 1 << lod);
 		double margin = 64 + 24 * Math.pow(2, steps + 1);
+		// The clouds climb with distance from explored land, which can lie past the margin: read as
+		// far as the climb reaches, or the terraces at the picture's edge depend on where it's cut.
+		if (!smoke) {
+			margin += CLOUD_LEVELS * CELLS_PER_LEVEL * CLOUD_CELL * Math.pow(2, steps);
+		}
 		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
 		while (span / texel > MAX_MASK) {
 			texel *= 2;
@@ -391,7 +398,7 @@ public final class ExportFog implements ImageExport.Finish {
 			double probeV = gv + toSunV;
 			float toward = this.thicknessAt(probeU, probeV, p.clear ? 1 : this.knownAt(probeU, probeV, p), p);
 			float occlusion = clamp((toward - th) / FOG_HEIGHT * 2.2F);
-			float light = clamp(0.2F + 0.7F * (h / FOG_HEIGHT) + 0.3F - occlusion * SHADOW);
+			float light = clamp(0.2F + 0.7F * (h / FOG_HEIGHT) + 0.3F - occlusion * (this.clouds ? SHADOW : FOG_SHADOW));
 			float layerAlpha = a * 0.45F;
 			r += (1 - alpha) * layerAlpha * mix(this.shade[0], this.lit[0], light);
 			g += (1 - alpha) * layerAlpha * mix(this.shade[1], this.lit[1], light);

@@ -461,6 +461,7 @@ public final class MapViewport {
 			return;
 		}
 		MaskInputs before = this.maskInputs;
+		boolean sameLevel = this.maskLevel.get() == level;
 		this.maskInputs = inputs;
 		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
@@ -565,35 +566,54 @@ public final class MapViewport {
 		}
 		this.lifting = false;
 		boolean surface = view.layer() == TileKey.SURFACE;
-		// Caves keep the fog as it always was: full height everywhere (alpha 255).
-		if (!surface) {
-			this.markReach(fogReach(texel, true, fast, scaleSteps), false);
-		} else {
+		boolean clouds = surface && !level.roofless();
+		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds);
+		if (surface) {
 			if (memory != null) {
+				// The whole mask, not just the view: the clouds climb toward land the old map never
+				// had, and past the view's edge is no such land.
+				memory.ask(memoryLod, originU, originV, originU + MASK * texel, originV + MASK * texel);
 				for (int j = 0; j < MASK; j++) {
 					double v = originV + (j + 0.5) * texel;
 					for (int i = 0; i < MASK; i++) {
-						this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
+						float known = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
+						// A remembered tile not read yet is taken as all known: read a moment later, it
+						// rarely has much less, while taking it for unexplored stands the clouds up to
+						// full height until it lands.
+						this.remembered[j * MASK + i] = Float.isNaN(known) ? 1 : known;
 					}
 				}
 			} else {
 				Arrays.fill(this.remembered, 0);
 			}
+		}
+		if (!clouds) {
+			// Caves and smoke keep the fog as it always was: full height (alpha 255), but over a
+			// remembered map, whose share alpha is 255 less, so the fog lies low there.
+			this.markReach(this.reach, false);
+			if (surface) {
+				for (int k = 0; k < MASK * MASK; k++) {
+					this.maskPixels[k] = this.maskPixels[k] & 0xFFFFFF | 255 - Math.round(this.remembered[k] * 255) << 24;
+				}
+			}
+		} else {
 			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
 			this.liftTargets(centerI, centerJ, texel, scaleSteps);
 			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
-			// view has its texels in new places, so the old heights mean nothing there.
-			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
+			// view has its texels in new places, and another map's heights mean nothing on this one.
+			boolean moved = !sameLevel || before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
 				|| before.lod() != lod || before.layer() != view.layer();
 			if (moved) {
 				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
+				this.liftMs = System.currentTimeMillis();
 			} else {
-				this.lifting = true;
+				// Rebuilt as tiles land, as often as every frame in a redraw: the heights carry on
+				// easing through it.
+				this.lifting = !this.stepLift();
 			}
-			this.markReach(fogReach(texel, false, fast, scaleSteps), true);
+			this.markReach(this.reach, true);
 			this.writeRemembered();
-			this.liftMs = System.currentTimeMillis();
 			this.writeLift();
 		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
@@ -604,22 +624,13 @@ public final class MapViewport {
 	 * shader lets that much of the old map show through the clouds.
 	 */
 	private void writeRemembered() {
-		// Faded in over a few texels from the remembered map's edge, and only inside it, so its
-		// edge doesn't show as a line in the clouds and nothing shows through where there's no map.
-		System.arraycopy(this.remembered, 0, this.blurA, 0, this.blurA.length);
-		boxBlur(this.blurA, this.blurB, SEE_FADE, true);
-		boxBlur(this.blurB, this.blurA, SEE_FADE, false);
 		for (int k = 0; k < MASK * MASK; k++) {
 			int pixel = this.maskPixels[k];
 			if ((pixel & 0xFF00) == 0) {
-				float see = Math.min(this.remembered[k], this.blurA[k]);
-				this.maskPixels[k] = pixel | Math.round(see * 0.4F * 255) << 8;
+				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
 			}
 		}
 	}
-
-	/** Mask texels the old map's show-through fades in over from its edge. */
-	private static final int SEE_FADE = 4;
 
 	/** Cloud levels, and how far from explored land the clouds over never-explored land reach full height, per level in cells. Match fog.fsh. */
 	private static final double CLOUD_LEVELS = 5;
@@ -635,6 +646,8 @@ public final class MapViewport {
 	private final int[] toRedrawn = new int[MASK * MASK];
 	private final int[] toUnexplored = new int[MASK * MASK];
 	private boolean lifting;
+	/** How far the shader reads around a pixel, for the mask last built: {@link #fogReach}. */
+	private int[] reach = new int[4];
 	private long liftMs;
 	/** Lift a second the fog's height can change by while easing. */
 	private static final float LIFT_PER_SECOND = 0.6F;
@@ -716,8 +729,8 @@ public final class MapViewport {
 		}
 	}
 
-	/** Steps the drawn heights toward the targets, for the time since the last step. */
-	private void easeLift() {
+	/** Steps the drawn heights toward the targets, for the time since the last step. Whether they're all there. */
+	private boolean stepLift() {
 		long now = System.currentTimeMillis();
 		float step = Math.max(0.001F, (now - this.liftMs) / 1000.0F * LIFT_PER_SECOND);
 		this.liftMs = now;
@@ -731,7 +744,20 @@ public final class MapViewport {
 				done = false;
 			}
 		}
-		this.lifting = !done;
+		return done;
+	}
+
+	/** Eases the drawn heights on a frame the mask isn't rebuilt. */
+	private void easeLift() {
+		this.lifting = !this.stepLift();
+		if (!this.lifting) {
+			// Settled: clouds that have reached the full height can have the flat top now.
+			for (int k = 0; k < MASK * MASK; k++) {
+				this.maskPixels[k] &= 0xFF0000FF;
+			}
+			this.markReach(this.reach, true);
+			this.writeRemembered();
+		}
 		this.writeLift();
 		if (this.maskTexture != null) {
 			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
@@ -745,6 +771,9 @@ public final class MapViewport {
 		}
 	}
 
+	/** A cloud level's thickness in cells; match fog.fsh. */
+	private static final double LEVEL_THICK = 0.9;
+
 	/**
 	 * How far, in mask texels, the fog shader can read from a pixel: {west, east, north, south}.
 	 * Mirrors fog.fsh: the blur taps (the wide surface blur, 1.9x on the diagonals, never under a
@@ -752,10 +781,7 @@ public final class MapViewport {
 	 * 9 west and 3.6 north times the noise scale. On top of that one texel for linear filtering,
 	 * and half a texel for where in its own texel the pixel sits.
 	 */
-	/** A cloud level's thickness in cells; match fog.fsh. */
-	private static final double LEVEL_THICK = 0.9;
-
-	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps) {
+	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps, boolean clouds) {
 		double fogHeight = cave ? 4 : 10;
 		double blurUnits = cave ? 2.5 : 7;
 		if (blurUnits >= 5 && !fast) {
@@ -769,7 +795,7 @@ public final class MapViewport {
 		// The clouds read up to four cells around a point (the cell blend, the curling edges, the
 		// looks toward the sun), and the line of sight leans south over the levels' height. Cells
 		// are twice as big while the zoom hands over to the next step.
-		double cell = cave ? 0 : 2 * CLOUD_CELL * (1 << scaleSteps) / texel;
+		double cell = !clouds ? 0 : 2 * CLOUD_CELL * (1 << scaleSteps) / texel;
 		double around = 4 * cell;
 		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * 0.643;
 		return new int[] {
