@@ -3,6 +3,7 @@ package dev.diorama;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.craft.Crafts;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
@@ -65,6 +66,7 @@ public final class MapSession {
 	private final boolean mainMap;
 	/** Fills the main map in from the world's save, in singleplayer; null elsewhere and when turned off. */
 	private @Nullable SavedChunkImport savedChunks;
+	private final Crafts crafts;
 	/** Portals found in the save, waiting for the client thread to pin them. */
 	private final Queue<Portals.Spot> savedPortals = new ConcurrentLinkedQueue<>();
 	private final Lights lights;
@@ -78,9 +80,21 @@ public final class MapSession {
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
 		// Before the map opens: the folder it saves in goes by which way it faces.
 		Projection.setFacing(key == null ? Facing.NORTH : Maps.of(key).facing());
-		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
+		Path folder = mapFolder(level, key);
+		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, folder);
 		this.mainMap = key != null && Maps.of(key).active(level.dimension().identifier().toString()).isEmpty();
+		this.crafts = new Crafts(level, this.map, folder, this::lookAgain);
 		this.lights = new Lights(level, this.map);
+	}
+
+	/** Snapshots the chunks under a world box again, as its blocks may have changed unseen. */
+	private void lookAgain(int[] box) {
+		int[] change = {box[0] - 1, box[1] - 1, box[2] - 1, box[3] + 1, box[4] + 1, box[5] + 1, MapLevel.CHANGED_SURFACE};
+		for (int cx = change[0] >> 4; cx <= change[3] >> 4; cx++) {
+			for (int cz = change[2] >> 4; cz <= change[5] >> 4; cz++) {
+				this.schedule(cx, cz, CHANGE_DELAY_MS, change);
+			}
+		}
 	}
 
 	/** Stops filling in from the save, then saves and closes the map. */
@@ -89,6 +103,7 @@ public final class MapSession {
 			this.savedChunks.stop();
 		}
 		this.lights.close();
+		this.crafts.close(this.ticks);
 		this.map.close();
 	}
 
@@ -244,8 +259,8 @@ public final class MapSession {
 				session.schedule(around.chunkX, around.chunkZ, CHANGE_DELAY_MS, strip);
 			}
 		}
-	}
-
+	}
+
 	private static boolean sameFromEverySide(BlockLooks looks, BlockState oldState, BlockState newState) {
 		for (Facing facing : Facing.values()) {
 			int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
@@ -516,6 +531,7 @@ public final class MapSession {
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
 		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
 		this.map.update();
+		this.crafts.tick(viewer, this.ticks);
 		if (viewer != null) {
 			this.updateUnderground(viewer);
 			if (this.underground) {
@@ -569,6 +585,10 @@ public final class MapSession {
 
 	public MapLevel map() {
 		return this.map;
+	}
+
+	public Crafts crafts() {
+		return this.crafts;
 	}
 
 	public Lights lights() {
