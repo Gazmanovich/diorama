@@ -673,6 +673,18 @@ public final class MapLevel implements ChunkSource {
 		return tile;
 	}
 
+	/**
+	 * A tile at another zoom level standing in for one that hasn't loaded yet, if it's in memory:
+	 * counted as drawn so it stays, and nothing is asked for, so the stand-in costs no loading.
+	 */
+	public @Nullable MapTile standIn(TileKey key) {
+		MapTile tile = this.tiles.get(key);
+		if (tile != null) {
+			tile.lastDrawn = this.frame;
+		}
+		return tile;
+	}
+
 	/** The baked tile, if any, without asking for it to be baked. */
 	public @Nullable MapTile peek(TileKey key) {
 		return this.tiles.get(key);

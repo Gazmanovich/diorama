@@ -200,6 +200,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("zoom-stand-in")) {
+				ZoomStandInTest.run(context, world);
+			}
 			if (tests.contains("minimap-zoom")) {
 				MinimapZoomTest.ruler(context, world);
 			}
@@ -241,6 +244,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("pixelmon")) {
 				PixelmonTest.run(context, world);
+			}
+			if (tests.contains("roof-caves")) {
+				RoofCavesTest.run(context, world);
 			}
 			if (tests.contains("spectate")) {
 				SpectateTest.run(context, world);

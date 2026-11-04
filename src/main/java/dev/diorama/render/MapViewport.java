@@ -9,6 +9,7 @@ import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -242,11 +243,16 @@ public final class MapViewport {
 				boolean visible = tu >= tu0 && tu <= tu1 && tv >= tv0 && tv <= tv1;
 				// Tiles just outside the view bake too, so panning finds them ready.
 				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : MapLevel.OUTSIDE_VIEW));
+				float sx = view.screenX(tu * units);
+				float sy = view.screenY(tv * units);
+				if (visible && (tile == null || tile.texture() == null)) {
+					// Not loaded yet, as after zooming to another level: show what's loaded of the same ground.
+					drawStandIn(level, key, canvas, tiles, circle, sx, sy, size, tint);
+					continue;
+				}
 				if (!visible || tile == null || tile.texture() == null) {
 					continue;
 				}
-				float sx = view.screenX(tu * units);
-				float sy = view.screenY(tv * units);
 				MapTexture overlay = overlays == 0 || lod > 0 ? null : tile.overlay(overlays);
 				MapTexture claimed = claims ? level.claims(key, tile) : null;
 				if (circle != null) {
@@ -278,6 +284,66 @@ public final class MapViewport {
 			lit.run();
 		}
 		above.forEach(Runnable::run);
+	}
+
+	/**
+	 * Draws a tile that hasn't loaded from one that has: the coarser tile over the same ground,
+	 * magnified, else the finer tiles under it, shrunk, from up to {@link #FINER_STAND_INS} levels
+	 * down. Blurry or rough, but the ground doesn't vanish while the right tile loads, which on a big
+	 * map takes a while. Draws nothing if none is in memory.
+	 */
+	private static void drawStandIn(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint) {
+		TileKey above = key;
+		for (int up = 1; key.lod() + up <= TileKey.MAX_LOD; up++) {
+			above = above.parent();
+			MapTile tile = level.standIn(above);
+			if (tile != null && tile.texture() != null) {
+				int span = 1 << up;
+				float u0 = Math.floorMod(key.tileU(), span) / (float) span;
+				float v0 = Math.floorMod(key.tileV(), span) / (float) span;
+				drawPart(canvas, tile, sampling, circle, sx, sy, size, u0, v0, u0 + 1F / span, v0 + 1F / span, tint);
+				return;
+			}
+		}
+		drawFiner(level, key, canvas, sampling, circle, sx, sy, size, tint, FINER_STAND_INS);
+	}
+
+	/**
+	 * How many levels finer a stand-in can come from. One notch of the wheel zooms 1.25 times and a
+	 * level is twice the zoom, so a quick scroll crosses two levels before the one between has loaded,
+	 * and the tiles last drawn are then two levels finer.
+	 */
+	private static final int FINER_STAND_INS = 2;
+
+	/** Draws the four tiles one level finer than {@code key}, and in place of any not in memory, theirs. */
+	private static void drawFiner(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint, int levels) {
+		if (key.lod() == 0 || levels == 0) {
+			return;
+		}
+		float half = size / 2;
+		for (int dv = 0; dv < 2; dv++) {
+			for (int du = 0; du < 2; du++) {
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + du, key.tileV() * 2 + dv, key.lod() - 1);
+				MapTile tile = level.standIn(child);
+				if (tile != null && tile.texture() != null) {
+					drawPart(canvas, tile, sampling, circle, sx + du * half, sy + dv * half, half, 0, 0, 1, 1, tint);
+				} else if (tile == null) {
+					drawFiner(level, child, canvas, sampling, circle, sx + du * half, sy + dv * half, half, tint, levels - 1);
+				}
+			}
+		}
+	}
+
+	/** Draws the part of a tile's texture from (u0, v0) to (u1, v1) in a square, inside the circle if the view is round. */
+	private static void drawPart(MapCanvas canvas, MapTile tile, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, float u0, float v0, float u1, float v1, int tint) {
+		if (circle != null) {
+			Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, u0, v0, u1, v1);
+			if (inside != null) {
+				canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
+			}
+			return;
+		}
+		canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, u0, v0, u1, v1, tint);
 	}
 
 	/**
@@ -398,6 +464,14 @@ public final class MapViewport {
 		int lastTu = Integer.MIN_VALUE;
 		int lastTv = Integer.MIN_VALUE;
 		MapTile tile = null;
+		MapTile above = null;
+		TileKey aboveKey = null;
+		// The finer tiles under the last point read, one level down and the next, as drawTiles stands them in.
+		MapTile[] finer = new MapTile[FINER_STAND_INS];
+		int[] lastFinerTu = new int[FINER_STAND_INS];
+		int[] lastFinerTv = new int[FINER_STAND_INS];
+		Arrays.fill(lastFinerTu, Integer.MIN_VALUE);
+		Arrays.fill(lastFinerTv, Integer.MIN_VALUE);
 		int lastNearTu = Integer.MIN_VALUE;
 		int lastNearTv = Integer.MIN_VALUE;
 		MapTile nearTile = null;
@@ -412,11 +486,54 @@ public final class MapViewport {
 					tile = level.peek(new TileKey(view.layer(), tu, tv, lod));
 					lastTu = tu;
 					lastTv = tv;
+					above = null;
+					aboveKey = null;
+					if (tile == null || !tile.hasCoverage()) {
+						// As drawTiles stands a coarser tile in for one that hasn't loaded: it knows as much.
+						TileKey up = new TileKey(view.layer(), tu, tv, lod);
+						for (int l = lod + 1; l <= TileKey.MAX_LOD && above == null; l++) {
+							up = up.parent();
+							MapTile candidate = level.peek(up);
+							if (candidate != null && candidate.hasCoverage()) {
+								above = candidate;
+								aboveKey = up;
+							}
+						}
+					}
 				}
 				float known = 0;
 				if (tile != null && tile.hasCoverage()) {
 					int cellX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - tu * units) / cellUnits));
 					known = tile.coverage(cellX, cellY);
+				} else if (above != null) {
+					double aboveSpan = aboveKey.units();
+					double aboveCell = aboveSpan / Projection.COVERAGE_CELLS;
+					int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - aboveKey.tileU() * aboveSpan) / aboveCell)));
+					int aboveY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - aboveKey.tileV() * aboveSpan) / aboveCell)));
+					known = above.coverage(cellX, aboveY);
+				} else {
+					// Or a finer tile under this spot, as drawTiles shrinks it in: the next level down
+					// if it's in memory, else the one below that.
+					for (int down = 1; down <= FINER_STAND_INS && lod - down >= 0; down++) {
+						double span = units / (1 << down);
+						int finerTu = (int) Math.floor(u / span);
+						int finerTv = (int) Math.floor(v / span);
+						if (finerTu != lastFinerTu[down - 1] || finerTv != lastFinerTv[down - 1]) {
+							finer[down - 1] = level.peek(new TileKey(view.layer(), finerTu, finerTv, lod - down));
+							lastFinerTu[down - 1] = finerTu;
+							lastFinerTv[down - 1] = finerTv;
+						}
+						MapTile under = finer[down - 1];
+						if (under != null) {
+							if (under.hasCoverage()) {
+								double finerCell = span / Projection.COVERAGE_CELLS;
+								int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - finerTu * span) / finerCell)));
+								int finerY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - finerTv * span) / finerCell)));
+								known = under.coverage(cellX, finerY);
+							}
+							break;
+						}
+					}
 				}
 				// Ground the overviews don't have yet can be on a detailed tile drawn over them.
 				if (drawsNear && known < 1) {
