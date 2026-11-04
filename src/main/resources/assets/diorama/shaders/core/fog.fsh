@@ -331,27 +331,34 @@ float terraceInside(vec2 p, float h, float size, float level) {
 }
 
 // The colour of the cloud surface met at height h over a point, and how solid it is there.
-vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float jitter) {
+// The colour of the cloud surface at height h, from how much cloud lies toward the sun (blocked)
+// and how much of the level falls away toward the sun and away from it there (the edges).
+vec3 terraceColor(float h, float level, float hTop, float blocked, float sunEdge, float farEdge) {
     vec3 sky = vec3(0.56, 0.65, 0.77) * AMBIENT;
     vec3 sunlight = vec3(1.0, 0.93, 0.82) * SUN;
     vec3 haze = vec3(0.64, 0.75, 0.9);
     float k = clamp(ceil(h / level), 1.0, CLOUD_LEVELS);
     float up = pow(clamp(h / level - (k - 1.0), 0.0, 1.0), 0.8);
-    // Two looks toward the sun: a level as high or higher there darkens this point, less near a slab's top.
-    vec2 toward = normalize(vec2(-1.0, -0.4)) * size * 0.4;
-    float blocked = levelCover(p + toward * (1.0 + jitter * 0.5), size, k) + levelCover(p + toward * (2.0 + jitter * 0.5), size, k + 1.0);
     float shading = (0.12 + 0.5 * up) * (2.0 - SHADOW * blocked * (1.0 - up * up));
     // A level's top is a pillow: lit along the edges that face the sun, shaded along the ones
     // that face away.
-    vec2 sunward = normalize(vec2(-1.0, -0.4)) * size * 0.35;
-    float sunEdge = 1.0 - levelCover(p + sunward, size, k);
-    float farEdge = 1.0 - levelCover(p - sunward, size, k);
     shading *= mix(1.0, 1.0 + PILLOW * (0.3 * sunEdge - 0.45 * farEdge), up);
     vec3 color = sky * (1.0 - 0.35 * shading) + sunlight * 0.5 * (0.1 + shading);
     // Higher levels catch more light, deeper ones sit in haze: that's what reads as depth.
     color *= mix(DEPTH_DARK, 1.0, k / CLOUD_LEVELS);
     color = min(color, vec3(1.0));
-    color = mix(color, haze, HAZE * pow(1.0 - h / hTop, 1.5));
+    return mix(color, haze, HAZE * pow(1.0 - h / hTop, 1.5));
+}
+
+vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float jitter) {
+    float k = clamp(ceil(h / level), 1.0, CLOUD_LEVELS);
+    // Two looks toward the sun: a level as high or higher there darkens this point, less near a slab's top.
+    vec2 toward = normalize(vec2(-1.0, -0.4)) * size * 0.4;
+    float blocked = levelCover(p + toward * (1.0 + jitter * 0.5), size, k) + levelCover(p + toward * (2.0 + jitter * 0.5), size, k + 1.0);
+    vec2 sunward = normalize(vec2(-1.0, -0.4)) * size * 0.35;
+    float sunEdge = 1.0 - levelCover(p + sunward, size, k);
+    float farEdge = 1.0 - levelCover(p - sunward, size, k);
+    vec3 color = terraceColor(h, level, hTop, blocked, sunEdge, farEdge);
     // Solid inside; toward the edge it frays into strands drawn out along the wind.
     float cover = wispCover(p, size, k);
     float fringe = cover - 0.25;
@@ -410,15 +417,16 @@ vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
 
 // What clouds() returns over plain never-explored land, where every cell is at the top level and
 // so cover is whole at every height: the march's first step is already inside, and its three
-// halvings close in from the top to an eighth of that step. Drawn without the march, to the same
-// colour, so nothing marks where the march stops.
-vec4 flatTop(vec2 p0, float size, float jitter) {
+// halvings close in from the top to an eighth of that step. There terraceSurface finds the top
+// level all round and none above it toward the sun, no edges, and a whole, solid level, so this
+// needs no reads at all, and draws the same colour: nothing marks where the march stops.
+vec4 flatTop(float size, float jitter) {
     float level = size * LEVEL_THICK;
     float hTop = CLOUD_LEVELS * level;
     float dh = hTop / (CLOUD_LEVELS * (fast ? 2.0 : 3.0));
     float h = hTop - (0.5 + jitter * 0.9) * dh / 8.0;
-    vec4 hit = terraceSurface(vec2(p0.x, p0.y + h * COS_PITCH), h, size, level, hTop, jitter);
-    return vec4(hit.rgb * hit.a, 1.0 - hit.a);
+    vec3 color = terraceColor(h, level, hTop, 1.0, 0.0, 0.0);
+    return vec4(color * CLOUD_ALPHA, 1.0 - CLOUD_ALPHA);
 }
 
 // The clouds' shadow on the revealed map under a point, 0 to 1.
@@ -498,14 +506,14 @@ void main() {
         } else if (deep) {
             // Never explored and plain all around: the highest level's top, and its shadow
             // all over the ground under it.
-            c = flatTop(p0, size, jitter);
+            c = flatTop(size, jitter);
             shadow = fast ? 0.0 : GROUND_SHADOW;
         } else {
             c = clouds(p0, size, lit, shade, jitter);
             shadow = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size);
         }
         if (handover > 0.0 && handover < 1.0) {
-            vec4 c2 = deep ? flatTop(p0, size * 2.0, jitter) : clouds(p0, size * 2.0, lit, shade, jitter);
+            vec4 c2 = deep ? flatTop(size * 2.0, jitter) : clouds(p0, size * 2.0, lit, shade, jitter);
             float shadow2 = fast ? 0.0 : GROUND_SHADOW * (deep ? 1.0 : groundShadow(p0, size * 2.0));
             c = mix(c, c2, handover);
             shadow = mix(shadow, shadow2, handover);
