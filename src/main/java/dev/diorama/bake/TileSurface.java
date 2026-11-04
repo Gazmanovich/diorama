@@ -10,9 +10,9 @@ package dev.diorama.bake;
  * one); {@code albedo} the pixel as drawn with its light taken out but a side's darkening kept,
  * in sRGB as 0xAARRGGBB with the pixel's alpha, so water keeps its depth and edges their
  * coverage; {@code light}, what lit it there ({@link #caveLight}), so a moving light can light it
- * again; and {@code outlined}, whether the style's outline darkens it.
+ * again; and {@code outline}, how much of the style's outline darkens it (0..1, less under water).
  */
-public record TileSurface(int revision, int x0, int y0, int width, int height, float[] y, boolean[] top, int[] albedo, int[] light, boolean[] outlined) {
+public record TileSurface(int revision, int x0, int y0, int width, int height, float[] y, boolean[] top, int[] albedo, int[] light, float[] outline) {
 	/** The arrays' index for tile pixel (px, py), or -1 outside the part of the tile this covers. */
 	int index(int px, int py) {
 		int x = px - this.x0;
