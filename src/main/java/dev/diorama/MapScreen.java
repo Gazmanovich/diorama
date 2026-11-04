@@ -736,6 +736,8 @@ public final class MapScreen extends Screen {
 				widgetTook = true;
 			} else if (this.layer != TileKey.SURFACE && this.minecraft.level != null && this.gauge.contains(x, y)) {
 				this.menu = null;
+				// Picking a slice: following the player could switch layers under the drag.
+				this.layerPicked = true;
 				this.gauge.grab(this.minecraft.level, y);
 				widgetTook = true;
 			}
@@ -1673,6 +1675,8 @@ public final class MapScreen extends Screen {
 		if (MapViewport.ready(level, wanted) || now - this.followHoldStart > FOLLOW_HOLD_MS || !MapViewport.showsAnything(level, current)) {
 			this.layer = auto;
 			this.followHoldStart = -1;
+			// A menu belongs to the view it was opened on, as when the player changes layer.
+			this.menu = null;
 		}
 	}
 

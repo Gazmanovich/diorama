@@ -41,7 +41,7 @@ final class RoofCavesTest {
 		context.waitFor(mc -> mc.player.onGround() && mc.player.blockPosition().getY() == g + 1, 400);
 		DioramaClientTest.settle(context, 100);
 		String house = log(context, "house");
-		expect(house, "minimap layer surface", "In a house with Prefer the surface on, the minimap left the surface");
+		expect(house, "auto layer surface", "In a house with Prefer the surface on, the auto layer left the surface");
 		context.takeScreenshot("roof-01-house-minimap");
 		context.setScreen(MapScreen::new);
 		DioramaClientTest.settle(context, 60);
@@ -51,7 +51,7 @@ final class RoofCavesTest {
 		// Off, the house is underground again, as before the setting.
 		context.runOnClient(mc -> Settings.get().preferSurface = false);
 		context.waitTicks(5);
-		expect(log(context, "house, prefer surface off"), "minimap layer cave", "In a house with Prefer the surface off, the minimap stayed on the surface");
+		expect(log(context, "house, prefer surface off"), "auto layer cave", "In a house with Prefer the surface off, the auto layer stayed on the surface");
 		context.runOnClient(mc -> Settings.get().preferSurface = true);
 
 		// A natural cave nearby: an air pocket with plenty of rock above.
@@ -86,7 +86,7 @@ final class RoofCavesTest {
 		world.getServer().runCommand("tp @a " + cx + ".5 " + cy + " " + cz + ".5 -90 20");
 		context.waitFor(mc -> mc.player.blockPosition().getY() == cy, 400);
 		DioramaClientTest.settle(context, 100);
-		expect(log(context, "cave"), "minimap layer cave", "Deep in a cave, the minimap stayed on the surface");
+		expect(log(context, "cave"), "auto layer cave", "Deep in a cave, the auto layer stayed on the surface");
 		context.takeScreenshot("roof-03-cave-minimap");
 		context.setScreen(MapScreen::new);
 		DioramaClientTest.settle(context, 60);
@@ -175,7 +175,10 @@ final class RoofCavesTest {
 		return !state.isAir() && state.getFluidState().isEmpty();
 	}
 
-	/** One line with what decides the layer, and the layers the minimap and the open map show; logged and returned. */
+	/**
+	 * One line with what decides the layer, the layer the minimap and map ask for (the minimap can
+	 * keep the old one on screen for a moment), and the open map's layer; logged and returned.
+	 */
 	private static String log(ClientGameTestContext context, String where) {
 		String line = context.computeOnClient(mc -> {
 			MapSession session = MapSession.get();
@@ -183,7 +186,7 @@ final class RoofCavesTest {
 			int sky = mc.level.getBrightness(LightLayer.SKY, eye);
 			int auto = session.autoLayer(mc.player);
 			String screen = mc.gui.screen() instanceof MapScreen map ? layerName(field(map, "layer")) : "closed";
-			return String.format("%s: feet y %d, eye sky light %d, underground %s, minimap layer %s, map layer %s",
+			return String.format("%s: feet y %d, eye sky light %d, underground %s, auto layer %s, map layer %s",
 				where, mc.player.blockPosition().getY(), sky, session.isUnderground(), layerName(auto), screen);
 		});
 		Diorama.LOGGER.info("roof-caves: {}", line);
