@@ -75,7 +75,7 @@ final class TileFilterTest {
 				throw new AssertionError(check.name + " draws overview level " + lod + ", not " + check.lod);
 			}
 			BufferedImage shot = read(context.takeScreenshot("tile-filter-" + check.name));
-			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view));
+			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod));
 			double[] result = compare(shot, view, store, check, mapped);
 			System.out.printf("TILE-FILTER %s: median error %.3f over %.0f pixels, colour scale %.3f%n", check.name, result[0], result[1], result[2]);
 			if (result[1] < 5_000) {
@@ -209,8 +209,10 @@ final class TileFilterTest {
 		private static final double AROUND = 48;
 		private static final double SOUTH = 72;
 
-		static Mapped around(MapLevel map, MapViewport.View view) {
-			double cell = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+		/** From the tiles of overview level {@code lod}, the ones the view draws and so the map holds. */
+		static Mapped around(MapLevel map, MapViewport.View view, int lod) {
+			double tileUnits = (double) Projection.TILE_UNITS * (1 << lod);
+			double cell = tileUnits / Projection.COVERAGE_CELLS;
 			double u0 = Math.floor((view.minU() - AROUND) / cell) * cell;
 			double v0 = Math.floor((view.minV() - AROUND) / cell) * cell;
 			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * AROUND) / cell) + 1;
@@ -221,11 +223,11 @@ final class TileFilterTest {
 				for (int i = 0; i < width; i++) {
 					double u = u0 + (i + 0.5) * cell;
 					double v = v0 + (j + 0.5) * cell;
-					int tu = (int) Math.floor(u / Projection.TILE_UNITS);
-					int tv = (int) Math.floor(v / Projection.TILE_UNITS);
-					MapTile tile = map.peek(new TileKey(TileKey.SURFACE, tu, tv, 0));
+					int tu = (int) Math.floor(u / tileUnits);
+					int tv = (int) Math.floor(v / tileUnits);
+					MapTile tile = map.peek(new TileKey(TileKey.SURFACE, tu, tv, lod));
 					boolean full = tile != null && tile.hasCoverage()
-						&& tile.coverage((int) Math.floor((u - tu * (double) Projection.TILE_UNITS) / cell), (int) Math.floor((v - tv * (double) Projection.TILE_UNITS) / cell)) >= 0.999F;
+						&& tile.coverage((int) Math.floor((u - tu * tileUnits) / cell), (int) Math.floor((v - tv * tileUnits) / cell)) >= 0.999F;
 					line += full ? 0 : 1;
 					sums[(j + 1) * (width + 1) + i + 1] = sums[j * (width + 1) + i + 1] + line;
 				}
