@@ -166,7 +166,10 @@ public final class Lights {
 			if (sy > view.layer()) {
 				continue;
 			}
-			Held light = Held.of(player.getUUID(), (int) Math.floor(eye.x), sy, (int) Math.floor(eye.z), carried);
+			dev.diorama.Facing facing = Projection.facing();
+			int eyeX = (int) Math.floor(eye.x);
+			int eyeZ = (int) Math.floor(eye.z);
+			Held light = Held.of(player.getUUID(), facing.blockX(eyeX, eyeZ), sy, facing.blockZ(eyeX, eyeZ), carried);
 			// Only lights that reach into the view, so a group never spans more than the view and their reach.
 			if (light.pu1() > vu0 && light.pu0() < vu1 && light.pv1() > vv0 && light.pv0() < vv1) {
 				held.add(light);

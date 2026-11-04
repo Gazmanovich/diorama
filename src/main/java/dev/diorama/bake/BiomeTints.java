@@ -49,8 +49,13 @@ public final class BiomeTints {
 		ChunkSnapshot.Tints tints = snapshot.tints();
 		if (tints == null) {
 			// Two bakes may both blend; they read the same biomes, so either result will do.
-			tints = blend(snapshot);
-			snapshot.setTints(tints);
+			// A turned view blends its chunk, and turns what that gives.
+			ChunkSnapshot chunk = snapshot.chunk();
+			tints = blend(chunk);
+			chunk.setTints(tints);
+			if (chunk != snapshot) {
+				tints = snapshot.tints();
+			}
 		}
 		return tints;
 	}

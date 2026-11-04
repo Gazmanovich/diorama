@@ -1,6 +1,11 @@
 package dev.diorama.waypoint;
 
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import net.minecraft.network.chat.Component;
 
 /**
  * A marked place. Mutable so the edit screen can change it in place; {@link WaypointStore} saves
@@ -16,7 +21,17 @@ public final class Waypoint {
 		/** A waystone the Waystones mod told the client about ({@link Waystones}). Never saved, and Waystones names it. */
 		WAYSTONE,
 		/** The bed the player last slept in, kept up to date: one per dimension. */
-		BED
+		BED,
+		/** A lit portal the map found ({@link Portals}). */
+		NETHER_PORTAL,
+		/** A lit portal the map found ({@link Portals}). */
+		END_PORTAL,
+		/** A lit portal the map found ({@link Portals}). */
+		END_GATEWAY;
+
+		public boolean isPortal() {
+			return this == NETHER_PORTAL || this == END_PORTAL || this == END_GATEWAY;
+		}
 	}
 
 	/** Colours a waypoint can take, picked to stay readable on both grass and water. */
@@ -24,6 +39,15 @@ public final class Waypoint {
 		0xFFE5484D, 0xFFF76B15, 0xFFFFC53D, 0xFF46A758, 0xFF12A594, 0xFF0090FF, 0xFF3E63DD, 0xFF8E4EC6,
 		0xFFD6409F, 0xFFFFFFFF, 0xFFB0B4BA, 0xFF60646C, 0xFF8D6B4B, 0xFF99D52A, 0xFF7CE2FE, 0xFFF0C0D8
 	};
+
+	/**
+	 * Automatic pins are saved under English names and shown in the player's language, until the
+	 * player renames one. Xaero's Minimap does the same with a translation key for its deathpoints;
+	 * an English name keeps the file readable by older Diorama versions, which saved these names.
+	 */
+	public static final String BED_NAME = "Bed";
+	private static final DateTimeFormatter DEATH_TIME = DateTimeFormatter.ofPattern("HH:mm");
+	private static final Pattern DEATH_NAME = Pattern.compile("Death (\\d\\d:\\d\\d)");
 
 	/** The most letters a pin's initials can have; the pin's head widens to hold more than two. */
 	public static final int MAX_INITIALS = 4;
@@ -46,6 +70,10 @@ public final class Waypoint {
 	public long created = System.currentTimeMillis();
 	/** The dimension's map it was made on ({@link dev.diorama.Maps}); null for the main map. */
 	public @org.jspecify.annotations.Nullable String map;
+	/** A portal pin the player deleted: kept out of sight, so finding the portal again doesn't bring it back. */
+	public boolean deleted;
+	/** A portal pin the player renamed or moved: it's theirs now, and stays when the portal goes. */
+	public boolean edited;
 
 	public Waypoint() {
 	}
@@ -63,6 +91,37 @@ public final class Waypoint {
 	/** Whether the player can edit or delete it here: everything but waystones, which Waystones owns. */
 	public boolean editable() {
 		return this.kind != Kind.WAYSTONE;
+	}
+
+	/** The saved name of a death pin made at {@code time}. */
+	public static String deathName(LocalTime time) {
+		return "Death " + time.format(DEATH_TIME);
+	}
+
+	/** The name to show: an automatic pin's own name in the player's language, otherwise the saved one. */
+	public String shownName() {
+		switch (this.kind) {
+			case BED -> {
+				// The Bed icon's name, which every language already has.
+				if (this.name.equals(BED_NAME)) {
+					return WaypointIconScreen.name(dev.diorama.render.WaypointIcons.BED).getString();
+				}
+			}
+			case DEATH -> {
+				Matcher time = DEATH_NAME.matcher(this.name);
+				if (time.matches()) {
+					return Component.translatable("diorama.waypoint.death", time.group(1)).getString();
+				}
+			}
+			case NETHER_PORTAL, END_PORTAL, END_GATEWAY -> {
+				if (this.name.equals(Portals.savedName(this.kind))) {
+					return Portals.block(this.kind).getName().getString();
+				}
+			}
+			default -> {
+			}
+		}
+		return this.name;
 	}
 
 	public String label() {

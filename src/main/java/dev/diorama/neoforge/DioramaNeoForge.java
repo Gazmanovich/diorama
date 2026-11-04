@@ -66,7 +66,10 @@ public final class DioramaNeoForge {
 			DioramaClient.KEY_MAPPINGS.forEach(event::register);
 		});
 		//? if >=1.21.6 {
-		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> event.registerPipeline(DioramaPipelines.FOG));
+		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> {
+			event.registerPipeline(DioramaPipelines.FOG);
+			event.registerPipeline(DioramaPipelines.TILE);
+		});
 		//?}
 		// As on Fabric: waypoints in the world under the whole vanilla HUD and every screen, as part
 		// of the picture of the world, and the minimap above the HUD. Each layer already sits 200

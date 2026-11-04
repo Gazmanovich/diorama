@@ -396,7 +396,7 @@ public final class VoxelReader {
 				BlockState uniform = this.snapshot.uniformSection(index);
 				if (uniform != null) {
 					int[] ids = new int[4096];
-					java.util.Arrays.fill(ids, BlockLooks.bakeId(uniform));
+					java.util.Arrays.fill(ids, BlockLooks.bakeId(this.snapshot.turned(uniform)));
 					this.sections[index] = ids;
 				} else if (states != null) {
 					int[] ids = new int[4096];
@@ -405,7 +405,7 @@ public final class VoxelReader {
 					for (int y = 0; y < 16; y++) {
 						for (int z = 0; z < 16; z++) {
 							for (int x = 0; x < 16; x++) {
-								BlockState state = states.get(x, y, z);
+								BlockState state = this.snapshot.state(states, x, y, z);
 								if (state != lastState) {
 									lastState = state;
 									lastId = BlockLooks.bakeId(state);

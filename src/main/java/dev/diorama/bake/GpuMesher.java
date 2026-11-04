@@ -771,7 +771,8 @@ public final class GpuMesher {
 		if (seed != null) {
 			int cx = x >> 4;
 			int cz = z >> 4;
-			if (mesh.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, cx, cz))) {
+			dev.diorama.Facing facing = Projection.facing();
+			if (mesh.slimeChunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), k -> Overlays.slimeChunk(seed, facing.worldBlockX(cx, cz), facing.worldBlockZ(cx, cz)))) {
 				flags |= SLIME;
 			}
 		}

@@ -53,7 +53,7 @@ public final class WaypointShare {
 		String initials = encode(chatSafe(waypoint.label()));
 		String tail = ":" + initials + ":" + waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":"
 			+ colorIndex(waypoint.color) + ":false:0:Internal-" + xaeroDimension(waypoint.dimension) + "-waypoints";
-		String name = chatSafe(waypoint.name).trim();
+		String name = chatSafe(waypoint.shownName()).trim();
 		if (name.isEmpty()) {
 			name = "Waypoint";
 		}

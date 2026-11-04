@@ -89,7 +89,7 @@ public final class DrawingOverlay {
 	}
 
 	private static boolean hits(Font font, MapViewport.View view, Drawing drawing, double x, double y, boolean notes) {
-		double[] p = drawing.points;
+		double[] p = drawing.shown();
 		int n = drawing.pointCount();
 		switch (drawing.kind) {
 			case NOTE -> {
@@ -138,7 +138,7 @@ public final class DrawingOverlay {
 
 	/** Whether any of a drawing could be in the view: its points' bounds, grown by a line's width. */
 	private boolean onScreen(MapViewport.View view, Drawing drawing) {
-		double[] p = drawing.points;
+		double[] p = drawing.shown();
 		double minU = Double.MAX_VALUE;
 		double minV = Double.MAX_VALUE;
 		double maxU = -Double.MAX_VALUE;
@@ -159,8 +159,8 @@ public final class DrawingOverlay {
 		float[] sx = new float[n];
 		float[] sy = new float[n];
 		for (int k = 0; k < n; k++) {
-			sx[k] = view.screenX(drawing.points[k * 2]);
-			sy[k] = view.screenY(drawing.points[k * 2 + 1]);
+			sx[k] = view.screenX(drawing.shown()[k * 2]);
+			sy[k] = view.screenY(drawing.shown()[k * 2 + 1]);
 		}
 		if (drawing.kind == Drawing.Kind.AREA) {
 			if (n >= 3) {
@@ -356,8 +356,8 @@ public final class DrawingOverlay {
 	/** A note's plate on screen: x0, y0, x1, y1, then where its text starts. */
 	private static float[] plate(Font font, MapViewport.View view, Drawing note) {
 		int width = font.width(note.text);
-		float x = Math.round(view.screenX(note.points[0]) - width / 2.0F);
-		float y = Math.round(view.screenY(note.points[1]) - 4);
+		float x = Math.round(view.screenX(note.shown()[0]) - width / 2.0F);
+		float y = Math.round(view.screenY(note.shown()[1]) - 4);
 		return new float[] {x - 2, y - 2, x + width + 1, y + 9, x, y};
 	}
 

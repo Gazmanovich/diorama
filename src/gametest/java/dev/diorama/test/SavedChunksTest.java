@@ -9,6 +9,7 @@ import dev.diorama.render.SavedChunkImport;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -85,8 +86,53 @@ final class SavedChunksTest {
 		});
 		context.waitTicks(40);
 		context.takeScreenshot("saved-chunks-far");
+		// The tooltip over them gives no biome: the client has none for a chunk it hasn't loaded (#262).
+		hoverMiddle(context);
+		context.takeScreenshot("saved-chunks-far-tooltip");
+		context.runOnClient(mc -> {
+			Component biome = ((MapScreen) mc.gui.screen()).biomeAt(new BlockPos(X + 24, ground, Z + 24));
+			if (biome != null) {
+				throw new AssertionError("The tooltip over chunks the client hasn't loaded names a biome: " + biome.getString());
+			}
+		});
+		// Where the player is, it does.
+		BlockPos near = context.computeOnClient(mc -> mc.player.blockPosition().offset(8, 0, 0));
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(near.getX(), Projection.v(near.getY(), near.getZ()), 2, TileKey.SURFACE));
+		hoverMiddle(context);
+		context.takeScreenshot("saved-chunks-near-tooltip");
+		context.runOnClient(mc -> {
+			if (((MapScreen) mc.gui.screen()).biomeAt(near) == null) {
+				throw new AssertionError("The tooltip next to the player names no biome");
+			}
+			// At the east edge of the loaded chunks, the last blocks of a loaded chunk can take their
+			// biome from the unloaded one beyond it, so they name none; its middle still does.
+			int chunkX = near.getX() >> 4;
+			int chunkZ = near.getZ() >> 4;
+			while (mc.level.getChunkSource().hasChunk(chunkX + 1, chunkZ)) {
+				chunkX++;
+			}
+			MapScreen map = (MapScreen) mc.gui.screen();
+			int z = chunkZ * 16 + 8;
+			if (map.biomeAt(new BlockPos(chunkX * 16 + 15, near.getY(), z)) != null) {
+				throw new AssertionError("The tooltip names a biome at the edge of chunk " + chunkX + "," + chunkZ + ", next to one the client hasn't loaded");
+			}
+			if (map.biomeAt(new BlockPos(chunkX * 16 + 8, near.getY(), z)) == null) {
+				throw new AssertionError("The tooltip names no biome in the middle of the loaded chunk " + chunkX + "," + chunkZ);
+			}
+		});
+		context.getInput().setCursorPos(0, 0);
 		context.setScreen(() -> null);
 		return ground;
+	}
+
+	/** The mouse on the middle of the map, long enough for its tooltip to show. */
+	private static void hoverMiddle(ClientGameTestContext context) {
+		double[] at = context.computeOnClient(mc -> {
+			double scale = mc.getWindow().getGuiScale();
+			return new double[] {mc.gui.screen().width / 2.0 * scale, mc.gui.screen().height / 2.0 * scale};
+		});
+		context.getInput().setCursorPos(at[0], at[1]);
+		context.waitTicks(20);
 	}
 
 	private static void placesPlayedInAreNotDrawnAgain(ClientGameTestContext context, TestSingleplayerContext world) {

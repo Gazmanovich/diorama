@@ -31,6 +31,8 @@ layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec4 fragInfo;
 
 const float OUTLINE_DEPTH = 1.5;
+// TileBaker.OUTLINE_WATER_FADE: outlines under water fade with the water in front of them.
+const float OUTLINE_WATER_FADE = 6.0;
 
 float luminance(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -40,11 +42,11 @@ vec3 mix_water(vec3 under, vec4 water, float depth) {
     vec3 w = water.rgb;
     float light = water.a;
     if (Grade.w > 0.5) {
-        float peak = max(w.r, max(w.g, w.b));
-        vec3 t = exp(-depth * 0.45 * (1.0 - w / peak) - depth * 0.04);
-        vec3 deep = w * 0.55 * light;
-        float sheen = 0.05 * light;
-        return under * t + deep * (1.0 - t) + vec3(sheen, sheen, sheen * 1.2);
+        float peak = max(1e-4, max(w.r, max(w.g, w.b)));
+        vec3 t = exp(-depth * (0.45 * (1.0 - w / peak) + 0.16));
+        float l = luminance(w);
+        vec3 deep = max(vec3(0.0), vec3(l) + (w - vec3(l)) * 1.2) * light * (0.3 + 0.7 * exp(-depth / 18.0));
+        return under * t + deep * (1.0 - t);
     }
     float a = clamp(1.0 - exp(-0.2 * depth), 0.5, 0.94);
     return under * (1.0 - a) + w * light * a;
@@ -63,6 +65,26 @@ float pixel_depth(ivec2 pixel) {
         }
     }
     return known == 0 ? -1.0 : sum / float(known);
+}
+
+// Blocks of water in front of what each sample hit, averaged over the pixel's known samples
+// (0 for a sample with none), as TileBaker.mixWater counts them.
+float pixel_water(ivec2 pixel) {
+    float sum = 0.0;
+    int known = 0;
+    for (int i = 0; i < 4; i++) {
+        ivec2 s = pixel * 2 + ivec2(i & 1, i >> 1);
+        if (texelFetch(SceneColor, s, 0).a > 0.5) {
+            float window = texelFetch(SceneDepth, s, 0).r;
+            float waterWindow = texelFetch(WaterDepth, s, 0).r;
+            if (waterWindow > 0.0 && waterWindow >= window) {
+                bool nothing = texelFetch(SceneAux, s, 0).b > 0.5;
+                sum += nothing || window <= 0.0 ? 64.0 : max(0.0, bake_depth(window) - bake_depth(waterWindow));
+            }
+            known++;
+        }
+    }
+    return known == 0 ? 0.0 : sum / float(known);
 }
 
 bool nearer(float neighbour, float here) {
@@ -137,7 +159,7 @@ void main() {
         float here = pixel_depth(pixel);
         if (nearer(pixel_depth(pixel + ivec2(-1, 0)), here) || nearer(pixel_depth(pixel + ivec2(1, 0)), here)
             || nearer(pixel_depth(pixel + ivec2(0, -1)), here) || nearer(pixel_depth(pixel + ivec2(0, 1)), here)) {
-            srgb *= 1.0 - Grade.z;
+            srgb *= 1.0 - Grade.z * exp(-pixel_water(pixel) / OUTLINE_WATER_FADE);
         }
     }
     fragColor = vec4(srgb, floor(float(known) * 255.0 / 4.0) / 255.0);

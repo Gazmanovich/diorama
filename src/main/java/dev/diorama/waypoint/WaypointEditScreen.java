@@ -18,8 +18,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Creates or edits one waypoint: name, initials, position, colour, folder and whether it shows. A
- * preview on the right stands its pin on a piece of the map, as the map will draw it, and follows
- * the colour and initials as they change; the folder, Share in chat and Teleport sit under it. The footer is only
+ * preview on the right stands its pin on the piece of the map where it is, in its own dimension, as
+ * the map will draw it, and follows the position, colour and initials as they change; the folder,
+ * Share in chat and Teleport sit under it. The footer is only
  * the two ways out, Save and Cancel. Deleting lives on the list's rows and the map's menu.
  */
 public final class WaypointEditScreen extends Screen {
@@ -36,6 +37,8 @@ public final class WaypointEditScreen extends Screen {
 	/** Vanilla's colour for a number field it can't read, from the game rules screen. */
 	private static final int INVALID_TEXT = 0xFFFF0000;
 	private static final int LABEL = 0xFFA0A0A0;
+	/** The most characters a waypoint name can have. */
+	private static final int MAX_NAME = 32;
 
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
@@ -96,7 +99,7 @@ public final class WaypointEditScreen extends Screen {
 		int top = this.top();
 		int cx = left + FORM / 2;
 		// Resizing the window or changing GUI scale runs init() again: keep what's typed, not the saved waypoint.
-		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.name), "diorama.waypoint.name", 32);
+		this.name = this.field(left, top + 16, 112, draft(this.name, this.waypoint.shownName()), "diorama.waypoint.name", MAX_NAME);
 		this.iconButton = this.addRenderableWidget(Button.builder(this.iconLabel(), b -> this.pickIcon())
 			.bounds(left + 116, top + 16, 40, 20).build());
 		// A death marker always shows its headstone.
@@ -178,7 +181,7 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	private void pickIcon() {
-		this.preview.name = this.name.getValue().trim().isEmpty() ? this.waypoint.name : this.name.getValue().trim();
+		this.preview.name = this.typedName();
 		this.preview.initials = this.initials.getValue().trim();
 		this.preview.color = this.color;
 		this.minecraft.gui.setScreen(new WaypointIconScreen(this, this.preview, this.icon, id -> {
@@ -421,8 +424,8 @@ public final class WaypointEditScreen extends Screen {
 	}
 
 	/**
-	 * The pin as the map will draw it, standing on the same piece of map as the empty list, in a
-	 * list panel of its own. The pin's head rises above the piece, so the two are centred together.
+	 * The pin as the map will draw it, standing on its own piece of the map, in a list panel of its
+	 * own. The pin's head rises above the piece, so the two are centred together.
 	 */
 	private void drawPreview(GuiGraphicsExtractor graphics) {
 		int x0 = this.left() + PREVIEW_LEFT;
@@ -431,7 +434,7 @@ public final class WaypointEditScreen extends Screen {
 		int y1 = this.previewBottom();
 		graphics.text(this.font, Component.translatable("diorama.waypoint.preview"), x0, this.top() + 5, LABEL, true);
 		ScreenArt.list(graphics, x0, y0, x1, y1);
-		this.preview.name = this.name.getValue().trim().isEmpty() ? this.waypoint.name : this.name.getValue().trim();
+		this.preview.name = this.typedName();
 		this.preview.initials = this.initials.getValue().trim();
 		this.preview.color = this.color;
 		this.preview.kind = this.waypoint.kind;
@@ -443,7 +446,8 @@ public final class WaypointEditScreen extends Screen {
 		int total = rise + this.piece.outerHeight();
 		int pieceX = (x0 + x1) / 2 - this.piece.outerWidth() / 2;
 		int pieceY = y0 + (y1 - y0 - total) / 2 + rise;
-		this.piece.draw(graphics, pieceX, pieceY);
+		this.piece.draw(graphics, pieceX, pieceY, new MapPiece.Place(this.waypoint.dimension,
+			typed(this.x, this.waypoint.x), typed(this.y, this.waypoint.y), typed(this.z, this.waypoint.z)));
 		// The caption of the folder button under the panel.
 		graphics.text(this.font, Component.translatable("diorama.waypoint.folder_caption"), x0, y1 + 3, LABEL, true);
 		graphics.pose().pushMatrix();
@@ -520,6 +524,18 @@ public final class WaypointEditScreen extends Screen {
 		return this.waypoint;
 	}
 
+	/**
+	 * The name field's text, or the saved name while the field is empty or still shows it, so an
+	 * automatic pin saved without a rename keeps following the player's language. The field holds
+	 * {@link #MAX_NAME} characters, so a longer translation shows cut, and the cut text counts too.
+	 */
+	private String typedName() {
+		String typed = this.name.getValue().trim();
+		String shown = this.waypoint.shownName();
+		shown = shown.length() > MAX_NAME ? shown.substring(0, MAX_NAME) : shown;
+		return typed.isEmpty() || typed.equals(shown.trim()) ? this.waypoint.name : typed;
+	}
+
 	/** The waypoint as the fields show it now, edits included, without saving; null while a coordinate isn't a number. */
 	private @Nullable Waypoint shown() {
 		Integer x = parse(this.x.getValue());
@@ -528,8 +544,8 @@ public final class WaypointEditScreen extends Screen {
 		if (x == null || y == null || z == null) {
 			return null;
 		}
-		String name = this.name.getValue().trim();
-		Waypoint shown = new Waypoint(name.isEmpty() ? this.waypoint.name : name, x, y, z, this.waypoint.dimension, this.color);
+		Waypoint shown = new Waypoint(this.typedName(), x, y, z, this.waypoint.dimension, this.color);
+		shown.kind = this.waypoint.kind;
 		String initials = this.initials.getValue().trim();
 		shown.initials = initials.isEmpty() ? shown.initials : initials;
 		return shown;
@@ -565,6 +581,8 @@ public final class WaypointEditScreen extends Screen {
 			this.onClose();
 			return;
 		}
+		this.waypoint.edited |= this.waypoint.kind.isPortal() && (!shown.name.equals(this.waypoint.name)
+			|| shown.x != this.waypoint.x || shown.y != this.waypoint.y || shown.z != this.waypoint.z);
 		this.waypoint.name = shown.name;
 		this.waypoint.initials = this.initials.getValue().trim();
 		this.waypoint.x = shown.x;
@@ -587,12 +605,24 @@ public final class WaypointEditScreen extends Screen {
 		this.onClose();
 	}
 
+	/** A coordinate as typed, or the saved one while the field doesn't read as a number. */
+	private static int typed(EditBox box, int saved) {
+		Integer value = parse(box.getValue());
+		return value == null ? saved : value;
+	}
+
 	private static @Nullable Integer parse(String text) {
 		try {
 			return Integer.parseInt(text.trim());
 		} catch (NumberFormatException e) {
 			return null;
 		}
+	}
+
+	@Override
+	public void tick() {
+		super.tick();
+		this.piece.tick();
 	}
 
 	@Override

@@ -4,6 +4,11 @@ package dev.diorama.render.gpu;
 public enum Sampling {
 	/** Tiles shown smaller than their pixels: blends across mip levels, clamped at the edges. */
 	TILE_SMOOTH,
+	/**
+	 * Tiles shown about their size or smaller, drawn by the tile shader: each screen pixel is the
+	 * average of the area of the tile under it, read from a mip level at least twice as fine.
+	 */
+	TILE_AREA,
 	/** Tiles shown larger than their pixels: as above, but magnified pixels stay crisp so blocks keep their edges. */
 	TILE_CRISP,
 	/** Clamped at the edges, linear, no mipmaps: the fog mask and icons. */
@@ -14,7 +19,7 @@ public enum Sampling {
 	REPEAT_LINEAR;
 
 	public boolean mipmapped() {
-		return this == TILE_SMOOTH || this == TILE_CRISP;
+		return this == TILE_SMOOTH || this == TILE_AREA || this == TILE_CRISP;
 	}
 
 	public boolean crisp() {

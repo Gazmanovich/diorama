@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapMenu;
+import dev.diorama.Facing;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -115,6 +116,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("showcase")) {
 				showcase(context, world);
 			}
+			if (tests.contains("portal-photos")) {
+				PortalPinsTest.photos(context, world);
+			}
 			if (tests.contains("icon-waypoints")) {
 				IconWaypointsTest.photos(context, world);
 			}
@@ -163,6 +167,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("icons")) {
 				IconWaypointsTest.checks(context, world);
 			}
+			if (tests.contains("portal-pins")) {
+				PortalPinsTest.checks(context, world);
+			}
+			if (tests.contains("pin-names")) {
+				PinNamesTest.run(context, world);
+			}
+			if (tests.contains("waypoint-preview")) {
+				WaypointPreviewTest.run(context, world);
+			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
@@ -202,6 +215,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("game-time")) {
 				GameTimeTest.run(context, world);
 			}
+			if (tests.contains("tile-filter")) {
+				TileFilterTest.run(context);
+			}
 			if (tests.contains("image-export")) {
 				ImageExportTest.run(context, world);
 			}
@@ -210,6 +226,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("redraw")) {
 				RedrawTest.run(context, world);
+			}
+			if (tests.contains("facing")) {
+				FacingTest.run(context, world);
 			}
 			if (tests.contains("waystones")) {
 				waystones(context, world);
@@ -238,10 +257,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw")) && save != null) {
+		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
+				}
+				if (tests.contains("facing")) {
+					FacingTest.reopened(context);
 				}
 				if (tests.contains("redraw")) {
 					RedrawTest.reopened(context);
@@ -962,7 +984,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
-	private static void switchLanguage(ClientGameTestContext context, String language) {
+	static void switchLanguage(ClientGameTestContext context, String language) {
 		reloadPacks(context, mc -> {
 			mc.getLanguageManager().setSelected(language);
 			mc.options.languageCode = language;
@@ -1713,7 +1735,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			&& Math.abs(mc.player.getX() - spawnPosition[0]) < 0.5 && Math.abs(mc.player.getZ() - spawnPosition[2]) < 0.5
 			&& MapSession.get() != null && MapSession.get().map().chunk(chunkX, chunkZ) != null, 2400);
 		settle(context, 100);
+		// The saved map is compared facing north after the restart; the facing test leaves it turned.
+		Facing was = context.computeOnClient(mc -> Projection.facing());
+		FacingTest.turnTo(context, Facing.NORTH);
 		spawnProbes = spawnProbes(context, cell);
+		FacingTest.turnTo(context, was);
 	}
 
 	/**
@@ -5286,7 +5312,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** The screen's text fields, top to bottom and left to right. */
-	private static List<net.minecraft.client.gui.components.EditBox> editBoxes(net.minecraft.client.gui.screens.Screen screen) {
+	static List<net.minecraft.client.gui.components.EditBox> editBoxes(net.minecraft.client.gui.screens.Screen screen) {
 		java.util.List<net.minecraft.client.gui.components.EditBox> boxes = new java.util.ArrayList<>();
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.EditBox box) {
@@ -6106,10 +6132,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

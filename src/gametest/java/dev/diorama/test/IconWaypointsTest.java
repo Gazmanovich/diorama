@@ -110,7 +110,7 @@ final class IconWaypointsTest {
 	}
 
 	/** Puts a bed with its head at {@code head} and has the player lie down in it, then get up. */
-	private static void sleep(ClientGameTestContext context, TestSingleplayerContext world, BlockPos head) {
+	static void sleep(ClientGameTestContext context, TestSingleplayerContext world, BlockPos head) {
 		sleep(context, world, head, "red_bed");
 	}
 

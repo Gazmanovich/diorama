@@ -83,7 +83,7 @@ public final class WaypointHud implements HudElement {
 				String text = Math.round(distance) + " m";
 				boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
 				if (labels == Settings.WaypointLabels.ALWAYS || labels == Settings.WaypointLabels.AUTO && (nearCrosshair || distance < NAME_DISTANCE)) {
-					text = waypoint.name + " · " + text;
+					text = waypoint.shownName() + " · " + text;
 				}
 				int w = font.width(text);
 				graphics.pose().translate(-w / 2.0F, 1 + Pins.SHADOW * scale);

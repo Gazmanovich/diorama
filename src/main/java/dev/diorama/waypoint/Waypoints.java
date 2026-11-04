@@ -3,7 +3,6 @@ package dev.diorama.waypoint;
 import dev.diorama.MapSession;
 import dev.diorama.Settings;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.Minecraft;
@@ -14,7 +13,6 @@ import org.jspecify.annotations.Nullable;
 
 /** Making waypoints (where the player stands, at a picked spot, where they die) and going to them. */
 public final class Waypoints {
-	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
 
 	private Waypoints() {
 	}
@@ -154,7 +152,7 @@ public final class Waypoints {
 				return true;
 			}
 		}
-		Waypoint bed = new Waypoint("Bed", pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFE5484D);
+		Waypoint bed = new Waypoint(Waypoint.BED_NAME, pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFE5484D);
 		bed.kind = Waypoint.Kind.BED;
 		bed.icon = dev.diorama.render.WaypointIcons.BED;
 		store.add(bed);
@@ -172,7 +170,7 @@ public final class Waypoints {
 			return;
 		}
 		BlockPos pos = player.blockPosition();
-		Waypoint death = new Waypoint("Death " + LocalTime.now().format(TIME), pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFF60646C);
+		Waypoint death = new Waypoint(Waypoint.deathName(LocalTime.now()), pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFF60646C);
 		death.kind = Waypoint.Kind.DEATH;
 		store.add(death);
 	}

@@ -52,7 +52,7 @@ public final class WorldSavePick {
 	 * The standing spot at map point {@code (u, v)} of the surface, or null where the ray finds
 	 * nothing. {@code map} answers for the chunks it still has, and for everything but chunks.
 	 */
-	public CompletableFuture<@Nullable BlockPos> pick(ChunkSource map, BlockLooks looks, double u, double v, boolean fogOfWar) {
+	public CompletableFuture<@Nullable BlockPos> pick(ChunkSource map, dev.diorama.Facing facing, BlockLooks looks, double u, double v, boolean fogOfWar) {
 		if (!this.server.isRunning()) {
 			return CompletableFuture.completedFuture(null);
 		}
@@ -67,8 +67,8 @@ public final class WorldSavePick {
 				return null;
 			}
 			TileKey tile = new TileKey(TileKey.SURFACE, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
-			MapPick pick = MapPick.fromWorldTop(new Source(map, serverLevel, this.level), looks, tile, fogOfWar);
-			return pick.pick(u, v) == MapPick.FOUND ? new BlockPos((int) Math.floor(u), pick.y, pick.z) : null;
+			MapPick pick = MapPick.fromWorldTop(new dev.diorama.bake.TurnedSource(new Source(map, serverLevel, this.level), facing), looks, tile, fogOfWar);
+			return pick.pick(u, v) == MapPick.FOUND ? facing.worldPos(new BlockPos((int) Math.floor(u), pick.y, pick.z)) : null;
 		}).exceptionally(t -> {
 			Diorama.LOGGER.warn("Couldn't read the world's chunks at map point {}, {}", u, v, t);
 			return null;

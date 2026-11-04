@@ -218,7 +218,7 @@ public final class WaypointListScreen extends Screen {
 			// This dimension's waypoints nearest first; any from other dimensions after them, by name.
 			this.all.sort(Comparator.<Waypoint, Boolean>comparing(w -> !w.dimension.equals(here))
 				.thenComparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ()) : 0)
-				.thenComparing(w -> w.name.toLowerCase(Locale.ROOT)));
+				.thenComparing(w -> w.shownName().toLowerCase(Locale.ROOT)));
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
@@ -348,7 +348,7 @@ public final class WaypointListScreen extends Screen {
 		String query = this.search != null ? this.search.getValue().trim().toLowerCase(Locale.ROOT) : "";
 		this.rows.clear();
 		for (Waypoint waypoint : this.all) {
-			if (query.isEmpty() || waypoint.name.toLowerCase(Locale.ROOT).contains(query)) {
+			if (query.isEmpty() || waypoint.shownName().toLowerCase(Locale.ROOT).contains(query)) {
 				this.rows.add(waypoint);
 			}
 		}
@@ -576,7 +576,8 @@ public final class WaypointListScreen extends Screen {
 			Pins.badge(graphics, waypoint, left + badgeX(waypoint), y + 12.5F, Pins.LARGE);
 			// The name and position stop short of the selected row's buttons.
 			int room = right - (selected ? this.actionsWidth() + 4 : 6) - (left + textLeft);
-			String name = this.fit(waypoint.name, room);
+			String full = waypoint.shownName();
+			String name = this.fit(full, room);
 			graphics.text(this.font, name, left + textLeft, y + 4, waypoint.visible && !folderHidden ? 0xFFFFFFFF : HIDDEN, true);
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
@@ -590,12 +591,12 @@ public final class WaypointListScreen extends Screen {
 			String shownDetail = this.fit(detail, room);
 			graphics.text(this.font, shownDetail, left + textLeft, y + 14, DETAIL, true);
 			boolean overText = mouseX >= left + textLeft && mouseX < left + textLeft + room && mouseY >= y && mouseY < y + ROW;
-			if (overText && (!name.equals(waypoint.name) || !shownDetail.equals(detail))) {
+			if (overText && (!name.equals(full) || !shownDetail.equals(detail))) {
 				//? if >=1.21.6 {
-				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(waypoint.name), Component.literal(detail)), mouseX, mouseY);
+				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(full), Component.literal(detail)), mouseX, mouseY);
 				//?} else {
 				/*// The screen draws this tooltip after everything else.
-				this.setTooltipForNextRenderPass(List.of(Component.literal(waypoint.name).getVisualOrderText(), Component.literal(detail).getVisualOrderText()));
+				this.setTooltipForNextRenderPass(List.of(Component.literal(full).getVisualOrderText(), Component.literal(detail).getVisualOrderText()));
 				*///?}
 			}
 		}

@@ -59,6 +59,8 @@ public final class Maps {
 	/** What {@code maps.json} holds: for each dimension that has more than its main map, by ID. */
 	private static final class Saved {
 		Map<String, Dimension> dimensions = new LinkedHashMap<>();
+		/** Which way this world's map faces; see {@link Facing}. Left out while it's north. */
+		@Nullable String facing;
 	}
 
 	private static final class Dimension {
@@ -110,6 +112,18 @@ public final class Maps {
 
 	public String worldKey() {
 		return this.worldKey;
+	}
+
+	/** Which way this world's map faces, in every dimension. A build's front belongs to one world. */
+	public Facing facing() {
+		return this.saved.facing == null ? Facing.NORTH : Facing.of(this.saved.facing);
+	}
+
+	/** Turns this world's map. Returns whether it could be saved. */
+	public boolean facing(Facing facing) {
+		String before = GSON.toJson(this.saved);
+		this.saved.facing = facing == Facing.NORTH ? null : facing.id();
+		return this.saveOrUndo(before);
 	}
 
 	/** The dimensions that have a map other than their main one, or had one. */
@@ -381,6 +395,10 @@ public final class Maps {
 			if (dimensions == null || !dimensions.isJsonObject()) {
 				damaged = true;
 				dimensions = new JsonObject();
+			}
+			JsonElement facing = root.isJsonObject() ? root.getAsJsonObject().get("facing") : null;
+			if (facing != null && facing.isJsonPrimitive()) {
+				this.saved.facing = facing.getAsString();
 			}
 			// One dimension at a time, so a bad one costs only itself. Also dropped: what a hand edit
 			// might have broken, like entries without an ID or a name, repeated IDs, and a map in use

@@ -107,8 +107,8 @@ public final class Radar {
 			if (Math.abs(pos.y - selfY) > range) {
 				continue;
 			}
-			float x = view.screenX(pos.x);
-			float y = view.screenY(Projection.v(pos.y, pos.z));
+			float x = view.screenX(Projection.u(pos.x, pos.z));
+			float y = view.screenY(Projection.v(pos.x, pos.y, pos.z));
 			if (x < view.x() - margin || y < view.y() - margin || x > view.x() + view.width() + margin || y > view.y() + view.height() + margin) {
 				continue;
 			}
