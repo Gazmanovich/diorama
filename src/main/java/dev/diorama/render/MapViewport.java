@@ -9,6 +9,7 @@ import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -446,17 +447,23 @@ public final class MapViewport {
 		}
 		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		this.lifting = false;
-		if (memory != null) {
-			int memoryLod = memory.lod(view, lod);
-			for (int j = 0; j < MASK; j++) {
-				double v = originV + (j + 0.5) * texel;
-				for (int i = 0; i < MASK; i++) {
-					this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
+		// Caves keep the fog as it always was: full height everywhere (alpha 255).
+		if (view.layer() == TileKey.SURFACE) {
+			if (memory != null) {
+				int memoryLod = memory.lod(view, lod);
+				for (int j = 0; j < MASK; j++) {
+					double v = originV + (j + 0.5) * texel;
+					for (int i = 0; i < MASK; i++) {
+						this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
+					}
 				}
+			} else {
+				Arrays.fill(this.remembered, 0);
 			}
 			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
-			this.liftTargets(centerI, centerJ);
+			this.liftTargets(centerI, centerJ, texel, scaleSteps);
+			this.writeRemembered();
 			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
 			// view has its texels in new places, so the old heights mean nothing there.
 			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
@@ -471,6 +478,24 @@ public final class MapViewport {
 		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 	}
+
+	/**
+	 * The remembered share into green, at 0.4 for all of it, where green isn't the clear flag: the
+	 * shader lets that much of the old map show through the clouds.
+	 */
+	private void writeRemembered() {
+		for (int k = 0; k < MASK * MASK; k++) {
+			int pixel = this.maskPixels[k];
+			if ((pixel & 0xFF00) == 0) {
+				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
+			}
+		}
+	}
+
+	/** Cloud levels, and how far from explored land the clouds over never-explored land reach full height, per level in cells. Match fog.fsh. */
+	private static final double CLOUD_LEVELS = 5;
+	private static final double CLOUD_CELL = 12;
+	private static final double CELLS_PER_LEVEL = 5;
 
 	/** How much of a remembered map is under each mask texel, 0 to 1. */
 	private final float[] remembered = new float[MASK * MASK];
@@ -493,25 +518,30 @@ public final class MapViewport {
 	 * over the view's width; with nothing redrawn yet it starts at the middle of the view, where
 	 * the redraw starts.
 	 */
-	private void liftTargets(int centerI, int centerJ) {
+	private void liftTargets(int centerI, int centerJ, double texel, int scaleSteps) {
 		int far = MASK * 3;
 		boolean anyRedrawn = false;
+		boolean anyRemembered = false;
 		for (int k = 0; k < MASK * MASK; k++) {
 			boolean redrawn = (this.maskPixels[k] & 0xFF) >= 128;
 			anyRedrawn |= redrawn;
+			anyRemembered |= this.remembered[k] >= 0.5F;
 			this.toRedrawn[k] = redrawn ? 0 : Integer.MAX_VALUE / 2;
 			this.toUnexplored[k] = !redrawn && this.remembered[k] < 0.5F ? 0 : Integer.MAX_VALUE / 2;
 		}
-		if (!anyRedrawn) {
+		if (!anyRedrawn && anyRemembered) {
 			this.toRedrawn[Math.max(0, Math.min(MASK - 1, centerJ)) * MASK + Math.max(0, Math.min(MASK - 1, centerI))] = 0;
 		}
 		chamfer(this.toRedrawn);
 		chamfer(this.toUnexplored);
+		// Over never-explored land the clouds climb a level every few cells away from explored land.
+		double climbThirds = 3 * CLOUD_LEVELS * CELLS_PER_LEVEL * CLOUD_CELL * (1 << scaleSteps) / texel;
 		for (int k = 0; k < MASK * MASK; k++) {
 			float redrawn = Math.min(this.toRedrawn[k], far);
 			float unexplored = Math.min(this.toUnexplored[k], far);
 			float ramp = redrawn + unexplored == 0 ? 1 : redrawn / (redrawn + unexplored);
-			this.liftTarget[k] = 1 - this.remembered[k] * (1 - ramp);
+			float climb = anyRedrawn ? (float) Math.min(1, this.toRedrawn[k] / climbThirds) : 1;
+			this.liftTarget[k] = this.remembered[k] * ramp + (1 - this.remembered[k]) * climb;
 		}
 	}
 
