@@ -1517,9 +1517,17 @@ public final class MapScreen extends Screen {
 		*///?}
 	}
 
+	/** For tests on versions without a tick freeze: the map pauses a singleplayer world while it's open. */
+	private static boolean pausesForTests;
+
+	/** For tests: see {@link #pausesForTests}. */
+	public static void pauseForTests(boolean pause) {
+		pausesForTests = pause;
+	}
+
 	@Override
 	public boolean isPauseScreen() {
-		return false;
+		return pausesForTests;
 	}
 
 	@Override
