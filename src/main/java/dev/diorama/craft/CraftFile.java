@@ -150,7 +150,8 @@ final class CraftFile {
 					throw new IOException("bad craft size");
 				}
 				int limit = size[0] * size[1] * size[2];
-				String[] palette = new String[checked(data.readInt(), limit + 1)];
+				// Block states and copycat materials share it: at most one of each per cell.
+				String[] palette = new String[checked(data.readInt(), limit * 2)];
 				for (int i = 0; i < palette.length; i++) {
 					palette[i] = data.readUTF();
 				}

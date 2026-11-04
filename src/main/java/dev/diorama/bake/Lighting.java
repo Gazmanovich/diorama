@@ -33,8 +33,8 @@ final class Lighting {
 	 * whether something stands between it and the sun, {@code ao} the corner occlusion,
 	 * {@code sky} how much open sky it sees (0..1), {@code emission} its own glow (0..1),
 	 * {@code facing} how much its side is darkened (1 for a top) and {@code y} its height.
-	 * {@code out[3]} gets the share of the light that comes straight from the sun: what a shadow
-	 * falling on it takes away.
+	 * If {@code out} has a fourth place, it gets the share of the light that comes straight from
+	 * the sun: what a shadow falling on it takes away. Only crafts ask, so tiles don't pay for it.
 	 */
 	void surface(double lambert, boolean shadowed, float ao, float sky, float emission, float facing, double y, float[] out) {
 		MapStyle style = this.style;
@@ -67,17 +67,19 @@ final class Lighting {
 			g *= f;
 			b *= f;
 		}
-		float lit = luminance(r, g, b);
-		float sun = luminance(direct * sunTint[0], direct * sunTint[1], direct * sunTint[2]) / Math.max(1e-6F, luminance(ambient * skyTint[0] + direct * sunTint[0], ambient * skyTint[1] + direct * sunTint[1], ambient * skyTint[2] + direct * sunTint[2]));
+		boolean wantSun = out.length > 3;
+		float lit = wantSun ? luminance(r, g, b) : 0;
+		float sun = wantSun ? luminance(direct * sunTint[0], direct * sunTint[1], direct * sunTint[2]) / Math.max(1e-6F, luminance(ambient * skyTint[0] + direct * sunTint[0], ambient * skyTint[1] + direct * sunTint[1], ambient * skyTint[2] + direct * sunTint[2])) : 0;
 		if (emission > 0) {
 			float glow = 0.35F + emission * 0.85F;
 			r = Math.max(r, glow);
 			g = Math.max(g, glow);
 			b = Math.max(b, glow);
-			// Where the block's own glow outshines the daylight, a shadow takes less away.
-			sun *= Math.min(1, lit / Math.max(1e-6F, luminance(r, g, b)));
 		}
-		out[3] = sun;
+		if (wantSun) {
+			// Where the block's own glow outshines the daylight, a shadow takes less away.
+			out[3] = emission > 0 ? sun * Math.min(1, lit / Math.max(1e-6F, luminance(r, g, b))) : sun;
+		}
 		out[0] = r * facing;
 		out[1] = g * facing;
 		out[2] = b * facing;
