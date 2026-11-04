@@ -569,8 +569,9 @@ void main() {
         vec3 premul = color * FOG_MIX + (1.0 - a) * cloudGlow;
         alpha = 1.0 - (1.0 - a) * (1.0 - cloudCover);
         color = premul;
-        // A remembered map shows through a little: its share is in green where that isn't the clear flag.
-        float remembered = clear ? 0.0 : clamp(flags.g / 0.4, 0.0, 1.0);
+        // A remembered map shows through a little: its share is in green where that isn't the clear
+        // flag. Read filtered, so it changes smoothly between texels rather than a texel at a time.
+        float remembered = clear ? 0.0 : clamp(texture(Sampler0, maskUv).g / 0.4, 0.0, 1.0);
         float keep = 1.0 - MEMORY_SEE * remembered;
         color *= keep;
         alpha *= keep;
