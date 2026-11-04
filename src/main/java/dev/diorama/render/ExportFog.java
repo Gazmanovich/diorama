@@ -516,17 +516,15 @@ public final class ExportFog implements ImageExport.Finish {
 			c = new float[] {0, 0, 0, 1};
 			handover = 0;
 		} else if (p.deep) {
-			float hTop = CLOUD_LEVELS * size * LEVEL_THICK;
-			float[] hit = this.terraceSurface(u, v + hTop * COS_PITCH, hTop * 0.98F, size, size * LEVEL_THICK, hTop, jitter);
-			c = new float[] {hit[0] * hit[3], hit[1] * hit[3], hit[2] * hit[3], 1 - hit[3]};
-			handover = 0;
+			c = this.flatTop(u, v, size, jitter);
+			shadow = GROUND_SHADOW;
 		} else {
 			c = this.clouds(u, v, size, jitter);
 			shadow = GROUND_SHADOW * this.groundShadow(u, v, size);
 		}
 		if (handover > 0 && handover < 1) {
-			float[] c2 = this.clouds(u, v, size * 2, jitter);
-			float shadow2 = GROUND_SHADOW * this.groundShadow(u, v, size * 2);
+			float[] c2 = p.deep ? this.flatTop(u, v, size * 2, jitter) : this.clouds(u, v, size * 2, jitter);
+			float shadow2 = GROUND_SHADOW * (p.deep ? 1 : this.groundShadow(u, v, size * 2));
 			for (int i = 0; i < 4; i++) {
 				c[i] = mix(c[i], c2[i], handover);
 			}
@@ -633,6 +631,16 @@ public final class ExportFog implements ImageExport.Finish {
 	}
 
 	/** fog.fsh's march down the line of sight: premultiplied colour and how much shows through. */
+	/** fog.fsh's flatTop: what {@link #clouds} returns over plain never-explored land, without the march. */
+	private float[] flatTop(double u, double v, float size, float jitter) {
+		float level = size * LEVEL_THICK;
+		float hTop = CLOUD_LEVELS * level;
+		float dh = hTop / (CLOUD_LEVELS * 3);
+		float h = hTop - (0.5F + jitter * 0.9F) * dh / 8;
+		float[] hit = this.terraceSurface(u, v + h * COS_PITCH, h, size, level, hTop, jitter);
+		return new float[] {hit[0] * hit[3], hit[1] * hit[3], hit[2] * hit[3], 1 - hit[3]};
+	}
+
 	private float[] clouds(double u, double v, float size, float jitter) {
 		float level = size * LEVEL_THICK;
 		float hTop = CLOUD_LEVELS * level;

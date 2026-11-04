@@ -401,6 +401,19 @@ vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
     return vec4(glow, through);
 }
 
+// What clouds() returns over plain never-explored land, where every cell is at the top level and
+// so cover is whole at every height: the march's first step is already inside, and its three
+// halvings close in from the top to an eighth of that step. Drawn without the march, to the same
+// colour, so nothing marks where the march stops.
+vec4 flatTop(vec2 p0, float size, float jitter) {
+    float level = size * LEVEL_THICK;
+    float hTop = CLOUD_LEVELS * level;
+    float dh = hTop / (CLOUD_LEVELS * (fast ? 2.0 : 3.0));
+    float h = hTop - (0.5 + jitter * 0.9) * dh / 8.0;
+    vec4 hit = terraceSurface(vec2(p0.x, p0.y + h * COS_PITCH), h, size, level, hTop, jitter);
+    return vec4(hit.rgb * hit.a, 1.0 - hit.a);
+}
+
 // The clouds' shadow on the revealed map under a point, 0 to 1.
 float groundShadow(vec2 p0, float size) {
     vec2 toward = normalize(vec2(-1.0, -0.4));
@@ -474,18 +487,17 @@ void main() {
             c = vec4(0.0, 0.0, 0.0, 1.0);
             handover = 0.0;
         } else if (deep) {
-            // Never explored and plain all around: the highest level's flat top.
-            float hTop = CLOUD_LEVELS * size * LEVEL_THICK;
-            vec4 hit = terraceSurface(vec2(p0.x, p0.y + hTop * COS_PITCH), hTop * 0.98, size, size * LEVEL_THICK, hTop, jitter);
-            c = vec4(hit.rgb * hit.a, 1.0 - hit.a);
-            handover = 0.0;
+            // Never explored and plain all around: the highest level's top, and its shadow
+            // all over the ground under it.
+            c = flatTop(p0, size, jitter);
+            shadow = fast ? 0.0 : GROUND_SHADOW;
         } else {
             c = clouds(p0, size, lit, shade, jitter);
             shadow = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size);
         }
         if (handover > 0.0 && handover < 1.0) {
-            vec4 c2 = clouds(p0, size * 2.0, lit, shade, jitter);
-            float shadow2 = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size * 2.0);
+            vec4 c2 = deep ? flatTop(p0, size * 2.0, jitter) : clouds(p0, size * 2.0, lit, shade, jitter);
+            float shadow2 = fast ? 0.0 : GROUND_SHADOW * (deep ? 1.0 : groundShadow(p0, size * 2.0));
             c = mix(c, c2, handover);
             shadow = mix(shadow, shadow2, handover);
         }
