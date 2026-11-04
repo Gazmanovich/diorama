@@ -86,6 +86,7 @@
     "diorama.share.add": "[Добавить]",
     "diorama.share.add_hover": "Добавить %s в координаты %s, %s, %s в ваши точки",
     "diorama.waypoint.temporary": "Временная",
+    "diorama.waypoint.death": "Смерть %s",
     "diorama.menu.where": "%s, %s, %s · %s м",
     "diorama.menu.where_rough": "Примерно %s, %s · %s м",
     "diorama.menu.not_mapped": "Здесь ничего не нанесено на карту",
