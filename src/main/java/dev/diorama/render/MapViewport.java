@@ -825,7 +825,8 @@ public final class MapViewport {
 	private void writeCloudTops() {
 		// The most a cell can stand, from a texel: fog.fsh reads a cell's middle filtered, between
 		// four texels, at least one of them under half known if the cell has clouds at all; its height
-		// is then at most the highest of the texels around that one, plus the stairs' noise.
+		// is then at most the highest of the texels around that one, plus the stairs' noise (and a hair
+		// for the graphics card's rounding).
 		int[] alpha = this.topScratch;
 		for (int j = 0; j < MASK; j++) {
 			for (int i = 0; i < MASK; i++) {
@@ -851,7 +852,7 @@ public final class MapViewport {
 					a = Math.max(a, alpha[k + MASK]);
 				}
 				boolean cloudy = (this.maskPixels[k] & 0xFF) < 128;
-				this.cellTop[k] = cloudy ? (int) Math.max(1, Math.min(CLOUD_LEVELS, Math.ceil(a / 255.0 * CLOUD_LEVELS + 0.3))) : 0;
+				this.cellTop[k] = cloudy ? (int) Math.max(1, Math.min(CLOUD_LEVELS, Math.ceil(a / 255.0 * CLOUD_LEVELS + 0.31))) : 0;
 			}
 		}
 		// For each level, how many texels within reach can stand that high: the highest with any.
