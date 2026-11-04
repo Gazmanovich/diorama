@@ -86,6 +86,7 @@
     "diorama.share.add": "[Дадаць]",
     "diorama.share.add_hover": "Дадаць %s у %s, %s, %s у вашыя указальнікі",
     "diorama.waypoint.temporary": "Часовая",
+    "diorama.waypoint.death": "Смерць %s",
     "diorama.menu.where": "%s, %s, %s · %s м",
     "diorama.menu.where_rough": "Прыкладна %s, %s · %s м",
     "diorama.menu.not_mapped": "Тут нічога не замалёвана",
