@@ -134,7 +134,8 @@ public final class TileBaker {
 	private final ChunkSource source;
 	private final MapStyle style;
 	private final Lighting lighting;
-	private final float[] light = new float[4];
+	/** Three long, or four in a surface pass, where crafts also want the sun's share (see {@link Lighting#surface}). */
+	private float[] light = new float[3];
 	private final float[] unlit = new float[3];
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
 	private final double sin;
@@ -345,6 +346,7 @@ public final class TileBaker {
 		}
 		if (!baker.cave) {
 			baker.surfaceOnly = true;
+			baker.light = new float[4];
 			double unit = 1.0 / Projection.PIXELS_PER_UNIT;
 			for (int py = 0; py < height; py++) {
 				for (int px = 0; px < width; px++) {
