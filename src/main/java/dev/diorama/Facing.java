@@ -129,6 +129,14 @@ public enum Facing {
 
 	/** A block as turned space has it. */
 	public BlockState turned(BlockState state) {
-		return this == NORTH ? state : state.rotate(this.rotation);
+		if (this == NORTH) {
+			return state;
+		}
+		try {
+			return state.rotate(this.rotation);
+		} catch (RuntimeException e) {
+			// A mod's block that can't be turned is drawn as it stands.
+			return state;
+		}
 	}
 }

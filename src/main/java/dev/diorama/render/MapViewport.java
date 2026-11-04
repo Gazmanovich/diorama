@@ -445,10 +445,12 @@ public final class MapViewport {
 		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
-		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
 		this.lifting = false;
+		boolean surface = view.layer() == TileKey.SURFACE;
 		// Caves keep the fog as it always was: full height everywhere (alpha 255).
-		if (view.layer() == TileKey.SURFACE) {
+		if (!surface) {
+			this.markReach(fogReach(texel, true, fast, scaleSteps), false);
+		} else {
 			if (memory != null) {
 				int memoryLod = memory.lod(view, lod);
 				for (int j = 0; j < MASK; j++) {
@@ -463,7 +465,6 @@ public final class MapViewport {
 			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
 			this.liftTargets(centerI, centerJ, texel, scaleSteps);
-			this.writeRemembered();
 			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
 			// view has its texels in new places, so the old heights mean nothing there.
 			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
@@ -473,6 +474,8 @@ public final class MapViewport {
 			} else {
 				this.lifting = true;
 			}
+			this.markReach(fogReach(texel, false, fast, scaleSteps), true);
+			this.writeRemembered();
 			this.liftMs = System.currentTimeMillis();
 			this.writeLift();
 		}
@@ -494,7 +497,7 @@ public final class MapViewport {
 
 	/** Cloud levels, and how far from explored land the clouds over never-explored land reach full height, per level in cells. Match fog.fsh. */
 	private static final double CLOUD_LEVELS = 5;
-	private static final double CLOUD_CELL = 12;
+	private static final double CLOUD_CELL = 12.8;
 	private static final double CELLS_PER_LEVEL = 5;
 
 	/** How much of a remembered map is under each mask texel, 0 to 1. */
@@ -623,6 +626,9 @@ public final class MapViewport {
 	 * 9 west and 3.6 north times the noise scale. On top of that one texel for linear filtering,
 	 * and half a texel for where in its own texel the pixel sits.
 	 */
+	/** A cloud level's thickness in cells; match fog.fsh. */
+	private static final double LEVEL_THICK = 0.9;
+
 	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps) {
 		double fogHeight = cave ? 4 : 10;
 		double blurUnits = cave ? 2.5 : 7;
@@ -634,11 +640,17 @@ public final class MapViewport {
 		// The noise scale is below 2^(steps + 1).
 		double sun = fast ? 0 : 9.0 * (1 << (scaleSteps + 1)) / texel;
 		double slack = 1.5;
+		// The clouds read up to four cells around a point (the cell blend, the curling edges, the
+		// looks toward the sun), and the line of sight leans south over the levels' height. Cells
+		// are twice as big while the zoom hands over to the next step.
+		double cell = cave ? 0 : 2 * CLOUD_CELL * (1 << scaleSteps) / texel;
+		double around = 4 * cell;
+		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * 0.643;
 		return new int[] {
-			(int) Math.ceil(Math.max(blur, sun) + slack),
-			(int) Math.ceil(blur + slack),
-			(int) Math.ceil(Math.max(blur, sun * 0.4) + slack),
-			(int) Math.ceil(blur + layerShift + slack)
+			(int) Math.ceil(Math.max(Math.max(blur, sun), around) + slack),
+			(int) Math.ceil(Math.max(blur, around) + slack),
+			(int) Math.ceil(Math.max(Math.max(blur, sun * 0.4), around) + slack),
+			(int) Math.ceil(Math.max(blur + layerShift, around + lean) + slack)
 		};
 	}
 
@@ -652,7 +664,7 @@ public final class MapViewport {
 	 * skips the noise too; deep in the fog only the noise is left to read. Texels past the mask's
 	 * edge read as the edge texel, so the reach just stops at the edge.
 	 */
-	private void markReach(int[] reach) {
+	private void markReach(int[] reach, boolean surface) {
 		int row = MASK + 1;
 		// counts[(j + 1) * row + i + 1]: texels short of fully known (or with any known share) in the
 		// rectangle from (0, 0) to (i, j).
@@ -662,9 +674,13 @@ public final class MapViewport {
 			int lineNotKnown = 0;
 			int lineNotUnknown = 0;
 			for (int i = 0; i < MASK; i++) {
-				int known = this.maskPixels[j * MASK + i] & 0xFF;
+				int k = j * MASK + i;
+				int known = this.maskPixels[k] & 0xFF;
 				lineNotKnown += known == 0xFF ? 0 : 1;
-				lineNotUnknown += known == 0 ? 0 : 1;
+				// On the surface "fully unknown" is plain too: the clouds at full height, now and as
+				// they ease, and no old map under them. The shader draws a flat cloud top there.
+				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0;
+				lineNotUnknown += known == 0 && plain ? 0 : 1;
 				notKnown[(j + 1) * row + i + 1] = notKnown[j * row + i + 1] + lineNotKnown;
 				notUnknown[(j + 1) * row + i + 1] = notUnknown[j * row + i + 1] + lineNotUnknown;
 			}

@@ -355,7 +355,9 @@ public final class MapScreen extends Screen {
 		if (!maps.facing(now)) {
 			return;
 		}
-		double z = Projection.zAt(this.centerV, USUAL_GROUND_Y);
+		// The ground in the middle stays there: on a cave slice, the slice's.
+		double y = this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
+		double z = Projection.zAt(this.centerV, y);
 		double worldX = was.worldX(this.centerU, z);
 		double worldZ = was.worldZ(this.centerU, z);
 		Projection.setFacing(now);
@@ -366,7 +368,7 @@ public final class MapScreen extends Screen {
 		this.spot = null;
 		this.spotRequest = null;
 		this.centerU = Projection.u(worldX, worldZ);
-		this.centerV = Projection.v(worldX, USUAL_GROUND_Y, worldZ);
+		this.centerV = Projection.v(worldX, y, worldZ);
 		this.facingButton.setMessage(facingLetter());
 	}
 

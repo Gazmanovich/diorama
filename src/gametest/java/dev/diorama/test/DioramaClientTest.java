@@ -4,6 +4,7 @@ import dev.diorama.Claims;
 import dev.diorama.Diorama;
 import dev.diorama.DioramaClient;
 import dev.diorama.MapMenu;
+import dev.diorama.Facing;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
@@ -1734,7 +1735,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			&& Math.abs(mc.player.getX() - spawnPosition[0]) < 0.5 && Math.abs(mc.player.getZ() - spawnPosition[2]) < 0.5
 			&& MapSession.get() != null && MapSession.get().map().chunk(chunkX, chunkZ) != null, 2400);
 		settle(context, 100);
+		// The saved map is compared facing north after the restart; the facing test leaves it turned.
+		Facing was = context.computeOnClient(mc -> Projection.facing());
+		FacingTest.turnTo(context, Facing.NORTH);
 		spawnProbes = spawnProbes(context, cell);
+		FacingTest.turnTo(context, was);
 	}
 
 	/**

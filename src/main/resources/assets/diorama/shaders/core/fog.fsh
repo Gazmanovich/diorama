@@ -98,7 +98,7 @@ const float MASK_TEXELS = 256.0;
 const float NOISE_PERIOD = 512.0;
 // The default camera angle (50 degrees). At other angles the banks sit slightly too far north or south.
 const float COS_PITCH = 0.643;
-const int LAYERS = 12;
+const int LAYERS = 8;
 // How much of the soft fog is drawn over the cloud terraces.
 const float FOG_MIX = 0.5;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
@@ -122,7 +122,9 @@ float liftHere = 1.0;
 // height and rounds off toward its top and bottom, so the stacked levels read as layered pillows.
 // Lit like a sunny day's clouds: warm sunlight on the upper parts, cool sky light under, hazier the
 // deeper a level is.
-const float CLOUD_CELL = 12.0;
+// 80 cells to the 1024 * 2^steps map units the noise offset wraps over, and every noise scale the
+// clouds read a whole fraction of that too, so nothing jumps where the offset wraps.
+const float CLOUD_CELL = 12.8;
 const float CLOUD_LEVELS = 5.0;
 // A level's thickness as a share of a cell, and how much noise breaks up the stairs.
 const float LEVEL_THICK = 0.9;
@@ -135,7 +137,6 @@ const float PROFILE = 4.0;
 const float CLOUD_ALPHA = 0.95;
 // How much drifting noise eats a level's edges into wisps, and how far into a level it reaches.
 const float WISP = 1.5;
-const float WISP_SCALE = 1.2;
 // How much a level's edge frays into strands.
 const float STRANDS = 1.0;
 // How far swirling noise pushes a level's edges, in cells.
@@ -261,7 +262,7 @@ float cellLevel(vec2 cell, float size) {
     if (m.r >= 0.5) {
         return 0.0;
     }
-    float n = texture(Sampler1, pos / (size * 24.0) + 0.21).r;
+    float n = texture(Sampler1, pos / (size * 20.0) + 0.21).r;
     return clamp(ceil(m.a * CLOUD_LEVELS + (n - 0.5) * STAIR_NOISE), 1.0, CLOUD_LEVELS);
 }
 
@@ -280,19 +281,19 @@ float levelCover(vec2 p, float size, float k) {
 
 // Drifting noise for wisps, 0 to 1, a few times finer than a cell.
 float wispAt(vec2 p, float size) {
-    vec2 n = p / (size * 3.0 * WISP_SCALE);
+    vec2 n = p / (size * 4.0);
     float a = texture(Sampler1, n + vec2(5.0, 2.0) * seconds / 1200.0).g;
-    float b = texture(Sampler1, n * 2.3 + vec2(-7.0, 4.0) * seconds / 1200.0).b;
+    float b = texture(Sampler1, n * 2.0 + vec2(-7.0, 4.0) * seconds / 1200.0).b;
     return a * 0.6 + b * 0.4;
 }
 
 // A point pushed about by swirling noise, so a level's edges curl and trail into wisps instead of
 // running straight. Less at the lowest level, whose edge is the revealed map's.
 vec2 warped(vec2 p, float size, float k) {
-    vec2 n = p / (size * 2.2 * WISP_SCALE);
+    vec2 n = p / (size * 2.5);
     float drift = seconds / 1200.0;
     vec2 a = vec2(texture(Sampler1, n + vec2(3.0, 1.0) * drift).g, texture(Sampler1, n + 0.37 + vec2(-2.0, 3.0) * drift).b) - 0.5;
-    vec2 b = vec2(texture(Sampler1, n * 3.1 + 0.11).a, texture(Sampler1, n * 3.1 + 0.71).g) - 0.5;
+    vec2 b = vec2(texture(Sampler1, n * 3.0 + 0.11).a, texture(Sampler1, n * 3.0 + 0.71).g) - 0.5;
     float amount = WARP * size * (k <= 1.0 ? 0.35 : 1.0);
     return p + (a + b * 0.45) * amount;
 }
@@ -351,7 +352,7 @@ vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float 
 vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
     float level = size * LEVEL_THICK;
     float hTop = CLOUD_LEVELS * level;
-    int steps = int(CLOUD_LEVELS) * (fast ? 2 : 6);
+    int steps = int(CLOUD_LEVELS) * (fast ? 2 : 3);
     float dh = hTop / float(steps);
     float last = hTop;
     bool wasInside = false;
@@ -365,7 +366,7 @@ vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
             // Close in on the surface between the last point outside and this one.
             float above = last;
             float below = h;
-            for (int r = 0; r < 4; r++) {
+            for (int r = 0; r < 3; r++) {
                 float mid = 0.5 * (above + below);
                 if (terraceInside(vec2(p0.x, p0.y + mid * COS_PITCH), mid, size, level) > 0.0) {
                     below = mid;
@@ -377,7 +378,7 @@ vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
             glow += through * hit.a * hit.rgb;
             through *= 1.0 - hit.a;
             surfaces++;
-            if (surfaces >= 2 || through < 0.02) {
+            if (surfaces >= 2 || through < 0.1) {
                 break;
             }
         }
@@ -415,7 +416,8 @@ void main() {
     scaleFraction = mod(fogCode, 16.0) / 16.0;
     fogScale = exp2(scaleSteps + scaleFraction);
     // MapViewport.fogReach repeats how far the reads below can reach (these sizes, the blur taps,
-    // the layer shift and the sun probe), to know where the clear and deep flags are safe. Change both together.
+    // the layer shift, the sun probe, and the clouds' cells, curls and southward lean), to know where
+    // the clear and deep flags are safe. Change both together.
     fogHeight = cave ? 4.0 : 10.0;
     blurUnits = cave ? 2.5 : 7.0;
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
@@ -447,8 +449,22 @@ void main() {
         if (handover >= 1.0) {
             size *= 2.0;
         }
-        vec4 c = clouds(p0, size, lit, shade, jitter);
-        float shadow = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size);
+        vec4 c;
+        float shadow = 0.0;
+        if (clear) {
+            // Everything the clouds could reach from here is explored: none here.
+            c = vec4(0.0, 0.0, 0.0, 1.0);
+            handover = 0.0;
+        } else if (deep) {
+            // Never explored and plain all around: the highest level's flat top.
+            float hTop = CLOUD_LEVELS * size * LEVEL_THICK;
+            vec4 hit = terraceSurface(vec2(p0.x, p0.y + hTop * COS_PITCH), hTop * 0.98, size, size * LEVEL_THICK, hTop, jitter);
+            c = vec4(hit.rgb * hit.a, 1.0 - hit.a);
+            handover = 0.0;
+        } else {
+            c = clouds(p0, size, lit, shade, jitter);
+            shadow = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size);
+        }
         if (handover > 0.0 && handover < 1.0) {
             vec4 c2 = clouds(p0, size * 2.0, lit, shade, jitter);
             float shadow2 = fast ? 0.0 : GROUND_SHADOW * groundShadow(p0, size * 2.0);

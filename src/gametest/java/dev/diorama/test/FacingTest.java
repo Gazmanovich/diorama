@@ -247,4 +247,16 @@ final class FacingTest {
 		}
 		return on > off + 20;
 	}
+
+	/** Turns the map without the map screen, as its button does; for other tests' checks that need north. */
+	static void turnTo(ClientGameTestContext context, Facing to) {
+		context.runOnClient(mc -> {
+			if (Projection.facing() != to && Maps.get() != null && Maps.get().facing(to)) {
+				Projection.setFacing(to);
+				MapSession.facingChanged();
+			}
+		});
+		context.waitTicks(5);
+	}
+
 }
