@@ -178,6 +178,7 @@ public final class MinimapHud implements HudElement {
 		MapViewport.View view = new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), layer), layer, round, true);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
 			() -> session.lights().draw(graphics, view, partialTick, opacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
+		session.crafts().draw(graphics, view, partialTick, opacity);
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
 			this.drawings.draw(graphics, font, view, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);

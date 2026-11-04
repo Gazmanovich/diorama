@@ -3,6 +3,7 @@ package dev.diorama;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.craft.Crafts;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
@@ -45,6 +46,10 @@ public final class MapSession {
 	private static final long LOAD_DELAY_MS = 750;
 	private static final long CHANGE_DELAY_MS = 250;
 	private static final int SNAPSHOTS_PER_TICK = 24;
+	/** How many blocks of rock above the player count as underground. A house roof is thinner. */
+	private static final int MIN_CAVE_DEPTH = 8;
+	/** How far up to look for open sky. */
+	private static final int MAX_SKY_DEPTH = 32;
 
 	private static @Nullable MapSession current;
 	private static int started;
@@ -61,6 +66,7 @@ public final class MapSession {
 	private final boolean mainMap;
 	/** Fills the main map in from the world's save, in singleplayer; null elsewhere and when turned off. */
 	private @Nullable SavedChunkImport savedChunks;
+	private final Crafts crafts;
 	/** Portals found in the save, waiting for the client thread to pin them. */
 	private final Queue<Portals.Spot> savedPortals = new ConcurrentLinkedQueue<>();
 	private final Lights lights;
@@ -74,9 +80,21 @@ public final class MapSession {
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
 		// Before the map opens: the folder it saves in goes by which way it faces.
 		Projection.setFacing(key == null ? Facing.NORTH : Maps.of(key).facing());
-		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
+		Path folder = mapFolder(level, key);
+		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, folder);
 		this.mainMap = key != null && Maps.of(key).active(level.dimension().identifier().toString()).isEmpty();
+		this.crafts = new Crafts(level, this.map, folder, this::lookAgain);
 		this.lights = new Lights(level, this.map);
+	}
+
+	/** Snapshots the chunks under a world box again, as its blocks may have changed unseen. */
+	private void lookAgain(int[] box) {
+		int[] change = {box[0] - 1, box[1] - 1, box[2] - 1, box[3] + 1, box[4] + 1, box[5] + 1, MapLevel.CHANGED_SURFACE};
+		for (int cx = change[0] >> 4; cx <= change[3] >> 4; cx++) {
+			for (int cz = change[2] >> 4; cz <= change[5] >> 4; cz++) {
+				this.schedule(cx, cz, CHANGE_DELAY_MS, change);
+			}
+		}
 	}
 
 	/** Stops filling in from the save, then saves and closes the map. */
@@ -85,6 +103,7 @@ public final class MapSession {
 			this.savedChunks.stop();
 		}
 		this.lights.close();
+		this.crafts.close(this.ticks);
 		this.map.close();
 	}
 
@@ -240,8 +259,8 @@ public final class MapSession {
 				session.schedule(around.chunkX, around.chunkZ, CHANGE_DELAY_MS, strip);
 			}
 		}
-	}
-
+	}
+
 	private static boolean sameFromEverySide(BlockLooks looks, BlockState oldState, BlockState newState) {
 		for (Facing facing : Facing.values()) {
 			int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
@@ -512,6 +531,7 @@ public final class MapSession {
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
 		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
 		this.map.update();
+		this.crafts.tick(viewer, this.ticks);
 		if (viewer != null) {
 			this.updateUnderground(viewer);
 			if (this.underground) {
@@ -567,6 +587,10 @@ public final class MapSession {
 		return this.map;
 	}
 
+	public Crafts crafts() {
+		return this.crafts;
+	}
+
 	public Lights lights() {
 		return this.lights;
 	}
@@ -582,6 +606,26 @@ public final class MapSession {
 
 	/** The layer the minimap should show right now. */
 	public int autoLayer(Entity viewer) {
-		return this.underground ? caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		if (!this.underground) {
+			return TileKey.SURFACE;
+		}
+		// A roof overhead isn't the same as being in a cave. Unless the player asks for caves
+		// anyway, keep the surface view until there's real rock above them.
+		if (Settings.get().preferSurface && this.depthToSky(BlockPos.containing(viewer.getEyePosition())) < MIN_CAVE_DEPTH) {
+			return TileKey.SURFACE;
+		}
+		return caveLayerFor(viewer.getY());
+	}
+
+	/** Blocks between the eye and the first place open to the sky, or more than {@link #MAX_SKY_DEPTH}. */
+	private int depthToSky(BlockPos eye) {
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		int top = Math.min(this.level.getMaxY(), eye.getY() + MAX_SKY_DEPTH);
+		for (int y = eye.getY(); y <= top; y++) {
+			if (this.level.getBrightness(LightLayer.SKY, pos.set(eye.getX(), y, eye.getZ())) >= 15) {
+				return y - eye.getY();
+			}
+		}
+		return MAX_SKY_DEPTH + 1;
 	}
 }

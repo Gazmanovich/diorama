@@ -74,6 +74,8 @@ public final class MapScreen extends Screen {
 	private static final double NETHER_SCALE = 8;
 	/** How far out the saved surface map zooms; overview tiles make it cheap. */
 	private static final double MIN_ZOOM = 0.04;
+	/** How long the open map keeps the layer on screen while the one the player moved into bakes; as the minimap. */
+	private static final long FOLLOW_HOLD_MS = 3000;
 
 	private static final double MAX_ZOOM = 16;
 
@@ -101,6 +103,13 @@ public final class MapScreen extends Screen {
 	private double centerV;
 	private double zoom = 2.0;
 	private int layer;
+	/** Set once the player picks a layer with the map open: auto caves stops following them then. */
+	private boolean layerPicked;
+	/**
+	 * When following the player moved them onto a layer whose tiles aren't there yet, since when
+	 * the old one has stayed on screen; -1 when not waiting. See {@link #followLayer}.
+	 */
+	private long followHoldStart = -1;
 	private boolean following = true;
 	private List<Radar.Blip> blips = List.of();
 	private List<WaypointOverlay.Pin> pins = List.of();
@@ -270,6 +279,8 @@ public final class MapScreen extends Screen {
 		this.menu = null;
 		this.gauge.cancel();
 		this.following = true;
+		this.layerPicked = false;
+		this.followHoldStart = -1;
 		this.layer = this.otherDimension == null ? this.layerOnOpening() : TileKey.SURFACE;
 		this.spotU = Integer.MIN_VALUE;
 		this.spot = null;
@@ -434,12 +445,16 @@ public final class MapScreen extends Screen {
 			this.centerU = playerU;
 			this.centerV = playerV;
 		}
+		this.followLayer(session, viewer);
 		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
 		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
 		// Held lights belong to this dimension's map, not one shown from elsewhere.
 		this.viewport.draw(graphics, shown, view, elsewhere ? 0 : overlayBits(session), !elsewhere && Settings.get().claims != Settings.ClaimsShown.OFF,
 			elsewhere ? null : () -> session.lights().draw(graphics, view, a, 1, ServerRules.radarAllowed() && Settings.get().radarOnMap));
+		if (!elsewhere) {
+			session.crafts().draw(graphics, view, a, 1);
+		}
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && (this.draw.active() || Settings.get().drawings != Settings.DrawingsShown.OFF)) {
 			this.draw.drawMap(graphics, this.font, view, drawings.in(this.dimension()), mouseX, mouseY, !this.overControls(mouseX, mouseY));
@@ -716,11 +731,16 @@ public final class MapScreen extends Screen {
 			if (tab >= 0) {
 				if ((tab == 1) != (this.layer != TileKey.SURFACE)) {
 					this.toggleCaves();
+				} else if (this.otherDimension == null) {
+					// The tab already shown, clicked: a pick too, so the map stops following.
+					this.layerPicked = true;
 				}
 				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 				widgetTook = true;
 			} else if (this.layer != TileKey.SURFACE && this.minecraft.level != null && this.gauge.contains(x, y)) {
 				this.menu = null;
+				// Picking a slice: following the player could switch layers under the drag.
+				this.layerPicked = true;
 				this.gauge.grab(this.minecraft.level, y);
 				widgetTook = true;
 			}
@@ -750,6 +770,7 @@ public final class MapScreen extends Screen {
 			int slice = this.gauge.release();
 			if (this.layer != TileKey.SURFACE) {
 				this.layer = slice;
+				this.layerPicked = true;
 			}
 		}
 		// Only the release of the latest press counts: letting go of a button held since before
@@ -1140,6 +1161,7 @@ public final class MapScreen extends Screen {
 		this.gauge.cancel();
 		Entity viewer = MapSession.viewer();
 		this.layer = this.layer == TileKey.SURFACE && viewer != null ? MapSession.caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		this.layerPicked = true;
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
@@ -1153,6 +1175,7 @@ public final class MapScreen extends Screen {
 			this.layer = MapSession.caveLayerFor(viewer.getY());
 		}
 		this.layer = Math.max(this.minecraft.level.getMinY() + 4, Math.min(this.minecraft.level.getMaxY() + 1, this.layer + delta));
+		this.layerPicked = true;
 	}
 
 	/**
@@ -1488,11 +1511,24 @@ public final class MapScreen extends Screen {
 		return claim.forceLoaded() ? line.copy().append(Component.translatable("diorama.map.claim.force_loaded").withStyle(ChatFormatting.GRAY)) : line;
 	}
 
-	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. */
-	private @Nullable Component biomeAt(BlockPos pos) {
+	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. Public for tests. */
+	public @Nullable Component biomeAt(BlockPos pos) {
 		ClientLevel level = this.minecraft.level;
-		if (level == null || !level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+		if (level == null) {
 			return null;
+		}
+		// The game's lookup picks the biome from one of the cells around the spot, and near a chunk's
+		// edge that cell can be in the next chunk. Where that one isn't loaded, the game's stand-in
+		// chunk answers, all Plains. So every chunk a candidate cell is in has to be loaded. Ask the
+		// chunk source: the client level answers that every chunk is loaded (#262).
+		int cellX = (pos.getX() - 2) >> 2;
+		int cellZ = (pos.getZ() - 2) >> 2;
+		for (int chunkX = cellX >> 2; chunkX <= ((cellX + 1) >> 2); chunkX++) {
+			for (int chunkZ = cellZ >> 2; chunkZ <= ((cellZ + 1) >> 2); chunkZ++) {
+				if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
+					return null;
+				}
+			}
 		}
 		return level.getBiome(pos).unwrapKey()
 			.map(k -> (Component) Component.translatableWithFallback(k.identifier().toLanguageKey("biome"), k.identifier().getPath()))
@@ -1615,9 +1651,45 @@ public final class MapScreen extends Screen {
 	}
 
 	/** Cave slices and unsaved maps have no overview tiles, so they stop at the detailed zoom. */
+	/**
+	 * Follows the player between the surface and caves, until they pick a layer themselves. Not
+	 * while looking at another dimension, which the player isn't standing in. As on the minimap,
+	 * the layer on screen stays until the new one has its tiles, or for {@link #FOLLOW_HOLD_MS},
+	 * so climbing past a slice edge doesn't swap a map for fog.
+	 */
+	private void followLayer(MapSession session, Entity viewer) {
+		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves) {
+			this.followHoldStart = -1;
+			return;
+		}
+		int auto = session.autoLayer(viewer);
+		if (auto == this.layer) {
+			this.followHoldStart = -1;
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (this.followHoldStart < 0) {
+			this.followHoldStart = now;
+		}
+		MapLevel level = session.map();
+		MapViewport.View wanted = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, Math.max(this.minZoom(auto), this.zoom), auto);
+		MapViewport.View current = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
+		// The old layer only helps if it has something to show: after a teleport it doesn't.
+		if (MapViewport.ready(level, wanted) || now - this.followHoldStart > FOLLOW_HOLD_MS || !MapViewport.showsAnything(level, current)) {
+			this.layer = auto;
+			this.followHoldStart = -1;
+			// A menu belongs to the view it was opened on, as when the player changes layer.
+			this.menu = null;
+		}
+	}
+
 	private double minZoom() {
+		return this.minZoom(this.layer);
+	}
+
+	private double minZoom(int layer) {
 		MapSession session = MapSession.get();
-		boolean overviews = this.layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
+		boolean overviews = layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
 		return overviews ? MIN_ZOOM : MapViewport.DETAILED_ZOOM;
 	}
 
@@ -1627,6 +1699,7 @@ public final class MapScreen extends Screen {
 		this.centerV = v;
 		this.zoom = zoom;
 		this.layer = layer;
+		this.layerPicked = true;
 		this.following = false;
 	}
 }
