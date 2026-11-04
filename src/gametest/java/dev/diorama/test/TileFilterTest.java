@@ -78,7 +78,9 @@ final class TileFilterTest {
 			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod));
 			double[] result = compare(shot, view, store, check, mapped);
 			System.out.printf("TILE-FILTER %s: median error %.3f over %.0f pixels, colour scale %.3f%n", check.name, result[0], result[1], result[2]);
-			if (result[1] < 5_000) {
+			// The shrunk-eightfold case compares a strip of about 8,000 screen pixels, of which only
+			// those with mapped ground all round count: some 4,000 to 5,000 near the spawn's edge.
+			if (result[1] < 3_000) {
 				throw new AssertionError(check.name + ": only " + result[1] + " pixels of known ground to compare");
 			}
 			if (result[2] < 0.9 || result[2] > 1.15) {
