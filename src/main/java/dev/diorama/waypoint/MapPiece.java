@@ -230,7 +230,8 @@ final class MapPiece {
 				BlockState state;
 				if (hit != null) {
 					pos.set(facing(bx, hit[1], true), hit[0] - row, facing(bx, hit[1], false));
-					state = level.getBlockState(pos);
+					// As the map sees it: the side facing the camera is the one shown.
+					state = Projection.facing().turned(level.getBlockState(pos));
 				} else {
 					int pz = Projection.facing().blockZ(player.getX(), player.getZ());
 					pos.set(facing(bx, pz, true), player.getY() - 1 - row, facing(bx, pz, false));
