@@ -600,16 +600,30 @@ public final class MapViewport {
 			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
 			this.liftTargets(centerI, centerJ, texel, scaleSteps);
-			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
-			// view has its texels in new places, and another map's heights mean nothing on this one.
-			boolean moved = !sameLevel || before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
-				|| before.lod() != lod || before.layer() != view.layer();
-			if (moved) {
+			// The heights ease to new ones, as tiles land (as often as every frame in a redraw) or the
+			// view pans; a pan moves them with the ground. The mask can't see explored land past its
+			// edge, so heights near the edge are only a guess, corrected as a pan brings that land in:
+			// eased, that reads as the clouds settling, not jumping. A new mask scale or another map
+			// has nothing to ease from.
+			boolean fresh = !sameLevel || before == null || before.texel() != texel || before.lod() != lod || before.layer() != view.layer()
+				|| before.scaleSteps() != scaleSteps;
+			int di = fresh ? 0 : (int) Math.round((originU - before.originU()) / texel);
+			int dj = fresh ? 0 : (int) Math.round((originV - before.originV()) / texel);
+			if (fresh || Math.abs(di) >= MASK || Math.abs(dj) >= MASK) {
 				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
 				this.liftMs = System.currentTimeMillis();
 			} else {
-				// Rebuilt as tiles land, as often as every frame in a redraw: the heights carry on
-				// easing through it.
+				if (di != 0 || dj != 0) {
+					for (int j = 0; j < MASK; j++) {
+						for (int i = 0; i < MASK; i++) {
+							int fromI = i + di;
+							int fromJ = j + dj;
+							boolean inside = fromI >= 0 && fromI < MASK && fromJ >= 0 && fromJ < MASK;
+							this.liftMoved[j * MASK + i] = inside ? this.liftShown[fromJ * MASK + fromI] : this.liftTarget[j * MASK + i];
+						}
+					}
+					System.arraycopy(this.liftMoved, 0, this.liftShown, 0, this.liftShown.length);
+				}
 				this.lifting = !this.stepLift();
 			}
 			this.markReach(this.reach, true);
@@ -643,6 +657,7 @@ public final class MapViewport {
 	private final float[] liftTarget = new float[MASK * MASK];
 	/** The heights drawn, easing toward the targets. */
 	private final float[] liftShown = new float[MASK * MASK];
+	private final float[] liftMoved = new float[MASK * MASK];
 	private final int[] toRedrawn = new int[MASK * MASK];
 	private final int[] toUnexplored = new int[MASK * MASK];
 	private boolean lifting;
@@ -732,7 +747,8 @@ public final class MapViewport {
 	/** Steps the drawn heights toward the targets, for the time since the last step. Whether they're all there. */
 	private boolean stepLift() {
 		long now = System.currentTimeMillis();
-		float step = Math.max(0.001F, (now - this.liftMs) / 1000.0F * LIFT_PER_SECOND);
+		// At most a frame's worth, as if from the last frame: after a quiet spell the heights still ease.
+		float step = Math.max(0.001F, Math.min(100, now - this.liftMs) / 1000.0F * LIFT_PER_SECOND);
 		this.liftMs = now;
 		boolean done = true;
 		for (int k = 0; k < MASK * MASK; k++) {
