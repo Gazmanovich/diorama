@@ -1488,11 +1488,23 @@ public final class MapScreen extends Screen {
 		return claim.forceLoaded() ? line.copy().append(Component.translatable("diorama.map.claim.force_loaded").withStyle(ChatFormatting.GRAY)) : line;
 	}
 
-	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. */
-	private @Nullable Component biomeAt(BlockPos pos) {
+	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. Public for tests. */
+	public @Nullable Component biomeAt(BlockPos pos) {
 		ClientLevel level = this.minecraft.level;
-		if (level == null || !level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+		if (level == null) {
 			return null;
+		}
+		// The game's lookup reads the biome cells around the spot, which near a chunk's edge are in
+		// the next chunk. Where one isn't loaded it gets the game's stand-in chunk, all Plains. Ask the
+		// chunk source: the client level answers that every chunk is loaded (#262).
+		int cellX = (pos.getX() - 2) >> 2;
+		int cellZ = (pos.getZ() - 2) >> 2;
+		for (int chunkX = cellX >> 2; chunkX <= (cellX + 1) >> 2; chunkX++) {
+			for (int chunkZ = cellZ >> 2; chunkZ <= (cellZ + 1) >> 2; chunkZ++) {
+				if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
+					return null;
+				}
+			}
 		}
 		return level.getBiome(pos).unwrapKey()
 			.map(k -> (Component) Component.translatableWithFallback(k.identifier().toLanguageKey("biome"), k.identifier().getPath()))
