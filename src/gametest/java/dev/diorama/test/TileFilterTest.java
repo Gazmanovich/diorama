@@ -7,6 +7,8 @@ import dev.diorama.Settings;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.TileStore;
+import dev.diorama.render.MapLevel;
+import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -73,7 +75,8 @@ final class TileFilterTest {
 				throw new AssertionError(check.name + " draws overview level " + lod + ", not " + check.lod);
 			}
 			BufferedImage shot = read(context.takeScreenshot("tile-filter-" + check.name));
-			double[] result = compare(shot, view, store, check);
+			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod));
+			double[] result = compare(shot, view, store, check, mapped);
 			System.out.printf("TILE-FILTER %s: median error %.3f over %.0f pixels, colour scale %.3f%n", check.name, result[0], result[1], result[2]);
 			if (result[1] < 5_000) {
 				throw new AssertionError(check.name + ": only " + result[1] + " pixels of known ground to compare");
@@ -96,7 +99,7 @@ final class TileFilterTest {
 	 * lighter than the tiles under the fog's veil, so each channel of the average is first scaled and
 	 * offset to fit the frame as well as it can.
 	 */
-	private static double[] compare(BufferedImage shot, MapViewport.View view, TileStore store, Case check) {
+	private static double[] compare(BufferedImage shot, MapViewport.View view, TileStore store, Case check, Mapped mapped) {
 		// Pixels of the mip level read, per map unit.
 		double perUnit = (double) Projection.TILE_PIXELS / (Projection.TILE_UNITS << check.lod) / (1 << check.mip);
 		double perScreenPixel = perUnit / (view.zoom() * check.guiScale);
@@ -110,6 +113,9 @@ final class TileFilterTest {
 		int reach = (int) Math.min(280, 170 * view.zoom() * check.guiScale);
 		for (int y = middleY - reach * 2 / 3; y < middleY + reach * 2 / 3; y++) {
 			for (int x = middleX - reach; x < middleX - 12; x++) {
+				if (!mapped.allAround(view.minU() + x * perScreenPixel / perUnit, view.minV() + y * perScreenPixel / perUnit)) {
+					continue;
+				}
 				double[] expected = average(originX + x * perScreenPixel, originY + y * perScreenPixel, perScreenPixel, tiles, store, check);
 				if (expected == null) {
 					continue;
@@ -192,4 +198,55 @@ final class TileFilterTest {
 			throw new UncheckedIOException(e);
 		}
 	}
+
+	/**
+	 * Which coverage cells around the view the live map has fully mapped. The clouds' haze, their
+	 * shadows and their lean reach onto mapped ground near its edge, which is the fog's business,
+	 * not the filter's: a pixel is compared only with mapped ground all around it, further to the
+	 * south, which the clouds lean over.
+	 */
+	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums) {
+		private static final double AROUND = 48;
+		private static final double SOUTH = 72;
+
+		/** From the tiles of overview level {@code lod}, the ones the view draws and so the map holds. */
+		static Mapped around(MapLevel map, MapViewport.View view, int lod) {
+			double tileUnits = (double) Projection.TILE_UNITS * (1 << lod);
+			double cell = tileUnits / Projection.COVERAGE_CELLS;
+			double u0 = Math.floor((view.minU() - AROUND) / cell) * cell;
+			double v0 = Math.floor((view.minV() - AROUND) / cell) * cell;
+			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * AROUND) / cell) + 1;
+			int height = (int) Math.ceil((view.height() / view.zoom() + AROUND + SOUTH) / cell) + 1;
+			int[] sums = new int[(width + 1) * (height + 1)];
+			for (int j = 0; j < height; j++) {
+				int line = 0;
+				for (int i = 0; i < width; i++) {
+					double u = u0 + (i + 0.5) * cell;
+					double v = v0 + (j + 0.5) * cell;
+					int tu = (int) Math.floor(u / tileUnits);
+					int tv = (int) Math.floor(v / tileUnits);
+					MapTile tile = map.peek(new TileKey(TileKey.SURFACE, tu, tv, lod));
+					boolean full = tile != null && tile.hasCoverage()
+						&& tile.coverage((int) Math.floor((u - tu * tileUnits) / cell), (int) Math.floor((v - tv * tileUnits) / cell)) >= 0.999F;
+					line += full ? 0 : 1;
+					sums[(j + 1) * (width + 1) + i + 1] = sums[j * (width + 1) + i + 1] + line;
+				}
+			}
+			return new Mapped(u0, v0, cell, width, height, sums);
+		}
+
+		boolean allAround(double u, double v) {
+			int i0 = (int) Math.floor((u - AROUND - this.u0) / this.cell);
+			int i1 = (int) Math.floor((u + AROUND - this.u0) / this.cell) + 1;
+			int j0 = (int) Math.floor((v - AROUND - this.v0) / this.cell);
+			int j1 = (int) Math.floor((v + SOUTH - this.v0) / this.cell) + 1;
+			if (i0 < 0 || j0 < 0 || i1 > this.width || j1 > this.height) {
+				return false;
+			}
+			int row = this.width + 1;
+			int[] s = this.unmappedSums;
+			return s[j1 * row + i1] - s[j0 * row + i1] - s[j1 * row + i0] + s[j0 * row + i0] == 0;
+		}
+	}
+
 }

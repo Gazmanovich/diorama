@@ -9,6 +9,7 @@ import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -389,8 +390,12 @@ public final class MapViewport {
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
 		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
+			if (this.lifting) {
+				this.easeLift();
+			}
 			return;
 		}
+		MaskInputs before = this.maskInputs;
 		this.maskInputs = inputs;
 		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
@@ -442,18 +447,177 @@ public final class MapViewport {
 		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
-		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
-		if (memory != null) {
-			// Alpha is 255 less the share of a remembered map under the fog, which thins it there.
-			for (int j = 0; j < MASK; j++) {
-				double v = originV + (j + 0.5) * texel;
-				for (int i = 0; i < MASK; i++) {
-					int remembered = Math.round(memory.known(memoryLod, originU + (i + 0.5) * texel, v) * 255);
-					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
+		this.lifting = false;
+		boolean surface = view.layer() == TileKey.SURFACE;
+		// Caves keep the fog as it always was: full height everywhere (alpha 255).
+		if (!surface) {
+			this.markReach(fogReach(texel, true, fast, scaleSteps), false);
+		} else {
+			if (memory != null) {
+				for (int j = 0; j < MASK; j++) {
+					double v = originV + (j + 0.5) * texel;
+					for (int i = 0; i < MASK; i++) {
+						this.remembered[j * MASK + i] = memory.known(memoryLod, originU + (i + 0.5) * texel, v);
+					}
 				}
+			} else {
+				Arrays.fill(this.remembered, 0);
 			}
+			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
+			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
+			this.liftTargets(centerI, centerJ, texel, scaleSteps);
+			// Where the view hasn't moved the fog eases to its new height as tiles land; a moved
+			// view has its texels in new places, so the old heights mean nothing there.
+			boolean moved = before == null || before.originU() != originU || before.originV() != originV || before.texel() != texel
+				|| before.lod() != lod || before.layer() != view.layer();
+			if (moved) {
+				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
+			} else {
+				this.lifting = true;
+			}
+			this.markReach(fogReach(texel, false, fast, scaleSteps), true);
+			this.writeRemembered();
+			this.liftMs = System.currentTimeMillis();
+			this.writeLift();
 		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+	}
+
+	/**
+	 * The remembered share into green, at 0.4 for all of it, where green isn't the clear flag: the
+	 * shader lets that much of the old map show through the clouds.
+	 */
+	private void writeRemembered() {
+		for (int k = 0; k < MASK * MASK; k++) {
+			int pixel = this.maskPixels[k];
+			if ((pixel & 0xFF00) == 0) {
+				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
+			}
+		}
+	}
+
+	/** Cloud levels, and how far from explored land the clouds over never-explored land reach full height, per level in cells. Match fog.fsh. */
+	private static final double CLOUD_LEVELS = 5;
+	private static final double CLOUD_CELL = 12.8;
+	private static final double CELLS_PER_LEVEL = 5;
+
+	/** How much of a remembered map is under each mask texel, 0 to 1. */
+	private final float[] remembered = new float[MASK * MASK];
+	/** How tall the fog stands over each texel, as a share of its full height: {@link #liftTargets}. */
+	private final float[] liftTarget = new float[MASK * MASK];
+	/** The heights drawn, easing toward the targets. */
+	private final float[] liftShown = new float[MASK * MASK];
+	private final int[] toRedrawn = new int[MASK * MASK];
+	private final int[] toUnexplored = new int[MASK * MASK];
+	private boolean lifting;
+	private long liftMs;
+	/** Lift a second the fog's height can change by while easing. */
+	private static final float LIFT_PER_SECOND = 0.6F;
+
+	/**
+	 * The fog over a remembered map rolls up from the land already redrawn to the full height of
+	 * the fog over land never explored: a texel's lift is its distance from the redrawn land over
+	 * that plus its distance from the unexplored. Lift 1 is the fog as it always is; a texel with
+	 * no remembered map under it has 1. With nothing unexplored in the view the slope runs out
+	 * over the view's width; with nothing redrawn yet it starts at the middle of the view, where
+	 * the redraw starts.
+	 */
+	private void liftTargets(int centerI, int centerJ, double texel, int scaleSteps) {
+		int far = MASK * 3;
+		boolean anyRedrawn = false;
+		boolean anyRemembered = false;
+		for (int k = 0; k < MASK * MASK; k++) {
+			boolean redrawn = (this.maskPixels[k] & 0xFF) >= 128;
+			anyRedrawn |= redrawn;
+			anyRemembered |= this.remembered[k] >= 0.5F;
+			this.toRedrawn[k] = redrawn ? 0 : Integer.MAX_VALUE / 2;
+			this.toUnexplored[k] = !redrawn && this.remembered[k] < 0.5F ? 0 : Integer.MAX_VALUE / 2;
+		}
+		if (!anyRedrawn && anyRemembered) {
+			this.toRedrawn[Math.max(0, Math.min(MASK - 1, centerJ)) * MASK + Math.max(0, Math.min(MASK - 1, centerI))] = 0;
+		}
+		chamfer(this.toRedrawn);
+		chamfer(this.toUnexplored);
+		// Over never-explored land the clouds climb a level every few cells away from explored land.
+		double climbThirds = 3 * CLOUD_LEVELS * CELLS_PER_LEVEL * CLOUD_CELL * (1 << scaleSteps) / texel;
+		for (int k = 0; k < MASK * MASK; k++) {
+			float redrawn = Math.min(this.toRedrawn[k], far);
+			float unexplored = Math.min(this.toUnexplored[k], far);
+			float ramp = redrawn + unexplored == 0 ? 1 : redrawn / (redrawn + unexplored);
+			float climb = anyRedrawn ? (float) Math.min(1, this.toRedrawn[k] / climbThirds) : 1;
+			this.liftTarget[k] = this.remembered[k] * ramp + (1 - this.remembered[k]) * climb;
+		}
+	}
+
+	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer: two passes over the grid. */
+	private static void chamfer(int[] d) {
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				int k = j * MASK + i;
+				int v = d[k];
+				if (i > 0) {
+					v = Math.min(v, d[k - 1] + 3);
+				}
+				if (j > 0) {
+					v = Math.min(v, d[k - MASK] + 3);
+					if (i > 0) {
+						v = Math.min(v, d[k - MASK - 1] + 4);
+					}
+					if (i < MASK - 1) {
+						v = Math.min(v, d[k - MASK + 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
+		for (int j = MASK - 1; j >= 0; j--) {
+			for (int i = MASK - 1; i >= 0; i--) {
+				int k = j * MASK + i;
+				int v = d[k];
+				if (i < MASK - 1) {
+					v = Math.min(v, d[k + 1] + 3);
+				}
+				if (j < MASK - 1) {
+					v = Math.min(v, d[k + MASK] + 3);
+					if (i < MASK - 1) {
+						v = Math.min(v, d[k + MASK + 1] + 4);
+					}
+					if (i > 0) {
+						v = Math.min(v, d[k + MASK - 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
+	}
+
+	/** Steps the drawn heights toward the targets, for the time since the last step. */
+	private void easeLift() {
+		long now = System.currentTimeMillis();
+		float step = Math.max(0.001F, (now - this.liftMs) / 1000.0F * LIFT_PER_SECOND);
+		this.liftMs = now;
+		boolean done = true;
+		for (int k = 0; k < MASK * MASK; k++) {
+			float diff = this.liftTarget[k] - this.liftShown[k];
+			if (Math.abs(diff) <= step) {
+				this.liftShown[k] = this.liftTarget[k];
+			} else {
+				this.liftShown[k] += Math.signum(diff) * step;
+				done = false;
+			}
+		}
+		this.lifting = !done;
+		this.writeLift();
+		if (this.maskTexture != null) {
+			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+		}
+	}
+
+	/** The drawn heights into the mask's alpha. */
+	private void writeLift() {
+		for (int k = 0; k < MASK * MASK; k++) {
+			this.maskPixels[k] = this.maskPixels[k] & 0xFFFFFF | Math.round(this.liftShown[k] * 255) << 24;
+		}
 	}
 
 	/**
@@ -463,6 +627,9 @@ public final class MapViewport {
 	 * 9 west and 3.6 north times the noise scale. On top of that one texel for linear filtering,
 	 * and half a texel for where in its own texel the pixel sits.
 	 */
+	/** A cloud level's thickness in cells; match fog.fsh. */
+	private static final double LEVEL_THICK = 0.9;
+
 	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps) {
 		double fogHeight = cave ? 4 : 10;
 		double blurUnits = cave ? 2.5 : 7;
@@ -474,11 +641,17 @@ public final class MapViewport {
 		// The noise scale is below 2^(steps + 1).
 		double sun = fast ? 0 : 9.0 * (1 << (scaleSteps + 1)) / texel;
 		double slack = 1.5;
+		// The clouds read up to four cells around a point (the cell blend, the curling edges, the
+		// looks toward the sun), and the line of sight leans south over the levels' height. Cells
+		// are twice as big while the zoom hands over to the next step.
+		double cell = cave ? 0 : 2 * CLOUD_CELL * (1 << scaleSteps) / texel;
+		double around = 4 * cell;
+		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * 0.643;
 		return new int[] {
-			(int) Math.ceil(Math.max(blur, sun) + slack),
-			(int) Math.ceil(blur + slack),
-			(int) Math.ceil(Math.max(blur, sun * 0.4) + slack),
-			(int) Math.ceil(blur + layerShift + slack)
+			(int) Math.ceil(Math.max(Math.max(blur, sun), around) + slack),
+			(int) Math.ceil(Math.max(blur, around) + slack),
+			(int) Math.ceil(Math.max(Math.max(blur, sun * 0.4), around) + slack),
+			(int) Math.ceil(Math.max(blur + layerShift, around + lean) + slack)
 		};
 	}
 
@@ -492,7 +665,7 @@ public final class MapViewport {
 	 * skips the noise too; deep in the fog only the noise is left to read. Texels past the mask's
 	 * edge read as the edge texel, so the reach just stops at the edge.
 	 */
-	private void markReach(int[] reach) {
+	private void markReach(int[] reach, boolean surface) {
 		int row = MASK + 1;
 		// counts[(j + 1) * row + i + 1]: texels short of fully known (or with any known share) in the
 		// rectangle from (0, 0) to (i, j).
@@ -502,9 +675,13 @@ public final class MapViewport {
 			int lineNotKnown = 0;
 			int lineNotUnknown = 0;
 			for (int i = 0; i < MASK; i++) {
-				int known = this.maskPixels[j * MASK + i] & 0xFF;
+				int k = j * MASK + i;
+				int known = this.maskPixels[k] & 0xFF;
 				lineNotKnown += known == 0xFF ? 0 : 1;
-				lineNotUnknown += known == 0 ? 0 : 1;
+				// On the surface "fully unknown" is plain too: the clouds at full height, now and as
+				// they ease, and no old map under them. The shader draws a flat cloud top there.
+				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0;
+				lineNotUnknown += known == 0 && plain ? 0 : 1;
 				notKnown[(j + 1) * row + i + 1] = notKnown[j * row + i + 1] + lineNotKnown;
 				notUnknown[(j + 1) * row + i + 1] = notUnknown[j * row + i + 1] + lineNotUnknown;
 			}
