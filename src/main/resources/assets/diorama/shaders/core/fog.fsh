@@ -188,6 +188,9 @@ bool clear;
 // Every mask texel this pixel can read is fully unknown: every known share is exactly 0, so the
 // mask reads are skipped. The noise still shapes the fog there, so its reads stay.
 bool deep;
+// Elsewhere blue holds the highest cloud level any cell within the clouds' reach can stand at, in
+// 32nds of 255 (MapViewport.writeCloudTops): the march starts just above it, and there is none at 0.
+float cloudTop = CLOUD_LEVELS;
 
 // The known share at uv, without the read where the answer is already known.
 float knownAt(vec2 uv) {
@@ -365,14 +368,18 @@ vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float 
 vec4 clouds(vec2 p0, float size, vec3 lit, vec3 shade, float jitter) {
     float level = size * LEVEL_THICK;
     float hTop = CLOUD_LEVELS * level;
-    int steps = int(CLOUD_LEVELS) * (fast ? 2 : 3);
+    int perLevel = fast ? 2 : 3;
+    int steps = int(CLOUD_LEVELS) * perLevel;
     float dh = hTop / float(steps);
-    float last = hTop;
+    // The steps over the highest level within reach can't meet a cloud: start under them, at the
+    // same heights, with the one before as the last point outside.
+    int first = int(CLOUD_LEVELS - cloudTop) * perLevel;
+    float last = first == 0 ? hTop : hTop - (float(first) - 0.5 + jitter * 0.9) * dh;
     bool wasInside = false;
     int surfaces = 0;
     float through = 1.0;
     vec3 glow = vec3(0.0);
-    for (int s = 0; s < steps; s++) {
+    for (int s = first; s < steps; s++) {
         float h = hTop - (float(s) + 0.5 + jitter * 0.9) * dh;
         bool inside = terraceInside(vec2(p0.x, p0.y + h * COS_PITCH), h, size, level) > 0.0;
         if (inside && !wasInside) {
@@ -449,7 +456,9 @@ void main() {
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
     vec4 flags = texelFetch(Sampler0, texel, 0);
     clear = flags.g > 0.5;
-    deep = flags.b > 0.5;
+    float blue = floor(flags.b * 255.0 + 0.5);
+    deep = blue > 200.0;
+    cloudTop = deep ? CLOUD_LEVELS : min(CLOUD_LEVELS, floor(blue / 32.0 + 0.5));
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
@@ -482,8 +491,8 @@ void main() {
         }
         vec4 c;
         float shadow = 0.0;
-        if (clear) {
-            // Everything the clouds could reach from here is explored: none here.
+        if (clear || cloudTop < 0.5) {
+            // No cloud within reach of here: none here.
             c = vec4(0.0, 0.0, 0.0, 1.0);
             handover = 0.0;
         } else if (deep) {

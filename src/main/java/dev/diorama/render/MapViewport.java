@@ -32,7 +32,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int cellScale, boolean fast, int nearU, int nearV) {
 	}
 
 	/**
@@ -403,7 +403,8 @@ public final class MapViewport {
 		double originU = Math.floor((view.minU() - MASK_MARGIN) / snap) * snap;
 		double originV = Math.floor((view.minV() - MASK_MARGIN) / snap) * snap;
 		boolean fast = TileBaker.fast();
-		this.buildMask(level, view, originU, originV, texel, steps, fast);
+		// Cloud cells double halfway to the next step; while they hand over, both sizes are drawn.
+		this.buildMask(level, view, originU, originV, texel, steps, fraction >= 7 ? 2 : 1, fast);
 
 		double span = MASK * texel;
 		float mu0 = (float) ((view.minU() - originU) / span);
@@ -438,7 +439,7 @@ public final class MapViewport {
 		);
 	}
 
-	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, boolean fast) {
+	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, int cellScale, boolean fast) {
 		if (this.maskTexture == null) {
 			this.maskTexture = MapTexture.create("diorama fog mask", MASK, 1);
 		}
@@ -453,7 +454,7 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, cellScale, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			if (this.lifting) {
 				this.easeLift();
@@ -567,7 +568,8 @@ public final class MapViewport {
 		this.lifting = false;
 		boolean surface = view.layer() == TileKey.SURFACE;
 		boolean clouds = surface && !level.roofless();
-		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds);
+		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds ? cellScale : 0);
+		this.cloudReach = cloudReach(texel, scaleSteps, cellScale);
 		if (surface) {
 			if (memory != null) {
 				// The whole mask, not just the view: the clouds climb toward land the old map never
@@ -629,6 +631,7 @@ public final class MapViewport {
 			this.markReach(this.reach, true);
 			this.writeRemembered();
 			this.writeLift();
+			this.writeCloudTops();
 		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 	}
@@ -775,6 +778,7 @@ public final class MapViewport {
 			this.writeRemembered();
 		}
 		this.writeLift();
+		this.writeCloudTops();
 		if (this.maskTexture != null) {
 			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 		}
@@ -789,6 +793,100 @@ public final class MapViewport {
 
 	/** A cloud level's thickness in cells; match fog.fsh. */
 	private static final double LEVEL_THICK = 0.9;
+	/** Blue a cloud level, where blue isn't the deep flag (255): fog.fsh reads the highest level within reach. */
+	private static final int TOP_CODE = 32;
+
+	/**
+	 * How far, in mask texels, the clouds can read from a pixel: {west, east, north, south}. Mirrors
+	 * fog.fsh: a level's cover reads the cells within one of a point, at a point the curling edges
+	 * push up to 1.45 cells away; the looks toward the sun and the ground shadow reach less. The line
+	 * of sight leans south over the levels' height. Cells are {@code cellScale} times their size
+	 * while the zoom hands over to the next step. One texel more for linear filtering, half a texel
+	 * for where in its own texel the pixel sits.
+	 */
+	private static int[] cloudReach(double texel, int scaleSteps, int cellScale) {
+		double cell = CLOUD_CELL * (1 << scaleSteps) * cellScale / texel;
+		double around = 2.45 * cell + 1.5;
+		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * 0.643;
+		int side = (int) Math.ceil(around);
+		return new int[] {side, side, side, (int) Math.ceil(around + lean)};
+	}
+
+	private int[] cloudReach = new int[4];
+	private final int[] cellTop = new int[MASK * MASK];
+	private final int[] topScratch = new int[MASK * MASK];
+	private final int[] topCounts = new int[(MASK + 1) * (MASK + 1)];
+
+	/**
+	 * Into blue, where it isn't the deep flag: the highest cloud level any cell within the clouds'
+	 * reach can stand at, 0 for none. The shader starts its march down through the levels just above
+	 * that, and skips it with none, which draws the same as marching from the top.
+	 */
+	private void writeCloudTops() {
+		// The most a cell can stand, from a texel: fog.fsh reads a cell's middle filtered, between
+		// four texels, at least one of them under half known if the cell has clouds at all; its height
+		// is then at most the highest of the texels around that one, plus the stairs' noise.
+		int[] alpha = this.topScratch;
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				int k = j * MASK + i;
+				int a = this.maskPixels[k] >>> 24;
+				if (i > 0) {
+					a = Math.max(a, this.maskPixels[k - 1] >>> 24);
+				}
+				if (i < MASK - 1) {
+					a = Math.max(a, this.maskPixels[k + 1] >>> 24);
+				}
+				alpha[k] = a;
+			}
+		}
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				int k = j * MASK + i;
+				int a = alpha[k];
+				if (j > 0) {
+					a = Math.max(a, alpha[k - MASK]);
+				}
+				if (j < MASK - 1) {
+					a = Math.max(a, alpha[k + MASK]);
+				}
+				boolean cloudy = (this.maskPixels[k] & 0xFF) < 128;
+				this.cellTop[k] = cloudy ? (int) Math.max(1, Math.min(CLOUD_LEVELS, Math.ceil(a / 255.0 * CLOUD_LEVELS + 0.3))) : 0;
+			}
+		}
+		// For each level, how many texels within reach can stand that high: the highest with any.
+		int row = MASK + 1;
+		int[] counts = this.topCounts;
+		int[] top = alpha;
+		Arrays.fill(top, 0);
+		int[] reach = this.cloudReach;
+		for (int level = 1; level <= CLOUD_LEVELS; level++) {
+			for (int j = 0; j < MASK; j++) {
+				int line = 0;
+				for (int i = 0; i < MASK; i++) {
+					line += this.cellTop[j * MASK + i] >= level ? 1 : 0;
+					counts[(j + 1) * row + i + 1] = counts[j * row + i + 1] + line;
+				}
+			}
+			for (int j = 0; j < MASK; j++) {
+				int t = Math.max(0, j - reach[2]);
+				int b = Math.min(MASK - 1, j + reach[3]) + 1;
+				for (int i = 0; i < MASK; i++) {
+					int l = Math.max(0, i - reach[0]);
+					int r = Math.min(MASK - 1, i + reach[1]) + 1;
+					if (counts[b * row + r] - counts[t * row + r] - counts[b * row + l] + counts[t * row + l] > 0) {
+						top[j * MASK + i] = level;
+					}
+				}
+			}
+		}
+		for (int k = 0; k < MASK * MASK; k++) {
+			int pixel = this.maskPixels[k];
+			if ((pixel & 0xFF0000) != 0xFF0000) {
+				this.maskPixels[k] = pixel & 0xFF00FFFF | top[k] * TOP_CODE << 16;
+			}
+		}
+	}
 
 	/**
 	 * How far, in mask texels, the fog shader can read from a pixel: {west, east, north, south}.
@@ -797,7 +895,7 @@ public final class MapViewport {
 	 * 9 west and 3.6 north times the noise scale. On top of that one texel for linear filtering,
 	 * and half a texel for where in its own texel the pixel sits.
 	 */
-	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps, boolean clouds) {
+	private static int[] fogReach(double texel, boolean cave, boolean fast, int scaleSteps, int cellScale) {
 		double fogHeight = cave ? 4 : 10;
 		double blurUnits = cave ? 2.5 : 7;
 		if (blurUnits >= 5 && !fast) {
@@ -808,17 +906,13 @@ public final class MapViewport {
 		// The noise scale is below 2^(steps + 1).
 		double sun = fast ? 0 : 9.0 * (1 << (scaleSteps + 1)) / texel;
 		double slack = 1.5;
-		// The clouds read up to four cells around a point (the cell blend, the curling edges, the
-		// looks toward the sun), and the line of sight leans south over the levels' height. Cells
-		// are twice as big while the zoom hands over to the next step.
-		double cell = !clouds ? 0 : 2 * CLOUD_CELL * (1 << scaleSteps) / texel;
-		double around = 4 * cell;
-		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * 0.643;
+		// The clouds' reach, cellScale 0 for none: see cloudReach.
+		int[] clouds = cellScale == 0 ? new int[4] : cloudReach(texel, scaleSteps, cellScale);
 		return new int[] {
-			(int) Math.ceil(Math.max(Math.max(blur, sun), around) + slack),
-			(int) Math.ceil(Math.max(blur, around) + slack),
-			(int) Math.ceil(Math.max(Math.max(blur, sun * 0.4), around) + slack),
-			(int) Math.ceil(Math.max(blur + layerShift, around + lean) + slack)
+			Math.max((int) Math.ceil(Math.max(blur, sun) + slack), clouds[0]),
+			Math.max((int) Math.ceil(blur + slack), clouds[1]),
+			Math.max((int) Math.ceil(Math.max(blur, sun * 0.4) + slack), clouds[2]),
+			Math.max((int) Math.ceil(blur + layerShift + slack), clouds[3])
 		};
 	}
 
