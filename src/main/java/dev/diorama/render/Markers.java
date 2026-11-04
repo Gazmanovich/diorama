@@ -35,8 +35,13 @@ public final class Markers {
 
 	/**
 	 * The player arrow at a screen point: the voxel arrow from {@link ArrowArt}, centred on the
-	 * player's spot. {@code yawDegrees} is Minecraft's yaw: 0 faces south, 90 faces west.
+	 * player's spot. {@code yawDegrees} is Minecraft's yaw: 0 faces south, 90 faces west, on a map
+	 * facing north; see {@link #onMap}.
 	 */
+	public static float onMap(float yawDegrees) {
+		return yawDegrees - 90 * Projection.facing().turns;
+	}
+
 	public static void player(GuiGraphicsExtractor graphics, float x, float y, float yawDegrees, float size) {
 		int heading = Math.floorMod(Math.round(yawDegrees / (360.0F / HEADINGS)), HEADINGS);
 		dev.diorama.Settings settings = dev.diorama.Settings.get();

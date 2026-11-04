@@ -72,6 +72,8 @@ public final class MapSession {
 		this.level = level;
 		// The Nether's roof: its sky view looks down from just under it.
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
+		// Before the map opens: the folder it saves in goes by which way it faces.
+		Projection.setFacing(key == null ? Facing.NORTH : Maps.of(key).facing());
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
 		this.mainMap = key != null && Maps.of(key).active(level.dimension().identifier().toString()).isEmpty();
 		this.lights = new Lights(level, this.map);
@@ -105,6 +107,13 @@ public final class MapSession {
 		if (current != null && current.level.dimension().identifier().toString().equals(dimension)) {
 			current.end();
 			current = null;
+		}
+	}
+
+	/** The player turned the map: this world's other dimensions pick it up as they open. */
+	public static void facingChanged() {
+		if (current != null) {
+			current.map.colorsChanged();
 		}
 	}
 
@@ -217,7 +226,7 @@ public final class MapSession {
 		int reach = ChunkSnapshot.BIOME_REACH;
 		for (int dx = -1; dx <= 1; dx++) {
 			for (int dz = -1; dz <= 1; dz++) {
-				ChunkSnapshot around = session.map.chunk(cx + dx, cz + dz);
+				ChunkSnapshot around = session.map.worldChunk(cx + dx, cz + dz);
 				if ((dx == 0 && dz == 0) || around == null || around.hasBiomesAround(-dx, -dz)) {
 					continue;
 				}
@@ -231,6 +240,17 @@ public final class MapSession {
 				session.schedule(around.chunkX, around.chunkZ, CHANGE_DELAY_MS, strip);
 			}
 		}
+	}
+
+	private static boolean sameFromEverySide(BlockLooks looks, BlockState oldState, BlockState newState) {
+		for (Facing facing : Facing.values()) {
+			int oldId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(oldState));
+			int newId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(newState));
+			if (oldId < 0 || newId < 0 || !looks.sameLook(oldId, newId)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public static void blockChanged(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
@@ -238,9 +258,8 @@ public final class MapSession {
 			return;
 		}
 		BlockLooks looks = BlockLooks.get();
-		int oldId = Block.BLOCK_STATE_REGISTRY.getId(oldState);
-		int newId = Block.BLOCK_STATE_REGISTRY.getId(newState);
-		if (looks != null && oldId >= 0 && newId >= 0 && looks.sameLook(oldId, newId)) {
+		// Only a change no side shows: the snapshot is kept for every facing the map can turn to.
+		if (looks != null && sameFromEverySide(looks, oldState, newState)) {
 			return;
 		}
 		if (DEBUG_CHANGES) {
@@ -282,7 +301,7 @@ public final class MapSession {
 		if (!Copycats.INSTALLED || current == null || current.level != level) {
 			return;
 		}
-		ChunkSnapshot snapshot = current.map.chunk(pos.getX() >> 4, pos.getZ() >> 4);
+		ChunkSnapshot snapshot = current.map.worldChunk(pos.getX() >> 4, pos.getZ() >> 4);
 		if (snapshot == null || Copycats.material(level.getBlockEntity(pos)) == snapshot.copycatMaterial(pos.getX(), pos.getY(), pos.getZ())) {
 			return;
 		}
@@ -384,7 +403,7 @@ public final class MapSession {
 		int pcz = viewer.blockPosition().getZ() >> 4;
 		for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
 			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
-				if (this.map.chunk(cx, cz) == null && !this.pending.containsKey(ChunkSnapshot.key(cx, cz))
+				if (this.map.worldChunk(cx, cz) == null && !this.pending.containsKey(ChunkSnapshot.key(cx, cz))
 					&& this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false) != null) {
 					this.schedule(cx, cz, 0, null);
 				}
@@ -475,11 +494,11 @@ public final class MapSession {
 			// refuses an instanceof pattern that can't fail.
 			Object loaded = this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
 			if (loaded instanceof LevelChunk chunk) {
-				boolean known = this.map.chunk(cx, cz) != null;
+				boolean known = this.map.worldChunk(cx, cz) != null;
 				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level);
 				this.map.put(snapshot, known ? p.box : null, playerChunkX, playerChunkZ);
 				if (pins != null) {
-					Portals.chunkSeen(snapshot, dimension, pins, this.map);
+					Portals.chunkSeen(snapshot, dimension, pins, this.map.world());
 				}
 				budget--;
 			}

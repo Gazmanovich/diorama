@@ -62,7 +62,7 @@ public final class MapExport {
 		}
 		MapExport export = new MapExport(file);
 		running = export;
-		List<Drawing> copied = List.copyOf(drawings);
+		List<Drawing> copied = drawings.stream().map(Drawing::fixed).toList();
 		// The font options notes are drawn with, read here as the game reads them for its fonts.
 		Set<String> fontOptions = new HashSet<>();
 		if (mc.options.forceUnicodeFont().get()) {

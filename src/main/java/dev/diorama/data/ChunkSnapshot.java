@@ -1,5 +1,6 @@
 package dev.diorama.data;
 
+import dev.diorama.Facing;
 import dev.diorama.bake.TallChunks;
 import dev.diorama.mixin.BiomeManagerAccessor;
 import net.minecraft.client.Minecraft;
@@ -68,9 +69,104 @@ public final class ChunkSnapshot {
 	public final int floorY;
 	/** Per section, the filled copycats in it; null when the chunk has none, as nearly every chunk. */
 	private final @Nullable SectionCopycats @Nullable [] copycats;
+	/** Which way a turned view looks, north for the chunk itself; see {@link #turned(Facing)}. */
+	private final Facing facing;
+	private final @Nullable ChunkSnapshot base;
+	/** The views made so far, by turns. */
+	private final @Nullable ChunkSnapshot @Nullable [] views;
+
+	/** This chunk in turned space. Bakes of neighbouring tiles share the view and its tints. Any thread. */
+	public ChunkSnapshot turned(Facing facing) {
+		if (facing == Facing.NORTH) {
+			return this;
+		}
+		ChunkSnapshot view = this.views[facing.turns];
+		if (view == null) {
+			// Two bakes may both make one; either will do.
+			view = new ChunkSnapshot(this, facing);
+			this.views[facing.turns] = view;
+		}
+		return view;
+	}
+
+	private ChunkSnapshot(ChunkSnapshot base, Facing facing) {
+		this.base = base;
+		this.facing = facing;
+		this.views = null;
+		this.chunkX = facing.blockX(base.chunkX, base.chunkZ);
+		this.chunkZ = facing.blockZ(base.chunkX, base.chunkZ);
+		this.minSectionY = base.minSectionY;
+		this.states = base.states;
+		this.uniform = base.uniform;
+		this.hasSkyLight = base.hasSkyLight;
+		this.blockLight = base.blockLight;
+		this.skyLight = base.skyLight;
+		this.biomes = base.biomes;
+		this.biomeZoomSeed = base.biomeZoomSeed;
+		this.blendRadius = base.blendRadius;
+		this.fallbackBiome = base.fallbackBiome;
+		this.maxY = base.maxY;
+		this.floorY = base.floorY;
+		this.copycats = turnedCopycats(base.copycats, facing);
+		for (int x = 0; x < 16; x++) {
+			for (int z = 0; z < 16; z++) {
+				this.surface[(z << 4) | x] = base.surface(this.localX(x, z), this.localZ(x, z));
+			}
+		}
+	}
+
+	/** The world's column in this chunk for a column of this view. */
+	private int localX(int x, int z) {
+		return this.facing.worldBlockX(x, z) & 15;
+	}
+
+	private int localZ(int x, int z) {
+		return this.facing.worldBlockZ(x, z) & 15;
+	}
+
+	private static @Nullable SectionCopycats @Nullable [] turnedCopycats(@Nullable SectionCopycats @Nullable [] copycats, Facing facing) {
+		if (copycats == null) {
+			return null;
+		}
+		SectionCopycats[] out = new SectionCopycats[copycats.length];
+		for (int i = 0; i < copycats.length; i++) {
+			if (copycats[i] != null) {
+				int[] at = copycats[i].at().clone();
+				for (int k = 0; k < at.length; k++) {
+					int x = at[k] & 15;
+					int z = at[k] >> 4 & 15;
+					at[k] = at[k] & ~0xFF | (facing.blockZ(x, z) & 15) << 4 | facing.blockX(x, z) & 15;
+				}
+				BlockState[] materials = copycats[i].material().clone();
+				for (int k = 0; k < materials.length; k++) {
+					materials[k] = facing.turned(materials[k]);
+				}
+				out[i] = new SectionCopycats(at, materials);
+			}
+		}
+		return out;
+	}
+
+	/** The block at a place in the view, from a section's {@link #section} container. */
+	public BlockState state(PalettedContainer<BlockState> states, int x, int y, int z) {
+		return this.facing.turned(states.get(this.localX(x, z), y, this.localZ(x, z)));
+	}
+
+	/** The chunk itself, of a turned view. */
+	public ChunkSnapshot chunk() {
+		return this.base != null ? this.base : this;
+	}
+
+	/** A block as this view has it. */
+	public BlockState turned(BlockState state) {
+		return this.facing.turned(state);
+	}
 
 	@SuppressWarnings("unchecked")
 	private ChunkSnapshot(LevelChunk chunk, ClientLevel level) {
+		this.facing = Facing.NORTH;
+		this.base = null;
+		this.views = new ChunkSnapshot[4];
 		this.chunkX = chunk.getPos().x();
 		this.chunkZ = chunk.getPos().z();
 		this.minSectionY = chunk.getMinSectionY();
@@ -143,6 +239,9 @@ public final class ChunkSnapshot {
 	 */
 	@SuppressWarnings("unchecked")
 	private ChunkSnapshot(ChunkAccess chunk, ClientLevel level, boolean full) {
+		this.facing = Facing.NORTH;
+		this.base = null;
+		this.views = new ChunkSnapshot[4];
 		this.chunkX = chunk.getPos().x();
 		this.chunkZ = chunk.getPos().z();
 		this.minSectionY = chunk.getMinSectionY();
@@ -197,6 +296,9 @@ public final class ChunkSnapshot {
 	 */
 	@SuppressWarnings("unchecked")
 	private ChunkSnapshot(SavedChunk chunk, @Nullable SavedChunk[] around, Level level) {
+		this.facing = Facing.NORTH;
+		this.base = null;
+		this.views = new ChunkSnapshot[4];
 		this.chunkX = chunk.chunkX();
 		this.chunkZ = chunk.chunkZ();
 		this.minSectionY = level.getMinSectionY();
@@ -338,13 +440,16 @@ public final class ChunkSnapshot {
 
 	public int blockLight(int sectionIndex, int x, int y, int z) {
 		DataLayer layer = this.blockLight[sectionIndex];
-		return layer == null ? 0 : layer.get(x, y, z);
+		return layer == null ? 0 : layer.get(this.localX(x, z), y, this.localZ(x, z));
 	}
 
 	public int skyLight(int sectionIndex, int x, int y, int z) {
 		if (!this.hasSkyLight) {
 			return 0;
 		}
+		int turnedX = x;
+		x = this.localX(turnedX, z);
+		z = this.localZ(turnedX, z);
 		DataLayer layer = this.skyLight[sectionIndex];
 		if (layer != null) {
 			return layer.get(x, y, z);
@@ -365,6 +470,9 @@ public final class ChunkSnapshot {
 	 * lookup, and the game's fallback biome where it had no chunk.
 	 */
 	public Holder<Biome> noiseBiome(int quartX, int quartY, int quartZ) {
+		if (this.base != null) {
+			return this.base.noiseBiome(this.facing.worldBlockX(quartX, quartZ), quartY, this.facing.worldBlockZ(quartX, quartZ));
+		}
 		int dx = (quartX >> 2) - this.chunkX;
 		int dz = (quartZ >> 2) - this.chunkZ;
 		PalettedContainerRO<Holder<Biome>>[] sections = dx < -1 || dx > 1 || dz < -1 || dz > 1 ? null : this.biomes[(dx + 1) * 3 + dz + 1];
@@ -379,6 +487,10 @@ public final class ChunkSnapshot {
 
 	/** Whether the game had the neighbouring chunk at this offset when the snapshot was taken. */
 	public boolean hasBiomesAround(int dx, int dz) {
+		if (this.base != null) {
+			// Offsets turn about the origin, without the block formula's -1.
+			return this.base.hasBiomesAround((int) this.facing.worldX(dx, dz), (int) this.facing.worldZ(dx, dz));
+		}
 		return this.biomes[(dx + 1) * 3 + dz + 1] != null;
 	}
 
@@ -425,7 +537,22 @@ public final class ChunkSnapshot {
 	}
 
 	public @Nullable Tints tints() {
+		if (this.tints == null && this.base != null && this.base.tints != null) {
+			// The chunk's own tints, turned, so every facing shows the same colours.
+			Tints from = this.base.tints;
+			this.tints = new Tints(this.turnedColumns(from.grass()), this.turnedColumns(from.foliage()), this.turnedColumns(from.dryFoliage()), this.turnedColumns(from.water()));
+		}
 		return this.tints;
+	}
+
+	private int[] turnedColumns(int[] columns) {
+		int[] out = new int[256];
+		for (int x = 0; x < 16; x++) {
+			for (int z = 0; z < 16; z++) {
+				out[(z << 4) | x] = columns[(this.localZ(x, z) << 4) | this.localX(x, z)];
+			}
+		}
+		return out;
 	}
 
 	public void setTints(Tints tints) {

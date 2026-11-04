@@ -12,6 +12,7 @@ import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Pins;
 import dev.diorama.render.Radar;
+import dev.diorama.render.SavedChunkImport;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointListScreen;
@@ -148,9 +149,10 @@ public final class MapScreen extends Screen {
 	private @Nullable String otherDimension;
 	/** That map while it's open. It's closed with the screen, and with each screen opened over this one. */
 	private @Nullable OtherMap otherMap;
+	private Button facingButton;
 
 	/** A dimension's saved map, and what it was opened for: a change to either opens it again. */
-	private record OtherMap(Path folder, MapStyle style, MapLevel map) {
+	private record OtherMap(Path folder, MapStyle style, Facing facing, MapLevel map) {
 	}
 
 	public MapScreen() {
@@ -213,6 +215,8 @@ public final class MapScreen extends Screen {
 			this.menu = null;
 			this.following = true;
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.map.recenter")).build());
+		this.facingButton = this.addRenderableWidget(Button.builder(facingLetter(), b -> this.turn(DrawMode.shiftDown() ? -1 : 1))
+			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.facing." + Projection.facing().id())).build());
 		this.sliceUp = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
 			this.menu = null;
 			this.shiftSlice(DepthGauge.STEP, MapSession.viewer());
@@ -291,9 +295,9 @@ public final class MapScreen extends Screen {
 		}
 		// The player can switch this dimension's map, or change the view, from the screens over this one.
 		Path folder = maps.tileFolder(other, maps.active(other));
-		if (this.otherMap == null || !this.otherMap.folder().equals(folder) || this.otherMap.style() != MapStyle.get()) {
+		if (this.otherMap == null || !this.otherMap.folder().equals(folder) || this.otherMap.style() != MapStyle.get() || this.otherMap.facing() != Projection.facing()) {
 			this.closeOtherMap();
-			this.otherMap = new OtherMap(folder, MapStyle.get(), MapLevel.saved(folder));
+			this.otherMap = new OtherMap(folder, MapStyle.get(), Projection.facing(), MapLevel.saved(folder));
 		}
 		this.otherMap.map().setFogOfWar(ServerRules.fogOfWar(other.equals("minecraft:the_nether")));
 		return this.otherMap.map();
@@ -334,6 +338,40 @@ public final class MapScreen extends Screen {
 	}
 
 	/** Puts the zoom buttons beside the gauge on the cave map, in the corner otherwise. */
+	private static Component facingLetter() {
+		return Component.translatable("diorama.map.facing_letter." + Projection.facing().id());
+	}
+
+	/** Turns this world's map, keeping the same ground in the middle of the view. */
+	public void turn(int steps) {
+		Maps maps = Maps.get();
+		MapSession session = MapSession.get();
+		if (maps == null || session == null) {
+			return;
+		}
+		this.menu = null;
+		Facing was = Projection.facing();
+		Facing now = was.next(steps);
+		if (!maps.facing(now)) {
+			return;
+		}
+		// The ground in the middle stays there: on a cave slice, the slice's.
+		double y = this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
+		double z = Projection.zAt(this.centerV, y);
+		double worldX = was.worldX(this.centerU, z);
+		double worldZ = was.worldZ(this.centerU, z);
+		Projection.setFacing(now);
+		this.closeOtherMap();
+		MapSession.facingChanged();
+		// The block under the mouse was the old facing's.
+		this.spotU = Integer.MIN_VALUE;
+		this.spot = null;
+		this.spotRequest = null;
+		this.centerU = Projection.u(worldX, worldZ);
+		this.centerV = Projection.v(worldX, y, worldZ);
+		this.facingButton.setMessage(facingLetter());
+	}
+
 	private void placeControls() {
 		boolean caves = this.layer != TileKey.SURFACE;
 		int x = this.width - (caves ? 56 : 26);
@@ -346,6 +384,9 @@ public final class MapScreen extends Screen {
 		this.zoomIn.setPosition(x, y);
 		this.zoomOut.setPosition(x, y + 22);
 		this.recenter.setPosition(x, y + 48);
+		this.facingButton.setPosition(x - 22, y + 48);
+		// The draw tools can reach down this far on a short window, and turning moves what's being drawn on.
+		this.facingButton.visible = !this.draw.active();
 		// Nothing to switch to until a second dimension has a map. Not while drawing, where the draw
 		// tools can reach down this far on a short window.
 		this.dimensionButton.visible = this.severalDimensions && Settings.get().mapDimensionButton && !this.draw.active();
@@ -387,8 +428,8 @@ public final class MapScreen extends Screen {
 		boolean elsewhere = this.otherDimension != null;
 		Vec3 pos = viewer.getPosition(a);
 		double scale = this.scaleToShown();
-		double playerU = pos.x * scale;
-		double playerV = Projection.v(pos.y, pos.z * scale);
+		double playerU = Projection.u(pos.x * scale, pos.z * scale);
+		double playerV = Projection.v(pos.x * scale, pos.y, pos.z * scale);
 		if (this.following) {
 			this.centerU = playerU;
 			this.centerV = playerV;
@@ -417,7 +458,7 @@ public final class MapScreen extends Screen {
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Radar.draw(graphics, view, this.blips, true, true);
-		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), viewer.getViewYRot(a), 6);
+		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), Markers.onMap(viewer.getViewYRot(a)), 6);
 		this.lastView = view;
 		if (caves) {
 			this.gauge.layout(this.minecraft.level, viewer.blockPosition(), this.layer, this.width, this.height);
@@ -530,7 +571,10 @@ public final class MapScreen extends Screen {
 			? Component.translatable("diorama.map.you_are_in", Waypoints.dimensionName(viewer.level().dimension().identifier().toString())).getString()
 			: String.format("%d, %d, %d", viewer.getBlockX(), viewer.getBlockY(), viewer.getBlockZ());
 		String chunks = elsewhere ? null : Component.translatable("diorama.map.chunks", shown.chunkCount()).getString();
-		String baking = !elsewhere && shown.bakingCount() > 0 ? Component.translatable("diorama.map.baking").getString() : null;
+		SavedChunkImport job = elsewhere ? null : MapSession.get().savedChunks();
+		boolean redrawing = job != null && shown.memory() != null && job.chunksLeft() > 0;
+		String baking = redrawing ? Component.translatable("diorama.map.redrawing", job.percentDone()).getString()
+			: !elsewhere && shown.bakingCount() > 0 ? Component.translatable("diorama.map.baking").getString() : null;
 		MapExport export = MapExport.running();
 		String saving = export != null ? Component.translatable("diorama.export.saving", Math.round(export.progress() * 100)).getString() : null;
 		List<String> parts = new ArrayList<>();
@@ -808,7 +852,7 @@ public final class MapScreen extends Screen {
 		TileKey tile = new TileKey(this.layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		MapPick pick = new MapPick(session.map(), looks, tile, session.map().fogOfWar());
 		return switch (pick.pick(u, v)) {
-			case MapPick.FOUND -> CompletableFuture.completedFuture(new MapLevel.Spot(new BlockPos((int) Math.floor(u), pick.y, pick.z), false));
+			case MapPick.FOUND -> CompletableFuture.completedFuture(new MapLevel.Spot(Projection.facing().worldPos(new BlockPos((int) Math.floor(u), pick.y, pick.z)), false));
 			case MapPick.NOTHING -> CompletableFuture.completedFuture(MapLevel.Spot.NOTHING);
 			default -> session.map().savedSpot(this.layer, u, v, looks, readWorld);
 		};
@@ -829,7 +873,7 @@ public final class MapScreen extends Screen {
 		int y = this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
 		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
 		double v = TileSpots.rowMiddle(view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom());
-		return new BlockPos((int) Math.floor(u), y, (int) Math.floor(Projection.zAt(v, y)));
+		return Projection.facing().worldPos(new BlockPos((int) Math.floor(u), y, (int) Math.floor(Projection.zAt(v, y))));
 	}
 
 	private List<MapMenu.Item> spotItems(MapLevel.Spot found, @Nullable BlockPos rough) {
@@ -1125,7 +1169,8 @@ public final class MapScreen extends Screen {
 			view.centerV() + ((top + bottom) / 2.0 - view.y() - view.height() / 2.0) / view.zoom(),
 			view.zoom(), view.layer());
 		List<WaypointOverlay.Pin> pins = WaypointOverlay.layout(clear, waypoints, true);
-		int bx0 = this.zoomIn.getX() - 2;
+		// The column of buttons, and the facing button left of recenter.
+		int bx0 = (this.facingButton.visible ? this.facingButton.getX() : this.zoomIn.getX()) - 2;
 		// From the export (or draw) button down to recenter.
 		int by0 = (this.export.visible ? this.export.getY() : this.drawButton.getY()) - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
@@ -1312,7 +1357,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}
@@ -1352,6 +1397,12 @@ public final class MapScreen extends Screen {
 		}
 		if (on(this.zoomOut, x, y)) {
 			return tip(this.zoomOut, Component.translatable("diorama.map.zoom_out"), Component.translatable("diorama.map.scroll_down"));
+		}
+		if (on(this.facingButton, x, y)) {
+			MapSession session = MapSession.get();
+			boolean walk = session != null && session.map().memory() != null && session.savedChunks() == null;
+			return tip(this.facingButton, Component.translatable("diorama.map.facing." + Projection.facing().id()),
+				Component.translatable(walk ? "diorama.map.facing_walk" : "diorama.map.facing_turn"));
 		}
 		if (on(this.recenter, x, y)) {
 			return tip(this.recenter, Component.translatable("diorama.map.recenter"), key(keyName(InputConstants.KEY_SPACE)));

@@ -31,7 +31,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
 	}
 
 	/**
@@ -115,7 +115,7 @@ public final class MapViewport {
 
 		MapMemory memory = cave ? null : level.memory();
 		if (memory != null) {
-			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF);
+			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF, lodFor(level, view), tileSampling(sampling(view)));
 		}
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit);
 		this.drawFog(graphics, level, view);
@@ -167,7 +167,7 @@ public final class MapViewport {
 	}
 
 	/** How a tile's own pixels are sampled; what's drawn over them has no mip levels for the tile shader. */
-	private static Sampling tileSampling(Sampling sampling) {
+	static Sampling tileSampling(Sampling sampling) {
 		return sampling == Sampling.TILE_SMOOTH ? Sampling.TILE_AREA : sampling;
 	}
 
@@ -385,7 +385,9 @@ public final class MapViewport {
 		boolean drawsNear = this.drawsNear(view, lod);
 		int nearU = drawsNear ? (int) Math.floor(view.centerU() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
+		// The memory's level can change with the zoom while the real tiles' doesn't.
+		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
@@ -446,7 +448,7 @@ public final class MapViewport {
 			for (int j = 0; j < MASK; j++) {
 				double v = originV + (j + 0.5) * texel;
 				for (int i = 0; i < MASK; i++) {
-					int remembered = Math.round(memory.known(view, originU + (i + 0.5) * texel, v) * 255);
+					int remembered = Math.round(memory.known(memoryLod, originU + (i + 0.5) * texel, v) * 255);
 					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
 				}
 			}

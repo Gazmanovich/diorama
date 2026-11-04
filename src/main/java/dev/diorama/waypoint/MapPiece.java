@@ -156,9 +156,9 @@ final class MapPiece {
 		boolean here = place == null || place.dimension().equals(level.dimension().identifier().toString());
 		MapLevel map = !here ? this.savedMap(place.dimension()) : session != null ? session.map() : null;
 		MapViewport.View view = place == null
-			? new MapViewport.View(left, top, this.width, this.depth, viewer.getX(), Projection.v(viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE)
+			? new MapViewport.View(left, top, this.width, this.depth, Projection.u(viewer.getX(), viewer.getZ()), Projection.v(viewer.getX(), viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE)
 			// Where the map stands a waypoint's pin: the middle of its block's top.
-			: new MapViewport.View(left, top, this.width, this.depth, place.x() + 0.5, Projection.v(place.y(), place.z() + 0.5), ZOOM, TileKey.SURFACE);
+			: new MapViewport.View(left, top, this.width, this.depth, Projection.u(place.x() + 0.5, place.z() + 0.5), Projection.v(place.x() + 0.5, place.y(), place.z() + 0.5), ZOOM, TileKey.SURFACE);
 		BlockPos ground = place == null ? viewer.blockPosition() : new BlockPos(place.x(), place.y(), place.z());
 		if (map != null && (place != null || MapViewport.showsAnything(map, view))) {
 			// Under a waypoint, ground the map has never seen is fog, as on the map.
@@ -229,10 +229,12 @@ final class MapPiece {
 				// Where the map shows nothing, an ordinary column: grass, a few blocks of dirt, then stone.
 				BlockState state;
 				if (hit != null) {
-					pos.set(bx, hit[0] - row, hit[1]);
-					state = level.getBlockState(pos);
+					pos.set(facing(bx, hit[1], true), hit[0] - row, facing(bx, hit[1], false));
+					// As the map sees it: the side facing the camera is the one shown.
+					state = Projection.facing().turned(level.getBlockState(pos));
 				} else {
-					pos.set(bx, player.getY() - 1 - row, player.getZ());
+					int pz = Projection.facing().blockZ(player.getX(), player.getZ());
+					pos.set(facing(bx, pz, true), player.getY() - 1 - row, facing(bx, pz, false));
 					state = (row == 0 ? Blocks.GRASS_BLOCK : row <= 3 ? Blocks.DIRT : Blocks.STONE).defaultBlockState();
 				}
 				for (int t = 0; t < TEXELS_PER_ROW; t++) {
@@ -279,9 +281,11 @@ final class MapPiece {
 		} else {
 			// Start a little above the ground the heightmap finds along the ray, to save walking
 			// down from the sky; a few rounds settle where the ray meets it.
-			int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, (int) Math.floor(v / sin));
+			int z = (int) Math.floor(v / sin);
+			int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, facing(x, z, true), facing(x, z, false));
 			for (int i = 0; i < 4; i++) {
-				y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, (int) Math.floor((v + y * cos) / sin));
+				z = (int) Math.floor((v + y * cos) / sin);
+				y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, facing(x, z, true), facing(x, z, false));
 			}
 			if (y <= minY) {
 				return null;
@@ -296,7 +300,7 @@ final class MapPiece {
 			int zIn = (int) Math.floor((v + (y + 1) * cos) / sin);
 			int zOut = (int) Math.floor((v + y * cos) / sin);
 			for (int z = zIn; z >= zOut; z--) {
-				BlockState state = level.getBlockState(pos.set(x, y, z));
+				BlockState state = level.getBlockState(pos.set(facing(x, z, true), y, facing(x, z, false)));
 				if (!underRoof) {
 					if (state.isAir()) {
 						underRoof = true;
@@ -309,6 +313,11 @@ final class MapPiece {
 			}
 		}
 		return null;
+	}
+
+	/** The world's x, or z, of a column of the map. */
+	private static int facing(int x, int z, boolean worldX) {
+		return worldX ? Projection.facing().worldBlockX(x, z) : Projection.facing().worldBlockZ(x, z);
 	}
 
 	private static boolean ground(BlockLooks looks, BlockState state) {

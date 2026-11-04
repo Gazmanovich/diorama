@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import dev.diorama.Diorama;
+import dev.diorama.Facing;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
@@ -122,6 +123,10 @@ public final class SavedChunkImport {
 	private long lastSave;
 	/** Regions with chunks to draw, as of the last listing. */
 	private final Set<Long> pending = new HashSet<>();
+	/** Chunks with something to draw as of the last listing, of how many are in the save. */
+	private volatile int chunksToDo;
+	private volatile int chunksInSave;
+	private volatile int chunksDone;
 	/** Regions part way through. */
 	private final Map<Long, Plan> plans = new HashMap<>();
 	/** Regions waiting to try tiles again, and until when. */
@@ -137,7 +142,7 @@ public final class SavedChunkImport {
 	private SavedChunkImport(MapLevel map, SavedChunks save, Consumer<List<Portals.Spot>> portals) {
 		this.map = map;
 		this.save = save;
-		this.source = new SavedChunkSource(map, save, portals);
+		this.source = new SavedChunkSource(map.world(), save, portals);
 		this.thread = new Thread(this::run, "diorama-saved-chunks");
 		this.thread.setDaemon(true);
 		this.thread.setPriority(Thread.MIN_PRIORITY);
@@ -179,6 +184,17 @@ public final class SavedChunkImport {
 	private boolean remembered(int chunkX, int chunkZ, int top) {
 		MapMemory memory = this.map.memory();
 		return memory != null && this.remembered.computeIfAbsent(ChunkSnapshot.key(chunkX, chunkZ), k -> memory.showsChunk(chunkX, chunkZ, top));
+	}
+
+	/** How many chunks are left to draw. */
+	public int chunksLeft() {
+		return this.idle ? 0 : Math.max(0, this.chunksToDo - this.chunksDone);
+	}
+
+	/** How far through the save this is, 0 to 99: it isn't done until {@link #chunksLeft} says so. */
+	public int percentDone() {
+		int all = this.chunksInSave;
+		return all == 0 ? 0 : Math.min(99, 100 * (all - this.chunksLeft()) / all);
 	}
 
 	/** For tests: whether everything in the save as of the last listing is drawn. */
@@ -286,11 +302,22 @@ public final class SavedChunkImport {
 				}
 			}
 			this.pending.clear();
+			int toDo = 0;
+			int inSave = 0;
 			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
 				if (progress.hasWork(region.getKey(), region.getValue(), this.onlyRemembered)) {
 					this.pending.add(region.getKey());
 				}
+				int regionX = (int) (region.getKey() >> 32);
+				int regionZ = (int) (long) region.getKey();
+				for (int i = 0; i < 1024; i++) {
+					inSave += region.getValue()[i] == 0 ? 0 : 1;
+					toDo += progress.isWork(regionX, regionZ, i, region.getValue()[i], this.onlyRemembered) ? 1 : 0;
+				}
 			}
+			this.chunksToDo = toDo;
+			this.chunksInSave = inSave;
+			this.chunksDone = 0;
 		}
 		Long next = this.nearestPending();
 		if (next == null) {
@@ -314,8 +341,10 @@ public final class SavedChunkImport {
 		double x;
 		double z;
 		if (focus != null) {
-			x = focus[0];
-			z = Projection.zAt(focus[1], TYPICAL_Y);
+			Facing facing = Projection.facing();
+			double turnedZ = Projection.zAt(focus[1], TYPICAL_Y);
+			x = facing.worldX(focus[0], turnedZ);
+			z = facing.worldZ(focus[0], turnedZ);
 		} else {
 			Entity viewer = MapSession.viewer();
 			x = viewer == null ? 0 : viewer.getX();
@@ -352,10 +381,13 @@ public final class SavedChunkImport {
 			if (this.drawn.containsKey(key) || inProgress.contains(key)) {
 				continue;
 			}
+			Facing facing = Projection.facing();
 			double u = key.minU() + key.units() / 2;
 			double z = Projection.zAt(key.minV() + key.units() / 2, TYPICAL_Y);
+			int regionX = (int) Math.floor(facing.worldX(u, z)) >> 9;
+			int regionZ = (int) Math.floor(facing.worldZ(u, z)) >> 9;
 			// Its region can get work later, so it's only looked at, once, when there is some.
-			if (this.pending.contains(SavedChunks.regionKey((int) Math.floor(u) >> 9, (int) Math.floor(z) >> 9)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
+			if (this.pending.contains(SavedChunks.regionKey(regionX, regionZ)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
 				return key;
 			}
 		}
@@ -369,7 +401,7 @@ public final class SavedChunkImport {
 		this.source.clear();
 		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
 		Plan plan = this.plans.get(region);
-		if (plan == null || plan.onlyRemembered != this.onlyRemembered) {
+		if (plan == null || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing()) {
 			plan = this.plan(region, progress);
 			if (plan == null) {
 				return;
@@ -384,14 +416,14 @@ public final class SavedChunkImport {
 		boolean leaving = false;
 		RuntimeException failure = null;
 		while (running > 0 || !leaving && !plan.order.isEmpty()) {
-			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered;
+			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing();
 			while (!leaving && running < this.workersNow() && !this.save.serverBehind()
 				&& this.map.unwrittenTiles() < MAX_UNWRITTEN && !memoryTight()) {
 				TileKey viewTile = this.nextViewTile(inProgress);
 				if (viewTile != null) {
 					inProgress.add(viewTile);
 					forViews.add(viewTile);
-					this.submit(drawing, viewTile, looks);
+					this.submit(drawing, viewTile, looks, plan.facing);
 					running++;
 					continue;
 				}
@@ -412,7 +444,7 @@ public final class SavedChunkImport {
 				plan.order.remove(plan.order.size() - 1);
 				if (this.needsDrawing(key, plan.tiles.get(key), plan, progress)) {
 					inProgress.add(key);
-					this.submit(drawing, key, looks);
+					this.submit(drawing, key, looks, plan.facing);
 					running++;
 				} else {
 					this.tileDone(key, plan, progress);
@@ -508,11 +540,11 @@ public final class SavedChunkImport {
 		return true;
 	}
 
-	private void submit(CompletionService<Drawn> drawing, TileKey key, BlockLooks looks) {
+	private void submit(CompletionService<Drawn> drawing, TileKey key, BlockLooks looks, Facing facing) {
 		drawing.submit(() -> {
 			long start = System.nanoTime();
 			try {
-				boolean taken = this.map.bakeFromSave(key, this.source, looks);
+				boolean taken = this.map.bakeFromSave(key, this.source, looks, facing);
 				long nanos = System.nanoTime() - start;
 				if (PACED && playing()) {
 					this.pause(3 * nanos / 1_000_000);
@@ -542,6 +574,7 @@ public final class SavedChunkImport {
 	private void tileDone(TileKey key, Plan plan, Progress progress) {
 		for (long chunk : plan.tiles.get(key)) {
 			if (plan.waiting.merge(chunk, -1, Integer::sum) == 0) {
+				this.chunksDone++;
 				int cx = (int) (chunk >> 32);
 				int cz = (int) chunk;
 				progress.mark(cx >> 5, cz >> 5, index(cx, cz), plan.times.get(chunk));
@@ -580,7 +613,7 @@ public final class SavedChunkImport {
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
 		int[] times = this.regions.get(region);
-		Plan plan = new Plan(this.onlyRemembered);
+		Plan plan = new Plan(this.onlyRemembered, Projection.facing());
 		MapMemory memory = plan.onlyRemembered ? this.map.memory() : null;
 		for (int i = 0; i < 1024; i++) {
 			int time = times[i];
@@ -603,15 +636,17 @@ public final class SavedChunkImport {
 			if (summary == null || !summary.finished()) {
 				// Nothing to draw yet. Once it's finished, the save writes it again.
 				progress.mark(regionX, regionZ, i, time);
+				this.chunksDone++;
 				continue;
 			}
 			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
 				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
+				this.chunksDone++;
 				continue;
 			}
 			long chunk = ChunkSnapshot.key(cx, cz);
 			plan.times.put(chunk, time);
-			for (TileKey key : this.tilesShowing(cx, cz, summary)) {
+			for (TileKey key : this.tilesShowing(cx, cz, summary, plan.facing)) {
 				plan.tiles.computeIfAbsent(key, k -> new HashSet<>()).add(chunk);
 				plan.waiting.merge(chunk, 1, Integer::sum);
 			}
@@ -627,9 +662,9 @@ public final class SavedChunkImport {
 	 * The sky view tiles a chunk can show in, as {@link MapLevel} works it out for a newly loaded
 	 * chunk: its own blocks, plus the shadows and sky occlusion they cast on blocks nearby.
 	 */
-	private List<TileKey> tilesShowing(int cx, int cz, SavedChunks.Summary summary) {
-		int x0 = cx << 4;
-		int z0 = cz << 4;
+	private List<TileKey> tilesShowing(int cx, int cz, SavedChunks.Summary summary, Facing facing) {
+		int x0 = facing.blockX(cx, cz) << 4;
+		int z0 = facing.blockZ(cx, cz) << 4;
 		int x1 = x0 + 15;
 		int z1 = z0 + 15;
 		double top = summary.maxY() + 2;
@@ -661,6 +696,8 @@ public final class SavedChunkImport {
 	private static final class Plan {
 		/** Made for redrawing only what's remembered; a change of mind makes a new plan. */
 		final boolean onlyRemembered;
+		/** Which way the tiles below face: a chunk shows in others from another side, so a turn makes a new plan. */
+		final Facing facing;
 		/** Tiles left to draw; taken from the end. */
 		final List<TileKey> order = new ArrayList<>();
 		/** The region's new or changed chunks each tile shows. */
@@ -670,8 +707,9 @@ public final class SavedChunkImport {
 		/** When the save last wrote each of those chunks. */
 		final Map<Long, Integer> times = new HashMap<>();
 
-		Plan(boolean onlyRemembered) {
+		Plan(boolean onlyRemembered, Facing facing) {
 			this.onlyRemembered = onlyRemembered;
+			this.facing = facing;
 		}
 	}
 

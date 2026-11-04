@@ -9,11 +9,14 @@ package dev.diorama;
  *   <li>{@code u = x} (east is right)</li>
  *   <li>{@code v = z * sin - y * cos} (south is down, and higher blocks move up the screen)</li>
  * </ul>
+ * That x and z are in turned space; see {@link Facing}. {@link #u} and {@link #v(double, double, double)}
+ * take a place in the world.
  */
 public final class Projection {
 	// The default style's angle until a style is applied.
 	private static volatile double sin = Math.sin(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
 	private static volatile double cos = Math.cos(Math.toRadians(MapStyle.DEFAULT.pitchDegrees()));
+	private static volatile Facing facing = Facing.NORTH;
 
 	/** Map units per tile edge. */
 	public static final int TILE_UNITS = 128;
@@ -32,6 +35,15 @@ public final class Projection {
 		cos = Math.cos(Math.toRadians(degrees));
 	}
 
+	/** Turns the camera. Everything baked before is wrong afterwards, like a change of angle. */
+	public static void setFacing(Facing value) {
+		facing = value;
+	}
+
+	public static Facing facing() {
+		return facing;
+	}
+
 	public static double sin() {
 		return sin;
 	}
@@ -40,11 +52,22 @@ public final class Projection {
 		return cos;
 	}
 
+	/** The map row of a height and z in turned space. */
 	public static double v(double y, double z) {
 		return z * sin - y * cos;
 	}
 
-	/** World z where a ray through map row {@code v} crosses height {@code y}. */
+	/** The map column of a place in the world. */
+	public static double u(double x, double z) {
+		return facing.x(x, z);
+	}
+
+	/** The map row of a place in the world. */
+	public static double v(double x, double y, double z) {
+		return v(y, facing.z(x, z));
+	}
+
+	/** The z in turned space where a ray through map row {@code v} crosses height {@code y}. */
 	public static double zAt(double v, double y) {
 		return (v + y * cos) / sin;
 	}
