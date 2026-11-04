@@ -488,13 +488,22 @@ public final class MapViewport {
 	 * shader lets that much of the old map show through the clouds.
 	 */
 	private void writeRemembered() {
+		// Faded in over a few texels from the remembered map's edge, and only inside it, so its
+		// edge doesn't show as a line in the clouds and nothing shows through where there's no map.
+		System.arraycopy(this.remembered, 0, this.blurA, 0, this.blurA.length);
+		boxBlur(this.blurA, this.blurB, SEE_FADE, true);
+		boxBlur(this.blurB, this.blurA, SEE_FADE, false);
 		for (int k = 0; k < MASK * MASK; k++) {
 			int pixel = this.maskPixels[k];
 			if ((pixel & 0xFF00) == 0) {
-				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
+				float see = Math.min(this.remembered[k], this.blurA[k]);
+				this.maskPixels[k] = pixel | Math.round(see * 0.4F * 255) << 8;
 			}
 		}
 	}
+
+	/** Mask texels the old map's show-through fades in over from its edge. */
+	private static final int SEE_FADE = 4;
 
 	/** Cloud levels, and how far from explored land the clouds over never-explored land reach full height, per level in cells. Match fog.fsh. */
 	private static final double CLOUD_LEVELS = 5;
