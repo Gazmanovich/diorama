@@ -78,6 +78,8 @@ public final class TileBaker {
 	private static final float[] AO_LEVELS = {0.6F, 0.74F, 0.87F, 1.0F};
 	/** Faces that aren't up read darker, the way Minecraft shades its own block sides. */
 	static final float SIDE = 0.82F;
+	/** Outlines on the floor under water fade with the water in front: a third left after this many blocks of it. */
+	private static final float OUTLINE_WATER_FADE = 6;
 	/** How much nearer a neighbouring pixel has to be, in blocks, before an outline is drawn. */
 	private static final float OUTLINE_DEPTH = 1.5F;
 	/** How far below the cut a cave slice looks. */
@@ -162,6 +164,8 @@ public final class TileBaker {
 	private float outB;
 	/** Camera depth of the last hit relative to {@link #depthOrigin}; larger is farther. */
 	private float outDepth;
+	/** Blocks of water the last trace looked through to what it hit; 0 when it met none. */
+	private float outWater;
 	// The block the last trace stopped on, when it was solid, for the overlays.
 	private boolean hitSolid;
 	private boolean hitTop;
@@ -328,7 +332,7 @@ public final class TileBaker {
 	public static TileSurface surface(TileKey key, int revision, ChunkSource source, BlockLooks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
 		int count = width * height;
-		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new boolean[count], new int[count], new int[count], new boolean[count]);
+		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new boolean[count], new int[count], new int[count], new float[count]);
 		java.util.Arrays.fill(surface.y(), Float.NaN);
 		// Only cave slices, and not under a roof, where the light is lifted off the rock above.
 		if (!baker.cave || baker.startY <= baker.limitY || baker.lifted) {
@@ -362,7 +366,7 @@ public final class TileBaker {
 				surface.y()[i] = baker.surfaceY;
 				surface.top()[i] = baker.surfaceTop;
 				surface.light()[i] = baker.surfaceLight;
-				surface.outlined()[i] = linear[i * 4 + 3] > 0;
+				surface.outline()[i] = linear[i * 4 + 3];
 				// A light relights what the pixel shows, water and all: the baked pixel with the
 				// light that lit it taken out.
 				surface.albedo()[i] = pixels[i] & 0xFF000000 | srgb(linear[i * 4], linear[i * 4 + 1], linear[i * 4 + 2]);
@@ -535,7 +539,7 @@ public final class TileBaker {
 	/**
 	 * Traces pixels into {@code out}, and when {@code linear} isn't null, four floats per pixel
 	 * into it: the pixel's colour in linear light with each sample's own cave light taken out
-	 * (all but a side's darkening), then 1 where an outline darkens it.
+	 * (all but a side's darkening), then how strongly an outline darkens it, 0 for none.
 	 */
 	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info, float @Nullable [] linear) {
 		if (this.startY <= this.limitY) {
@@ -547,6 +551,7 @@ public final class TileBaker {
 		int h = height + 2 * border;
 		int[] pixels = border == 0 ? out : new int[w * h];
 		float[] depth = border == 0 ? null : new float[w * h];
+		float[] water = border == 0 ? null : new float[w * h];
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
@@ -557,6 +562,7 @@ public final class TileBaker {
 				float g = 0;
 				float b = 0;
 				float d = 0;
+				float wd = 0;
 				float ur = 0;
 				float ug = 0;
 				float ub = 0;
@@ -565,6 +571,7 @@ public final class TileBaker {
 					double u = minU + (px0 + x - border + samples[s][0]) * unitsPerPixel;
 					double v = minV + (py0 + y - border + samples[s][1]) * unitsPerPixel;
 					this.surfaceLight = -1;
+					this.outWater = 0;
 					if (this.trace(u, v, s)) {
 						if (linear != null) {
 							// Samples on faces lit differently are each unlit by their own light; ones
@@ -590,6 +597,7 @@ public final class TileBaker {
 						g += this.outG;
 						b += this.outB;
 						d += this.outDepth;
+						wd += this.outWater;
 						known++;
 					}
 				}
@@ -606,22 +614,24 @@ public final class TileBaker {
 				}
 				if (depth != null) {
 					depth[y * w + x] = known > 0 ? d / known : Float.NaN;
+					water[y * w + x] = known > 0 ? wd / known : 0;
 				}
 			}
 		}
 		if (border == 0) {
 			return;
 		}
-		float keep = 1 - this.style.outline();
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				int i = (y + 1) * w + x + 1;
 				int pixel = pixels[i];
 				float here = depth[i];
 				if (pixel != 0 && (nearer(depth[i - 1], here) || nearer(depth[i + 1], here) || nearer(depth[i - w], here) || nearer(depth[i + w], here))) {
-					pixel = darken(pixel, keep);
+					// The seafloor's outlines show through shallow water and fade out deeper down.
+					float outline = (float) Math.exp(-water[i] / OUTLINE_WATER_FADE);
+					pixel = darken(pixel, 1 - this.style.outline() * outline);
 					if (linear != null) {
-						linear[(y * width + x) * 4 + 3] = 1;
+						linear[(y * width + x) * 4 + 3] = outline;
 					}
 				}
 				out[y * width + x] = pixel;
@@ -1057,8 +1067,7 @@ public final class TileBaker {
 			}
 		}
 		double depth = Math.max(0, tHit - tEntry);
-		// The water's surface is flat, so the floor under it draws no outlines.
-		this.outDepth = (float) (-(this.sin * (y0 - tEntry * this.sin) + this.cos * (z0 - tEntry * this.cos)) - this.depthOrigin);
+		this.outWater = (float) depth;
 		if (this.style.clearWater()) {
 			// Light through water loses the colours the water doesn't have: red goes first, so
 			// shallows over sand turn turquoise. The floor is gone a few blocks down, and the

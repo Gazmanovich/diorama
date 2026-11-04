@@ -52,6 +52,7 @@ public record SurfaceArea(int tileU0, int tileV0, int columns, int rows, @Nullab
 		int albedo = surface.albedo()[i];
 		float[] lin = TileBaker.SRGB_TO_LINEAR;
 		int pixel = TileBaker.abgr(style, lin[albedo >> 16 & 0xFF] * scratch[0], lin[albedo >> 8 & 0xFF] * scratch[1], lin[albedo & 0xFF] * scratch[2], alpha * (albedo >>> 24) / 255);
-		return surface.outlined()[i] ? TileBaker.darken(pixel, 1 - style.outline()) : pixel;
+		float outline = surface.outline()[i];
+		return outline > 0 ? TileBaker.darken(pixel, 1 - style.outline() * outline) : pixel;
 	}
 }
