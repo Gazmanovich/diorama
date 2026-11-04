@@ -1494,13 +1494,14 @@ public final class MapScreen extends Screen {
 		if (level == null) {
 			return null;
 		}
-		// The game's lookup reads the biome cells around the spot, which near a chunk's edge are in
-		// the next chunk. Where one isn't loaded it gets the game's stand-in chunk, all Plains. Ask the
+		// The game's lookup picks the biome from one of the cells around the spot, and near a chunk's
+		// edge that cell can be in the next chunk. Where that one isn't loaded, the game's stand-in
+		// chunk answers, all Plains. So every chunk a candidate cell is in has to be loaded. Ask the
 		// chunk source: the client level answers that every chunk is loaded (#262).
 		int cellX = (pos.getX() - 2) >> 2;
 		int cellZ = (pos.getZ() - 2) >> 2;
-		for (int chunkX = cellX >> 2; chunkX <= (cellX + 1) >> 2; chunkX++) {
-			for (int chunkZ = cellZ >> 2; chunkZ <= (cellZ + 1) >> 2; chunkZ++) {
+		for (int chunkX = cellX >> 2; chunkX <= ((cellX + 1) >> 2); chunkX++) {
+			for (int chunkZ = cellZ >> 2; chunkZ <= ((cellZ + 1) >> 2); chunkZ++) {
 				if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
 					return null;
 				}

@@ -104,6 +104,21 @@ final class SavedChunksTest {
 			if (((MapScreen) mc.gui.screen()).biomeAt(near) == null) {
 				throw new AssertionError("The tooltip next to the player names no biome");
 			}
+			// At the east edge of the loaded chunks, the last blocks of a loaded chunk can take their
+			// biome from the unloaded one beyond it, so they name none; its middle still does.
+			int chunkX = near.getX() >> 4;
+			int chunkZ = near.getZ() >> 4;
+			while (mc.level.getChunkSource().hasChunk(chunkX + 1, chunkZ)) {
+				chunkX++;
+			}
+			MapScreen map = (MapScreen) mc.gui.screen();
+			int z = chunkZ * 16 + 8;
+			if (map.biomeAt(new BlockPos(chunkX * 16 + 15, near.getY(), z)) != null) {
+				throw new AssertionError("The tooltip names a biome at the edge of chunk " + chunkX + "," + chunkZ + ", next to one the client hasn't loaded");
+			}
+			if (map.biomeAt(new BlockPos(chunkX * 16 + 8, near.getY(), z)) == null) {
+				throw new AssertionError("The tooltip names no biome in the middle of the loaded chunk " + chunkX + "," + chunkZ);
+			}
 		});
 		context.getInput().setCursorPos(0, 0);
 		context.setScreen(() -> null);
