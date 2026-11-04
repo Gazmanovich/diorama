@@ -278,8 +278,15 @@ float cellLevel(vec2 cell, float size) {
     if (m.r >= 0.5) {
         return 0.0;
     }
+    // The noise moves the climb by under half of STAIR_NOISE either way: well inside a level it
+    // can't change the cell's level, and needn't be read.
+    float climb = m.a * CLOUD_LEVELS;
+    float within = fract(climb);
+    if (within > 0.31 && within < 0.69) {
+        return clamp(ceil(climb), 1.0, CLOUD_LEVELS);
+    }
     float n = texture(Sampler1, pos / (size * 20.0) + 0.21).r;
-    return clamp(ceil(m.a * CLOUD_LEVELS + (n - 0.5) * STAIR_NOISE), 1.0, CLOUD_LEVELS);
+    return clamp(ceil(climb + (n - 0.5) * STAIR_NOISE), 1.0, CLOUD_LEVELS);
 }
 
 // How much of a point is under cells at level k or above: the four nearest cells blended, with the
@@ -318,6 +325,10 @@ vec2 warped(vec2 p, float size, float k) {
 // cover is thinning, so the middle of a level stays whole and revealed land stays clear.
 float wispCover(vec2 p, float size, float k) {
     float cover = levelCover(warped(p, size, k), size, k);
+    // Wholly in or out of the level, the bite takes nothing: no need to read the wisps.
+    if (cover <= 0.0 || cover >= 1.0) {
+        return cover;
+    }
     float bite = smoothstep(0.35, 0.75, wispAt(p, size));
     return cover - WISP * bite * (1.0 - cover) * cover * 2.0;
 }
