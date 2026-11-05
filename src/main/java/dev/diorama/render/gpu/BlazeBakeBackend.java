@@ -290,8 +290,8 @@ final class BlazeBakeBackend implements BakeBackend {
 		GpuBuffer faceBuffer = null;
 		GpuBuffer casterBuffer = null;
 		try {
-			faceBuffer = job.faceCount() == 0 ? null : device.createBuffer(() -> "Diorama bake faces", GpuBuffer.USAGE_VERTEX, job.faces);
-			casterBuffer = job.casterCount == 0 ? null : device.createBuffer(() -> "Diorama bake casters", GpuBuffer.USAGE_VERTEX, job.casters);
+			faceBuffer = job.faceCount() == 0 ? null : t.faces(device, encoder, job.faces);
+			casterBuffer = job.casterCount == 0 ? null : t.casters(device, encoder, job.casters);
 			RenderSystem.AutoStorageIndexBuffer quads = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
 			GpuBuffer indices = quads.getBuffer(6);
 			IndexType indexType = quads.type();
@@ -445,12 +445,6 @@ final class BlazeBakeBackend implements BakeBackend {
 			recorded[0] = System.nanoTime() - start;
 			GpuTileBaker.recorded(recorded[0]);
 		} finally {
-			if (faceBuffer != null) {
-				faceBuffer.close();
-			}
-			if (casterBuffer != null) {
-				casterBuffer.close();
-			}
 			job.free();
 		}
 		return true;
@@ -531,6 +525,36 @@ final class BlazeBakeBackend implements BakeBackend {
 		final GpuBuffer corners;
 		final GpuBuffer ubo;
 		final GpuQueryPool timestamps;
+		/**
+		 * The faces and shadow casters of the bake being drawn, grown to fit and kept. Making them
+		 * new for each bake took half of a bake's time on the render thread.
+		 */
+		private @Nullable GpuBuffer faces;
+		private @Nullable GpuBuffer casters;
+
+		GpuBuffer faces(GpuDevice device, CommandEncoder encoder, ByteBuffer data) {
+			this.faces = fit(device, this.faces, data.remaining(), "Diorama bake faces");
+			encoder.writeToBuffer(this.faces.slice(0, data.remaining()), data);
+			return this.faces;
+		}
+
+		GpuBuffer casters(GpuDevice device, CommandEncoder encoder, ByteBuffer data) {
+			this.casters = fit(device, this.casters, data.remaining(), "Diorama bake casters");
+			encoder.writeToBuffer(this.casters.slice(0, data.remaining()), data);
+			return this.casters;
+		}
+
+		/** {@code buffer} if it holds {@code bytes}, else a new one: the next power of two that does, at least a megabyte. */
+		private static GpuBuffer fit(GpuDevice device, @Nullable GpuBuffer buffer, long bytes, String label) {
+			if (buffer != null && buffer.size() >= bytes) {
+				return buffer;
+			}
+			if (buffer != null) {
+				buffer.close();
+			}
+			long size = Math.max(1L << 20, Long.highestOneBit(Math.max(1, bytes - 1)) << 1);
+			return device.createBuffer(() -> label, GpuBuffer.USAGE_VERTEX | GpuBuffer.USAGE_COPY_DST, size);
+		}
 
 		Targets() {
 			GpuDevice device = RenderSystem.getDevice();

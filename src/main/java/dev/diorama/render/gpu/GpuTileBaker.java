@@ -218,10 +218,13 @@ public final class GpuTileBaker {
 		return name == null ? "a GPU not set up yet" : name;
 	}
 
-	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
-	public static void frame() {
+	/**
+	 * Draws queued tiles. Call on the render thread at the start of a frame, outside any pass.
+	 * Returns whether it drew one, which is most of a frame's share of map work.
+	 */
+	public static boolean frame() {
 		if (!used || dead) {
-			return;
+			return false;
 		}
 		try {
 			if (!GpuBakeCheck.opened()) {
@@ -229,7 +232,7 @@ public final class GpuTileBaker {
 				GpuBakeCheck.open(device);
 				if (GpuBakeCheck.failed()) {
 					cancelAll();
-					return;
+					return false;
 				}
 			}
 			Backend.INSTANCE.poll();
@@ -240,13 +243,14 @@ public final class GpuTileBaker {
 					throw new IllegalStateException("the pixels of " + job.mesh.key + " never came back");
 				}
 			}
-			drawQueued(now);
+			return drawQueued(now);
 		} catch (Throwable t) {
 			// Nothing here may reach the frame: it would take the game down with it.
 			Diorama.LOGGER.error("GPU baking stopped", t);
 			dead = true;
 			GpuBakeCheck.broken(String.valueOf(t));
 			failAll();
+			return false;
 		}
 	}
 
@@ -264,7 +268,7 @@ public final class GpuTileBaker {
 		}
 	}
 
-	private static void drawQueued(long now) {
+	private static boolean drawQueued(long now) {
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
 			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
@@ -272,6 +276,7 @@ public final class GpuTileBaker {
 			backgroundBudget = Math.min(backgroundBudget + backgroundShare * (now - lastFrame), cost());
 		}
 		lastFrame = now;
+		boolean drew = false;
 		while (budget >= cost()) {
 			Job job = QUEUE.poll();
 			if (job == null) {
@@ -280,20 +285,23 @@ public final class GpuTileBaker {
 			if (draw(job)) {
 				// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
 				budget -= cost();
+				drew = true;
 			}
 		}
 		if (!QUEUE.isEmpty()) {
-			return;
+			return drew;
 		}
 		while (backgroundBudget >= cost()) {
 			Job job = BACKGROUND.poll();
 			if (job == null) {
-				return;
+				return drew;
 			}
 			if (draw(job)) {
 				backgroundBudget -= cost();
+				drew = true;
 			}
 		}
+		return drew;
 	}
 
 	/** Draws a job, or hands it back for tracing; returns whether the GPU drew anything. */

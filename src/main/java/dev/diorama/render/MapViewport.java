@@ -1,5 +1,6 @@
 package dev.diorama.render;
 
+import dev.diorama.Diorama;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileBaker;
@@ -12,6 +13,9 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import org.jspecify.annotations.Nullable;
@@ -43,7 +47,42 @@ public final class MapViewport {
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
 	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV) {
+		/**
+		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
+		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
+		 */
+		boolean sameGeometry(MaskInputs other) {
+			return this.layer == other.layer && this.originU == other.originU && this.originV == other.originV && this.texel == other.texel
+				&& this.rounded == other.rounded && this.scaleSteps == other.scaleSteps && this.fraction == other.fraction && this.fast == other.fast;
+		}
 	}
+
+	/**
+	 * Finishes fog masks off the render thread. After the tiles are read into the mask, the rest of
+	 * a build (rounding off, the soft edge, the clouds' heights, the reach marks, the cells) took 3 to
+	 * 5 milliseconds of the frame on a fast CPU, several times a second while flying over new land.
+	 * When only what the map knows changed, the view is where it was and a mask a frame late shows
+	 * the same: so this thread does that part, and the render thread uploads it once it's done.
+	 */
+	private static final ExecutorService MASK_WORKER = Executors.newSingleThreadExecutor(task -> {
+		Thread thread = new Thread(task, "diorama-fog-mask");
+		thread.setDaemon(true);
+		// Under the game's threads, over the bakers': the fog waits on it.
+		thread.setPriority(Thread.NORM_PRIORITY - 1);
+		return thread;
+	});
+	/**
+	 * The mask being finished on {@link #MASK_WORKER}, or null. Until it's done, everything a build
+	 * works in (the mask's pixels, the heights, the cells and what they're made with) is the
+	 * worker's, and the render thread leaves it alone.
+	 */
+	private @Nullable CompletableFuture<Void> finishing;
+	/** The worker's build threw: built again in full on the render thread. */
+	private volatile boolean finishFailed;
+	private static boolean finishFailureLogged;
+	/** The detail texture's part to upload with the mask: {x, y, edge}, pixels in {@link #detailUpload}. */
+	private final int[] detailArea = new int[3];
+	private int @Nullable [] detailUpload;
 
 	/**
 	 * Where and how big a map is drawn, and what part of the map it shows. A {@code round} view
@@ -575,15 +614,26 @@ public final class MapViewport {
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
 		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV);
-		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
+		boolean sameLevel = this.maskLevel.get() == level;
+		this.takeFinished();
+		if (sameLevel && inputs.equals(this.maskInputs)) {
 			// A few times a second: a cell's level, all the heights show as, changes far less often.
-			if (this.lifting && System.currentTimeMillis() - this.liftMs >= EASE_MS) {
-				this.easeLift();
+			if (this.finishing == null && this.lifting && System.currentTimeMillis() - this.liftMs >= EASE_MS) {
+				this.finish(this::easeLift, true);
 			}
 			return;
 		}
+		boolean later = sameLevel && this.maskInputs != null && inputs.sameGeometry(this.maskInputs);
+		if (this.finishing != null) {
+			if (later) {
+				// The next starts once this one is in.
+				return;
+			}
+			// The view moved: what's being finished wouldn't line up. It's what the heights ease from, though.
+			this.finishing.join();
+			this.finishing = null;
+		}
 		MaskInputs before = this.maskInputs;
-		boolean sameLevel = this.maskLevel.get() == level;
 		this.maskInputs = inputs;
 		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
@@ -683,14 +733,8 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}
 		}
-		if (rounded) {
-			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
-		}
-		this.writeSoft(texel, view.layer() != TileKey.SURFACE, fast);
-		this.lifting = false;
 		boolean surface = view.layer() == TileKey.SURFACE;
 		boolean clouds = surface && !level.roofless();
-		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds ? cellScale : 0);
 		if (surface) {
 			if (memory != null) {
 				// The whole mask, not just the view: the clouds climb toward land the old map never
@@ -710,6 +754,33 @@ public final class MapViewport {
 				Arrays.fill(this.remembered, 0);
 			}
 		}
+		int centerI = (int) Math.floor((view.centerU() - originU) / texel);
+		int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
+		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
+		// Read here, so the worker finds it made.
+		FogTextures.noiseBytes();
+		this.finish(() -> this.finishBuild(before, sameLevel, inputs, rounded, surface, clouds, cellScale, centerI, centerJ, grid), later);
+	}
+
+	/**
+	 * The rest of a mask's build, from the known share read into the mask's pixels (and the
+	 * remembered map into {@link #remembered}) to everything the textures take. Doesn't touch the
+	 * map or the textures, so it can run on {@link #MASK_WORKER}.
+	 */
+	private void finishBuild(@Nullable MaskInputs before, boolean sameLevel, MaskInputs inputs, boolean rounded, boolean surface, boolean clouds,
+		int cellScale, int centerI, int centerJ, @Nullable CellGrid grid) {
+		double texel = inputs.texel();
+		int scaleSteps = inputs.scaleSteps();
+		int lod = inputs.lod();
+		boolean fast = inputs.fast();
+		double originU = inputs.originU();
+		double originV = inputs.originV();
+		if (rounded) {
+			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
+		}
+		this.writeSoft(texel, !surface, fast);
+		this.lifting = false;
+		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds ? cellScale : 0);
 		if (!clouds) {
 			// Caves and smoke keep the fog as it always was: full height (alpha 255), but over a
 			// remembered map, whose share alpha is 255 less, so the fog lies low there.
@@ -720,15 +791,13 @@ public final class MapViewport {
 				}
 			}
 		} else {
-			int centerI = (int) Math.floor((view.centerU() - originU) / texel);
-			int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
 			this.liftTargets(centerI, centerJ, texel, scaleSteps);
 			// The heights ease to new ones, as tiles land (as often as every frame in a redraw) or the
 			// view pans; a pan moves them with the ground. The mask can't see explored land past its
 			// edge, so heights near the edge are only a guess, corrected as a pan brings that land in:
 			// eased, that reads as the clouds settling, not jumping. A new mask scale or another map
 			// has nothing to ease from.
-			boolean fresh = !sameLevel || before == null || before.texel() != texel || before.lod() != lod || before.layer() != view.layer()
+			boolean fresh = !sameLevel || before == null || before.texel() != texel || before.lod() != lod || before.layer() != inputs.layer()
 				|| before.scaleSteps() != scaleSteps;
 			int di = fresh ? 0 : (int) Math.round((originU - before.originU()) / texel);
 			int dj = fresh ? 0 : (int) Math.round((originV - before.originV()) / texel);
@@ -753,9 +822,58 @@ public final class MapViewport {
 			this.writeRemembered();
 			this.writeLift();
 		}
-		this.cellGrid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
+		this.cellGrid = grid;
 		this.writeCells(true);
-		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+	}
+
+	/**
+	 * Runs {@code work}, a build's or an ease's part that doesn't touch the textures, then uploads
+	 * what it made: on the worker if {@code later}, the upload then on a later frame (see
+	 * {@link #takeFinished}), else here and now.
+	 */
+	private void finish(Runnable work, boolean later) {
+		if (!later) {
+			work.run();
+			this.uploadMask();
+			return;
+		}
+		this.finishFailed = false;
+		this.finishing = CompletableFuture.runAsync(() -> {
+			try {
+				work.run();
+			} catch (Throwable t) {
+				this.finishFailed = true;
+				if (!finishFailureLogged) {
+					finishFailureLogged = true;
+					Diorama.LOGGER.error("Building the fog mask failed", t);
+				}
+			}
+		}, MASK_WORKER);
+	}
+
+	/** Uploads the mask the worker finished, if it has. Render thread. */
+	private void takeFinished() {
+		if (this.finishing == null || !this.finishing.isDone()) {
+			return;
+		}
+		this.finishing = null;
+		if (this.finishFailed) {
+			// Half made: the next frame builds it all again, here.
+			this.maskInputs = null;
+			return;
+		}
+		this.uploadMask();
+	}
+
+	/** The mask's pixels and the detail texture's changed part to the graphics card. Render thread. */
+	private void uploadMask() {
+		if (this.maskTexture != null) {
+			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+		}
+		if (this.detailTexture != null && this.detailUpload != null) {
+			this.detailTexture.write(0, this.detailArea[0], this.detailArea[1], this.detailArea[2], this.detailUpload);
+		}
+		this.detailUpload = null;
 		this.fogSerial++;
 	}
 
@@ -902,10 +1020,6 @@ public final class MapViewport {
 		}
 		this.writeLift();
 		this.writeCells(false);
-		if (this.maskTexture != null) {
-			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
-		}
-		this.fogSerial++;
 	}
 
 	/** The drawn heights into the mask's alpha. */
@@ -1118,11 +1232,8 @@ public final class MapViewport {
 			// mask's edge a margin before the view's): the cells are there.
 			pixels[0] |= 0xFF000000;
 		}
-		if (this.detailTexture == null) {
-			return;
-		}
 		if (all || changed == null) {
-			this.detailTexture.write(0, 0, 0, edge, pixels);
+			this.detailWrite(0, 0, edge, pixels);
 			return;
 		}
 		// The square from the changed cells' first corner that holds them all, if it fits in the texture.
@@ -1130,7 +1241,7 @@ public final class MapViewport {
 		int y0 = changed[2];
 		int side = Math.max(changed[1] - x0, changed[3] - y0) + 1;
 		if (x0 + side > DETAIL || y0 + side > DETAIL) {
-			this.detailTexture.write(0, 0, 0, edge, pixels);
+			this.detailWrite(0, 0, edge, pixels);
 			return;
 		}
 		int[] part = this.detailPart.length >= side * side ? this.detailPart : (this.detailPart = new int[side * side]);
@@ -1141,7 +1252,15 @@ public final class MapViewport {
 				part[j * side + i] = x < edge && y < edge ? pixels[y * edge + x] : 0;
 			}
 		}
-		this.detailTexture.write(0, x0, y0, side, part);
+		this.detailWrite(x0, y0, side, part);
+	}
+
+	/** Which part of the detail texture {@link #uploadMask} sends. */
+	private void detailWrite(int x, int y, int edge, int[] pixels) {
+		this.detailArea[0] = x;
+		this.detailArea[1] = y;
+		this.detailArea[2] = edge;
+		this.detailUpload = pixels;
 	}
 
 	private int detailEdge;
@@ -1385,6 +1504,11 @@ public final class MapViewport {
 	}
 
 	public void close() {
+		if (this.finishing != null) {
+			// Its arrays are the next build's.
+			this.finishing.join();
+			this.finishing = null;
+		}
 		if (this.maskTexture != null) {
 			this.maskTexture.close();
 			this.maskTexture = null;

@@ -821,14 +821,7 @@ public final class MapLevel implements ChunkSource {
 				this.dirty.computeIfAbsent(changedOverview, k -> new Dirty(0)).blocks.set(0);
 			}
 		}
-		TileImage image;
-		while ((image = this.finished.poll()) != null) {
-			this.bakeFinished(image);
-			// After the image reached the store, so a tile from the save either reads it or hears of it.
-			if (this.savedTilesBaking.contains(image.key())) {
-				this.savedTilesRaced.add(image.key());
-			}
-		}
+		this.takeFinished(Integer.MAX_VALUE);
 		SavedTile savedTile;
 		while ((savedTile = this.fromSave.poll()) != null) {
 			savedTile.taken().complete(this.tileFromSave(savedTile.image(), savedTile.store()));
@@ -900,6 +893,22 @@ public final class MapLevel implements ChunkSource {
 		}
 		this.wanted.clear();
 		this.evict();
+	}
+
+	/**
+	 * Takes up to {@code most} finished bakes, oldest first. Frames take one each between updates,
+	 * so a tile's upload doesn't land on the same frame as the next one's, or as the tick's work;
+	 * {@link #update} takes whatever is left. Render thread.
+	 */
+	public void takeFinished(int most) {
+		TileImage image;
+		for (int taken = 0; taken < most && (image = this.finished.poll()) != null; taken++) {
+			this.bakeFinished(image);
+			// After the image reached the store, so a tile from the save either reads it or hears of it.
+			if (this.savedTilesBaking.contains(image.key())) {
+				this.savedTilesRaced.add(image.key());
+			}
+		}
 	}
 
 	/** Takes a finished bake: shows it if a map still wants it, and saves it. */

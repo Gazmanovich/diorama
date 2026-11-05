@@ -165,6 +165,17 @@ public final class MapSession {
 		}
 	}
 
+	/**
+	 * Takes a finished tile, unless the frame already drew a GPU bake ({@code baked}). Call every
+	 * frame, on the render thread.
+	 */
+	public static void frame(boolean baked) {
+		MapSession session = current;
+		if (session != null && !baked && session.level == mc().level) {
+			session.map.takeFinished(1);
+		}
+	}
+
 	/** Keeps the session in step with the client's level. Call every client tick. */
 	public static void tick(Minecraft mc) {
 		MapSession session = forLevel(mc.level);

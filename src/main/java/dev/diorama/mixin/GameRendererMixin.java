@@ -31,7 +31,8 @@ public abstract class GameRendererMixin {
 	/*@Inject(method = "render(FJZ)V", at = @At("HEAD"))
 	*///?}
 	private void diorama$gpuBakes(CallbackInfo ci) {
-		dev.diorama.render.gpu.GpuTileBaker.frame();
+		boolean baked = dev.diorama.render.gpu.GpuTileBaker.frame();
+		dev.diorama.MapSession.frame(baked);
 	}
 
 	//? if >=26.1 {
