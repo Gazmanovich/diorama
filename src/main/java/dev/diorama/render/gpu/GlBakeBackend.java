@@ -420,7 +420,8 @@ final class GlBakeBackend implements BakeBackend {
 		// Under a roof the voxels too, for the shadows the shadow map misses.
 		this.opaqueProgram = program(vsh, fsh, Map.of("ShadowMap", 0, "Sky", 1, "Voxels", 2), null, depth);
 		this.tintedProgram = program(vsh, fsh, faces, "TINTED", depth);
-		this.waterProgram = program(vsh, fsh, faces, "WATER", depth);
+		// The voxels stay bound on unit 2 from the opaque pass.
+		this.waterProgram = program(vsh, fsh, Map.of("ShadowMap", 0, "Sky", 1, "Voxels", 2), "WATER", depth);
 		Map<String, Integer> composite = new LinkedHashMap<>();
 		String[] names = {"SceneColor", "SceneDepth", "SceneAux", "Tint", "WaterColor", "WaterDepth"};
 		for (int i = 0; i < names.length; i++) {

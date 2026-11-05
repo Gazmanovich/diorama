@@ -6,7 +6,7 @@
 #extension GL_ARB_separate_shader_objects : require
 #define LOC(n) layout(location = n)
 #define VERTEX_INDEX gl_VertexIndex
-#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(WATER) && !defined(TINTED)
+#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(TINTED)
 #define VOXEL_WALK
 #endif
 
@@ -14,7 +14,7 @@
 //?} else {
 /*#define LOC(n)
 #define VERTEX_INDEX gl_VertexID
-#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(WATER) && !defined(TINTED)
+#if !defined(SKY_PASS) && !defined(SHADOW) && !defined(TINTED)
 #define VOXEL_WALK
 #endif
 
@@ -256,7 +256,9 @@ void main() {
         if (Light.z > 0.0) {
             ambient *= 1.0 - Light.z * (1.0 - (0.15 + 0.85 * bilinear(faceSky, faceUv)));
         }
-        lit = ambient + sunlight(localPos + normal * 0.06, vec3(0.0)) * Light.y;
+        // As TileBaker.mixWater: the sun's own ray from the surface, without a nudge, and like the
+        // ground's it can meet a block nearer than the caster the shadow map holds.
+        lit = ambient + far_sunlight(localPos + normal * 0.06, localPos + normal * 1e-4, vec3(0.0), true) * Light.y;
         if (Light.w != 0.0) {
             lit *= 1.0 + Light.w * clamp((localPos.y - 64.0) / 64.0, -1.0, 1.0);
         }
