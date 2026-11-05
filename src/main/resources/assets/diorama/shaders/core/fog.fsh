@@ -545,6 +545,10 @@ void main() {
     }
     vec2 toSun = vec2(-1.0, -0.4) * (9.0 * fogScale / unitsPerUv);
 
+    // The known share right here, sharp and soft, read once.
+    float knownHere = knownAt(maskUv);
+    float soft = knownSoft(maskUv);
+
     bool cloudy = false;
     vec3 cloudGlow = vec3(0.0);
     float cloudCover = 0.0;
@@ -593,9 +597,8 @@ void main() {
         float through = c.a;
         // Round the revealed map at the bottom, a soft sky-coloured haze against the cloud walls;
         // where there's no map at all, the same haze fills what the rounded edges leave.
-        float soft = knownSoft(maskUv);
         float halo = HALO * (1.0 - smoothstep(0.55, 1.0, soft));
-        float empty = 1.0 - smoothstep(0.3, 0.85, knownAt(maskUv));
+        float empty = 1.0 - smoothstep(0.3, 0.85, knownHere);
         float mist = max(halo, empty);
         glow += through * mist * vec3(0.64, 0.75, 0.9);
         through *= 1.0 - mist;
@@ -635,7 +638,6 @@ void main() {
     }
 
     // The ground under a thick bank is never visible.
-    float soft = knownSoft(maskUv);
     // Low fog over a remembered map keeps the old map under it.
     float floorFog = smoothstep(0.5, 2.5, thicknessAt(maskUv, soft)) * smoothstep(0.3, 0.9, liftHere) * (1.0 - memory);
     color += (1.0 - alpha) * floorFog * shade;
@@ -643,14 +645,14 @@ void main() {
 
     // Ground that is known right here stays visible; fog only rolls over its edges. Caves use the
     // sharp mask so narrow tunnels stay clear; the surface uses the blurred one so banks stay soft.
-    float here = cave ? knownAt(maskUv) : soft;
+    float here = cave ? knownHere : soft;
     alpha *= 1.0 - 0.85 * smoothstep(0.45, 0.95, here);
 
     // Where there is no map at all, nothing should show through, or the edge of the data would
     // read as a hard line inside the bank.
     // The cover takes the colour the layers already have here, so it doesn't show as a band.
     // A remembered map is only covered up as its fog reaches the full height.
-    float empty = (1.0 - smoothstep(0.3, 0.85, knownAt(maskUv))) * mix(MEMORY_COVER, 1.0, smoothstep(0.7, 1.0, liftHere)) * (1.0 - memory);
+    float empty = (1.0 - smoothstep(0.3, 0.85, knownHere)) * mix(MEMORY_COVER, 1.0, smoothstep(0.7, 1.0, liftHere)) * (1.0 - memory);
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
