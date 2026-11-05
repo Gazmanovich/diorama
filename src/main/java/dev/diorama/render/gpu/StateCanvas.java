@@ -109,10 +109,10 @@ final class StateCanvas implements MapCanvas {
 	}
 
 	@Override
-	public void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
+	public void fog(MapTexture mask, MapTexture noise, MapTexture detail, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
 		this.graphics.guiRenderState.addGuiElement(QuadElement.of(
 			DioramaPipelines.FOG,
-			StateTexture.pair((StateTexture) mask, Sampling.CLAMP_LINEAR, (StateTexture) noise, Sampling.REPEAT_LINEAR),
+			StateTexture.triple((StateTexture) mask, Sampling.CLAMP_LINEAR, (StateTexture) noise, Sampling.REPEAT_LINEAR, (StateTexture) detail, Sampling.CLAMP_LINEAR),
 			new Matrix3x2f(this.graphics.pose()),
 			corners,
 			uvs,
