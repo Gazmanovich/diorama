@@ -86,13 +86,15 @@ float caster_gap(vec3 p) {
 const int NUDGED_STEPS = 8;
 
 // Whether a ray from p toward the sun nudged by jitter meets a caster g blocks out, found over
-// some spot: that far out the ray is over p + jitter * g, so it does if there's one in reach there.
-bool nudged_meets(vec3 p, vec3 jitter, float g) {
+// some spot: that far out the ray is over p + jitter * g, so it does if there's one in reach
+// there, and, found by following the ray, about as far out (within blocks), or it could be another
+// caster that ray passes by.
+bool nudged_meets(vec3 p, vec3 jitter, float g, float within) {
     if (g <= Shadow.x || g >= SunDir.w) {
         return false;
     }
     float there = caster_gap(p + jitter * g);
-    return there > Shadow.x && there < SunDir.w;
+    return there > Shadow.x && there < SunDir.w && abs(there - g) <= within;
 }
 
 // 1 where the sun reaches p, 0 where a block within the shadow distance is in the way. The
@@ -104,7 +106,7 @@ bool nudged_meets(vec3 p, vec3 jitter, float g) {
 // over p left the outer sides of edges lit, and the map brighter than the tracer's along every
 // shadow, enough in a city of tall builds to fail GPU baking's check.
 float sunlight(vec3 p, vec3 jitter) {
-    if (nudged_meets(p, jitter, caster_gap(p))) {
+    if (nudged_meets(p, jitter, caster_gap(p), SunDir.w)) {
         return 0.0;
     }
     if (jitter == vec3(0.0)) {
@@ -115,7 +117,7 @@ float sunlight(vec3 p, vec3 jitter) {
         // t blocks out the ray is over this spot: a caster about t from it is one it can meet.
         float t = (float(i) + 0.5) * step;
         float g = caster_gap(p + jitter * t);
-        if (abs(g - t) <= 0.5 * step && nudged_meets(p, jitter, g)) {
+        if (abs(g - t) <= 0.5 * step && nudged_meets(p, jitter, g, 0.5 * step)) {
             return 0.0;
         }
     }
