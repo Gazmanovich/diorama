@@ -283,8 +283,17 @@ public final class GpuMesher {
 	 * what the player has seen, and overlay bits are recorded when {@code overlays} isn't null.
 	 */
 	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
+		return build(key, source, looks, fogOfWar, overlays, null);
+	}
+
+	/**
+	 * Same, with the saved tile's {@link TileSpots}: cells of chunks the map has no data for are
+	 * open where every saved ray through them stood lower (see {@link TileSpots#passedWhenSaved}),
+	 * as the tracer has them.
+	 */
+	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, int @Nullable [] savedSpots) {
 		long start = System.nanoTime();
-		TileBaker helper = TileBaker.forMeshing(key, source, looks, fogOfWar);
+		TileBaker helper = TileBaker.forMeshing(key, source, looks, fogOfWar, savedSpots);
 		VoxelReader reader = helper.reader;
 		MapStyle style = MapStyle.get();
 		double sin = Projection.sin();
@@ -374,7 +383,7 @@ public final class GpuMesher {
 					}
 					int id = reader.state(x, y, z);
 					if (id == VoxelReader.UNKNOWN) {
-						if (!helper.passesMissing(y)) {
+						if (!helper.passesMissing(y) && !helper.passedWhenSaved(x, y, z)) {
 							if (fromAbove) {
 								mesh.opaque.add(x, y, z, TOP, 0, 0, 0, UNKNOWN);
 							}

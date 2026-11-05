@@ -112,8 +112,8 @@ public final class TileStore {
 		}
 	}
 
-	/** A saved tile's pixels and its {@link BlockLight}, which is null if it was saved without. */
-	public record Saved(int[] pixels, byte @Nullable [] blockLight) {
+	/** A saved tile's pixels, its {@link BlockLight} and its {@link dev.diorama.bake.TileSpots}, either null where it was saved without. */
+	public record Saved(int[] pixels, byte @Nullable [] blockLight, int @Nullable [] spots) {
 	}
 
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
@@ -187,7 +187,7 @@ public final class TileStore {
 				}
 			}
 		}
-		return out == null ? null : new Saved(out, BlockLight.overview(childLight, childPixels));
+		return out == null ? null : new Saved(out, BlockLight.overview(childLight, childPixels), null);
 	}
 
 	/** A tile was written: the overview tiles above it are now out of date. */
@@ -273,7 +273,7 @@ public final class TileStore {
 		synchronized (this.io) {
 			this.merge(key);
 			Tile tile = this.saved(key);
-			return tile == null ? null : new Saved(tile.pixels, tile.blockLight);
+			return tile == null ? null : new Saved(tile.pixels, tile.blockLight, tile.spots);
 		}
 	}
 
