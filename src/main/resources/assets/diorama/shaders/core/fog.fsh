@@ -507,14 +507,24 @@ float hash(vec2 p) {
     return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
-// A random number, -0.5 to 0.5, for each square of the map a pixel or more across (a power of two
-// of map units), so it stays with the map as the view pans and zooms: from the screen's pixels,
-// the clouds' thin wisps were hit by different steps of the march each time the map moved, and
-// changed shape. It repeats with the noise's period, which the map point wraps at.
+// A random number for the map square of side q that holds p. It repeats every 1024 map units,
+// which every jump of the map point (a multiple of the noise's coarse period) is a whole number of.
+float squareHash(vec2 p, float q) {
+    return hash(mod(floor(p / q), max(2.0 * NOISE_PERIOD / q, 1.0)));
+}
+
+// The march's jitter, -0.5 to 0.5, from the map point rather than the screen pixel, so it stays
+// with the map as the view pans and zooms: from the screen's pixels, the clouds' thin wisps were
+// hit by different steps of the march each time the map moved, and changed shape. Squares of the
+// two powers of two around a pixel's size are blended by where the pixel falls between them, so
+// zooming changes it smoothly; at each power of two it is that size's alone. The blend is
+// scaled back to the spread of one square's number.
 float mapJitter(vec2 p, vec2 pixel) {
-    float q = exp2(ceil(log2(max(max(pixel.x, pixel.y), 1e-4))));
-    float period = NOISE_PERIOD * exp2(scaleSteps + 1.0) / q;
-    return hash(mod(floor(p / q), period)) - 0.5;
+    float size = log2(max(max(pixel.x, pixel.y), 1e-4));
+    float q = exp2(floor(size));
+    float t = size - floor(size);
+    float j = mix(squareHash(p, q), squareHash(p, q * 2.0), t) - 0.5;
+    return clamp(j / length(vec2(1.0 - t, t)), -0.5, 0.5);
 }
 
 void main() {
