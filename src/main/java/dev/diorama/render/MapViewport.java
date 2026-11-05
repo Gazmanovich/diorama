@@ -632,6 +632,10 @@ public final class MapViewport {
 			// The view moved: what's being finished wouldn't line up. It's what the heights ease from, though.
 			this.finishing.join();
 			this.finishing = null;
+			if (this.finishFailed) {
+				// Half made: nothing to ease from.
+				this.maskInputs = null;
+			}
 		}
 		MaskInputs before = this.maskInputs;
 		this.maskInputs = inputs;
