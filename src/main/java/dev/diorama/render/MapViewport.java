@@ -433,7 +433,7 @@ public final class MapViewport {
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
-		if (this.drawFogLayer(canvas, view, mu0, mv0, mu1, mv1, params)) {
+		if (this.drawFogLayer(canvas, view, originU, originV, span, params)) {
 			return;
 		}
 		if (view.round()) {
@@ -455,38 +455,56 @@ public final class MapViewport {
 	 * The fog at half the screen's resolution, scaled up: drawn into {@link FogLayer} when anything it
 	 * shows changes (the mask, the view, the parameters) or a game tick goes by, which moves the
 	 * clouds' slow drift on, and otherwise shown again as it is. False if the layer couldn't be drawn.
+	 *
+	 * <p>The layer's texels sit on a grid fixed to the map, whole texels from map 0, and the layer is
+	 * shown shifted by where the view starts within a texel. So a pan draws the same fog at the same
+	 * points of the map, and what's on screen moves with the map rather than being worked out afresh
+	 * at new points, which made the clouds' thin wisps change shape as the map moved.
 	 */
-	private boolean drawFogLayer(MapCanvas canvas, View view, float mu0, float mv0, float mu1, float mv1, int params) {
+	private boolean drawFogLayer(MapCanvas canvas, View view, double originU, double originV, double span, int params) {
 		double scale = Minecraft.getInstance().getWindow().getGuiScale() / 2.0;
-		int width = Math.max(1, (int) Math.ceil(view.width() * scale));
-		int height = Math.max(1, (int) Math.ceil(view.height() * scale));
+		// The view in layer texels, and a texel in map units.
+		double texelsW = view.width() * scale;
+		double texelsH = view.height() * scale;
+		double texel = 1 / (view.zoom() * scale);
+		// From the grid line a texel before the view's start, so what's shown never blends with a
+		// texel the layer didn't draw; a texel more after its end for the same reason.
+		double startU = (Math.floor(view.minU() / texel) - 1) * texel;
+		double startV = (Math.floor(view.minV() / texel) - 1) * texel;
+		double shiftU = (view.minU() - startU) / texel;
+		double shiftV = (view.minV() - startV) / texel;
+		int width = (int) Math.ceil(shiftU + texelsW) + 1;
+		int height = (int) Math.ceil(shiftV + texelsH) + 1;
 		if (this.fogLayer == null) {
 			this.fogLayer = new FogLayer();
 		}
+		float u0 = (float) ((startU - originU) / span);
+		float v0 = (float) ((startV - originV) / span);
+		float u1 = (float) ((startU + width * texel - originU) / span);
+		float v1 = (float) ((startV + height * texel - originV) / span);
 		var world = Minecraft.getInstance().level;
-		LayerKey key = new LayerKey(this.fogSerial, params, width, height, mu0, mv0, mu1, mv1, world == null ? 0 : world.getGameTime());
+		LayerKey key = new LayerKey(this.fogSerial, params, width, height, u0, v0, u1, v1, world == null ? 0 : world.getGameTime());
 		if (!key.equals(this.layerKey) || this.fogLayer.texture() == null) {
-			// A texel more each way than is shown, the mask range stretched to match, so what's
-			// shown never blends with a texel the layer didn't draw.
-			float wideU = mu0 + (mu1 - mu0) * (width + 1) / width;
-			float wideV = mv0 + (mv1 - mv0) * (height + 1) / height;
-			if (!this.fogLayer.render(canvas, this.maskTexture, FogTextures.noise(), this.detailTexture, width + 1, height + 1, mu0, mv0, wideU, wideV, params | LAYER_CODE << 24)) {
+			if (!this.fogLayer.render(canvas, this.maskTexture, FogTextures.noise(), this.detailTexture, width, height, u0, v0, u1, v1, params | LAYER_CODE << 24)) {
 				return false;
 			}
 			this.layerKey = key;
 		}
 		MapTexture layer = this.fogLayer.texture();
-		float su = width / (float) this.fogLayer.size();
-		float sv = height / (float) this.fogLayer.size();
+		float size = this.fogLayer.size();
+		float su0 = (float) (shiftU / size);
+		float sv0 = (float) (shiftV / size);
+		float su1 = (float) ((shiftU + texelsW) / size);
+		float sv1 = (float) ((shiftV + texelsH) / size);
 		float x1 = view.x() + view.width();
 		float y1 = view.y() + view.height();
 		if (view.round()) {
-			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), x1, y1, 0, 0, su, sv);
+			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), x1, y1, su0, sv0, su1, sv1);
 			if (disc != null) {
 				canvas.quad(layer, Sampling.CLAMP_LINEAR, disc.corners(), disc.uvs(), 0xFFFFFFFF);
 			}
 		} else {
-			canvas.rect(layer, Sampling.CLAMP_LINEAR, view.x(), view.y(), x1, y1, 0, 0, su, sv, 0xFFFFFFFF);
+			canvas.rect(layer, Sampling.CLAMP_LINEAR, view.x(), view.y(), x1, y1, su0, sv0, su1, sv1, 0xFFFFFFFF);
 		}
 		return true;
 	}

@@ -507,6 +507,16 @@ float hash(vec2 p) {
     return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
+// A random number, -0.5 to 0.5, for each square of the map a pixel or more across (a power of two
+// of map units), so it stays with the map as the view pans and zooms: from the screen's pixels,
+// the clouds' thin wisps were hit by different steps of the march each time the map moved, and
+// changed shape. It repeats with the noise's period, which the map point wraps at.
+float mapJitter(vec2 p, vec2 pixel) {
+    float q = exp2(ceil(log2(max(max(pixel.x, pixel.y), 1e-4))));
+    float period = NOISE_PERIOD * exp2(scaleSteps + 1.0) / q;
+    return hash(mod(floor(p / q), period)) - 0.5;
+}
+
 void main() {
     seconds = GameTime * 1200.0;
     // The red byte is the noise offset in its top three bits and, in its low five, how see-through
@@ -550,6 +560,10 @@ void main() {
         shade = vec3(0.07, 0.055, 0.055);
     }
     vec2 toSun = vec2(-1.0, -0.4) * (9.0 * fogScale / unitsPerUv);
+    // The map point under this pixel, and its jitter.
+    originMap = noiseOrigin * NOISE_PERIOD * exp2(scaleSteps + 1.0);
+    vec2 p0 = originMap + maskUv * unitsPerUv;
+    float jitter = mapJitter(p0, fwidth(p0));
 
     // The known share right here, sharp and soft, read once.
     float knownHere = knownAt(maskUv);
@@ -559,10 +573,7 @@ void main() {
     vec3 cloudGlow = vec3(0.0);
     float cloudCover = 0.0;
     if (!cave && !smoke) {
-        originMap = noiseOrigin * NOISE_PERIOD * exp2(scaleSteps + 1.0);
-        vec2 p0 = originMap + maskUv * unitsPerUv;
         float size = CLOUD_CELL * exp2(scaleSteps);
-        float jitter = hash(gl_FragCoord.xy) - 0.5;
         // Cells double in size halfway between two zoom steps, handing over quickly: two layouts
         // blended for long would show as ghost clouds.
         float handover = smoothstep(0.42, 0.58, scaleFraction);
@@ -622,7 +633,6 @@ void main() {
 
     vec3 color = vec3(0.0);
     float alpha = 0.0;
-    float jitter = hash(gl_FragCoord.xy) - 0.5;
     int layers = fast ? FAST_LAYERS : LAYERS;
     for (int i = 0; i < layers; i++) {
         float h = fogHeight * (1.0 - (float(i) + 0.5 + jitter * 0.6) / float(layers));
@@ -700,6 +710,6 @@ void main() {
         fragColor = vec4(mix(shade, lit, 0.7), 0.0);
         return;
     }
-    color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
+    color += jitter / 255.0;
     fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
 }
