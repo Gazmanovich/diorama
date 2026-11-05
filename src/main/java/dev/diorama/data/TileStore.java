@@ -8,7 +8,7 @@ import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
 import dev.diorama.bake.TileChunks;
 import dev.diorama.bake.TileSpots;
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -432,8 +432,10 @@ public final class TileStore {
 				int[] pixels;
 				byte[] light;
 				if (image.isFull()) {
-					pixels = image.mips()[0].clone();
-					light = image.blockLight() == null ? null : image.blockLight().clone();
+					// A bake's pixels and light never change once made, so the saved tile can be them: a
+					// copy was another tile-sized array for every bake, kept for seconds.
+					pixels = image.mips()[0];
+					light = image.blockLight();
 				} else {
 					pixels = saved == null ? new int[size * size] : saved.pixels.clone();
 					light = saved == null || saved.blockLight == null ? null : saved.blockLight.clone();
@@ -493,7 +495,8 @@ public final class TileStore {
 			return saved;
 		}
 		if (image.isFull()) {
-			return fresh.clone();
+			// Like the pixels, a bake's spots are made for it and never changed.
+			return fresh;
 		}
 		int[] spots = saved == null ? new int[fresh.length] : saved.clone();
 		for (TileImage.Patch patch : image.patches()) {
@@ -770,51 +773,79 @@ public final class TileStore {
 			}
 			int size = Projection.TILE_PIXELS;
 			InflaterInputStream inflated = new InflaterInputStream(in);
-			byte[] bytes = inflated.readNBytes(size * size * 4);
-			if (bytes.length != size * size * 4) {
+			// Read through a small buffer, not a byte copy of the whole tile.
+			ByteBuffer buffer = ByteBuffer.allocate(IO_BUFFER).order(ByteOrder.LITTLE_ENDIAN);
+			int[] pixels = new int[size * size];
+			if (!readInts(inflated, buffer, pixels)) {
 				return null;
 			}
-			int[] pixels = new int[size * size];
-			ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
 			// Tiles saved before spots, and overview tiles saved before chunks, end here. Each block
-			// after the pixels starts with its name, so one left out is just missing.
-			int extraMagic = key.lod() > 0 ? CHUNKS_MAGIC : SPOTS_MAGIC;
-			int extraLength = key.lod() > 0 ? size * size : TileSpots.COLUMNS * TileSpots.ROWS * 4;
-			byte[] extra = null;
-			int name = readName(inflated);
-			if (name == extraMagic) {
-				extra = inflated.readNBytes(extraLength);
-				if (extra.length != extraLength) {
-					extra = null;
+			// after the pixels starts with its name, so one left out is just missing; a block is read
+			// in full before its name counts.
+			int name = readInt(inflated);
+			byte[] chunks = null;
+			int[] spots = null;
+			if (key.lod() > 0 && name == CHUNKS_MAGIC) {
+				chunks = new byte[size * size];
+				if (inflated.readNBytes(chunks, 0, chunks.length) != chunks.length) {
+					chunks = null;
 				}
-				name = extra == null ? 0 : readName(inflated);
+				name = chunks == null ? 0 : readInt(inflated);
+			} else if (key.lod() == 0 && name == SPOTS_MAGIC) {
+				spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
+				if (!readInts(inflated, buffer, spots)) {
+					spots = null;
+				}
+				name = spots == null ? 0 : readInt(inflated);
 			}
 			byte[] light = null;
 			if (name == LIGHT_MAGIC) {
-				light = inflated.readNBytes(BlockLight.EDGE * BlockLight.EDGE);
-				if (light.length != BlockLight.EDGE * BlockLight.EDGE) {
+				light = new byte[BlockLight.EDGE * BlockLight.EDGE];
+				if (inflated.readNBytes(light, 0, light.length) != light.length) {
 					light = null;
 				}
 			}
-			if (key.lod() > 0) {
-				return new Tile(pixels, null, extra, light);
-			}
-			int[] spots = null;
-			if (extra != null) {
-				spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
-				ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(spots);
-			}
-			return new Tile(pixels, spots, null, light);
+			// The stream's checksum is only checked at its end: reading on to it makes damage anywhere
+			// above, a block's name included, throw instead of reading as a block left out.
+			inflated.transferTo(OutputStream.nullOutputStream());
+			return new Tile(pixels, spots, chunks, light);
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read saved tile {}", file, e);
 			return null;
 		}
 	}
 
-	/** The next block's name in a tile file, or 0 at its end. */
-	private static int readName(InputStream in) throws IOException {
-		byte[] name = in.readNBytes(4);
-		return name.length == 4 ? ByteBuffer.wrap(name).order(ByteOrder.LITTLE_ENDIAN).getInt() : 0;
+	/** Bytes read or written at a time: a tile file goes through this, not a copy of itself. */
+	private static final int IO_BUFFER = 1 << 16;
+
+	/** Fills {@code out} with little-endian ints from {@code in}, through {@code buffer}; false if the stream ends first. */
+	private static boolean readInts(InputStream in, ByteBuffer buffer, int[] out) throws IOException {
+		int perRead = buffer.capacity() / 4;
+		for (int at = 0; at < out.length; at += perRead) {
+			int n = Math.min(perRead, out.length - at);
+			if (in.readNBytes(buffer.array(), 0, n * 4) != n * 4) {
+				return false;
+			}
+			buffer.asIntBuffer().get(out, at, n);
+		}
+		return true;
+	}
+
+	/** A little-endian int from {@code in}, or 0 if the stream ends first; no magic number is 0. */
+	private static int readInt(InputStream in) throws IOException {
+		byte[] bytes = in.readNBytes(4);
+		return bytes.length == 4 ? ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt() : 0;
+	}
+
+	/** Writes {@code ints} little-endian to {@code out}, through {@code buffer}. */
+	private static void writeInts(OutputStream out, ByteBuffer buffer, int[] ints) throws IOException {
+		int perWrite = buffer.capacity() / 4;
+		for (int at = 0; at < ints.length; at += perWrite) {
+			int n = Math.min(perWrite, ints.length - at);
+			buffer.clear();
+			buffer.asIntBuffer().put(ints, at, n);
+			out.write(buffer.array(), 0, n * 4);
+		}
 	}
 
 	/**
@@ -829,33 +860,28 @@ public final class TileStore {
 		byte[] light = tile.blockLight;
 		try {
 			Files.createDirectories(file.getParent());
-			int extra = spots != null ? 4 + spots.length * 4 : chunks != null ? 4 + chunks.length : 0;
-			int lit = light != null ? 4 + light.length : 0;
-			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + extra + lit).order(ByteOrder.LITTLE_ENDIAN);
-			buffer.asIntBuffer().put(pixels);
-			buffer.position(pixels.length * 4);
-			if (spots != null) {
-				buffer.putInt(SPOTS_MAGIC);
-				buffer.asIntBuffer().put(spots);
-				buffer.position(buffer.position() + spots.length * 4);
-			} else if (chunks != null) {
-				buffer.putInt(CHUNKS_MAGIC);
-				buffer.put(chunks);
-			}
-			if (light != null) {
-				buffer.putInt(LIGHT_MAGIC);
-				buffer.put(light);
-			}
-			ByteArrayOutputStream bytes = new ByteArrayOutputStream(pixels.length);
-			try (DataOutputStream data = new DataOutputStream(bytes)) {
+			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+			// Straight into the file through a small buffer: building the whole file in memory
+			// first took several tile-sized arrays a write.
+			ByteBuffer buffer = ByteBuffer.allocate(IO_BUFFER).order(ByteOrder.LITTLE_ENDIAN);
+			try (DataOutputStream data = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(temp), IO_BUFFER))) {
 				data.writeInt(MAGIC);
 				data.writeInt(Projection.TILE_PIXELS);
 				try (OutputStream deflate = new DeflaterOutputStream(data)) {
-					deflate.write(buffer.array());
+					writeInts(deflate, buffer, pixels);
+					if (spots != null) {
+						writeInts(deflate, buffer, new int[] {SPOTS_MAGIC});
+						writeInts(deflate, buffer, spots);
+					} else if (chunks != null) {
+						writeInts(deflate, buffer, new int[] {CHUNKS_MAGIC});
+						deflate.write(chunks);
+					}
+					if (light != null) {
+						writeInts(deflate, buffer, new int[] {LIGHT_MAGIC});
+						deflate.write(light);
+					}
 				}
 			}
-			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-			Files.write(temp, bytes.toByteArray());
 			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 			return true;
 		} catch (IOException | RuntimeException e) {

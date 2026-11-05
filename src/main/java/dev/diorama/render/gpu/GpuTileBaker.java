@@ -401,11 +401,11 @@ public final class GpuTileBaker {
 			faces.flip();
 			this.faces = faces;
 			ByteBuffer casters = MemoryUtil.memAlloc(Math.max(1, this.casterCount * CASTER_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
-			int[] d = mesh.casters.data;
+			GpuMesher.Quads d = mesh.casters;
 			for (int q = 0; q < this.casterCount; q++) {
 				int i = q * GpuMesher.STRIDE;
-				casters.putShort((short) (d[i] - originX)).putShort((short) d[i + 1]).putShort((short) (d[i + 2] - originZ)).putShort((short) d[i + 3]);
-				casters.putInt(d[i + 8]).putInt(d[i + 9]);
+				casters.putShort((short) (d.get(i) - originX)).putShort((short) d.get(i + 1)).putShort((short) (d.get(i + 2) - originZ)).putShort((short) d.get(i + 3));
+				casters.putInt(d.get(i + 8)).putInt(d.get(i + 9));
 			}
 			casters.flip();
 			this.casters = casters;
@@ -420,6 +420,8 @@ public final class GpuTileBaker {
 			} else {
 				this.voxelRows = 0;
 			}
+			// Packed: the mesh's face lists aren't needed any more.
+			mesh.freeFaces();
 			this.packNanos = System.nanoTime() - start;
 		}
 
@@ -429,19 +431,19 @@ public final class GpuTileBaker {
 
 		/** {@code firstSky} is the first face's sky slot, the rest following on; -1 for none. */
 		private static void putFaces(ByteBuffer out, GpuMesher.Quads quads, int originX, int originZ, int firstSky) {
-			int[] d = quads.data;
+			GpuMesher.Quads d = quads;
 			for (int q = 0; q < quads.count; q++) {
 				int i = q * GpuMesher.STRIDE;
-				out.putShort((short) (d[i] - originX)).putShort((short) d[i + 1]).putShort((short) (d[i + 2] - originZ)).putShort((short) (d[i + 3] | d[i + 7] << 4));
-				int color = d[i + 4];
+				out.putShort((short) (d.get(i) - originX)).putShort((short) d.get(i + 1)).putShort((short) (d.get(i + 2) - originZ)).putShort((short) (d.get(i + 3) | d.get(i + 7) << 4));
+				int color = d.get(i + 4);
 				out.put((byte) (color >> 16)).put((byte) (color >> 8)).put((byte) color).put((byte) (color >>> 24));
-				int ao = d[i + 5];
+				int ao = d.get(i + 5);
 				out.put((byte) (ao >>> 24)).put((byte) (ao >> 16)).put((byte) (ao >> 8)).put((byte) ao);
-				int light = d[i + 6];
+				int light = d.get(i + 6);
 				out.put((byte) (light >>> 24)).put((byte) (light >> 16)).put((byte) (light >> 8)).put((byte) light);
 				out.putInt(firstSky < 0 ? -1 : firstSky + q);
-				out.putInt(d[i + 8]).putInt(d[i + 9]);
-				out.putInt(d[i + 10]).putInt(d[i + 11]).putInt(d[i + 12]).putInt(d[i + 13]);
+				out.putInt(d.get(i + 8)).putInt(d.get(i + 9));
+				out.putInt(d.get(i + 10)).putInt(d.get(i + 11)).putInt(d.get(i + 12)).putInt(d.get(i + 13));
 			}
 		}
 

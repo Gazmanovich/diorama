@@ -75,7 +75,8 @@ public final class MapTile {
 			this.coverage = image.coverage();
 			this.info = image.info();
 			this.overlayShown = -1;
-			this.blockLight = image.blockLight();
+			// Its own copy: patches write into it, and the bake's array is also the saved tile's.
+			this.blockLight = image.blockLight() == null ? null : image.blockLight().clone();
 			this.empty = isEmpty(this.coverage);
 			if (this.empty) {
 				this.close();
