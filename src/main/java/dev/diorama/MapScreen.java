@@ -1160,8 +1160,14 @@ public final class MapScreen extends Screen {
 		}
 		this.gauge.cancel();
 		Entity viewer = MapSession.viewer();
-		this.layer = this.layer == TileKey.SURFACE && viewer != null ? MapSession.caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		this.layer = this.layer == TileKey.SURFACE && viewer != null ? playerSlice(viewer) : TileKey.SURFACE;
 		this.layerPicked = true;
+	}
+
+	/** The slice the minimap shows for the viewer underground, so C and the slice keys start where it is. */
+	private static int playerSlice(Entity viewer) {
+		MapSession session = MapSession.get();
+		return session != null ? session.caveLayer(viewer) : MapSession.caveLayerFor(viewer.getY());
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
@@ -1172,7 +1178,7 @@ public final class MapScreen extends Screen {
 			if (viewer == null) {
 				return;
 			}
-			this.layer = MapSession.caveLayerFor(viewer.getY());
+			this.layer = playerSlice(viewer);
 		}
 		this.layer = Math.max(this.minecraft.level.getMinY() + 4, Math.min(this.minecraft.level.getMaxY() + 1, this.layer + delta));
 		this.layerPicked = true;

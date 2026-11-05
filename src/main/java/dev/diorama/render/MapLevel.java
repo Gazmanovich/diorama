@@ -9,6 +9,7 @@ import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.PinnedSource;
 import dev.diorama.bake.TallChunks;
+import dev.diorama.bake.CaveCut;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
@@ -548,7 +549,7 @@ public final class MapLevel implements ChunkSource {
 			double top = (cave ? caveY1 : y1) + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {
-				top = Math.min(top, layer);
+				top = Math.min(top, layer + CaveCut.LIFT);
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
 				if (top < bottom) {
 					continue;

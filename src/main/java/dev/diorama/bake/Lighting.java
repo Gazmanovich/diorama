@@ -11,6 +11,10 @@ import dev.diorama.MapStyle;
 final class Lighting {
 	/** Cave light up to here is kept as it is; above, it eases toward {@link #CAVE_CEILING}. */
 	private static final float CAVE_KNEE = 0.5F;
+	/** What a cave slice fades toward below the player's level, linear: a cool dark rather than black, so lower ground reads as further down, not as rock. */
+	static final float[] CAVE_FOG = {0.008F, 0.010F, 0.015F};
+	/** The rock a cave slice cuts through, linear: a muted grey, so walls read as solid ground beside the player. */
+	static final float[] CAVE_CUT = {0.022F, 0.023F, 0.027F};
 	private static final float CAVE_CEILING = 0.8F;
 
 	private final MapStyle style;
