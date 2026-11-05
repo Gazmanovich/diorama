@@ -127,7 +127,7 @@ final class StateTexture implements MapTexture {
 	/*// Before 1.21.11 a texture carried its own sampling state instead of each draw choosing a
 	// sampler. Render state draws at the end of the frame, so the last setting in a frame wins;
 	// each texture is only ever drawn one way per frame.
-	private void sampleWith(Sampling sampling) {
+	void sampleWith(Sampling sampling) {
 		this.texture.setAddressMode(sampling.repeats() ? AddressMode.REPEAT : AddressMode.CLAMP_TO_EDGE);
 		this.texture.setTextureFilter(FilterMode.LINEAR, sampling.crisp() ? FilterMode.NEAREST : FilterMode.LINEAR, sampling.mipmapped());
 	}
