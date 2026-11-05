@@ -220,7 +220,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		.withBindGroupLayout(BAKE)
 		.withBindGroupLayout(SCENE_SAMPLERS)
 		.withColorTargetState(0, ColorTargetState.DEFAULT)
-		.withColorTargetState(1, target(GpuFormat.R8_UNORM))
+		.withColorTargetState(1, target(GpuFormat.RG8_UNORM))
 		.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
 		.build();
 
