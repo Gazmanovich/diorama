@@ -33,11 +33,17 @@ public final class NightLook {
 
 	/**
 	 * How far into the night a view of {@code map} at {@code layer} is drawn right now: 0 in caves
-	 * and under a roof, which the game's own light lights, else {@link #amount}. Render thread.
+	 * and under a roof, which the game's own light lights, else {@link #amount}. Only the map of the
+	 * dimension the player is in follows the clock; another dimension's saved map, browsed from the
+	 * map screen, shows by day. Render thread.
 	 */
 	public static float forView(MapLevel map, int layer) {
 		ClientLevel world = Minecraft.getInstance().level;
-		return layer != TileKey.SURFACE || map.roofless() || world == null ? 0 : amount(world);
+		dev.diorama.MapSession session = dev.diorama.MapSession.get();
+		if (layer != TileKey.SURFACE || map.roofless() || world == null || session == null || session.map() != map) {
+			return 0;
+		}
+		return amount(world);
 	}
 
 	/**
