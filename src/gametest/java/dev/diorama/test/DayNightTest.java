@@ -137,14 +137,12 @@ final class DayNightTest {
 			throw new AssertionError("The tile should have lost its light");
 		}
 		context.runOnClient(mc -> Settings.get().mapSavedChunks = true);
-		for (int i = 0; saved(store, key, lit) <= 0; i++) {
-			if (i > 3600) {
-				throw new AssertionError("The fill never drew the tile from before light was kept again: saved light " + saved(store, key, lit));
-			}
-			context.waitTick();
-		}
+		// It draws everything the map had again, nearest the view first, and the platform is far away.
 		try (WorldPause paused = WorldPause.pause(context)) {
-			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 3600);
+			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 12000);
+		}
+		if (saved(store, key, lit) <= 0) {
+			throw new AssertionError("The fill went through the save without drawing the tile from before light was kept again: saved light " + saved(store, key, lit));
 		}
 		if (magic(progress) == BEFORE_LIGHT) {
 			throw new AssertionError("The fill's progress should be saved in the new form once it has relit the map");
