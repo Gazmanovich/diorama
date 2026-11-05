@@ -58,8 +58,9 @@ final class XaeroRealTest {
 
 	//? if >=1.21.4 && fabric {
 	/**
-	 * A server: Xaero's makes waypoints on the first visit, the line comes on the next, its link
-	 * opens the list and the list's picker, and on the visit after that the line doesn't come again.
+	 * A server: Xaero's makes waypoints on the first visit, the line comes on the next and its link
+	 * opens the list, and on the visit after that the line doesn't come again, though nothing was
+	 * imported; the list's picker still imports them.
 	 */
 	static void server(ClientGameTestContext context) {
 		requireXaero(context);
@@ -84,6 +85,27 @@ final class XaeroRealTest {
 				if (!"Import from Xaero's Minimap...".equals(label)) {
 					throw new AssertionError("The link's waypoint list offers " + label);
 				}
+				// The player leaves without importing.
+				context.setScreen(() -> null);
+			}
+			// Shown once per world: not on the next visit, though Xaero's waypoints still aren't
+			// in Diorama. The list still offers them.
+			context.runOnClient(mc -> mc.gui.hud.getChat().clearMessages(false));
+			try (TestDedicatedServerConnection connection = server.connect()) {
+				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
+				context.waitTicks(200);
+				String again = context.computeOnClient(XaeroRealTest::noticeLine);
+				if (again != null) {
+					throw new AssertionError("The Xaero's import line came again on the next visit: " + again);
+				}
+				String label = context.computeOnClient(mc -> {
+					mc.gui.setScreen(new WaypointListScreen(null));
+					return importLabel(mc.gui.screen());
+				});
+				if (!"Import from Xaero's Minimap...".equals(label)) {
+					throw new AssertionError("On the next visit the waypoint list offers " + label);
+				}
+				context.waitTicks(5);
 				context.runOnClient(mc -> press(button(mc.gui.screen(), label)));
 				context.waitTicks(5);
 				context.takeScreenshot("xaero-real-server-06-picker");
@@ -100,16 +122,6 @@ final class XaeroRealTest {
 				context.takeScreenshot("xaero-real-server-07-imported");
 				assertImported(context);
 				context.setScreen(() -> null);
-			}
-			// Shown once per world: not on the next visit, though Xaero's still has the waypoints.
-			context.runOnClient(mc -> mc.gui.hud.getChat().clearMessages(false));
-			try (TestDedicatedServerConnection connection = server.connect()) {
-				context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
-				context.waitTicks(200);
-				String again = context.computeOnClient(XaeroRealTest::noticeLine);
-				if (again != null) {
-					throw new AssertionError("The Xaero's import line came again on the next visit: " + again);
-				}
 			}
 		}
 	}

@@ -26,7 +26,9 @@ public final class XaeroNotice {
 	/** The command the link runs. */
 	public static final String COMMAND = "/diorama waypoint list";
 
+	/** The world last checked, and the one counting down to its check. */
 	private static @Nullable String checked;
+	private static @Nullable String pending;
 	private static int ticks;
 
 	private XaeroNotice() {
@@ -34,20 +36,27 @@ public final class XaeroNotice {
 
 	/** Called at the end of every client tick. */
 	public static void tick(Minecraft mc) {
-		if (mc.level == null || mc.player == null) {
-			checked = null;
-			ticks = 0;
+		String key = mc.level != null && mc.player != null ? WorldKey.current() : null;
+		if (key == null) {
+			if (mc.level == null) {
+				checked = null;
+			}
+			pending = null;
 			return;
 		}
-		String key = WorldKey.current();
-		if (key == null || key.equals(checked)) {
+		if (key.equals(checked)) {
 			return;
+		}
+		// Each world counts from its own start: a network's lobby doesn't count toward the next server.
+		if (!key.equals(pending)) {
+			pending = key;
+			ticks = 0;
 		}
 		if (++ticks < DELAY_TICKS) {
 			return;
 		}
 		checked = key;
-		ticks = 0;
+		pending = null;
 		Path shown = WorldKey.folder(key).resolve(SHOWN_FILE);
 		if (Files.exists(shown)) {
 			return;
