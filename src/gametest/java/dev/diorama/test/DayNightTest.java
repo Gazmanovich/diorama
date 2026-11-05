@@ -38,21 +38,52 @@ final class DayNightTest {
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("weather clear");
 		world.getServer().runCommand("forceload add " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
+		// Commands only change loaded chunks, and forced ones load over the next ticks.
+		for (int i = 0; !world.getServer().computeOnServer(server -> loaded(server.overworld())); i++) {
+			if (i > 2400) {
+				throw new AssertionError("The platform's chunks never loaded");
+			}
+			context.waitTick();
+		}
 		world.getServer().runCommand("fill " + (X - HALF) + " " + Y + " " + (Z - HALF) + " " + (X + HALF) + " " + Y + " " + (Z + HALF) + " minecraft:stone");
 		world.getServer().runCommand("setblock " + X + " " + (Y + 1) + " " + Z + " minecraft:glowstone");
 		world.getServer().runCommand("setblock " + (X + 12) + " " + (Y + 1) + " " + (Z + 12) + " minecraft:torch");
+		// Lit on the server before the player comes, so the chunks reach the client with their light.
+		net.minecraft.core.BlockPos beside = new net.minecraft.core.BlockPos(X + 1, Y + 1, Z);
+		for (int i = 0; world.getServer().computeOnServer(server -> server.overworld().getBrightness(net.minecraft.world.level.LightLayer.BLOCK, beside)) == 0; i++) {
+			if (i > 1200) {
+				throw new AssertionError("The server never lit the glowstone's side");
+			}
+			context.waitTick();
+		}
 		world.getServer().runCommand("tp @a " + X + " " + (Y + 2) + " " + (Z - 6));
-		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunk(X >> 4, Z >> 4) != null, 1200);
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunk(X >> 4, Z >> 4) != null
+			&& mc.level.getBlockState(new net.minecraft.core.BlockPos(X, Y + 1, Z)).is(net.minecraft.world.level.block.Blocks.GLOWSTONE), 1200);
+		// Before 1.21.2 the client works out light changes as it draws the world, which a screen over it stops.
+		context.setScreen(() -> null);
+		for (int i = 0; context.computeOnClient(mc -> mc.level.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, beside)) == 0; i++) {
+			if (i > 1200) {
+				throw new AssertionError("The client never lit the glowstone's side: the server has "
+					+ world.getServer().computeOnServer(server -> server.overworld().getBrightness(net.minecraft.world.level.LightLayer.BLOCK, beside))
+					+ ", emission " + context.computeOnClient(mc -> mc.level.getBlockState(beside.west()).getLightEmission()));
+			}
+			context.waitTick();
+		}
 
 		TileKey key = tileAt(X, Y + 1, Z);
 		lookAt(context);
 		// Beside the glowstone, on the platform's top, and far off in its corner, where nothing lights it.
 		int[] lit = texel(key, X + 2, Y, Z);
 		int[] dark = texel(key, X - HALF + 2, Y, Z - HALF + 2);
-		context.waitFor(mc -> {
+		for (int i = 0; !context.computeOnClient(mc -> {
 			MapTile tile = MapSession.get().map().peek(key);
 			return tile != null && tile.blockLightAt(lit[0], lit[1]) > 0;
-		}, 1200);
+		}); i++) {
+			if (i > 1200) {
+				throw new AssertionError("No light on the tile beside the glowstone: " + context.computeOnClient(mc -> state(key, lit)));
+			}
+			context.waitTick();
+		}
 		int litValue = context.computeOnClient(mc -> MapSession.get().map().peek(key).blockLightAt(lit[0], lit[1]));
 		int darkValue = context.computeOnClient(mc -> MapSession.get().map().peek(key).blockLightAt(dark[0], dark[1]));
 		// Glowstone gives 15, one block on 13 or 14; a value is the level times 17.
@@ -95,6 +126,31 @@ final class DayNightTest {
 		world.getServer().runCommand("forceload remove " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
 		world.getServer().runCommand("tp @a " + home[0] + " " + home[1] + " " + home[2]);
 		context.waitFor(mc -> mc.player.distanceToSqr(home[0], home[1], home[2]) < 4, 200);
+	}
+
+	/** Whether every chunk of the platform is loaded on the server. */
+	private static boolean loaded(net.minecraft.server.level.ServerLevel level) {
+		for (int cx = X - HALF >> 4; cx <= X + HALF >> 4; cx++) {
+			for (int cz = Z - HALF >> 4; cz <= Z + HALF >> 4; cz++) {
+				if (level.getChunkSource().getChunkNow(cx, cz) == null) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/** What the map knows there, for a failure. */
+	private static String state(TileKey key, int[] texel) {
+		MapTile tile = MapSession.get().map().peek(key);
+		var chunk = MapSession.get().map().chunk(X >> 4, Z >> 4);
+		int section = (Y + 1 >> 4) - (chunk == null ? 0 : chunk.minSectionY);
+		TileStore store = MapSession.get().map().savedMap();
+		return "tile " + (tile == null ? "none" : "empty " + tile.isEmpty() + ", light texture " + (tile.light() != null) + ", value " + tile.blockLightAt(texel[0], texel[1]))
+			+ "; saved " + (store == null ? "no store" : saved(store, key, texel))
+			+ "; chunk " + (chunk == null ? "unknown" : "light beside the glowstone " + chunk.blockLight(section, X + 1, Y + 1 & 15, Z) + ", on it " + chunk.blockLight(section, X, Y + 2 & 15, Z))
+			+ "; client light beside the glowstone " + net.minecraft.client.Minecraft.getInstance().level.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, new net.minecraft.core.BlockPos(X + 1, Y + 1, Z))
+			+ "; tile " + key + " texel " + texel[0] + "," + texel[1];
 	}
 
 	/** The saved light at a texel of a tile, -1 if it's saved without. */
