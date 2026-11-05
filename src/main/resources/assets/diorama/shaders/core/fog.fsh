@@ -74,6 +74,9 @@ layout(std140) uniform DynamicTransforms {
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
+// What would otherwise be worked out from the mask for every pixel, worked out once per mask texel
+// (MapViewport.writeSoft): red is the known share blurred as knownSoft reads it.
+uniform sampler2D Sampler2;
 
 //? if >=26.3 {
 layout(location = 0) in vec2 maskUv;
@@ -197,24 +200,9 @@ float knownAt(vec2 uv) {
     return deep ? 0.0 : texture(Sampler0, uv).r;
 }
 
-// Known share blurred over a radius in map units, so chunk-shaped edges melt away.
-float knownBlur(vec2 uv, float units) {
-    float r = max(units / unitsPerUv, 1.0 / MASK_TEXELS);
-    float k = texture(Sampler0, uv).r * 0.2;
-    k += texture(Sampler0, uv + vec2(r, 0.0)).r * 0.1;
-    k += texture(Sampler0, uv - vec2(r, 0.0)).r * 0.1;
-    k += texture(Sampler0, uv + vec2(0.0, r)).r * 0.1;
-    k += texture(Sampler0, uv - vec2(0.0, r)).r * 0.1;
-    float d = r * 1.9;
-    k += texture(Sampler0, uv + vec2(d, d)).r * 0.1;
-    k += texture(Sampler0, uv + vec2(-d, d)).r * 0.1;
-    k += texture(Sampler0, uv + vec2(d, -d)).r * 0.1;
-    k += texture(Sampler0, uv + vec2(-d, -d)).r * 0.1;
-    return k;
-}
-
 // Surface fog blends a near and a wide blur, so banks reach well over the edge of known land
-// and the noise has room to billow. Cave fog stays tight to the explored tunnels.
+// and the noise has room to billow. Cave fog stays tight to the explored tunnels. The blurs are
+// worked out per mask texel (MapViewport.writeSoft) and read filtered from Sampler2.
 float knownSoft(vec2 uv) {
     if (clear) {
         return 1.0;
@@ -222,10 +210,7 @@ float knownSoft(vec2 uv) {
     if (deep) {
         return 0.0;
     }
-    if (blurUnits < 5.0 || fast) {
-        return knownBlur(uv, blurUnits);
-    }
-    return 0.5 * knownBlur(uv, blurUnits) + 0.5 * knownBlur(uv, blurUnits * 2.4);
+    return texture(Sampler2, uv).r;
 }
 
 float noiseLayer(vec2 n) {

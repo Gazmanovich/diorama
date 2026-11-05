@@ -84,6 +84,7 @@ final class LegacyShaders extends RenderType {
 		.withUniform("GameTime", UniformType.FLOAT)
 		.withSampler("Sampler0")
 		.withSampler("Sampler1")
+		.withSampler("Sampler2")
 		.withBlend(BlendFunction.TRANSLUCENT)
 		.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
 		.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)

@@ -121,7 +121,7 @@ final class ImmediateCanvas implements MapCanvas {
 	}
 
 	@Override
-	public void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
+	public void fog(MapTexture mask, MapTexture noise, MapTexture detail, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
 		if (!LegacyShaders.fogReady()) {
 			return;
 		}
@@ -136,9 +136,11 @@ final class ImmediateCanvas implements MapCanvas {
 		}
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
 		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
+		((LegacyTexture) detail).bind(2, Sampling.CLAMP_LINEAR);
 		LegacyShaders.drawFog(mesh.buildOrThrow());
 		unbind(0);
 		unbind(1);
+		unbind(2);
 	}
 
 	// A rectangle of a game texture (a skin), sampled the way the game set that texture up.

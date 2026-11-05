@@ -27,6 +27,12 @@ public final class MapViewport {
 
 	private @Nullable MapTexture maskTexture;
 	private final int[] maskPixels = new int[MASK * MASK];
+	/**
+	 * What fog.fsh would otherwise work out from the mask for every pixel, worked out once per mask
+	 * texel instead: red is the known share blurred as the fog's soft edge reads it.
+	 */
+	private @Nullable MapTexture detailTexture;
+	private final int[] detailPixels = new int[MASK * MASK];
 	/** What the mask texture was last built from; it only needs building again when this changes. */
 	private @Nullable MaskInputs maskInputs;
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
@@ -427,12 +433,12 @@ public final class MapViewport {
 		if (view.round()) {
 			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1);
 			if (disc != null) {
-				canvas.fog(this.maskTexture, FogTextures.noise(), disc.corners(), disc.uvs(), view.x(), view.y(), view.width(), view.height(), params);
+				canvas.fog(this.maskTexture, FogTextures.noise(), this.detailTexture, disc.corners(), disc.uvs(), view.x(), view.y(), view.width(), view.height(), params);
 			}
 			return;
 		}
 		canvas.fog(
-			this.maskTexture, FogTextures.noise(),
+			this.maskTexture, FogTextures.noise(), this.detailTexture,
 			view.x(), view.y(), view.width(), view.height(),
 			mu0, mv0, mu1, mv1,
 			params
@@ -442,6 +448,7 @@ public final class MapViewport {
 	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, int cellScale, boolean fast) {
 		if (this.maskTexture == null) {
 			this.maskTexture = MapTexture.create("diorama fog mask", MASK, 1);
+			this.detailTexture = MapTexture.create("diorama fog details", MASK, 1);
 		}
 		int lod = lodFor(level, view);
 		// Caves keep the sharp mask: rounding would erode narrow explored tunnels away.
@@ -565,6 +572,7 @@ public final class MapViewport {
 		if (rounded) {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
+		this.writeSoft(texel, view.layer() != TileKey.SURFACE, fast);
 		this.lifting = false;
 		boolean surface = view.layer() == TileKey.SURFACE;
 		boolean clouds = surface && !level.roofless();
@@ -1007,6 +1015,88 @@ public final class MapViewport {
 		}
 	}
 
+	private final float[] knownShare = new float[MASK * MASK];
+	private final int[] notFullCounts = new int[(MASK + 1) * (MASK + 1)];
+	private final int[] notEmptyCounts = new int[(MASK + 1) * (MASK + 1)];
+
+	/**
+	 * The known share as fog.fsh's knownSoft reads it, at each texel's middle, into the detail
+	 * texture's red: one blur of nine taps (the middle, four at the radius, four on the diagonals at
+	 * 1.9 times it, each read filtered between texels and clamped at the mask's edge) or, for the
+	 * wide surface fog, half of that and half of the same at 2.4 times the radius. Filtered between
+	 * texels the shader then reads the same as it would have worked out, to well under a step of the
+	 * mask's bytes. Texels whose whole blur reach is all known or all unknown are just that.
+	 */
+	private void writeSoft(double texel, boolean cave, boolean fast) {
+		double units = cave ? 2.5 : 7;
+		boolean wide = units >= 5 && !fast;
+		double near = Math.max(units / texel, 1);
+		double far = Math.max(units * 2.4 / texel, 1);
+		int reach = (int) Math.ceil(1.9 * (wide ? far : near)) + 2;
+		int row = MASK + 1;
+		for (int j = 0; j < MASK; j++) {
+			int lineNotFull = 0;
+			int lineNotEmpty = 0;
+			for (int i = 0; i < MASK; i++) {
+				int k = j * MASK + i;
+				int known = this.maskPixels[k] & 0xFF;
+				this.knownShare[k] = known / 255.0F;
+				lineNotFull += known == 0xFF ? 0 : 1;
+				lineNotEmpty += known == 0 ? 0 : 1;
+				this.notFullCounts[(j + 1) * row + i + 1] = this.notFullCounts[j * row + i + 1] + lineNotFull;
+				this.notEmptyCounts[(j + 1) * row + i + 1] = this.notEmptyCounts[j * row + i + 1] + lineNotEmpty;
+			}
+		}
+		for (int j = 0; j < MASK; j++) {
+			int t = Math.max(0, j - reach);
+			int b = Math.min(MASK - 1, j + reach) + 1;
+			for (int i = 0; i < MASK; i++) {
+				int l = Math.max(0, i - reach);
+				int r = Math.min(MASK - 1, i + reach) + 1;
+				float soft;
+				if (this.notFullCounts[b * row + r] - this.notFullCounts[t * row + r] - this.notFullCounts[b * row + l] + this.notFullCounts[t * row + l] == 0) {
+					soft = 1;
+				} else if (this.notEmptyCounts[b * row + r] - this.notEmptyCounts[t * row + r] - this.notEmptyCounts[b * row + l] + this.notEmptyCounts[t * row + l] == 0) {
+					soft = 0;
+				} else {
+					soft = this.blurAt(i + 0.5, j + 0.5, near);
+					if (wide) {
+						soft = 0.5F * soft + 0.5F * this.blurAt(i + 0.5, j + 0.5, far);
+					}
+				}
+				this.detailPixels[j * MASK + i] = 0xFF000000 | Math.round(soft * 255);
+			}
+		}
+		if (this.detailTexture != null) {
+			this.detailTexture.write(0, 0, 0, MASK, this.detailPixels);
+		}
+	}
+
+	/** The known share blurred over {@code r} texels around (x, y), in texels, so chunk-shaped edges melt away. */
+	private float blurAt(double x, double y, double r) {
+		double d = r * 1.9;
+		return this.knownAt(x, y) * 0.2F
+			+ (this.knownAt(x + r, y) + this.knownAt(x - r, y) + this.knownAt(x, y + r) + this.knownAt(x, y - r)) * 0.1F
+			+ (this.knownAt(x + d, y + d) + this.knownAt(x - d, y + d) + this.knownAt(x + d, y - d) + this.knownAt(x - d, y - d)) * 0.1F;
+	}
+
+	/** The known share at (x, y) in texels, filtered between texel middles and clamped at the edge, as the graphics card reads it. */
+	private float knownAt(double x, double y) {
+		double fx = x - 0.5;
+		double fy = y - 0.5;
+		int i0 = (int) Math.floor(fx);
+		int j0 = (int) Math.floor(fy);
+		float tx = (float) (fx - i0);
+		float ty = (float) (fy - j0);
+		int i1 = Math.min(MASK - 1, Math.max(0, i0 + 1));
+		int j1 = Math.min(MASK - 1, Math.max(0, j0 + 1));
+		i0 = Math.min(MASK - 1, Math.max(0, i0));
+		j0 = Math.min(MASK - 1, Math.max(0, j0));
+		float top = this.knownShare[j0 * MASK + i0] + (this.knownShare[j0 * MASK + i1] - this.knownShare[j0 * MASK + i0]) * tx;
+		float bottom = this.knownShare[j1 * MASK + i0] + (this.knownShare[j1 * MASK + i1] - this.knownShare[j1 * MASK + i0]) * tx;
+		return top + (bottom - top) * ty;
+	}
+
 	private static int index(int line, int k, boolean horizontal) {
 		return horizontal ? line * MASK + k : k * MASK + line;
 	}
@@ -1015,6 +1105,10 @@ public final class MapViewport {
 		if (this.maskTexture != null) {
 			this.maskTexture.close();
 			this.maskTexture = null;
+		}
+		if (this.detailTexture != null) {
+			this.detailTexture.close();
+			this.detailTexture = null;
 		}
 		this.maskInputs = null;
 	}

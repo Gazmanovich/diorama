@@ -23,11 +23,11 @@ import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
 
 public final class DioramaPipelines {
-	/** The fog over unknown map areas: known-area mask in sampler 0, noise in sampler 1. */
+	/** The fog over unknown map areas: known-area mask in sampler 0, noise in sampler 1, details in sampler 2. */
 	//? if >=26.2 {
-	public static final RenderPipeline FOG = mapPipeline("fog", BindGroupLayouts.SAMPLER0_SAMPLER1);
+	public static final RenderPipeline FOG = mapPipeline("fog", BindGroupLayouts.SAMPLER0_SAMPLER1_SAMPLER2);
 	//?} else {
-	/*public static final RenderPipeline FOG = mapPipeline("fog", 2);
+	/*public static final RenderPipeline FOG = mapPipeline("fog", 3);
 	*///?}
 	/** A tile with its mip levels in sampler 0; see {@code tile.fsh}. */
 	//? if >=26.2 {
@@ -79,6 +79,9 @@ public final class DioramaPipelines {
 		if (samplers > 1) {
 			builder.withSampler("Sampler1");
 		}
+		if (samplers > 2) {
+			builder.withSampler("Sampler2");
+		}
 		return register(builder.build());
 	}
 	*///?} else {
@@ -93,6 +96,9 @@ public final class DioramaPipelines {
 			.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST);
 		if (samplers > 1) {
 			builder.withSampler("Sampler1");
+		}
+		if (samplers > 2) {
+			builder.withSampler("Sampler2");
 		}
 		return register(builder.build());
 	}

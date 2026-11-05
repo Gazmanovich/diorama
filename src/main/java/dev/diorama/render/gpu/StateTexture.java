@@ -90,6 +90,18 @@ final class StateTexture implements MapTexture {
 		*///?}
 	}
 
+	// Three textures for one draw, each sampled its own way.
+	static TextureSetup triple(StateTexture first, Sampling firstSampling, StateTexture second, Sampling secondSampling, StateTexture third, Sampling thirdSampling) {
+		//? if >=1.21.11 {
+		return new TextureSetup(first.view, second.view, third.view, sampler(firstSampling), sampler(secondSampling), sampler(thirdSampling));
+		//?} else {
+		/*first.sampleWith(firstSampling);
+		second.sampleWith(secondSampling);
+		third.sampleWith(thirdSampling);
+		return new TextureSetup(first.view, second.view, third.view);
+		*///?}
+	}
+
 	//? if >=1.21.11 {
 	private static GpuSampler sampler(Sampling sampling) {
 		return switch (sampling) {
