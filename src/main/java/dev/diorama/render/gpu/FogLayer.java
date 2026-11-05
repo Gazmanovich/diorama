@@ -63,10 +63,8 @@ public final class FogLayer implements AutoCloseable {
 	 * it couldn't; then the caller draws the fog directly.
 	 */
 	public boolean render(MapCanvas canvas, MapTexture mask, MapTexture noise, MapTexture detail, int width, int height, float u0, float v0, float u1, float v1, int params) {
-		int need = 64;
-		while (need < Math.max(width, height)) {
-			need *= 2;
-		}
+		// In steps of 256, so dragging the window's edge seldom makes a new texture.
+		int need = (Math.max(width, height) + 255) / 256 * 256;
 		if (need > MAX_SIZE) {
 			return false;
 		}
@@ -177,8 +175,8 @@ public final class FogLayer implements AutoCloseable {
 	}
 	//?}
 
-	/** The largest layer: a 4K screen's half. */
-	private static final int MAX_SIZE = 2048;
+	/** The largest layer: half of a screen 8K wide. */
+	private static final int MAX_SIZE = 4096;
 
 	@Override
 	public void close() {
