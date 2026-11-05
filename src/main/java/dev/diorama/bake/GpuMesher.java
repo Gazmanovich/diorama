@@ -437,7 +437,7 @@ public final class GpuMesher {
 							}
 						}
 					} else if (shape != 0) {
-						ShapeFaces sh = ShapeFaces.of(looks.shapes[shape]);
+						ShapeFaces sh = looks.faces(shape);
 						int wet = looks.wetShape[id];
 						boolean passes = false;
 						boolean reached;
@@ -982,14 +982,28 @@ public final class GpuMesher {
 				if (lifted) {
 					top = Math.min(top, helper.lid(x, z) - 1);
 				}
+				long[] mayCast = null;
+				int castY = Integer.MIN_VALUE;
 				for (int y = top; y >= bottom; y--) {
+					if (!lifted) {
+						// Most of a column is rock under rock, which casts nothing: skip those blocks
+						// on a bit each instead of looking at them and their neighbours.
+						if (y >> 4 != castY) {
+							castY = y >> 4;
+							mayCast = reader.casterSection(x >> 4, castY, z >> 4);
+						}
+						int i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+						if (mayCast != null && (mayCast[i >> 6] >>> i & 1) == 0) {
+							continue;
+						}
+					}
 					int solid = reader.solid(x, y, z);
 					if (solid == 2) {
 						// Smaller than a cube: shadow rays only stop at its boxes (TileBaker.meetsShape).
 						int id = reader.state(x, y, z);
 						int shape = id < 0 ? 0 : looks.shape[id];
 						if (shape != 0) {
-							int[] boxes = ShapeFaces.of(looks.shapes[shape]).boxes;
+							int[] boxes = looks.faces(shape).boxes;
 							for (int b = 0; b < boxes.length; b += 2) {
 								mesh.casters.add(x, y, z, TOP, 0, 0, 0, 0, boxes[b], boxes[b + 1]);
 								mesh.casters.add(x, y, z, WEST, 0, 0, 0, 0, boxes[b], boxes[b + 1]);

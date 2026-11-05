@@ -54,7 +54,71 @@ final class Sections {
 	}
 	*///?}
 
+	// The container's data record, then its storage and palette, found by type for every version:
+	// outside the dev environment older games run with intermediary or SRG names. Null if the
+	// layout isn't the one expected; readers then go block by block.
+	private static final java.lang.invoke.@Nullable MethodHandle PACKED_DATA;
+	private static final java.lang.invoke.@Nullable MethodHandle PACKED_STORAGE;
+	private static final java.lang.invoke.@Nullable MethodHandle PACKED_PALETTE;
+
+	static {
+		java.lang.invoke.MethodHandle data = null;
+		java.lang.invoke.MethodHandle storage = null;
+		java.lang.invoke.MethodHandle palette = null;
+		try {
+			java.lang.invoke.MethodHandles.Lookup lookup = java.lang.invoke.MethodHandles.lookup();
+			for (Field field : PalettedContainer.class.getDeclaredFields()) {
+				Class<?> type = field.getType();
+				if (!type.isRecord() || type.getEnclosingClass() != PalettedContainer.class || java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+					continue;
+				}
+				java.lang.invoke.MethodHandle s = null;
+				java.lang.invoke.MethodHandle p = null;
+				for (java.lang.reflect.RecordComponent component : type.getRecordComponents()) {
+					Method accessor = component.getAccessor();
+					if (component.getType() == net.minecraft.util.BitStorage.class) {
+						accessor.setAccessible(true);
+						s = lookup.unreflect(accessor).asType(java.lang.invoke.MethodType.methodType(net.minecraft.util.BitStorage.class, Object.class));
+					} else if (component.getType() == net.minecraft.world.level.chunk.Palette.class) {
+						accessor.setAccessible(true);
+						p = lookup.unreflect(accessor).asType(java.lang.invoke.MethodType.methodType(net.minecraft.world.level.chunk.Palette.class, Object.class));
+					}
+				}
+				if (s != null && p != null) {
+					field.setAccessible(true);
+					data = lookup.unreflectGetter(field).asType(java.lang.invoke.MethodType.methodType(Object.class, PalettedContainer.class));
+					storage = s;
+					palette = p;
+				}
+			}
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			data = null;
+		}
+		PACKED_DATA = data;
+		PACKED_STORAGE = data == null ? null : storage;
+		PACKED_PALETTE = data == null ? null : palette;
+	}
+
 	private Sections() {
+	}
+
+	/**
+	 * The container's packed blocks: one palette index per block, indexed
+	 * {@code (y << 8) | (z << 4) | x}, and the palette. Null if they can't be read.
+	 */
+	@SuppressWarnings("unchecked")
+	static ChunkSnapshot.@Nullable Packed packed(PalettedContainer<BlockState> states) {
+		if (PACKED_DATA == null) {
+			return null;
+		}
+		try {
+			Object data = (Object) PACKED_DATA.invokeExact(states);
+			net.minecraft.util.BitStorage storage = (net.minecraft.util.BitStorage) PACKED_STORAGE.invokeExact(data);
+			net.minecraft.world.level.chunk.Palette<BlockState> palette = (net.minecraft.world.level.chunk.Palette<BlockState>) (net.minecraft.world.level.chunk.Palette<?>) PACKED_PALETTE.invokeExact(data);
+			return storage == null || palette == null || storage.getSize() != 4096 ? null : new ChunkSnapshot.Packed(storage, palette);
+		} catch (Throwable e) {
+			return null;
+		}
 	}
 
 	/** The block filling the section if it uses a single-value palette, otherwise null. */
