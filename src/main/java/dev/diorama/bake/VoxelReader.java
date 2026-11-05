@@ -10,8 +10,10 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Block and light lookups for one bake job. Decodes each section it touches once into a flat
- * array of block state ids. Not thread-safe; each job gets its own reader.
+ * Block and light lookups for one bake job. Reads each section it touches through the chunk
+ * snapshot's own packed copy, with the id of each palette entry looked up once: the registry's
+ * hash lookup, per block, was most of what meshing a tile cost. Not thread-safe; each job gets
+ * its own reader.
  *
  * <p>Lookups are the bake's inner loop, so they skip the work they can: a ray stays in one section
  * for several steps, so the last section's ids are kept at hand, and the chunks a job has seen sit
@@ -22,12 +24,23 @@ public final class VoxelReader {
 	public static final int UNKNOWN = -1;
 	static final int AIR_ID = Block.BLOCK_STATE_REGISTRY.getId(Blocks.AIR.defaultBlockState());
 	/** The ids of a section with nothing in it. Shared and never written. */
-	private static final int[] AIR_SECTION = new int[4096];
+	private static final int[] AIR_IDS = new int[4096];
+	/** A section with nothing in it. */
+	private static final Section AIR_SECTION = new Section(AIR_ID, null, null, null, null);
 	/** The solid mask of a section with nothing solid in it. Shared and never written. */
 	private static final long[] NOTHING_SOLID = new long[64];
+	/**
+	 * The solid mask of a section of a single block that isn't solid. Shared and never written; not
+	 * {@link #NOTHING_SOLID}, which {@link #nothingSolid} tells apart, so the GPU's table holds these
+	 * sections as it always has.
+	 */
+	private static final long[] NONE_OF_ONE = new long[64];
+	/** Every bit set: a section of a single solid block. Shared and never written. */
+	private static final long[] ALL_SOLID = new long[64];
 
 	static {
-		Arrays.fill(AIR_SECTION, AIR_ID);
+		Arrays.fill(ALL_SOLID, -1L);
+		Arrays.fill(AIR_IDS, AIR_ID);
 	}
 
 	/**
@@ -68,6 +81,8 @@ public final class VoxelReader {
 	private int solidZ = Integer.MIN_VALUE;
 	private long @Nullable [] solidMask;
 	private long @Nullable [] partialMask;
+	/** A section's palette indices, unpacked while reading it. */
+	private final int[] unpacked = new int[4096];
 
 	VoxelReader(ChunkSource source) {
 		this(source, null);
@@ -115,8 +130,7 @@ public final class VoxelReader {
 			}
 			this.sectionIds = null;
 		} else {
-			int[] ids = chunk.section(sy - chunk.snapshot.minSectionY);
-			this.sectionIds = ids == null ? AIR_SECTION : ids;
+			this.sectionIds = chunk.ids(sy - chunk.snapshot.minSectionY, this.unpacked);
 		}
 		this.sectionX = sx;
 		this.sectionY = sy;
@@ -196,7 +210,7 @@ public final class VoxelReader {
 			this.solidMask = null;
 		} else {
 			int index = sy - chunk.snapshot.minSectionY;
-			this.solidMask = chunk.solid(index, this.kinds, this.shapes);
+			this.solidMask = chunk.solid(index, this.kinds, this.shapes, this.unpacked);
 			this.partialMask = chunk.partial(index);
 		}
 		this.solidX = sx;
@@ -210,7 +224,7 @@ public final class VoxelReader {
 	 */
 	long @Nullable [] solidSection(int sx, int sy, int sz) {
 		Decoded chunk = this.chunk(sx, sz);
-		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds, this.shapes);
+		return chunk == null ? null : chunk.solid(sy - chunk.snapshot.minSectionY, this.kinds, this.shapes, this.unpacked);
 	}
 
 	/**
@@ -223,8 +237,70 @@ public final class VoxelReader {
 			return null;
 		}
 		int index = sy - chunk.snapshot.minSectionY;
-		chunk.solid(index, this.kinds, this.shapes);
+		chunk.solid(index, this.kinds, this.shapes, this.unpacked);
 		return chunk.partial(index);
+	}
+
+	/** The bits of a solid mask where x is 0. */
+	private static final long WEST_EDGE = 0x0001_0001_0001_0001L;
+
+	/**
+	 * For {@link GpuMesher}'s shadow casters: which of a section's blocks may cast, one bit per
+	 * block indexed as {@link #solidSection}. A block without its bit isn't solid, or is a whole
+	 * cube with whole cubes above, west and south of it, which gives no caster face. Neighbours in
+	 * chunks this job hasn't read yet count as open, so asking reads no chunk the casters wouldn't.
+	 * Null where the chunk is missing or the section is outside the world. Don't write to it.
+	 */
+	public long @Nullable [] casterSection(int sx, int sy, int sz) {
+		Decoded chunk = this.chunk(sx, sz);
+		if (chunk == null) {
+			return null;
+		}
+		int index = sy - chunk.snapshot.minSectionY;
+		if (index < 0 || index >= chunk.solid.length) {
+			return null;
+		}
+		long[] out = chunk.casters[index];
+		if (out == null) {
+			long[] solid = chunk.solid(index, this.kinds, this.shapes, this.unpacked);
+			long[] partial = chunk.partial(index);
+			// The sections above, west and south: solid bits, then smaller blocks; null where none is read.
+			int upIndex = index + 1 < chunk.solid.length ? index + 1 : -1;
+			long[] upSolid = upIndex < 0 ? null : chunk.solid(upIndex, this.kinds, this.shapes, this.unpacked);
+			long[] upPartial = upIndex < 0 ? null : chunk.partial(upIndex);
+			Decoded west = this.peek(sx - 1, sz);
+			int westIndex = west == null ? -1 : sy - west.snapshot.minSectionY;
+			boolean westRead = westIndex >= 0 && westIndex < west.solid.length;
+			long[] westSolid = westRead ? west.solid(westIndex, this.kinds, this.shapes, this.unpacked) : null;
+			long[] westPartial = westRead ? west.partial(westIndex) : null;
+			Decoded south = this.peek(sx, sz + 1);
+			int southIndex = south == null ? -1 : sy - south.snapshot.minSectionY;
+			boolean southRead = southIndex >= 0 && southIndex < south.solid.length;
+			long[] southSolid = southRead ? south.solid(southIndex, this.kinds, this.shapes, this.unpacked) : null;
+			long[] southPartial = southRead ? south.partial(southIndex) : null;
+			out = new long[64];
+			for (int w = 0; w < 64; w++) {
+				long cubes = solid[w] & ~partial[w];
+				// Four words to a layer of y, four rows of z to a word, x along each row.
+				long above = w < 60 ? solid[w + 4] & ~partial[w + 4] : upSolid == null ? 0 : upSolid[w - 60] & ~upPartial[w - 60];
+				long westCubes = westSolid == null ? 0 : westSolid[w] & ~westPartial[w];
+				long westOf = (cubes << 1) & ~WEST_EDGE | (westCubes >>> 15 & WEST_EDGE);
+				long nextRow = (w & 3) < 3 ? solid[w + 1] & ~partial[w + 1] : southSolid == null ? 0 : southSolid[w - 3] & ~southPartial[w - 3];
+				long southOf = cubes >>> 16 | nextRow << 48;
+				out[w] = solid[w] & ~(cubes & above & westOf & southOf);
+			}
+			chunk.casters[index] = out;
+		}
+		return out;
+	}
+
+	/** A chunk this job has already read, without asking the source for one it hasn't: null then, or where it had none. */
+	private @Nullable Decoded peek(int chunkX, int chunkZ) {
+		int slot = ((chunkX & TABLE_MASK) << TABLE_BITS) | (chunkZ & TABLE_MASK);
+		if (this.tableX[slot] == chunkX && this.tableZ[slot] == chunkZ) {
+			return this.tableChunk[slot];
+		}
+		return this.cache.get(ChunkSnapshot.key(chunkX, chunkZ));
 	}
 
 	static boolean nothingSolid(long[] mask) {
@@ -254,7 +330,7 @@ public final class VoxelReader {
 					chunk = this.cache.get(key);
 				}
 				if (chunk != null) {
-					top = Math.max(top, chunk.solidTop(this.kinds, this.shapes));
+					top = Math.max(top, chunk.solidTop(this.kinds, this.shapes, this.unpacked));
 				}
 			}
 		}
@@ -310,78 +386,107 @@ public final class VoxelReader {
 		return decoded;
 	}
 
+	/**
+	 * What a section holds: one block, every block's id already (copycats, and palettes too big to
+	 * number whole), or the snapshot's packed palette indices with an id per palette entry.
+	 */
+	private static final class Section {
+		/** The id filling the section, or -1. */
+		final int single;
+		/** Every block's id, where it was decoded block by block; otherwise null. */
+		final int @Nullable [] ids;
+		/** Otherwise the palette index of each block, and each palette entry's id. */
+		final net.minecraft.util.@Nullable BitStorage storage;
+		final int @Nullable [] palette;
+		/** For a turned view, where its columns are in the storage: see {@link ChunkSnapshot#columns}. */
+		final int @Nullable [] columns;
+
+		Section(int single, int @Nullable [] ids, net.minecraft.util.@Nullable BitStorage storage, int @Nullable [] palette, int @Nullable [] columns) {
+			this.single = single;
+			this.ids = ids;
+			this.storage = storage;
+			this.palette = palette;
+			this.columns = columns;
+		}
+	}
+
 	private static final class Decoded {
 		final ChunkSnapshot snapshot;
 		final @Nullable BlockLooks looks;
-		final int[][] sections;
-		final boolean[] decoded;
+		final @Nullable Section[] sections;
+		/** Per section, every block's id, indexed {@code (y << 8) | (z << 4) | x}; made when {@link #state} first reads it. */
+		final int[][] ids;
 		/** Per section, one bit per block, set where it is {@link BlockLooks#SOLID}; built when first read. */
 		final long[][] solid;
 		/** The same, set where a solid block is smaller than a cube. */
 		final long[][] partial;
+		/** See {@link VoxelReader#casterSection}; built when first read. */
+		final long[][] casters;
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
 		Decoded(ChunkSnapshot snapshot, @Nullable BlockLooks looks) {
 			this.snapshot = snapshot;
 			this.looks = looks;
-			this.sections = new int[snapshot.sectionCount()][];
-			this.decoded = new boolean[snapshot.sectionCount()];
+			this.sections = new Section[snapshot.sectionCount()];
+			this.ids = new int[snapshot.sectionCount()][];
 			this.solid = new long[snapshot.sectionCount()][];
 			this.partial = new long[snapshot.sectionCount()][];
+			this.casters = new long[snapshot.sectionCount()][];
 		}
 
 		/** The section's solid mask, indexed as its ids. */
-		long[] solid(int index, byte[] kinds, int @Nullable [] shapes) {
+		long[] solid(int index, byte[] kinds, int @Nullable [] shapes, int[] unpacked) {
 			if (index < 0 || index >= this.solid.length) {
 				return NOTHING_SOLID;
 			}
 			long[] mask = this.solid[index];
 			if (mask == null) {
 				long[] partial = NOTHING_SOLID;
-				int[] ids = this.decoded[index] || this.snapshot.copycats(index) != null ? this.section(index) : null;
-				PalettedContainer<BlockState> states = this.snapshot.section(index);
-				BlockState uniform = this.snapshot.uniformSection(index);
-				if (ids == null && (states != null || uniform != null)) {
-					// Straight from the blocks. Most sections a bake reads only have shadow and sky
-					// rays through them, which need no more than these bits: decoding their ids
-					// first, 16 KB a section for every tile, made most of the garbage of flying over
-					// new land. Sections with copycats go through the ids, which carry their materials.
-					mask = new long[64];
-					BlockState last = null;
-					boolean solid = false;
-					boolean smaller = false;
-					for (int i = 0; i < 4096; i++) {
-						BlockState state = uniform != null ? uniform : this.snapshot.state(states, i & 15, i >> 8, i >> 4 & 15);
-						if (state != last) {
-							last = state;
-							int id = BlockLooks.bakeId(uniform != null ? this.snapshot.turned(uniform) : state);
-							solid = kinds[id] == BlockLooks.SOLID;
-							smaller = shapes != null && shapes[id] != 0;
-						}
-						if (solid) {
-							mask[i >> 6] |= 1L << i;
-							if (smaller) {
-								if (partial == NOTHING_SOLID) {
-									partial = new long[64];
-								}
-								partial[i >> 6] |= 1L << i;
-							}
-						}
-					}
-				} else if (ids == null) {
+				Section section = this.section(index);
+				if (section == AIR_SECTION) {
 					mask = NOTHING_SOLID;
+				} else if (section.single >= 0) {
+					int id = section.single;
+					mask = kinds[id] == BlockLooks.SOLID ? ALL_SOLID : NONE_OF_ONE;
+					if (mask == ALL_SOLID && shapes != null && shapes[id] != 0) {
+						partial = ALL_SOLID;
+					}
 				} else {
+					// Shadow and sky rays through a section need no more than these bits, so most
+					// sections a bake reads are never numbered block by block. Sections with
+					// copycats go through their ids, which carry the copycats' materials.
+					int[] ids = section.ids;
+					int[] columns = section.columns;
+					// Per palette entry (per block with ids): 1 if solid, 3 if solid and smaller than a cube.
+					byte[] flags;
+					if (ids == null) {
+						section.storage.unpack(unpacked);
+						int[] palette = section.palette;
+						flags = new byte[palette.length];
+						for (int p = 0; p < palette.length; p++) {
+							flags[p] = solidFlags(palette[p], kinds, shapes);
+						}
+					} else {
+						columns = null;
+						flags = null;
+					}
 					mask = new long[64];
-					for (int i = 0; i < 4096; i++) {
-						if (kinds[ids[i]] == BlockLooks.SOLID) {
-							mask[i >> 6] |= 1L << i;
-							if (shapes != null && shapes[ids[i]] != 0) {
-								if (partial == NOTHING_SOLID) {
-									partial = new long[64];
-								}
-								partial[i >> 6] |= 1L << i;
+					for (int w = 0; w < 64; w++) {
+						long solid = 0;
+						long smaller = 0;
+						for (int b = 0; b < 64; b++) {
+							int i = (w << 6) | b;
+							int f = flags == null ? solidFlags(ids[i], kinds, shapes) : flags[unpacked[columns == null ? i : (i & 0xF00) | columns[i & 0xFF]]];
+							solid |= (long) (f & 1) << b;
+							smaller |= (long) (f >> 1) << b;
+						}
+						mask[w] = solid;
+						if (smaller != 0) {
+							if (partial == NOTHING_SOLID) {
+								partial = new long[64];
 							}
+							partial[w] = smaller;
 						}
 					}
 				}
@@ -391,16 +496,23 @@ public final class VoxelReader {
 			return mask;
 		}
 
+		private static byte solidFlags(int id, byte[] kinds, int @Nullable [] shapes) {
+			if (kinds[id] != BlockLooks.SOLID) {
+				return 0;
+			}
+			return shapes != null && shapes[id] != 0 ? (byte) 3 : (byte) 1;
+		}
+
 		/** The section's mask of solid blocks smaller than a cube; read after {@link #solid}. */
 		long[] partial(int index) {
 			return index < 0 || index >= this.partial.length || this.partial[index] == null ? NOTHING_SOLID : this.partial[index];
 		}
 
-		int solidTop(byte[] kinds, int @Nullable [] shapes) {
+		int solidTop(byte[] kinds, int @Nullable [] shapes, int[] unpacked) {
 			if (this.solidTop == Integer.MAX_VALUE) {
 				int top = Integer.MIN_VALUE;
 				for (int index = this.sections.length - 1; index >= 0 && top == Integer.MIN_VALUE; index--) {
-					long[] mask = this.solid(index, kinds, shapes);
+					long[] mask = this.solid(index, kinds, shapes, unpacked);
 					for (int word = 63; word >= 0; word--) {
 						if (mask[word] != 0) {
 							// Bits run x, then z, then y: 64 bits are a quarter of one y layer.
@@ -415,47 +527,124 @@ public final class VoxelReader {
 			return this.solidTop;
 		}
 
-		int @Nullable [] section(int index) {
-			if (index < 0 || index >= this.sections.length) {
-				return null;
+		/**
+		 * The section's ids, decoded once for this job: a ray stays in a section for many steps, and
+		 * an array read is the fastest lookup.
+		 */
+		int[] ids(int index, int[] unpacked) {
+			if (index < 0 || index >= this.ids.length) {
+				return AIR_IDS;
 			}
-			if (!this.decoded[index]) {
-				this.decoded[index] = true;
-				PalettedContainer<BlockState> states = this.snapshot.section(index);
-				BlockState uniform = this.snapshot.uniformSection(index);
-				if (uniform != null) {
-					int[] ids = new int[4096];
-					java.util.Arrays.fill(ids, BlockLooks.bakeId(this.snapshot.turned(uniform)));
-					this.sections[index] = ids;
-				} else if (states != null) {
-					int[] ids = new int[4096];
-					BlockState lastState = null;
-					int lastId = 0;
-					for (int y = 0; y < 16; y++) {
-						for (int z = 0; z < 16; z++) {
-							for (int x = 0; x < 16; x++) {
-								BlockState state = this.snapshot.state(states, x, y, z);
-								if (state != lastState) {
-									lastState = state;
-									lastId = BlockLooks.bakeId(state);
-								}
-								ids[(y << 8) | (z << 4) | x] = lastId;
-							}
+			int[] ids = this.ids[index];
+			if (ids == null) {
+				Section section = this.section(index);
+				if (section == AIR_SECTION) {
+					ids = AIR_IDS;
+				} else if (section.ids != null) {
+					ids = section.ids;
+				} else if (section.single >= 0) {
+					ids = new int[4096];
+					Arrays.fill(ids, section.single);
+				} else {
+					ids = new int[4096];
+					int[] palette = section.palette;
+					int[] columns = section.columns;
+					if (columns == null) {
+						section.storage.unpack(ids);
+						for (int i = 0; i < 4096; i++) {
+							ids[i] = palette[ids[i]];
+						}
+					} else {
+						section.storage.unpack(unpacked);
+						for (int i = 0; i < 4096; i++) {
+							ids[i] = palette[unpacked[(i & 0xF00) | columns[i & 0xFF]]];
 						}
 					}
-					this.sections[index] = ids;
 				}
-				ChunkSnapshot.SectionCopycats copycats = this.snapshot.copycats(index);
-				int[] ids = this.sections[index];
-				if (copycats != null && ids != null && this.looks != null) {
-					// Filled copycats take their material's look, keeping their own outline.
-					for (int i = 0; i < copycats.at().length; i++) {
-						int at = copycats.at()[i];
-						ids[at] = this.looks.copycat(ids[at], Block.BLOCK_STATE_REGISTRY.getId(copycats.material()[i]));
+				this.ids[index] = ids;
+			}
+			return ids;
+		}
+
+		/** What the section holds: {@link #AIR_SECTION} where it has no blocks. */
+		Section section(int index) {
+			if (index < 0 || index >= this.sections.length) {
+				return AIR_SECTION;
+			}
+			Section section = this.sections[index];
+			if (section == null) {
+				section = this.read(index);
+				this.sections[index] = section;
+			}
+			return section;
+		}
+
+		private Section read(int index) {
+			PalettedContainer<BlockState> states = this.snapshot.section(index);
+			BlockState uniform = this.snapshot.uniformSection(index);
+			if (states == null && uniform == null) {
+				return AIR_SECTION;
+			}
+			ChunkSnapshot.SectionCopycats copycats = this.looks == null ? null : this.snapshot.copycats(index);
+			if (copycats == null) {
+				if (uniform != null) {
+					return new Section(BlockLooks.bakeId(this.snapshot.turned(uniform)), null, null, null, null);
+				}
+				ChunkSnapshot.Packed packed = this.snapshot.packed(index);
+				int[] palette = packed == null ? null : this.paletteIds(packed);
+				if (palette != null) {
+					return new Section(-1, null, packed.storage(), palette, this.snapshot.columns());
+				}
+			}
+			// Block by block: filled copycats take their material's look, and some palettes can't be
+			// numbered whole (the registry itself, in a section of over 256 kinds of block).
+			int[] ids = new int[4096];
+			if (uniform != null) {
+				Arrays.fill(ids, BlockLooks.bakeId(this.snapshot.turned(uniform)));
+			} else {
+				BlockState lastState = null;
+				int lastId = 0;
+				for (int y = 0; y < 16; y++) {
+					for (int z = 0; z < 16; z++) {
+						for (int x = 0; x < 16; x++) {
+							BlockState state = this.snapshot.state(states, x, y, z);
+							if (state != lastState) {
+								lastState = state;
+								lastId = BlockLooks.bakeId(state);
+							}
+							ids[(y << 8) | (z << 4) | x] = lastId;
+						}
 					}
 				}
 			}
-			return this.sections[index];
+			if (copycats != null) {
+				for (int i = 0; i < copycats.at().length; i++) {
+					int at = copycats.at()[i];
+					ids[at] = this.looks.copycat(ids[at], Block.BLOCK_STATE_REGISTRY.getId(copycats.material()[i]));
+				}
+			}
+			return new Section(-1, ids, null, null, null);
+		}
+
+		/**
+		 * The id of each of the section's palette entries, as this view has them, with room for
+		 * every index its storage can hold; null if the palette is too big to number this way.
+		 */
+		private int @Nullable [] paletteIds(ChunkSnapshot.Packed packed) {
+			int bits = packed.storage().getBits();
+			int size = packed.palette().getSize();
+			if (bits > 8 || size > 1 << bits) {
+				return null;
+			}
+			int[] ids = new int[1 << bits];
+			Arrays.fill(ids, AIR_ID);
+			for (int p = 0; p < size; p++) {
+				BlockState state = packed.palette().valueFor(p);
+				if (state != null) {
+					ids[p] = BlockLooks.bakeId(this.snapshot.turned(state));
+				}
+			}
+			return ids;
 		}
 	}
 }

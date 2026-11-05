@@ -128,6 +128,8 @@ public final class BlockLooks {
 	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused.
 	 */
 	public float[][] shapes;
+	/** {@link #faces} so far, by shape; made on first use. */
+	private volatile @Nullable ShapeFaces @Nullable [] faces;
 	/**
 	 * For a waterlogged block smaller than a cube, the state id of the fluid around it: rays that
 	 * pass beside the block, or reach it from above, go through that fluid. -1 for every other block.
@@ -167,6 +169,26 @@ public final class BlockLooks {
 
 	public static BlockLooks get() {
 		return current;
+	}
+
+	/**
+	 * What the GPU baker draws of {@link #shapes}{@code [shape]}. The mesher asks for every smaller
+	 * block it meets, so this keeps them by index rather than going through ShapeFaces' shared,
+	 * locked table each time. Any thread.
+	 */
+	ShapeFaces faces(int shape) {
+		ShapeFaces[] faces = this.faces;
+		if (faces == null) {
+			faces = new ShapeFaces[this.shapes.length];
+			this.faces = faces;
+		}
+		ShapeFaces made = faces[shape];
+		if (made == null) {
+			// Two threads may both look it up; they get the same one.
+			made = ShapeFaces.of(this.shapes[shape]);
+			faces[shape] = made;
+		}
+		return made;
 	}
 
 	/**

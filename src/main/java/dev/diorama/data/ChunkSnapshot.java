@@ -438,6 +438,45 @@ public final class ChunkSnapshot {
 		return this.uniform[index];
 	}
 
+	/**
+	 * A {@link #section}'s blocks as its container packs them, for readers that look each palette
+	 * entry up once instead of every block: one palette index per block in the chunk's own layout,
+	 * indexed {@code (y << 8) | (z << 4) | x}, so a turned view's blocks are at {@link #columns}
+	 * and its states need {@link #turned(BlockState)}. Null for a section without a container, or
+	 * where the container can't be read that way. Read only.
+	 */
+	public @Nullable Packed packed(int index) {
+		PalettedContainer<BlockState> states = this.states[index];
+		return states == null ? null : Sections.packed(states);
+	}
+
+	/** See {@link #packed}. */
+	public record Packed(net.minecraft.util.BitStorage storage, net.minecraft.world.level.chunk.Palette<BlockState> palette) {
+	}
+
+	/** {@link #columns} per facing, by turns. */
+	private static final int[][] COLUMNS = new int[4][];
+
+	static {
+		for (Facing facing : Facing.values()) {
+			int[] columns = new int[256];
+			for (int x = 0; x < 16; x++) {
+				for (int z = 0; z < 16; z++) {
+					columns[(z << 4) | x] = ((facing.worldBlockZ(x, z) & 15) << 4) | (facing.worldBlockX(x, z) & 15);
+				}
+			}
+			COLUMNS[facing.turns] = columns;
+		}
+	}
+
+	/**
+	 * Where each column of this view is in the chunk's own layout: entry {@code (z << 4) | x} of the
+	 * view holds the chunk's {@code (z << 4) | x}. Null for the chunk itself, which needs none.
+	 */
+	public int @Nullable [] columns() {
+		return this.facing == Facing.NORTH ? null : COLUMNS[this.facing.turns];
+	}
+
 	public int blockLight(int sectionIndex, int x, int y, int z) {
 		DataLayer layer = this.blockLight[sectionIndex];
 		return layer == null ? 0 : layer.get(this.localX(x, z), y, this.localZ(x, z));
