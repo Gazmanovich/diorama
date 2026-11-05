@@ -39,6 +39,13 @@ public interface MapCanvas {
 		);
 	}
 
+	/**
+	 * A tile at night with its block light, as {@link #quad} draws it by day: {@code params} is
+	 * {@link dev.diorama.render.NightLook#params}. Where the night shader can't be drawn, the tile
+	 * is drawn dimmed without its light.
+	 */
+	void nightTile(MapTexture tile, Sampling sampling, MapTexture light, float[] corners, float[] uvs, int params);
+
 	/** An untextured quad in one colour, corners counter-clockwise (the other winding is culled), or several, like {@link #quad}. */
 	void solid(float[] corners, int argb);
 

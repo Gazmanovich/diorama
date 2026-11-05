@@ -48,7 +48,12 @@ public final class MapExport {
 	 * ground, or its smoke when {@code smoke} (the sky view under a roof), and {@code drawings} over
 	 * it. False if an export is already running.
 	 */
-	public static synchronized boolean start(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings) {
+	public static boolean start(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings) {
+		return start(store, area, smoke, 0, drawings);
+	}
+
+	/** The same, the ground drawn {@code night} into the night (0..1) as the map draws it. */
+	public static synchronized boolean start(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings) {
 		if (running != null) {
 			return false;
 		}
@@ -74,23 +79,23 @@ public final class MapExport {
 			fontOptions.add("jp");
 		}
 		//?}
-		Thread thread = new Thread(() -> export.run(store, area, smoke, copied, fontOptions), "diorama-export");
+		Thread thread = new Thread(() -> export.run(store, area, smoke, night, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke, List<Drawing> drawings, Set<String> fontOptions) {
+	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings, Set<String> fontOptions) {
 		Component message;
 		try {
 			store.catchUp();
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
-			ImageExport.Finish finish = ExportFog.build(store, area, smoke);
+			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night);
 			if (!drawings.isEmpty()) {
 				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager(), fontOptions));
 			}
-			ImageExport.write(store, area, this.file, finish, p -> this.progress = p);
+			ImageExport.write(store, area, this.file, finish, night, p -> this.progress = p);
 			Path absolute = this.file.toAbsolutePath();
 			Component link = Component.literal(absolute.getFileName().toString())
 				.withStyle(ChatFormatting.UNDERLINE)

@@ -2,6 +2,7 @@ package dev.diorama.render;
 
 import dev.diorama.Claims;
 import dev.diorama.Projection;
+import dev.diorama.bake.BlockLight;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileImage;
@@ -17,6 +18,10 @@ public final class MapTile {
 	/** {@link Overlays} bits per pixel from the bakes that recorded them, or null. */
 	private byte @Nullable [] info;
 	private @Nullable MapTexture overlay;
+	/** The tile's {@link BlockLight}, null where it has none (caves, or saved before it was kept). */
+	private byte @Nullable [] blockLight;
+	/** The block light on the GPU in red, for night; null while the tile has no light anywhere. */
+	private @Nullable MapTexture light;
 	/** The overlay bits the overlay texture shows, or -1 when it has to be drawn again. */
 	private int overlayShown = -1;
 	private boolean empty = true;
@@ -70,6 +75,7 @@ public final class MapTile {
 			this.coverage = image.coverage();
 			this.info = image.info();
 			this.overlayShown = -1;
+			this.blockLight = image.blockLight();
 			this.empty = isEmpty(this.coverage);
 			if (this.empty) {
 				this.close();
@@ -80,6 +86,7 @@ public final class MapTile {
 			for (int level = 0; level < Mipmaps.LEVELS; level++) {
 				this.texture.write(level, 0, 0, size >> level, image.mips()[level]);
 			}
+			this.uploadLight();
 			return;
 		}
 		if (this.coverage == null) {
@@ -116,6 +123,57 @@ public final class MapTile {
 				this.patchInfo(patch);
 			}
 		}
+		this.patchLight(image);
+	}
+
+	/** Copies the patches' light into the tile's, then puts it on the GPU again: it's small. */
+	private void patchLight(TileImage image) {
+		boolean changed = false;
+		int edge = TileImage.BLOCK / BlockLight.SCALE;
+		for (TileImage.Patch patch : image.patches()) {
+			byte[] light = patch.blockLight();
+			if (light == null) {
+				continue;
+			}
+			if (this.blockLight == null) {
+				this.blockLight = new byte[BlockLight.EDGE * BlockLight.EDGE];
+			}
+			for (int y = 0; y < edge; y++) {
+				System.arraycopy(light, y * edge, this.blockLight, (patch.blockY() * edge + y) * BlockLight.EDGE + patch.blockX() * edge, edge);
+			}
+			changed = true;
+		}
+		if (changed) {
+			this.uploadLight();
+		}
+	}
+
+	/** Puts the tile's block light on the GPU, or frees it where there's none. */
+	private void uploadLight() {
+		if (!BlockLight.any(this.blockLight)) {
+			if (this.light != null) {
+				this.light.close();
+				this.light = null;
+			}
+			return;
+		}
+		if (this.light == null) {
+			this.light = MapTexture.create("diorama light", BlockLight.EDGE, Mipmaps.LEVELS);
+		}
+		byte[][] mips = BlockLight.mips(this.blockLight, Mipmaps.LEVELS);
+		for (int level = 0; level < Mipmaps.LEVELS; level++) {
+			byte[] values = mips[level];
+			int[] pixels = new int[values.length];
+			for (int i = 0; i < values.length; i++) {
+				pixels[i] = 0xFF000000 | values[i] & 0xFF;
+			}
+			this.light.write(level, 0, 0, BlockLight.EDGE >> level, pixels);
+		}
+	}
+
+	/** The block light texture to draw this tile at night with, or null if it has no light. */
+	public @Nullable MapTexture light() {
+		return this.texture == null ? null : this.light;
 	}
 
 	private void patchInfo(TileImage.Patch patch) {
@@ -229,6 +287,11 @@ public final class MapTile {
 		return (c[cellY * Projection.COVERAGE_CELLS + cellX] & 0xFF) / 255.0F;
 	}
 
+	/** The {@link BlockLight} value at (lx, ly), {@link BlockLight#EDGE} a side, or -1 if this tile has none. For tests. */
+	public int blockLightAt(int lx, int ly) {
+		return this.blockLight == null ? -1 : this.blockLight[ly * BlockLight.EDGE + lx] & 0xFF;
+	}
+
 	/** The overlay bits recorded for one pixel, or -1 if this tile has none. For tests. */
 	public int overlayBits(int px, int py) {
 		return this.info == null ? -1 : this.info[py * Projection.TILE_PIXELS + px] & 0xFF;
@@ -251,6 +314,10 @@ public final class MapTile {
 		if (this.overlay != null) {
 			this.overlay.close();
 			this.overlay = null;
+		}
+		if (this.light != null) {
+			this.light.close();
+			this.light = null;
 		}
 		if (this.texture != null) {
 			this.texture.close();

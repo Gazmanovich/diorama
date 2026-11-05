@@ -2,6 +2,7 @@ package dev.diorama.data;
 
 import dev.diorama.Diorama;
 import dev.diorama.Projection;
+import dev.diorama.bake.BlockLight;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
@@ -56,14 +57,19 @@ import org.jspecify.annotations.Nullable;
  * once the chunks are gone. An overview tile keeps its {@link TileChunks}, so land claims can be
  * drawn on it; a level-0 tile's come from its spots.
  *
+ * <p>A sky view tile also keeps its {@link BlockLight}, which lights the map at night. Tiles saved
+ * before it was kept have none until they're baked again.
+ *
  * <p>File format: {@code OMT1}, the edge length, then deflated: the ABGR pixels, then on level-0
- * tiles {@code SPT1} and the spots, and on overview tiles {@code CHK1} and the chunks. Versions
- * from before spots read the pixels and stop there.
+ * tiles {@code SPT1} and the spots, and on overview tiles {@code CHK1} and the chunks, then
+ * {@code LIT1} and the block light, {@link BlockLight#EDGE} a side, a byte each. Versions from
+ * before spots read the pixels and stop there; versions from before block light stop before it.
  */
 public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
 	private static final int SPOTS_MAGIC = 0x53505431;
 	private static final int CHUNKS_MAGIC = 0x43484B31;
+	private static final int LIGHT_MAGIC = 0x4C495431;
 	private static final int CACHED_TILES = 24;
 	private static final long WRITE_DELAY_SECONDS = 3;
 	/** After a failed write (a full disk, say), try again this much later. */
@@ -96,18 +102,18 @@ public final class TileStore {
 	/** Tiles with a merge waiting on the writer thread, so a run of bakes queues one. Guarded by {@code this}. */
 	private final Set<TileKey> mergeQueued = new HashSet<>();
 	/**
-	 * A saved tile: its pixels, and its spots (level 0) or chunks (overviews) where it has any.
-	 * Never modified.
+	 * A saved tile: its pixels, its spots (level 0) or chunks (overviews) where it has any, and its
+	 * block light where it was baked with it. Never modified.
 	 */
-	private record Tile(int[] pixels, int @Nullable [] spots, byte @Nullable [] chunks) {
-		Tile(int[] pixels, int @Nullable [] spots) {
-			this(pixels, spots, null);
-		}
-
+	private record Tile(int[] pixels, int @Nullable [] spots, byte @Nullable [] chunks, byte @Nullable [] blockLight) {
 		boolean same(Tile other) {
 			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.spots, other.spots)
-				&& java.util.Arrays.equals(this.chunks, other.chunks);
+				&& java.util.Arrays.equals(this.chunks, other.chunks) && java.util.Arrays.equals(this.blockLight, other.blockLight);
 		}
+	}
+
+	/** A saved tile's pixels and its {@link BlockLight}, which is null if it was saved without. */
+	public record Saved(int[] pixels, byte @Nullable [] blockLight) {
 	}
 
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
@@ -148,18 +154,27 @@ public final class TileStore {
 		return this.unwritten.size() + this.mergeQueued.size();
 	}
 
-	/** One level up from four children, each shrunk to a quarter; null if none exist. */
-	private int @Nullable [] shrinkChildren(TileKey key) {
+	/**
+	 * One level up from four children, each shrunk to a quarter; null if none exist. Its block
+	 * light is theirs shrunk the same way, null if none of them has any; a child saved without
+	 * gives its quarter none.
+	 */
+	private @Nullable Saved shrinkChildren(TileKey key) {
 		int size = Projection.TILE_PIXELS;
 		int half = size / 2;
 		int[] out = null;
+		byte[][] childLight = new byte[4][];
+		int[][] childPixels = new int[4][];
 		for (int dy = 0; dy < 2; dy++) {
 			for (int dx = 0; dx < 2; dx++) {
 				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
-				int[] c = this.read(child);
-				if (c == null) {
+				Saved saved = this.readSaved(child);
+				if (saved == null) {
 					continue;
 				}
+				int[] c = saved.pixels();
+				childPixels[dy * 2 + dx] = c;
+				childLight[dy * 2 + dx] = saved.blockLight();
 				if (out == null) {
 					out = new int[size * size];
 				}
@@ -172,7 +187,7 @@ public final class TileStore {
 				}
 			}
 		}
-		return out;
+		return out == null ? null : new Saved(out, BlockLight.overview(childLight, childPixels));
 	}
 
 	/** A tile was written: the overview tiles above it are now out of date. */
@@ -204,11 +219,11 @@ public final class TileStore {
 			Set<TileKey> level = levels.pollFirstEntry().getValue();
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
-				int[] pixels = this.shrinkChildren(key);
-				if (pixels == null) {
+				Saved shrunk = this.shrinkChildren(key);
+				if (shrunk == null) {
 					continue;
 				}
-				Tile tile = new Tile(pixels, null, this.shrinkChunks(key));
+				Tile tile = new Tile(shrunk.pixels(), null, this.shrinkChunks(key), shrunk.blockLight());
 				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
 				synchronized (this.io) {
 					synchronized (this) {
@@ -250,6 +265,15 @@ public final class TileStore {
 			this.merge(key);
 			Tile tile = this.saved(key);
 			return tile == null ? null : tile.pixels;
+		}
+	}
+
+	/** The same with the tile's block light, read together so the two always match. Don't modify the arrays. */
+	public @Nullable Saved readSaved(TileKey key) {
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			return tile == null ? null : new Saved(tile.pixels, tile.blockLight);
 		}
 	}
 
@@ -406,19 +430,33 @@ public final class TileStore {
 			boolean changed = false;
 			for (TileImage image : images) {
 				int[] pixels;
+				byte[] light;
 				if (image.isFull()) {
 					pixels = image.mips()[0].clone();
+					light = image.blockLight() == null ? null : image.blockLight().clone();
 				} else {
 					pixels = saved == null ? new int[size * size] : saved.pixels.clone();
+					light = saved == null || saved.blockLight == null ? null : saved.blockLight.clone();
 					for (TileImage.Patch patch : image.patches()) {
 						int[] block = patch.mips()[0];
 						int edge = TileImage.BLOCK;
 						for (int y = 0; y < edge; y++) {
 							System.arraycopy(block, y * edge, pixels, (patch.blockY() * edge + y) * size + patch.blockX() * edge, edge);
 						}
+						byte[] patchLight = patch.blockLight();
+						if (patchLight != null) {
+							if (light == null) {
+								// The rest of a tile saved without light gets none.
+								light = new byte[BlockLight.EDGE * BlockLight.EDGE];
+							}
+							int lightEdge = edge / BlockLight.SCALE;
+							for (int y = 0; y < lightEdge; y++) {
+								System.arraycopy(patchLight, y * lightEdge, light, (patch.blockY() * lightEdge + y) * BlockLight.EDGE + patch.blockX() * lightEdge, lightEdge);
+							}
+						}
 					}
 				}
-				Tile merged = new Tile(pixels, mergeSpots(saved == null ? null : saved.spots, image));
+				Tile merged = new Tile(pixels, mergeSpots(saved == null ? null : saved.spots, image), null, light);
 				if (saved != null ? saved.same(merged) : nothingKnown(pixels)) {
 					count(true);
 					continue;
@@ -476,10 +514,29 @@ public final class TileStore {
 			if (tile == null || key.lod() == 0) {
 				return;
 			}
-			old = new Tile(tile.pixels, null, null);
+			old = new Tile(tile.pixels, null, null, tile.blockLight);
 			synchronized (this) {
 				this.cache.put(key, old);
 				this.chunksAsked.remove(key);
+			}
+		}
+		this.store(key, old);
+	}
+
+	/** For tests: makes a level-0 tile look like one saved before block light was kept, on disk too. */
+	public void forgetBlockLight(TileKey key) {
+		Tile old;
+		synchronized (this.io) {
+			this.merge(key);
+			Tile tile = this.saved(key);
+			if (tile == null || key.lod() != 0) {
+				return;
+			}
+			old = new Tile(tile.pixels, tile.spots, null, null);
+			synchronized (this) {
+				this.cache.put(key, old);
+				// A write still waiting would put the light back.
+				this.unwritten.replace(key, old);
 			}
 		}
 		this.store(key, old);
@@ -494,7 +551,7 @@ public final class TileStore {
 			if (tile == null || key.lod() != 0) {
 				return;
 			}
-			old = new Tile(tile.pixels, null, null);
+			old = new Tile(tile.pixels, null, null, tile.blockLight);
 			synchronized (this) {
 				this.cache.put(key, old);
 				// A write still waiting would put the spots back.
@@ -719,26 +776,45 @@ public final class TileStore {
 			}
 			int[] pixels = new int[size * size];
 			ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-			// Tiles saved before spots, and overview tiles saved before chunks, end here.
-			if (key.lod() > 0) {
-				byte[] more = inflated.readNBytes(4 + size * size);
-				if (more.length == 4 + size * size && ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN).getInt() == CHUNKS_MAGIC) {
-					return new Tile(pixels, null, java.util.Arrays.copyOfRange(more, 4, more.length));
+			// Tiles saved before spots, and overview tiles saved before chunks, end here. Each block
+			// after the pixels starts with its name, so one left out is just missing.
+			int extraMagic = key.lod() > 0 ? CHUNKS_MAGIC : SPOTS_MAGIC;
+			int extraLength = key.lod() > 0 ? size * size : TileSpots.COLUMNS * TileSpots.ROWS * 4;
+			byte[] extra = null;
+			int name = readName(inflated);
+			if (name == extraMagic) {
+				extra = inflated.readNBytes(extraLength);
+				if (extra.length != extraLength) {
+					extra = null;
 				}
-				return new Tile(pixels, null);
+				name = extra == null ? 0 : readName(inflated);
+			}
+			byte[] light = null;
+			if (name == LIGHT_MAGIC) {
+				light = inflated.readNBytes(BlockLight.EDGE * BlockLight.EDGE);
+				if (light.length != BlockLight.EDGE * BlockLight.EDGE) {
+					light = null;
+				}
+			}
+			if (key.lod() > 0) {
+				return new Tile(pixels, null, extra, light);
 			}
 			int[] spots = null;
-			byte[] more = inflated.readNBytes(4 + TileSpots.COLUMNS * TileSpots.ROWS * 4);
-			ByteBuffer rest = ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN);
-			if (more.length == 4 + TileSpots.COLUMNS * TileSpots.ROWS * 4 && rest.getInt() == SPOTS_MAGIC) {
+			if (extra != null) {
 				spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
-				rest.asIntBuffer().get(spots);
+				ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(spots);
 			}
-			return new Tile(pixels, spots);
+			return new Tile(pixels, spots, null, light);
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read saved tile {}", file, e);
 			return null;
 		}
+	}
+
+	/** The next block's name in a tile file, or 0 at its end. */
+	private static int readName(InputStream in) throws IOException {
+		byte[] name = in.readNBytes(4);
+		return name.length == 4 ? ByteBuffer.wrap(name).order(ByteOrder.LITTLE_ENDIAN).getInt() : 0;
 	}
 
 	/**
@@ -750,19 +826,25 @@ public final class TileStore {
 		int[] pixels = tile.pixels;
 		int[] spots = tile.spots;
 		byte[] chunks = tile.chunks;
+		byte[] light = tile.blockLight;
 		try {
 			Files.createDirectories(file.getParent());
 			int extra = spots != null ? 4 + spots.length * 4 : chunks != null ? 4 + chunks.length : 0;
-			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + extra).order(ByteOrder.LITTLE_ENDIAN);
+			int lit = light != null ? 4 + light.length : 0;
+			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + extra + lit).order(ByteOrder.LITTLE_ENDIAN);
 			buffer.asIntBuffer().put(pixels);
+			buffer.position(pixels.length * 4);
 			if (spots != null) {
-				buffer.position(pixels.length * 4);
 				buffer.putInt(SPOTS_MAGIC);
 				buffer.asIntBuffer().put(spots);
+				buffer.position(buffer.position() + spots.length * 4);
 			} else if (chunks != null) {
-				buffer.position(pixels.length * 4);
 				buffer.putInt(CHUNKS_MAGIC);
 				buffer.put(chunks);
+			}
+			if (light != null) {
+				buffer.putInt(LIGHT_MAGIC);
+				buffer.put(light);
 			}
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(pixels.length);
 			try (DataOutputStream data = new DataOutputStream(bytes)) {

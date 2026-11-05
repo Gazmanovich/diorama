@@ -69,6 +69,7 @@ public final class DioramaNeoForge {
 		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> {
 			event.registerPipeline(DioramaPipelines.FOG);
 			event.registerPipeline(DioramaPipelines.TILE);
+			event.registerPipeline(DioramaPipelines.TILE_NIGHT);
 		});
 		//?}
 		// As on Fabric: waypoints in the world under the whole vanilla HUD and every screen, as part

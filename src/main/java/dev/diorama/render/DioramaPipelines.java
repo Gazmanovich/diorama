@@ -36,6 +36,13 @@ public final class DioramaPipelines {
 	/*public static final RenderPipeline TILE = mapPipeline("tile", 1);
 	*///?}
 
+	/** A tile at night with its block light: the tile in sampler 0, the light in sampler 1; see {@code tile_night.fsh}. */
+	//? if >=26.2 {
+	public static final RenderPipeline TILE_NIGHT = mapPipeline("tile_night", BindGroupLayouts.SAMPLER0_SAMPLER1);
+	//?} else {
+	/*public static final RenderPipeline TILE_NIGHT = mapPipeline("tile_night", 2);
+	*///?}
+
 	/**
 	 * One of the map's own shaders, with the fog's vertex shader. Each version builds it like its
 	 * own vanilla GUI_TEXTURED_SNIPPET, with the globals added.

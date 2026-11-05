@@ -49,7 +49,7 @@ public final class ExportFog implements ImageExport.Finish {
 	private final float[] shade;
 	private final int background;
 
-	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke) {
+	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke, float night) {
 		this.lod = lod;
 		this.unitsPerPixel = (double) (1 << lod) / Projection.PIXELS_PER_UNIT;
 		this.known = known;
@@ -62,10 +62,11 @@ public final class ExportFog implements ImageExport.Finish {
 		this.scaleSteps = steps;
 		this.scaleFraction = fraction;
 		this.fogScale = (float) Math.pow(2, steps + fraction);
-		this.lit = smoke ? new float[] {0.26F, 0.22F, 0.21F} : new float[] {0.97F, 0.97F, 0.99F};
-		this.shade = smoke ? new float[] {0.07F, 0.055F, 0.055F} : new float[] {0.48F, 0.55F, 0.67F};
+		// Dimmed at night as fog.fsh dims them.
+		this.lit = NightLook.darken(smoke ? new float[] {0.26F, 0.22F, 0.21F} : new float[] {0.97F, 0.97F, 0.99F}, night);
+		this.shade = NightLook.darken(smoke ? new float[] {0.07F, 0.055F, 0.055F} : new float[] {0.48F, 0.55F, 0.67F}, night);
 		// What the map draws behind its tiles.
-		this.background = smoke ? 0x29211F : 0x8C99AB;
+		this.background = NightLook.darken(smoke ? 0xFF29211F : 0xFF8C99AB, night) & 0xFFFFFF;
 	}
 
 	/**
@@ -73,6 +74,11 @@ public final class ExportFog implements ImageExport.Finish {
 	 * {@code smoke} for the sky view under a roof, which has smoke instead of clouds.
 	 */
 	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke) {
+		return build(store, area, smoke, 0);
+	}
+
+	/** The same, dimmed {@code night} into the night as the map draws it ({@link NightLook}). */
+	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke, float night) {
 		loadNoise();
 		int lod = area.lod();
 		double pixelsPerUnit = Projection.PIXELS_PER_UNIT / (double) (1 << lod);
@@ -132,7 +138,7 @@ public final class ExportFog implements ImageExport.Finish {
 			// Kept to bytes, like the mask texture.
 			sum[i] = Math.round(Math.min(1, sum[i] / perTexel) * 255) / 255F;
 		}
-		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, smoke);
+		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, smoke, night);
 		if (MapStyle.get().roundedFog() && texel < 16) {
 			fog.roundOff(Math.max(1, Math.round(10 / texel)));
 		}

@@ -221,6 +221,8 @@ void main() {
     vec2 offsetBytes = floor(params.rg * 255.0 + 0.5);
     noiseOrigin = floor(offsetBytes / 32.0) / 8.0;
     float fogOpacity = 1.0 - mod(offsetBytes.r, 32.0) / 31.0;
+    // The green byte's low five bits are how far into the night the map is drawn, in 31sts (NightLook).
+    float night = mod(offsetBytes.g, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
     fast = mod(alphaCode, 16.0) >= 2.0;
@@ -311,5 +313,6 @@ void main() {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
+    // At night the fog dims toward moonlight with the map under it, as NightLook.dim tints the tiles.
+    fragColor = vec4(color / alpha * mix(vec3(1.0), vec3(0.27, 0.33, 0.49), night), alpha * fogOpacity) * ColorModulator;
 }

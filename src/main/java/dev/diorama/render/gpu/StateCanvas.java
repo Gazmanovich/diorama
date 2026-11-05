@@ -41,6 +41,19 @@ final class StateCanvas implements MapCanvas {
 	}
 
 	@Override
+	public void nightTile(MapTexture tile, Sampling sampling, MapTexture light, float[] corners, float[] uvs, int params) {
+		this.graphics.guiRenderState.addGuiElement(QuadElement.of(
+			DioramaPipelines.TILE_NIGHT,
+			StateTexture.pair((StateTexture) tile, sampling, (StateTexture) light, Sampling.TILE_SMOOTH),
+			new Matrix3x2f(this.graphics.pose()),
+			corners,
+			uvs,
+			params,
+			this.graphics.scissorStack.peek()
+		));
+	}
+
+	@Override
 	public void solid(float[] corners, int argb) {
 		this.graphics.guiRenderState.addGuiElement(QuadElement.of(
 			RenderPipelines.GUI,

@@ -41,8 +41,9 @@ LOC(8) flat in ivec4 faceHaze;
 
 layout(location = 0) out vec4 fragColor;
 #if !defined(WATER) && !defined(TINTED)
-// The sample's overlay bits over 255, its surface's albedo brightness, and 1 on a floor, where
-// rays that met nothing end: the composite needs these to tint and to mix water like the tracer.
+// The sample's overlay bits over 255, its surface's albedo brightness, 1 on a floor, where rays
+// that met nothing end, and in the sky view its block light over 15: the composite needs these to
+// tint and to mix water like the tracer, and to keep the light that lights the map at night.
 layout(location = 1) out vec4 fragAux;
 #endif
 
@@ -292,7 +293,9 @@ void main() {
     }
     vec3 shaded = albedo * l;
     fragColor = vec4(lid ? hazed(shaded, localPos.y) : shaded, 1.0);
-    fragAux = vec4(bits, luminance(albedo), 0.0, 0.0);
+    // In the sky view, the block light in front of the face, or a lamp's own if brighter (TileBaker.outBlockLight).
+    float blockLight = Mode.x > 0.5 ? 0.0 : max(faceLight.y * 255.0, floor(emission * 15.0 + 0.5)) / 15.0;
+    fragAux = vec4(bits, luminance(albedo), 0.0, blockLight);
 #endif
 #endif
 }

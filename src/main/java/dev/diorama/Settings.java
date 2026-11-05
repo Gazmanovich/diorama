@@ -75,6 +75,8 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public GameTime gameTime = GameTime.OFF;
+	/** Whether the sky view is drawn by day, at night, or as the world's time has it; see {@code NightLook}. */
+	public DayNight dayNight = DayNight.FOLLOW;
 	public boolean autoCaves = true;
 	/** Keep the surface view while only a roof is overhead; see {@link MapSession#autoLayer}. */
 	public boolean preferSurface = true;
@@ -193,6 +195,13 @@ public final class Settings {
 		DAY_12H,
 		ONLY_24H,
 		ONLY_12H
+	}
+
+	/** How dark the map is drawn: as the world's time of day, or always by day or at night. */
+	public enum DayNight {
+		FOLLOW,
+		DAY,
+		NIGHT
 	}
 
 	/** The minimap's border: the dark frame, a clean Minecraft edge, or none. */
@@ -362,6 +371,9 @@ public final class Settings {
 		}
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;
+		}
+		if (settings.dayNight == null) {
+			settings.dayNight = DayNight.FOLLOW;
 		}
 		if (settings.gameTime == null) {
 			settings.gameTime = GameTime.OFF;
