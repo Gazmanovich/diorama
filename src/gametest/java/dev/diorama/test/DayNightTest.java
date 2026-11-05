@@ -33,6 +33,8 @@ final class DayNightTest {
 			throw new AssertionError("The map should follow the world's time at first, not " + fresh);
 		}
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
+		// The tests after this one look around where the player stands: they get the player back.
+		double[] home = context.computeOnClient(mc -> new double[] {mc.player.getX(), mc.player.getY(), mc.player.getZ()});
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("weather clear");
 		world.getServer().runCommand("forceload add " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
@@ -90,7 +92,9 @@ final class DayNightTest {
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		world.getServer().runCommand("time set noon");
-		world.getServer().runCommand("forceload remove all");
+		world.getServer().runCommand("forceload remove " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
+		world.getServer().runCommand("tp @a " + home[0] + " " + home[1] + " " + home[2]);
+		context.waitFor(mc -> mc.player.distanceToSqr(home[0], home[1], home[2]) < 4, 200);
 	}
 
 	/** The saved light at a texel of a tile, -1 if it's saved without. */
