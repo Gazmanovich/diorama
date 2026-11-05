@@ -196,6 +196,8 @@ final class LegacyShaders extends RenderType {
 	//?} else {
 	private static ShaderInstance fogShader;
 	private static ShaderInstance fogLayerShader;
+	// The layer's program failed since the last reload: the map draws the fog directly until the next.
+	private static boolean fogLayerFailed;
 	private static ShaderInstance tileShader;
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(GameRenderer::getPositionTexColorShader);
 	private static final RenderStateShard.ShaderStateShard FOG_SHADER = new RenderStateShard.ShaderStateShard(() -> fogShader);
@@ -269,6 +271,7 @@ final class LegacyShaders extends RenderType {
 				fogLayerShader.close();
 				fogLayerShader = null;
 			}
+			fogLayerFailed = false;
 		}
 		// Built by hand rather than through Fabric's core shader callback, whose failure would fail
 		// the whole resource reload. The json lives in the minecraft namespace, where the vanilla
@@ -294,10 +297,11 @@ final class LegacyShaders extends RenderType {
 		//? if >=1.21.2 {
 		return fogProgram != null;
 		//?} else {
-		if (fogLayerShader == null && fogShader != null) {
+		if (fogLayerShader == null && fogShader != null && !fogLayerFailed) {
 			try {
 				fogLayerShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "diorama_fog_layer", DefaultVertexFormat.POSITION_TEX_COLOR);
 			} catch (Exception e) {
+				fogLayerFailed = true;
 				LOGGER.error("Diorama's fog layer shader didn't compile; the map draws the fog directly", e);
 			}
 		}
