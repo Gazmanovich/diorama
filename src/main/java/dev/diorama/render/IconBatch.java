@@ -150,6 +150,8 @@ public final class IconBatch {
 			this.textureIds = new int[0];
 			this.runs = new int[0];
 			this.order = new long[0];
+			this.bounds = new float[0];
+			this.layers = new int[0];
 			this.groupXyz = new float[0];
 			this.groupUvs = new float[0];
 			this.groupColors = new int[0];
