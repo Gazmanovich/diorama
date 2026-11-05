@@ -421,9 +421,13 @@ vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float 
     float cover = bitten(curled, p, size);
     float fringe = cover - 0.25;
     float edge = 1.0 - smoothstep(0.55, 0.95, curled);
-    vec2 along = vec2(p.x * 0.35, p.y * 1.4);
-    float strands = smoothstep(0.25, 0.75, wispAt(along + 53.0, size * 0.5));
-    float alpha = CLOUD_ALPHA * smoothstep(0.0, EDGE_SOFT, fringe) * mix(1.0, strands, edge * STRANDS);
+    float alpha = CLOUD_ALPHA * smoothstep(0.0, EDGE_SOFT, fringe);
+    // The strands only show toward the edge: inside a level they needn't be read.
+    if (edge > 0.0) {
+        vec2 along = vec2(p.x * 0.35, p.y * 1.4);
+        float strands = smoothstep(0.25, 0.75, wispAt(along + 53.0, size * 0.5));
+        alpha *= mix(1.0, strands, edge * STRANDS);
+    }
     return vec4(color, alpha);
 }
 
