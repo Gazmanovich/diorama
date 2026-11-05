@@ -175,6 +175,9 @@ public final class Radar {
 			icons.endIcon();
 		}
 		icons.draw();
+		if (measure != null) {
+			measure.draw();
+		}
 		graphics.disableScissor();
 	}
 
