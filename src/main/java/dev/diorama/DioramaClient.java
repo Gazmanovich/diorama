@@ -11,6 +11,7 @@ import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.Waypoints;
 import dev.diorama.waypoint.Waystones;
+import dev.diorama.waypoint.XaeroNotice;
 import java.util.List;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -79,6 +80,7 @@ public final class DioramaClient {
 		MapSession.tick(mc);
 		Waypoints.watchSleep(mc);
 		Claims.tick(mc);
+		XaeroNotice.tick(mc);
 		while (OPEN_MAP.consumeClick()) {
 			if (mc.gui.screen() == null && mc.level != null && ServerRules.minimapAllowed()) {
 				mc.gui.setScreen(new MapScreen());
