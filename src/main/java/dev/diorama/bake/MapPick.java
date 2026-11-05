@@ -106,7 +106,7 @@ public final class MapPick {
 		while (by >= this.limitY) {
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				if ((this.tall == null || by < this.tall.missingTop) && !TileSpots.passedWhenSaved(this.tile, this.savedSpots, x, by, v)) {
+				if ((this.tall == null || by < this.tall.missingTop) && !TileSpots.passedWhenSaved(this.tile, this.savedSpots, x, by, bz)) {
 					return UNKNOWN;
 				}
 				id = VoxelReader.AIR_ID;

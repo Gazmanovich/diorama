@@ -895,7 +895,7 @@ public final class TileBaker {
 			}
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				if (!this.passesMissing(by) && !TileSpots.passedWhenSaved(this.key, this.savedSpots, x, by, v)) {
+				if (!this.passesMissing(by) && !TileSpots.passedWhenSaved(this.key, this.savedSpots, x, by, bz)) {
 					return false;
 				}
 				id = VoxelReader.AIR_ID;

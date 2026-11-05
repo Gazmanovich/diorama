@@ -147,9 +147,11 @@ public final class TileSpots {
 	 * nearby they cross chunks well south of what they land on; on a server those are often chunks
 	 * that are never sent while the player is close. Without this, the fresh pixel comes out less
 	 * known than the saved one, the saved one stays, and nothing built there since ever shows.
-	 * Below the saved spot the cell stays unknown: the saved ray may have landed in that chunk.
+	 * Below the saved spot the cell stays unknown: the saved ray may have landed in that chunk. A ray
+	 * goes on through glass and plants, so glass in a chunk taken as open draws as air until the
+	 * chunk is back; only its tint is lost.
 	 */
-	public static boolean passedWhenSaved(TileKey key, int @Nullable [] spots, int x, int y, double v) {
+	private static boolean passedWhenSaved(TileKey key, int @Nullable [] spots, int x, int y, double v) {
 		if (spots == null) {
 			return false;
 		}
@@ -163,8 +165,11 @@ public final class TileSpots {
 	}
 
 	/**
-	 * The same for every row whose rays cross block {@code (x, y, z)}: whether all their saved rays
-	 * passed through it. False if none of them is in the tile.
+	 * Whether every saved ray of the tile's pixel rows crossing block {@code (x, y, z)} passed
+	 * through it, so the block can be taken as open; false if none of them is in the tile. A spot
+	 * comes from the middle of its row, while a pixel's samples spread across it, so one row's word
+	 * isn't enough: at a tower's edge the middle can pass while a sample hits. The tracer, the GPU
+	 * mesher and the pick all ask this, so they agree.
 	 */
 	public static boolean passedWhenSaved(TileKey key, int @Nullable [] spots, int x, int y, int z) {
 		if (spots == null) {

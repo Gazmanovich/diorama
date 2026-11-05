@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerCon
 //?}
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -90,6 +91,12 @@ final class UnsentChunksTest {
 			try (TestDedicatedServerConnection connection = server.connect()) {
 				// A new session north of the site: the chunks south of it never arrive.
 				waitForMap(context);
+				// Where the rays down to the roof start, at the pillar's height.
+				int startChunkZ = (int) Math.floor(midZ + 100 * Projection.cos() / Projection.sin()) >> 4;
+				boolean sent = context.computeOnClient(mc -> mc.level.getChunkSource().getChunk(midX >> 4, startChunkZ, ChunkStatus.FULL, false) != null);
+				if (sent) {
+					throw new AssertionError("The chunk the roof's rays start in was sent: the test no longer stands for #272");
+				}
 				server.runCommand("fill " + x0 + " " + ground + " " + z0 + " " + (x0 + SIZE - 1) + " " + roofY + " " + (z0 + SIZE - 1) + " red_concrete");
 				context.waitTicks(100);
 				DioramaClientTest.settle(context, 20);
