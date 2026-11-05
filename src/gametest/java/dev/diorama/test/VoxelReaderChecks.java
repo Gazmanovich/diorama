@@ -30,8 +30,9 @@ public final class VoxelReaderChecks {
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
 			var uniform = snapshot.uniformSection(section);
 			var palette = snapshot.section(section);
-			// Readers number each palette entry once; going block by block instead still reads
-			// right, but loses the speed, so it fails here.
+			// Readers number each palette entry once, from the container's packed blocks. Where a
+			// loader or mod keeps them from being read, sections go block by block: still right,
+			// but without the speed, so that fails here.
 			if (palette != null && snapshot.packed(section) == null) {
 				throw new AssertionError("Section " + section + "'s packed blocks can't be read");
 			}
@@ -79,7 +80,7 @@ public final class VoxelReaderChecks {
 		int z0 = snapshot.chunkZ << 4;
 		reader.solid(x0 - 1, snapshot.minSectionY << 4, z0);
 		reader.solid(x0, snapshot.minSectionY << 4, z0 + 16);
-		int skipped = 0;
+		int skippedSolid = 0;
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
 			int sy = snapshot.minSectionY + section;
 			long[] mayCast = reader.casterSection(snapshot.chunkX, sy, snapshot.chunkZ);
@@ -90,18 +91,21 @@ public final class VoxelReaderChecks {
 				if ((mayCast[i >> 6] >>> i & 1) != 0) {
 					continue;
 				}
-				skipped++;
 				int x = x0 + (i & 15);
 				int y = (sy << 4) + (i >> 8);
 				int z = z0 + ((i >> 4) & 15);
 				int solid = reader.solid(x, y, z);
+				if (solid != 0) {
+					skippedSolid++;
+				}
 				if (solid != 0 && (solid != 1 || reader.solid(x, y + 1, z) != 1 || reader.solid(x - 1, y, z) != 1 || reader.solid(x, y, z + 1) != 1)) {
 					throw new AssertionError("Caster skipped at " + x + "," + y + "," + z);
 				}
 			}
 		}
-		if (skipped == 0) {
-			throw new AssertionError("No block skipped by the casters: the bits are all set");
+		// Every generated chunk has rock under rock, so bits that only skip open blocks aren't doing the job.
+		if (skippedSolid == 0) {
+			throw new AssertionError("The casters skip no buried block in this chunk");
 		}
 	}
 
