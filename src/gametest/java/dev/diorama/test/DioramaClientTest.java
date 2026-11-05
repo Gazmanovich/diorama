@@ -88,6 +88,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
 		}
+		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
+			XaeroRealTest.clearXaero(context);
+		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
 		int savedChunksGround = 0;
@@ -182,6 +185,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
+			if (tests.contains("xaero-real")) {
+				XaeroRealTest.singleplayer(context, world);
+			}
 			if (tests.contains("unnumbered-states")) {
 				UnnumberedStatesTest.run(context, world);
 			}
@@ -269,7 +275,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.waitTicks(100);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
@@ -283,6 +289,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (tests.contains("waypoints")) {
 					temporaryGone(context);
+				}
+				if (tests.contains("xaero-real")) {
+					XaeroRealTest.reopened(context);
 				}
 				if (tests.contains("waystones")) {
 					waystonesAfterRejoin(context, reopened);
@@ -312,6 +321,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			multiplayer(context);
 		}
 		//? if >=1.21.4 && fabric {
+		if (tests.contains("xaero-real-server")) {
+			XaeroRealTest.server(context);
+		}
 		if (tests.contains("game-time-server")) {
 			GameTimeTest.onServer(context);
 		}
@@ -5062,7 +5074,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * type, not name, so it works where the game's names are obfuscated (1.21.11 in production).
 	 */
 	@SuppressWarnings("unchecked")
-	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
+	static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
 		try {
 			for (java.lang.reflect.Field field : net.minecraft.client.gui.components.ChatComponent.class.getDeclaredFields()) {
 				if (field.getGenericType() instanceof java.lang.reflect.ParameterizedType type && type.getRawType() == java.util.List.class
@@ -5078,7 +5090,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** The command a line's click-to-run link carries, or null. */
-	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
+	static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
 			//? if >=1.21.5 {
