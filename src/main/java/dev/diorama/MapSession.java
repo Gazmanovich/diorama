@@ -373,7 +373,7 @@ public final class MapSession {
 	 * up to its lowest visible surface or higher. A torch placed deep in a mine can't.
 	 */
 	private boolean reachesSurface(int chunkX, int chunkZ, int top) {
-		dev.diorama.data.ChunkSnapshot chunk = this.map.chunk(chunkX, chunkZ);
+		dev.diorama.data.ChunkSnapshot chunk = this.map.worldChunk(chunkX, chunkZ);
 		return chunk == null || top >= chunk.floorY;
 	}
 

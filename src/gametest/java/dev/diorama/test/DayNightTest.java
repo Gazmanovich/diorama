@@ -148,20 +148,28 @@ final class DayNightTest {
 		if (saved(store, key, lit) != -1) {
 			throw new AssertionError("The tile should have lost its light");
 		}
-		context.runOnClient(mc -> Settings.get().mapSavedChunks = true);
+		// With filling in from the save off, as for a sub-map: the next time the map opens (here after
+		// a trip to the Nether) the save is read just for the ground the map had.
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 120 0");
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get() != null, 2400);
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + home[0] + " " + home[1] + " " + home[2]);
+		context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && MapSession.get() != null
+			&& MapSession.get().savedChunks() != null, 2400);
+		TileStore reopened = context.computeOnClient(mc -> MapSession.get().map().savedMap());
 		// It draws everything the map had again, nearest the view first, and the platform is far away.
 		try (WorldPause paused = WorldPause.pause(context)) {
-			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 12000);
+			context.waitFor(mc -> MapSession.get().savedChunks() == null || MapSession.get().savedChunks().idle(), 12000);
 		}
-		if (saved(store, key, lit) <= 0) {
-			throw new AssertionError("The fill went through the save without drawing the tile from before light was kept again: saved light " + saved(store, key, lit)
-				+ ", drew the tile " + context.computeOnClient(mc -> MapSession.get().savedChunks().drew(key))
-				+ ", drew the glowstone's chunk " + context.computeOnClient(mc -> MapSession.get().savedChunks().drewChunk(X >> 4, Z >> 4))
+		if (saved(reopened, key, lit) <= 0) {
+			throw new AssertionError("The save wasn't read again for the tile from before light was kept: saved light " + saved(reopened, key, lit)
 				+ ", progress " + java.util.Arrays.toString(progressBefore));
 		}
 		if (magic(progress) == BEFORE_LIGHT) {
 			throw new AssertionError("The fill's progress should be saved in the new form once it has relit the map");
 		}
+		// Nothing else to read for: with filling off it stops.
+		context.waitFor(mc -> MapSession.get().savedChunks() == null, 2400);
+		context.runOnClient(mc -> Settings.get().mapSavedChunks = true);
 
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		world.getServer().runCommand("time set noon");
