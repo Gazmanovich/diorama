@@ -131,7 +131,19 @@ final class DayNightTest {
 		context.runOnClient(mc -> Settings.get().mapSavedChunks = false);
 		context.waitFor(mc -> MapSession.get().savedChunks() == null, 200);
 		java.nio.file.Path progress = context.computeOnClient(mc -> MapSession.get().map().importFolder()).resolve("saved-chunks.bin");
-		setMagic(progress, BEFORE_LIGHT);
+		int[] progressBefore = chunkProgress(progress, X >> 4, Z >> 4);
+		// The stopped fill's thread can still be finishing its last pass and save its progress over
+		// this: write the old form until it stays.
+		for (int i = 0; ; i++) {
+			setMagic(progress, BEFORE_LIGHT);
+			context.waitTicks(60);
+			if (magic(progress) == BEFORE_LIGHT) {
+				break;
+			}
+			if (i > 20) {
+				throw new AssertionError("The stopped fill kept saving its progress");
+			}
+		}
 		context.runOnClient(mc -> store.forgetBlockLight(key));
 		if (saved(store, key, lit) != -1) {
 			throw new AssertionError("The tile should have lost its light");
@@ -142,7 +154,10 @@ final class DayNightTest {
 			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 12000);
 		}
 		if (saved(store, key, lit) <= 0) {
-			throw new AssertionError("The fill went through the save without drawing the tile from before light was kept again: saved light " + saved(store, key, lit));
+			throw new AssertionError("The fill went through the save without drawing the tile from before light was kept again: saved light " + saved(store, key, lit)
+				+ ", drew the tile " + context.computeOnClient(mc -> MapSession.get().savedChunks().drew(key))
+				+ ", drew the glowstone's chunk " + context.computeOnClient(mc -> MapSession.get().savedChunks().drewChunk(X >> 4, Z >> 4))
+				+ ", progress " + java.util.Arrays.toString(progressBefore));
 		}
 		if (magic(progress) == BEFORE_LIGHT) {
 			throw new AssertionError("The fill's progress should be saved in the new form once it has relit the map");
@@ -160,6 +175,29 @@ final class DayNightTest {
 			return in.readInt();
 		} catch (java.io.IOException e) {
 			throw new java.io.UncheckedIOException(e);
+		}
+	}
+
+	/** What the fill's progress file says of a chunk, for a failure: {region count, time}. */
+	private static int[] chunkProgress(java.nio.file.Path file, int cx, int cz) {
+		try (java.io.DataInputStream in = new java.io.DataInputStream(java.nio.file.Files.newInputStream(file))) {
+			in.readInt();
+			java.io.DataInputStream data = new java.io.DataInputStream(new java.util.zip.InflaterInputStream(in));
+			int count = data.readInt();
+			int time = Integer.MIN_VALUE;
+			for (int r = 0; r < count; r++) {
+				int x = data.readInt();
+				int z = data.readInt();
+				for (int i = 0; i < 1024; i++) {
+					int t = data.readInt();
+					if (x == cx >> 5 && z == cz >> 5 && i == ((cz & 31) << 5 | (cx & 31))) {
+						time = t;
+					}
+				}
+			}
+			return new int[] {count, time};
+		} catch (java.io.IOException e) {
+			return new int[] {-1, -1};
 		}
 	}
 
