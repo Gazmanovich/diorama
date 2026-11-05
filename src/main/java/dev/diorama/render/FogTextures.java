@@ -30,6 +30,18 @@ final class FogTextures {
 	 * Tileable value noise, a coarser scale in each channel from red to alpha, as ABGR pixels.
 	 * The same every time: exported images paint the fog from it on the CPU.
 	 */
+	/** The noise as RGBA bytes, worked out once; don't modify it. */
+	static int[] noiseBytes() {
+		int[] pixels = noiseCache;
+		if (pixels == null) {
+			pixels = noisePixels();
+			noiseCache = pixels;
+		}
+		return pixels;
+	}
+
+	private static int @org.jspecify.annotations.Nullable [] noiseCache;
+
 	static int[] noisePixels() {
 		int size = NOISE_SIZE;
 		float[][] channels = {

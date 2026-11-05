@@ -84,7 +84,24 @@ final class LegacyShaders extends RenderType {
 		.withUniform("GameTime", UniformType.FLOAT)
 		.withSampler("Sampler0")
 		.withSampler("Sampler1")
+		.withSampler("Sampler2")
 		.withBlend(BlendFunction.TRANSLUCENT)
+		.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
+		.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+		.withDepthWrite(false)
+		.withCull(false)
+		.build();
+
+	// The same into FogLayer's texture: written as it is, not blended.
+	private static final RenderPipeline FOG_LAYER_PIPELINE = RenderPipeline.builder(RenderPipelines.MATRICES_COLOR_SNIPPET)
+		.withLocation(Diorama.id("pipeline/fog_layer"))
+		.withVertexShader(Diorama.id("core/fog"))
+		.withFragmentShader(Diorama.id("core/fog"))
+		.withUniform("GameTime", UniformType.FLOAT)
+		.withSampler("Sampler0")
+		.withSampler("Sampler1")
+		.withSampler("Sampler2")
+		.withoutBlend()
 		.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
 		.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
 		.withDepthWrite(false)
@@ -138,6 +155,31 @@ final class LegacyShaders extends RenderType {
 		FOG.draw(mesh);
 	}
 
+	static boolean fogLayerReady() {
+		return RenderSystem.getDevice().precompilePipeline(FOG_LAYER_PIPELINE).isValid();
+	}
+
+	// Into a FogLayer texture, with the textures bound in slots 0 to 2: a pass of its own.
+	static void drawFogLayer(MeshData mesh, com.mojang.blaze3d.textures.GpuTexture into) {
+		com.mojang.blaze3d.buffers.GpuBuffer vertices = FOG_LAYER_PIPELINE.getVertexFormat().uploadImmediateVertexBuffer(mesh.vertexBuffer());
+		RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+		int count = mesh.drawState().indexCount();
+		com.mojang.blaze3d.buffers.GpuBuffer indexBuffer = indices.getBuffer(count);
+		try (com.mojang.blaze3d.systems.RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(into, java.util.OptionalInt.of(0))) {
+			pass.setPipeline(FOG_LAYER_PIPELINE);
+			pass.setVertexBuffer(0, vertices);
+			for (int slot = 0; slot < 3; slot++) {
+				com.mojang.blaze3d.textures.GpuTexture texture = RenderSystem.getShaderTexture(slot);
+				if (texture != null) {
+					pass.bindSampler("Sampler" + slot, texture);
+				}
+			}
+			pass.setIndexBuffer(indexBuffer, indices.type());
+			pass.drawIndexed(0, count);
+		}
+		mesh.close();
+	}
+
 	static void drawTile(MeshData mesh) {
 		TILE.draw(mesh);
 	}
@@ -153,9 +195,13 @@ final class LegacyShaders extends RenderType {
 	private static CompiledShaderProgram tileProgram;
 	//?} else {
 	private static ShaderInstance fogShader;
+	private static ShaderInstance fogLayerShader;
+	// The layer's program failed since the last reload: the map draws the fog directly until the next.
+	private static boolean fogLayerFailed;
 	private static ShaderInstance tileShader;
 	private static final RenderStateShard.ShaderStateShard TEXTURED_SHADER = new RenderStateShard.ShaderStateShard(GameRenderer::getPositionTexColorShader);
 	private static final RenderStateShard.ShaderStateShard FOG_SHADER = new RenderStateShard.ShaderStateShard(() -> fogShader);
+	private static final RenderStateShard.ShaderStateShard FOG_LAYER_SHADER = new RenderStateShard.ShaderStateShard(() -> fogLayerShader);
 	private static final RenderStateShard.ShaderStateShard TILE_SHADER = new RenderStateShard.ShaderStateShard(() -> tileShader);
 	//?}
 	// Each resource reload makes new instances of vanilla's own programs; this is the one seen at the
@@ -168,6 +214,9 @@ final class LegacyShaders extends RenderType {
 	static final RenderType TEXTURED = create("diorama_textured", DefaultVertexFormat.POSITION_TEX_COLOR, TEXTURED_SHADER);
 	static final RenderType SOLID = create("diorama_solid", DefaultVertexFormat.POSITION_COLOR, RenderStateShard.POSITION_COLOR_SHADER);
 	static final RenderType FOG = create("diorama_fog", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_SHADER);
+	//? if <1.21.2 {
+	private static final RenderType FOG_LAYER = create("diorama_fog_layer", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_LAYER_SHADER);
+	//?}
 	//? if >=1.21.2 {
 	private static final RenderType TILE = create("diorama_tile", DefaultVertexFormat.POSITION_TEX_COLOR, FOG_SHADER);
 	//?} else {
@@ -218,6 +267,11 @@ final class LegacyShaders extends RenderType {
 				fogShader.close();
 				fogShader = null;
 			}
+			if (fogLayerShader != null) {
+				fogLayerShader.close();
+				fogLayerShader = null;
+			}
+			fogLayerFailed = false;
 		}
 		// Built by hand rather than through Fabric's core shader callback, whose failure would fail
 		// the whole resource reload. The json lives in the minecraft namespace, where the vanilla
@@ -236,6 +290,51 @@ final class LegacyShaders extends RenderType {
 		}
 		return fogShader != null;
 		//?}
+	}
+
+	// Whether the fog can be drawn into a FogLayer texture; asked after fogReady.
+	static boolean fogLayerReady() {
+		//? if >=1.21.2 {
+		return fogProgram != null;
+		//?} else {
+		if (fogLayerShader == null && fogShader != null && !fogLayerFailed) {
+			try {
+				fogLayerShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "diorama_fog_layer", DefaultVertexFormat.POSITION_TEX_COLOR);
+			} catch (Exception e) {
+				fogLayerFailed = true;
+				LOGGER.error("Diorama's fog layer shader didn't compile; the map draws the fog directly", e);
+			}
+		}
+		return fogLayerShader != null;
+		//?}
+	}
+
+	// Into a FogLayer texture through its framebuffer, {@code size} on a side: the fog written as it
+	// is, not blended. The framebuffer is bound after the render type's state, which from 1.21.2
+	// binds the game's main target, and the main target is bound again after.
+	static void drawFogLayer(MeshData mesh, int framebuffer, int size) {
+		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+		//? if >=1.21.2 {
+		FOG.setupRenderState();
+		//?} else {
+		FOG_LAYER.setupRenderState();
+		//?}
+		RenderSystem.disableBlend();
+		RenderSystem.disableDepthTest();
+		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(36160, framebuffer);
+		com.mojang.blaze3d.platform.GlStateManager._viewport(0, 0, size, size);
+		//? if >=1.21.2 {
+		RenderSystem.setShader(fogProgram);
+		BufferUploader.drawWithShader(mesh);
+		FOG.clearRenderState();
+		//?} else {
+		com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(mesh);
+		FOG_LAYER.clearRenderState();
+		//?}
+		Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		if (depth) {
+			RenderSystem.enableDepthTest();
+		}
 	}
 
 	// As fogReady, for the tile shader.

@@ -68,6 +68,7 @@ public final class DioramaNeoForge {
 		//? if >=1.21.6 {
 		modBus.addListener(RegisterRenderPipelinesEvent.class, event -> {
 			event.registerPipeline(DioramaPipelines.FOG);
+			event.registerPipeline(DioramaPipelines.FOG_LAYER);
 			event.registerPipeline(DioramaPipelines.TILE);
 		});
 		//?}

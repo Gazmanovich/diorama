@@ -39,15 +39,17 @@ final class StateTexture implements MapTexture {
 	private final GpuTextureView view;
 
 	StateTexture(String label, int size, int levels) {
+		this(label, size, levels, false);
+	}
+
+	/** {@code target}: also drawn into, as a render pass's colour (FogLayer). */
+	StateTexture(String label, int size, int levels, boolean target) {
 		GpuDevice device = RenderSystem.getDevice();
+		int usage = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST | (target ? GpuTexture.USAGE_RENDER_ATTACHMENT : 0);
 		//? if >=26.2 {
-		this.texture = device.createTexture(
-			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, levels
-		);
+		this.texture = device.createTexture(label, usage, GpuFormat.RGBA8_UNORM, size, size, 1, levels);
 		//?} else {
-		/*this.texture = device.createTexture(
-			label, GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, TextureFormat.RGBA8, size, size, 1, levels
-		);
+		/*this.texture = device.createTexture(label, usage, TextureFormat.RGBA8, size, size, 1, levels);
 		*///?}
 		this.view = device.createTextureView(this.texture);
 	}
@@ -90,7 +92,27 @@ final class StateTexture implements MapTexture {
 		*///?}
 	}
 
+	// Three textures for one draw, each sampled its own way.
+	static TextureSetup triple(StateTexture first, Sampling firstSampling, StateTexture second, Sampling secondSampling, StateTexture third, Sampling thirdSampling) {
+		//? if >=1.21.11 {
+		return new TextureSetup(first.view, second.view, third.view, sampler(firstSampling), sampler(secondSampling), sampler(thirdSampling));
+		//?} else {
+		/*first.sampleWith(firstSampling);
+		second.sampleWith(secondSampling);
+		third.sampleWith(thirdSampling);
+		return new TextureSetup(first.view, second.view, third.view);
+		*///?}
+	}
+
+	GpuTextureView view() {
+		return this.view;
+	}
+
 	//? if >=1.21.11 {
+	static GpuSampler samplerFor(Sampling sampling) {
+		return sampler(sampling);
+	}
+
 	private static GpuSampler sampler(Sampling sampling) {
 		return switch (sampling) {
 			case TILE_SMOOTH, TILE_AREA, TILE_CRISP -> RenderSystem.getSamplerCache().getSampler(
@@ -105,7 +127,7 @@ final class StateTexture implements MapTexture {
 	/*// Before 1.21.11 a texture carried its own sampling state instead of each draw choosing a
 	// sampler. Render state draws at the end of the frame, so the last setting in a frame wins;
 	// each texture is only ever drawn one way per frame.
-	private void sampleWith(Sampling sampling) {
+	void sampleWith(Sampling sampling) {
 		this.texture.setAddressMode(sampling.repeats() ? AddressMode.REPEAT : AddressMode.CLAMP_TO_EDGE);
 		this.texture.setTextureFilter(FilterMode.LINEAR, sampling.crisp() ? FilterMode.NEAREST : FilterMode.LINEAR, sampling.mipmapped());
 	}

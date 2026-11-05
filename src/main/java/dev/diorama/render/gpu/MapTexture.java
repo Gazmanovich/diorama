@@ -17,6 +17,17 @@ public interface MapTexture extends AutoCloseable {
 		*///?}
 	}
 
+	/** A texture that is also drawn into, {@code size} x {@code size}, one level: see {@link FogLayer}. */
+	static MapTexture createTarget(String label, int size) {
+		//? if >=1.21.6 {
+		return new StateTexture(label, size, 1, true);
+		//?} else if >=1.21.5 {
+		/*return new BlazeTexture(label, size, 1);
+		*///?} else {
+		/*return new GlIdTexture(size, 1);
+		*///?}
+	}
+
 	/**
 	 * Writes {@code edge} x {@code edge} pixels at (x, y) of one mip level, from the start of
 	 * {@code abgr}. Each int is one pixel as ABGR, which is RGBA in memory.

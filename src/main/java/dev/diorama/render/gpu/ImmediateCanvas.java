@@ -121,7 +121,7 @@ final class ImmediateCanvas implements MapCanvas {
 	}
 
 	@Override
-	public void fog(MapTexture mask, MapTexture noise, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
+	public void fog(MapTexture mask, MapTexture noise, MapTexture detail, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
 		if (!LegacyShaders.fogReady()) {
 			return;
 		}
@@ -136,9 +136,62 @@ final class ImmediateCanvas implements MapCanvas {
 		}
 		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
 		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
+		((LegacyTexture) detail).bind(2, Sampling.CLAMP_LINEAR);
 		LegacyShaders.drawFog(mesh.buildOrThrow());
 		unbind(0);
 		unbind(1);
+		unbind(2);
+	}
+
+	// FogLayer before 1.21.6: the fog drawn into the layer's texture ({@code size} on a side) rather
+	// than the screen, between this canvas's other draws. False if the shader isn't ready.
+	boolean fogLayer(MapTexture target, int size, MapTexture mask, MapTexture noise, MapTexture detail, int width, int height, float u0, float v0, float u1, float v1, int params) {
+		if (!LegacyShaders.fogReady() || !LegacyShaders.fogLayerReady()) {
+			return false;
+		}
+		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
+		// Counter-clockwise with y up: the quad's top edge (v0) lands in the texture's first row,
+		// where the map reads v 0.
+		//? if >=1.21 {
+		mesh.addVertex(0, 0, 0).setUv(u0, v0).setColor(params);
+		mesh.addVertex(width, 0, 0).setUv(u1, v0).setColor(params);
+		mesh.addVertex(width, height, 0).setUv(u1, v1).setColor(params);
+		mesh.addVertex(0, height, 0).setUv(u0, v1).setColor(params);
+		//?} else {
+		mesh.vertex(0, 0, 0).uv(u0, v0).color(params).endVertex();
+		mesh.vertex(width, 0, 0).uv(u1, v0).color(params).endVertex();
+		mesh.vertex(width, height, 0).uv(u1, v1).color(params).endVertex();
+		mesh.vertex(0, height, 0).uv(u0, v1).color(params).endVertex();
+		//?}
+		// The GUI's model view only moves things back, so a wide depth range takes it in.
+		Matrix4f ortho = new Matrix4f().setOrtho(0, size, 0, size, 100, 30000);
+		RenderSystem.backupProjectionMatrix();
+		//? if >=1.21.2 {
+		RenderSystem.setProjectionMatrix(ortho, com.mojang.blaze3d.ProjectionType.ORTHOGRAPHIC);
+		//?} else {
+		RenderSystem.setProjectionMatrix(ortho, com.mojang.blaze3d.vertex.VertexSorting.ORTHOGRAPHIC_Z);
+		//?}
+		((LegacyTexture) mask).bind(0, Sampling.CLAMP_LINEAR);
+		((LegacyTexture) noise).bind(1, Sampling.REPEAT_LINEAR);
+		((LegacyTexture) detail).bind(2, Sampling.CLAMP_LINEAR);
+		//? if >=1.21.5 {
+		LegacyShaders.drawFogLayer(mesh.buildOrThrow(), ((BlazeTexture) target).texture());
+		//?} else {
+		// The GUI's scissor is in the screen's pixels: off while drawing into the layer.
+		boolean scissor = org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
+		org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
+		int framebuffer = ((GlIdTexture) target).framebuffer();
+		net.minecraft.client.Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		LegacyShaders.drawFogLayer(mesh.buildOrThrow(), framebuffer, size);
+		if (scissor) {
+			org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
+		}
+		//?}
+		unbind(0);
+		unbind(1);
+		unbind(2);
+		RenderSystem.restoreProjectionMatrix();
+		return true;
 	}
 
 	// A rectangle of a game texture (a skin), sampled the way the game set that texture up.
