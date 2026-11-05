@@ -113,9 +113,17 @@ final class DayNightTest {
 		// A map from before light was kept: in singleplayer the fill draws what it drew then once more
 		// from the save, with its light, while the player is far away and nothing bakes it live.
 		context.setScreen(() -> null);
-		world.getServer().runOnServer(server -> server.saveEverything(true, true, true));
+		world.getServer().runCommand("forceload remove " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
 		world.getServer().runCommand("tp @a " + home[0] + " " + home[1] + " " + home[2]);
 		context.waitFor(mc -> mc.player.distanceToSqr(home[0], home[1], home[2]) < 4, 200);
+		// Unloaded from the server, so the save has its last word on them, as for ground mapped long ago.
+		for (int i = 0; world.getServer().computeOnServer(server -> server.overworld().getChunkSource().getChunkNow(X >> 4, Z >> 4) != null); i++) {
+			if (i > 2400) {
+				throw new AssertionError("The platform's chunks never unloaded");
+			}
+			context.waitTick();
+		}
+		world.getServer().runOnServer(server -> server.saveEverything(true, true, true));
 		try (WorldPause paused = WorldPause.pause(context)) {
 			context.runOnClient(mc -> MapSession.get().savedChunks().rescanSoon());
 			context.waitFor(mc -> MapSession.get().savedChunks().idle(), 3600);
@@ -144,7 +152,6 @@ final class DayNightTest {
 
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		world.getServer().runCommand("time set noon");
-		world.getServer().runCommand("forceload remove " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
 	}
 
 	/** The magic of the fill's progress file from before tiles kept their light (SavedChunkImport). */
