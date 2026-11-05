@@ -27,6 +27,11 @@ public final class VoxelReader {
 	private static final int[] AIR_IDS = new int[4096];
 	/** A section with nothing in it. */
 	private static final Section AIR_SECTION = new Section(AIR_ID, null, null, null, null);
+	/**
+	 * A section whose palette can't be numbered whole (the registry itself, in a section of over
+	 * 256 kinds of block), read block by block, and only as far as each lookup needs.
+	 */
+	private static final Section BY_BLOCK = new Section(-1, null, null, null, null);
 	/** The solid mask of a section with nothing solid in it. Shared and never written. */
 	private static final long[] NOTHING_SOLID = new long[64];
 	/**
@@ -452,11 +457,31 @@ public final class VoxelReader {
 					if (mask == ALL_SOLID && shapes != null && shapes[id] != 0) {
 						partial = ALL_SOLID;
 					}
+				} else if (section == BY_BLOCK && this.ids[index] == null) {
+					// Straight from the blocks, without numbering every block of the section.
+					PalettedContainer<BlockState> states = this.snapshot.section(index);
+					mask = new long[64];
+					BlockState last = null;
+					int f = 0;
+					for (int i = 0; i < 4096; i++) {
+						BlockState state = this.snapshot.state(states, i & 15, i >> 8, i >> 4 & 15);
+						if (state != last) {
+							last = state;
+							f = solidFlags(BlockLooks.bakeId(state), kinds, shapes);
+						}
+						mask[i >> 6] |= (long) (f & 1) << i;
+						if (f > 1) {
+							if (partial == NOTHING_SOLID) {
+								partial = new long[64];
+							}
+							partial[i >> 6] |= 1L << i;
+						}
+					}
 				} else {
 					// Shadow and sky rays through a section need no more than these bits, so most
 					// sections a bake reads are never numbered block by block. Sections with
 					// copycats go through their ids, which carry the copycats' materials.
-					int[] ids = section.ids;
+					int[] ids = section == BY_BLOCK ? this.ids[index] : section.ids;
 					int[] columns = section.columns;
 					// Per palette entry (per block with ids): 1 if solid, 3 if solid and smaller than a cube.
 					byte[] flags;
@@ -542,6 +567,8 @@ public final class VoxelReader {
 					ids = AIR_IDS;
 				} else if (section.ids != null) {
 					ids = section.ids;
+				} else if (section == BY_BLOCK) {
+					ids = this.byBlock(index);
 				} else if (section.single >= 0) {
 					ids = new int[4096];
 					Arrays.fill(ids, section.single);
@@ -592,38 +619,43 @@ public final class VoxelReader {
 				}
 				ChunkSnapshot.Packed packed = this.snapshot.packed(index);
 				int[] palette = packed == null ? null : this.paletteIds(packed);
-				if (palette != null) {
-					return new Section(-1, null, packed.storage(), palette, this.snapshot.columns());
-				}
+				return palette != null ? new Section(-1, null, packed.storage(), palette, this.snapshot.columns()) : BY_BLOCK;
 			}
-			// Block by block: filled copycats take their material's look, and some palettes can't be
-			// numbered whole (the registry itself, in a section of over 256 kinds of block).
-			int[] ids = new int[4096];
+			// Filled copycats take their material's look, so their sections are numbered block by
+			// block up front: the solid bits come from these ids too.
+			int[] ids;
 			if (uniform != null) {
+				ids = new int[4096];
 				Arrays.fill(ids, BlockLooks.bakeId(this.snapshot.turned(uniform)));
 			} else {
-				BlockState lastState = null;
-				int lastId = 0;
-				for (int y = 0; y < 16; y++) {
-					for (int z = 0; z < 16; z++) {
-						for (int x = 0; x < 16; x++) {
-							BlockState state = this.snapshot.state(states, x, y, z);
-							if (state != lastState) {
-								lastState = state;
-								lastId = BlockLooks.bakeId(state);
-							}
-							ids[(y << 8) | (z << 4) | x] = lastId;
+				ids = this.byBlock(index);
+			}
+			for (int i = 0; i < copycats.at().length; i++) {
+				int at = copycats.at()[i];
+				ids[at] = this.looks.copycat(ids[at], Block.BLOCK_STATE_REGISTRY.getId(copycats.material()[i]));
+			}
+			return new Section(-1, ids, null, null, null);
+		}
+
+		/** Every block's id in a section with a container, looked up block by block. */
+		private int[] byBlock(int index) {
+			PalettedContainer<BlockState> states = this.snapshot.section(index);
+			int[] ids = new int[4096];
+			BlockState lastState = null;
+			int lastId = 0;
+			for (int y = 0; y < 16; y++) {
+				for (int z = 0; z < 16; z++) {
+					for (int x = 0; x < 16; x++) {
+						BlockState state = this.snapshot.state(states, x, y, z);
+						if (state != lastState) {
+							lastState = state;
+							lastId = BlockLooks.bakeId(state);
 						}
+						ids[(y << 8) | (z << 4) | x] = lastId;
 					}
 				}
 			}
-			if (copycats != null) {
-				for (int i = 0; i < copycats.at().length; i++) {
-					int at = copycats.at()[i];
-					ids[at] = this.looks.copycat(ids[at], Block.BLOCK_STATE_REGISTRY.getId(copycats.material()[i]));
-				}
-			}
-			return new Section(-1, ids, null, null, null);
+			return ids;
 		}
 
 		/**
