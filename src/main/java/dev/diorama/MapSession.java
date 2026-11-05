@@ -343,23 +343,38 @@ public final class MapSession {
 			int y0 = section.minBlockY();
 			int z0 = section.minBlockZ();
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
-			if (blockLight && current.keepsBlockLight()) {
+			if (blockLight && current.keepsBlockLight() && current.reachesSurface(section.x(), section.z(), y0 + 15)) {
 				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
 			}
 			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
 		}
 	}
 
-	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
+	/**
+	 * Server light for a chunk was applied; {@code blockLight} has a bit for each light section
+	 * (from one below the world's lowest) whose block light it sent.
+	 */
+	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ, java.util.BitSet blockLight) {
 		if (current != null && current.level == level) {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
-			if (current.keepsBlockLight()) {
+			int highest = blockLight.length() - 1;
+			if (highest >= 0 && current.keepsBlockLight()
+				&& current.reachesSurface(chunkX, chunkZ, ((level.getMinSectionY() - 1 + highest) << 4) + 15)) {
 				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
 			}
 			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
+	}
+
+	/**
+	 * Whether a block light change reaching up to {@code top} in this chunk can show in the sky view:
+	 * up to its lowest visible surface or higher. A torch placed deep in a mine can't.
+	 */
+	private boolean reachesSurface(int chunkX, int chunkZ, int top) {
+		dev.diorama.data.ChunkSnapshot chunk = this.map.chunk(chunkX, chunkZ);
+		return chunk == null || top >= chunk.floorY;
 	}
 
 	/** Whether this dimension's sky view keeps its block light, for the night: it isn't under a roof, and its time moves. */
@@ -468,7 +483,14 @@ public final class MapSession {
 	 */
 	private void updateSavedChunks(Minecraft mc) {
 		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
-		boolean on = (fill || this.map.memory() != null) && mc.getSingleplayerServer() != null;
+		if (this.relight == null) {
+			this.relight = mc.getSingleplayerServer() != null && SavedChunkImport.needsRelight(this.map, this.level);
+		}
+		// Only for the relighting: done once it has gone through the save.
+		if (this.relight && !fill && this.map.memory() == null && this.savedChunks != null && this.savedChunks.idle()) {
+			this.relight = false;
+		}
+		boolean on = (fill || this.map.memory() != null || this.relight) && mc.getSingleplayerServer() != null;
 		if (on && this.savedChunks == null) {
 			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
 		} else if (!on && this.savedChunks != null) {
@@ -479,6 +501,9 @@ public final class MapSession {
 			this.savedChunks.onlyRemembered(!fill);
 		}
 	}
+
+	/** Whether ground drawn before tiles kept their block light is waiting to be drawn again from the save; null before it's checked. */
+	private @Nullable Boolean relight;
 
 	/** What's filling the map in from the save, or null if nothing is. */
 	public @Nullable SavedChunkImport savedChunks() {

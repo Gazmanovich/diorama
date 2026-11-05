@@ -15,7 +15,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 *///?}
 
 /**
- * Tells the map when server light for a chunk has been applied, which cave slices draw. Hooks the
+ * Tells the map when server light for a chunk has been applied, which cave slices draw, and the
+ * sky view keeps the block light of for the night. Hooks the
  * method that applies it; the packet handler only queues that work. Also tells it when a block
  * entity got new data, which is how a copycat being filled reaches the client.
  * On NeoForge before 1.21.4 and on Forge it also runs the client's own commands from chat links.
@@ -31,7 +32,10 @@ public abstract class ClientPacketListenerMixin {
 	*///?}
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level != null) {
-			MapSession.lightUpdated(mc.level, x, z);
+			// The sections whose block light the server sent, or emptied.
+			java.util.BitSet blockLight = (java.util.BitSet) lightData.blockYMask().clone();
+			blockLight.or(lightData.emptyBlockYMask());
+			MapSession.lightUpdated(mc.level, x, z, blockLight);
 		}
 	}
 

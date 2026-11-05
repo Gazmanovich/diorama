@@ -148,6 +148,23 @@ public final class SavedChunkImport {
 		this.thread.setPriority(Thread.MIN_PRIORITY);
 	}
 
+	/**
+	 * Whether the map's folder has chunks drawn before tiles kept their block light, which a sky view
+	 * with a night draws again once (see {@link Progress}), so the save is read for them even where
+	 * the map doesn't fill in from it.
+	 */
+	public static boolean needsRelight(MapLevel map, ClientLevel level) {
+		Path folder = map.importFolder();
+		if (folder == null || map.roofless() || level.dimensionType().hasFixedTime()) {
+			return false;
+		}
+		try (java.io.DataInputStream in = new java.io.DataInputStream(Files.newInputStream(folder.resolve("saved-chunks.bin")))) {
+			return in.readInt() == Progress.BEFORE_LIGHT;
+		} catch (java.io.IOException e) {
+			return false;
+		}
+	}
+
 	/** Starts drawing the save behind this map, or returns null when there's no save here. */
 	public static @Nullable SavedChunkImport start(MapLevel map, ClientLevel level, Consumer<List<Portals.Spot>> portals) {
 		SavedChunks save = SavedChunks.open(level, map.roofless());
@@ -641,7 +658,9 @@ public final class SavedChunkImport {
 				this.chunksDone++;
 				continue;
 			}
-			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
+			// Ground this map already had is drawn again for its light even where it doesn't fill in.
+			if (plan.onlyRemembered && progress.time(regionX, regionZ, i) != Progress.RELIGHT
+				&& (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
 				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
 				this.chunksDone++;
 				continue;
@@ -720,7 +739,7 @@ public final class SavedChunkImport {
 	 * {@link #LIVE}, {@link #NOT_REMEMBERED} or {@link #CHANGED}. Kept in {@code saved-chunks.bin}:
 	 * {@code DSC2}, then deflated, the region count and, per region, its x, z and 1024 values.
 	 * {@code DSC1} is the same from before tiles kept their block light: in a sky view that gets
-	 * dark at night, everything it drew counts as {@link #CHANGED}, so it's all drawn once more,
+	 * dark at night, everything it drew counts as {@link #RELIGHT}, so it's all drawn once more,
 	 * with its light (#204).
 	 */
 	private static final class Progress {
@@ -735,6 +754,11 @@ public final class SavedChunkImport {
 		static final int NOT_REMEMBERED = -2;
 		/** Drawn once, and changed since: no save time, so it's work, and not a first drawing either. */
 		static final int CHANGED = 1;
+		/**
+		 * Drawn before tiles kept their block light: work once, to draw it with its light, on any map
+		 * that has it, whether or not that map fills in from the save.
+		 */
+		static final int RELIGHT = 2;
 		private final Path file;
 		private final Map<Long, int[]> times = new HashMap<>();
 		private boolean changed;
@@ -774,8 +798,8 @@ public final class SavedChunkImport {
 					for (int i = 0; i < 1024; i++) {
 						times[i] = data.readInt();
 						// Drawn there before, live or from the save: draw it again. What wasn't drawn stays so.
-						if (relight && (times[i] > CHANGED || times[i] == LIVE)) {
-							times[i] = CHANGED;
+						if (relight && (times[i] > RELIGHT || times[i] == LIVE || times[i] == CHANGED)) {
+							times[i] = RELIGHT;
 							progress.changed = true;
 						}
 					}

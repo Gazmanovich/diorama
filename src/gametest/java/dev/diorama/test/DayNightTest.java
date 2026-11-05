@@ -110,22 +110,60 @@ final class DayNightTest {
 		zoomedOut(context);
 		context.takeScreenshot("day-night-4-midnight-far");
 
-		// A tile from before light was kept: drawn with none, and lit again once baked again.
+		// A map from before light was kept: in singleplayer the fill draws what it drew then once more
+		// from the save, with its light, while the player is far away and nothing bakes it live.
 		context.setScreen(() -> null);
-		context.runOnClient(mc -> {
-			store.forgetBlockLight(key);
-			MapSession.get().map().colorsChanged();
-		});
-		lookAt(context);
-		context.waitFor(mc -> saved(store, key, lit) > 0 && MapSession.get().map().peek(key) != null
-			&& MapSession.get().map().peek(key).blockLightAt(lit[0], lit[1]) > 0, 1200);
+		world.getServer().runOnServer(server -> server.saveEverything(true, true, true));
+		world.getServer().runCommand("tp @a " + home[0] + " " + home[1] + " " + home[2]);
+		context.waitFor(mc -> mc.player.distanceToSqr(home[0], home[1], home[2]) < 4, 200);
+		try (WorldPause paused = WorldPause.pause(context)) {
+			context.runOnClient(mc -> MapSession.get().savedChunks().rescanSoon());
+			context.waitFor(mc -> MapSession.get().savedChunks().idle(), 3600);
+		}
+		context.runOnClient(mc -> Settings.get().mapSavedChunks = false);
+		context.waitFor(mc -> MapSession.get().savedChunks() == null, 200);
+		java.nio.file.Path progress = context.computeOnClient(mc -> MapSession.get().map().importFolder()).resolve("saved-chunks.bin");
+		setMagic(progress, BEFORE_LIGHT);
+		context.runOnClient(mc -> store.forgetBlockLight(key));
+		if (saved(store, key, lit) != -1) {
+			throw new AssertionError("The tile should have lost its light");
+		}
+		context.runOnClient(mc -> Settings.get().mapSavedChunks = true);
+		for (int i = 0; saved(store, key, lit) <= 0; i++) {
+			if (i > 3600) {
+				throw new AssertionError("The fill never drew the tile from before light was kept again: saved light " + saved(store, key, lit));
+			}
+			context.waitTick();
+		}
+		try (WorldPause paused = WorldPause.pause(context)) {
+			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 3600);
+		}
+		if (magic(progress) == BEFORE_LIGHT) {
+			throw new AssertionError("The fill's progress should be saved in the new form once it has relit the map");
+		}
 
-		context.setScreen(() -> null);
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("forceload remove " + (X - HALF) + " " + (Z - HALF) + " " + (X + HALF) + " " + (Z + HALF));
-		world.getServer().runCommand("tp @a " + home[0] + " " + home[1] + " " + home[2]);
-		context.waitFor(mc -> mc.player.distanceToSqr(home[0], home[1], home[2]) < 4, 200);
+	}
+
+	/** The magic of the fill's progress file from before tiles kept their light (SavedChunkImport). */
+	private static final int BEFORE_LIGHT = 0x44534331;
+
+	private static int magic(java.nio.file.Path file) {
+		try (java.io.DataInputStream in = new java.io.DataInputStream(java.nio.file.Files.newInputStream(file))) {
+			return in.readInt();
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+	}
+
+	private static void setMagic(java.nio.file.Path file, int magic) {
+		try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file, java.nio.file.StandardOpenOption.WRITE)) {
+			channel.write(java.nio.ByteBuffer.allocate(4).putInt(0, magic), 0);
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
 	}
 
 	/** Whether every chunk of the platform is loaded on the server. */

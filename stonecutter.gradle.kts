@@ -80,6 +80,8 @@ stonecutter parameters {
 	)
 	// Renamed in 26.3: the GPU API moved from com.mojang.blaze3d to com.mojang.renderpearl.api.
 	val before263 = listOf(
+		"\\.blockYMask\\(\\)" to ".getBlockYMask()",
+		"\\.emptyBlockYMask\\(\\)" to ".getEmptyBlockYMask()",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.GpuFormat\\b" to "com.mojang.blaze3d.GpuFormat",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.device\\.GpuDevice\\b" to "com.mojang.blaze3d.systems.GpuDevice",
 		"\\bcom\\.mojang\\.renderpearl\\.api\\.pipeline\\.PrimitiveTopology\\b" to "com.mojang.blaze3d.PrimitiveTopology",
