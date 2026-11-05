@@ -338,9 +338,38 @@ public final class VoxelReader {
 			}
 			long[] mask = this.solid[index];
 			if (mask == null) {
-				int[] ids = this.section(index);
 				long[] partial = NOTHING_SOLID;
-				if (ids == null) {
+				int[] ids = this.decoded[index] || this.snapshot.copycats(index) != null ? this.section(index) : null;
+				PalettedContainer<BlockState> states = this.snapshot.section(index);
+				BlockState uniform = this.snapshot.uniformSection(index);
+				if (ids == null && (states != null || uniform != null)) {
+					// Straight from the blocks. Most sections a bake reads only have shadow and sky
+					// rays through them, which need no more than these bits: decoding their ids
+					// first, 16 KB a section for every tile, made most of the garbage of flying over
+					// new land. Sections with copycats go through the ids, which carry their materials.
+					mask = new long[64];
+					BlockState last = null;
+					boolean solid = false;
+					boolean smaller = false;
+					for (int i = 0; i < 4096; i++) {
+						BlockState state = uniform != null ? uniform : this.snapshot.state(states, i & 15, i >> 8, i >> 4 & 15);
+						if (state != last) {
+							last = state;
+							int id = BlockLooks.bakeId(uniform != null ? this.snapshot.turned(uniform) : state);
+							solid = kinds[id] == BlockLooks.SOLID;
+							smaller = shapes != null && shapes[id] != 0;
+						}
+						if (solid) {
+							mask[i >> 6] |= 1L << i;
+							if (smaller) {
+								if (partial == NOTHING_SOLID) {
+									partial = new long[64];
+								}
+								partial[i >> 6] |= 1L << i;
+							}
+						}
+					}
+				} else if (ids == null) {
 					mask = NOTHING_SOLID;
 				} else {
 					mask = new long[64];
