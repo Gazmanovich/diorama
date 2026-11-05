@@ -2,6 +2,7 @@ package dev.diorama.drawing;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.diorama.render.MapViewport;
+import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.Waypoint;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -663,19 +664,56 @@ public final class DrawMode {
 		return Component.translatable("diorama.draw.help." + tool.name().toLowerCase(java.util.Locale.ROOT));
 	}
 
-	/** Pixel art centred on a 20-pixel button at (x, y). */
+	/**
+	 * Pixel art centred on a 20-pixel button at (x, y), as one shape: a rectangle per run of lit
+	 * pixels in a row. A fill per pixel cost a GUI element each, every frame the map is open.
+	 */
 	public static void icon(GuiGraphicsExtractor graphics, String[] rows, int x, int y, int argb) {
 		int h = rows.length;
 		int w = rows[0].length();
 		int x0 = x + (BUTTON - w) / 2;
 		int y0 = y + (BUTTON - h) / 2;
-		for (int r = 0; r < h; r++) {
+		int runs = 0;
+		for (String row : rows) {
 			for (int c = 0; c < w; c++) {
-				if (rows[r].charAt(c) == '#') {
-					graphics.fill(x0 + c, y0 + r, x0 + c + 1, y0 + r + 1, argb);
+				if (row.charAt(c) == '#' && (c == 0 || row.charAt(c - 1) != '#')) {
+					runs++;
 				}
 			}
 		}
+		if (runs == 0) {
+			return;
+		}
+		float[] corners = new float[runs * 8];
+		int k = 0;
+		for (int r = 0; r < h; r++) {
+			String row = rows[r];
+			int c = 0;
+			while (c < w) {
+				if (row.charAt(c) != '#') {
+					c++;
+					continue;
+				}
+				int start = c;
+				while (c < w && row.charAt(c) == '#') {
+					c++;
+				}
+				// Counter-clockwise from the top left, as MapCanvas.rect gives a rectangle.
+				float left = x0 + start;
+				float right = x0 + c;
+				float top = y0 + r;
+				float bottom = y0 + r + 1;
+				corners[k++] = left;
+				corners[k++] = top;
+				corners[k++] = left;
+				corners[k++] = bottom;
+				corners[k++] = right;
+				corners[k++] = bottom;
+				corners[k++] = right;
+				corners[k++] = top;
+			}
+		}
+		MapCanvas.of(graphics).solid(corners, argb);
 	}
 
 	/** A one-pixel frame like a vanilla button's highlight. */
