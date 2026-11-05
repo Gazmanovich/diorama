@@ -21,6 +21,9 @@ public final class VoxelReaderChecks {
 		BlockLooks looks = BlockLooks.get();
 		byte[] kinds = looks.kind;
 		VoxelReader reader = new VoxelReader(source, looks);
+		// Asked only whether blocks are solid, a reader builds its masks from the blocks, without
+		// the IDs: this one is never asked for an ID, and tells smaller blocks apart.
+		VoxelReader solidOnly = new VoxelReader(source, looks, true);
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
 			var uniform = snapshot.uniformSection(section);
 			var palette = snapshot.section(section);
@@ -37,6 +40,10 @@ public final class VoxelReaderChecks {
 				var material = snapshot.copycatMaterial(wx, wy, wz);
 				if (material != null) {
 					expected = looks.copycat(expected, Block.BLOCK_STATE_REGISTRY.getId(material));
+				}
+				int solid = kinds[expected] == BlockLooks.SOLID ? looks.shape[expected] != 0 ? 2 : 1 : 0;
+				if (solidOnly.solid(wx, wy, wz) != solid) {
+					throw new AssertionError("Solid mask without IDs wrong for block state " + expected + " at " + wx + "," + wy + "," + wz);
 				}
 				if (reader.state(wx, wy, wz) != expected
 					|| reader.solid(wx, wy, wz) != (kinds[expected] == BlockLooks.SOLID ? 1 : 0)) {
