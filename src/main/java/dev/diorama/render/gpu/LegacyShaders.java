@@ -305,23 +305,29 @@ final class LegacyShaders extends RenderType {
 		//?}
 	}
 
-	// Into a FogLayer texture, whose framebuffer is bound: the fog written as it is, not blended.
-	static void drawFogLayer(MeshData mesh) {
+	// Into a FogLayer texture through its framebuffer, {@code size} on a side: the fog written as it
+	// is, not blended. The framebuffer is bound after the render type's state, which from 1.21.2
+	// binds the game's main target, and the main target is bound again after.
+	static void drawFogLayer(MeshData mesh, int framebuffer, int size) {
 		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
 		//? if >=1.21.2 {
 		FOG.setupRenderState();
+		//?} else {
+		FOG_LAYER.setupRenderState();
+		//?}
 		RenderSystem.disableBlend();
 		RenderSystem.disableDepthTest();
+		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(36160, framebuffer);
+		com.mojang.blaze3d.platform.GlStateManager._viewport(0, 0, size, size);
+		//? if >=1.21.2 {
 		RenderSystem.setShader(fogProgram);
 		BufferUploader.drawWithShader(mesh);
 		FOG.clearRenderState();
 		//?} else {
-		FOG_LAYER.setupRenderState();
-		RenderSystem.disableBlend();
-		RenderSystem.disableDepthTest();
 		com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(mesh);
 		FOG_LAYER.clearRenderState();
 		//?}
+		Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
 		if (depth) {
 			RenderSystem.enableDepthTest();
 		}

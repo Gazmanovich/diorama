@@ -180,10 +180,9 @@ final class ImmediateCanvas implements MapCanvas {
 		// The GUI's scissor is in the screen's pixels: off while drawing into the layer.
 		boolean scissor = org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
 		org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
-		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(36160, ((GlIdTexture) target).framebuffer());
-		com.mojang.blaze3d.platform.GlStateManager._viewport(0, 0, size, size);
-		LegacyShaders.drawFogLayer(mesh.buildOrThrow());
+		int framebuffer = ((GlIdTexture) target).framebuffer();
 		net.minecraft.client.Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		LegacyShaders.drawFogLayer(mesh.buildOrThrow(), framebuffer, size);
 		if (scissor) {
 			org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
 		}
