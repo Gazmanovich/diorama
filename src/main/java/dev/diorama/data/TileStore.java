@@ -724,14 +724,17 @@ public final class TileStore {
 			}
 			// Tiles saved before spots, and overview tiles saved before chunks, end here.
 			if (key.lod() > 0) {
+				// Read in full before the marker counts, so the stream's checksum still catches damage in it.
+				int magic = readInt(inflated);
 				byte[] chunks = new byte[size * size];
-				if (readInt(inflated) == CHUNKS_MAGIC && inflated.readNBytes(chunks, 0, chunks.length) == chunks.length) {
+				if (inflated.readNBytes(chunks, 0, chunks.length) == chunks.length && magic == CHUNKS_MAGIC) {
 					return new Tile(pixels, null, chunks);
 				}
 				return new Tile(pixels, null);
 			}
+			int magic = readInt(inflated);
 			int[] spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
-			if (readInt(inflated) == SPOTS_MAGIC && readInts(inflated, buffer, spots)) {
+			if (readInts(inflated, buffer, spots) && magic == SPOTS_MAGIC) {
 				return new Tile(pixels, spots);
 			}
 			return new Tile(pixels, null);
