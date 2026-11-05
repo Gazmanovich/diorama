@@ -48,6 +48,28 @@ final class ImmediateCanvas implements MapCanvas {
 	}
 
 	@Override
+	public void nightTile(MapTexture tile, Sampling sampling, MapTexture light, float[] corners, float[] uvs, int params) {
+		if (!LegacyShaders.tileNightReady()) {
+			this.quad(tile, sampling, corners, uvs, dev.diorama.render.NightLook.tintOf(params));
+			return;
+		}
+		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
+		Matrix4f pose = this.graphics.pose().last().pose();
+		for (int i = 0; i < corners.length / 2; i++) {
+			//? if >=1.21 {
+			mesh.addVertex(pose, corners[i * 2], corners[i * 2 + 1], 0).setUv(uvs[i * 2], uvs[i * 2 + 1]).setColor(params);
+			//?} else {
+			mesh.vertex(pose, corners[i * 2], corners[i * 2 + 1], 0).uv(uvs[i * 2], uvs[i * 2 + 1]).color(params).endVertex();
+			//?}
+		}
+		((LegacyTexture) tile).bind(0, sampling);
+		((LegacyTexture) light).bind(1, Sampling.TILE_SMOOTH);
+		LegacyShaders.drawTileNight(mesh.buildOrThrow());
+		unbind(0);
+		unbind(1);
+	}
+
+	@Override
 	public void solid(float[] corners, int argb) {
 		BufferBuilder mesh = this.begin(DefaultVertexFormat.POSITION_COLOR);
 		Matrix4f pose = this.graphics.pose().last().pose();

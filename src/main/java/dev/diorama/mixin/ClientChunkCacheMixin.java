@@ -17,6 +17,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ClientChunkCacheMixin {
 	@Inject(method = "onLightUpdate", at = @At("TAIL"))
 	private void diorama$onLightUpdate(LightLayer layer, SectionPos pos, CallbackInfo ci) {
-		MapSession.lightSectionChanged((ClientChunkCache) (Object) this, pos);
+		MapSession.lightSectionChanged((ClientChunkCache) (Object) this, pos, layer == LightLayer.BLOCK);
 	}
 }

@@ -74,6 +74,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 	public void runTest(ClientGameTestContext context) {
 		context.getInput().resizeWindow(1600, 900);
 		context.runOnClient(mc -> mc.options.renderDistance().set(12));
+		// The clock runs through the tests, and some set midnight for their mobs: the map stays as
+		// baked, so what other tests compare it with doesn't depend on the time. day-night tests the night.
+		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		String seed = System.getProperty("diorama.seed", "diorama");
 		Set<String> tests = selectedTests();
 		if (tests.contains("stale-gl-error")) {
@@ -217,6 +220,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("game-time")) {
 				GameTimeTest.run(context, world);
+			}
+			if (tests.contains("day-night")) {
+				DayNightTest.run(context, world);
 			}
 			if (tests.contains("tile-filter")) {
 				TileFilterTest.run(context);
@@ -6138,10 +6144,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

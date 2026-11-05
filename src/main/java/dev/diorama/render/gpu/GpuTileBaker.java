@@ -117,11 +117,11 @@ public final class GpuTileBaker {
 	}
 
 	/**
-	 * {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them. Null
-	 * pixels mean the GPU didn't draw it: it couldn't, or, when {@code declined}, it never tried,
+	 * {@code info} holds the {@code Overlays} bits per pixel when the mesh asked for them, and
+	 * {@code blockLight} the {@code BlockLight} of a sky view tile. Null pixels mean the GPU didn't draw it: it couldn't, or, when {@code declined}, it never tried,
 	 * because the world was closing or the tile has more faces than its textures hold.
 	 */
-	public record Result(int @Nullable [] pixels, byte @Nullable [] info, Timing timing, boolean declined, MapStyle look) {
+	public record Result(int @Nullable [] pixels, byte @Nullable [] info, byte @Nullable [] blockLight, Timing timing, boolean declined, MapStyle look) {
 	}
 
 	/**
@@ -140,6 +140,15 @@ public final class GpuTileBaker {
 		if (dead && QUEUE.remove(job)) {
 			job.fail();
 		}
+	}
+
+	/** Every other byte of {@code both}, from {@code first}: one channel of a two-channel readback. */
+	static byte[] channel(byte[] both, int first) {
+		byte[] out = new byte[both.length / 2];
+		for (int i = 0; i < out.length; i++) {
+			out[i] = both[2 * i + first];
+		}
+		return out;
 	}
 
 	/** Lets frames start on the GPU code, for {@link GpuBakeCheck#open}. */
@@ -292,7 +301,8 @@ public final class GpuTileBaker {
 		try {
 			if (job.mesh.empty) {
 				// Rays start below the view's limit: the tracer leaves every pixel unknown.
-				job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+				job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS],
+					job.mesh.lit ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 				job.free();
 			} else if (GpuBakeCheck.failed() || job.mesh.traceInstead
 				|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
@@ -538,7 +548,7 @@ public final class GpuTileBaker {
 			PENDING.add(this);
 		}
 
-		void done(int[] pixels, byte @Nullable [] info, long recordNanos, long gpuNanos) {
+		void done(int[] pixels, byte @Nullable [] info, byte @Nullable [] blockLight, long recordNanos, long gpuNanos) {
 			PENDING.remove(this);
 			if (!this.completed.compareAndSet(false, true)) {
 				return;
@@ -551,7 +561,7 @@ public final class GpuTileBaker {
 				this.faceCount(), this.casterCount, this.faceCount() * FACE_BYTES + this.casterCount * CASTER_BYTES
 			);
 			log(timing);
-			this.callback.accept(new Result(pixels, info, timing, false, this.look));
+			this.callback.accept(new Result(pixels, info, blockLight, timing, false, this.look));
 		}
 
 		void fail() {
@@ -569,7 +579,7 @@ public final class GpuTileBaker {
 				return;
 			}
 			this.free();
-			this.callback.accept(new Result(null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), declined, this.look));
+			this.callback.accept(new Result(null, null, null, new Timing(this.mesh.buildNanos, this.packNanos, -1, -1, -1, this.faceCount(), this.casterCount, 0), declined, this.look));
 		}
 
 		void free() {

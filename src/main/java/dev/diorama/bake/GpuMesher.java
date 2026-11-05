@@ -134,7 +134,8 @@ public final class GpuMesher {
 		 * One face of block {@code (x, y, z)}. {@code color} is sRGB {@code 0xAARRGGBB} where alpha
 		 * carries the face's own weight (plants and glass) or emission; {@code ao} packs the four
 		 * corners a byte each, in the order of {@link GpuMesher#aoTop}. {@code light} is the block
-		 * and sky light in cave views: sky in the top byte, block light in the next.
+		 * and sky light in cave views: sky in the top byte, block light in the next; in the sky view
+		 * only the block light, which lights the map at night.
 		 */
 		void add(int x, int y, int z, int face, int color, int ao, int light, int flags) {
 			this.add(x, y, z, face, color, ao, light, flags, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI);
@@ -788,7 +789,9 @@ public final class GpuMesher {
 		}
 		int color = solidColor(helper, id, x, y, z, top, looks.emission[id], kind, style);
 		int ao = top ? aoTop(helper, x, y + 1, z) : aoSouth(helper, x, y, z + 1);
-		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1)) : 0;
+		// The sky view keeps only the block light, which lights the map at night (TileBaker.outBlockLight).
+		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1))
+			: (top ? helper.reader.blockLight(x, y + 1, z) : helper.reader.blockLight(x, y, z + 1)) << 16;
 		int flags = kind == BlockLooks.LAVA ? LAVA : 0;
 		if (mesh.overlays != null && kind == BlockLooks.SOLID) {
 			flags |= overlayFlags(mesh, helper.reader, looks, id, x, y, z, top);

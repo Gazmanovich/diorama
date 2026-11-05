@@ -534,6 +534,8 @@ void main() {
     vec2 offsetBytes = floor(params.rg * 255.0 + 0.5);
     noiseOrigin = floor(offsetBytes / 32.0) / 8.0;
     float fogOpacity = 1.0 - mod(offsetBytes.r, 32.0) / 31.0;
+    // The green byte's low five bits are how far into the night the map is drawn, in 31sts (NightLook).
+    float night = mod(offsetBytes.g, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
     // In the low nibble: 4 for Fast, 1 for smoke, 2 into the half-resolution layer (FogLayer).
@@ -711,15 +713,17 @@ void main() {
         color *= keep;
         alpha *= keep;
     }
+    // At night the fog dims toward moonlight with the map under it, as NightLook.dim tints the tiles.
+    vec3 moonlit = mix(vec3(1.0), vec3(0.27, 0.33, 0.49), night);
     if (alpha <= 0.002) {
         if (!layer) {
             discard;
         }
         // The layer is shown scaled up, filtered between its texels: an empty one keeps a fog
         // colour, so the fog's edge blends toward that rather than toward black.
-        fragColor = vec4(mix(shade, lit, 0.7), 0.0);
+        fragColor = vec4(mix(shade, lit, 0.7) * moonlit, 0.0);
         return;
     }
     color += jitter / 255.0;
-    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
+    fragColor = vec4(color / alpha * moonlit, alpha * fogOpacity) * ColorModulator;
 }

@@ -91,11 +91,18 @@ public final class MapViewport {
 
 	/** How opaque the map draws, 0 to 1. */
 	private float opacity = 1;
+	/** How far into the night to draw the sky view whatever the time, or -1 to follow {@link NightLook}. */
+	private float night = -1;
 
 	/**
 	 * Sets how opaque this map is drawn: the tiles and the fog, and not the backdrop behind them, so
 	 * the game shows through. The fullscreen map leaves it at 1; the minimap takes it from the settings.
 	 */
+	/** Draws the sky view this far into the night (0..1) whatever the time, or as {@link NightLook} has it for -1. */
+	public void night(float night) {
+		this.night = night;
+	}
+
 	public void opacity(float opacity) {
 		this.opacity = Math.max(0, Math.min(1, opacity));
 	}
@@ -114,6 +121,10 @@ public final class MapViewport {
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
 		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
 		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
+		float night = this.night < 0 || cave || level.roofless() ? NightLook.forView(level, view.layer()) : this.night;
+		if (night > 0) {
+			background = NightLook.darken(background, night);
+		}
 		// A see-through map has no backdrop: drawn under tiles that are themselves see-through, it
 		// would show through them and tint the game behind.
 		if (this.opacity < 1) {
@@ -124,12 +135,13 @@ public final class MapViewport {
 			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 		}
 
+		int alpha = Math.round(this.opacity * 255);
 		MapMemory memory = cave ? null : level.memory();
 		if (memory != null) {
-			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF, lodFor(level, view), tileSampling(sampling(view)));
+			memory.draw(MapCanvas.of(graphics), view, NightLook.dim(night, alpha), lodFor(level, view), tileSampling(sampling(view)));
 		}
-		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit);
-		this.drawFog(graphics, level, view);
+		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit, night);
+		this.drawFog(graphics, level, view, night);
 		graphics.disableScissor();
 	}
 
@@ -225,7 +237,7 @@ public final class MapViewport {
 		return Math.sqrt(du * du + dv * dv);
 	}
 
-	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit) {
+	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit, float night) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
@@ -257,7 +269,7 @@ public final class MapViewport {
 				float sy = view.screenY(tv * units);
 				if (visible && (tile == null || tile.texture() == null)) {
 					// Not loaded yet, as after zooming to another level: show what's loaded of the same ground.
-					drawStandIn(level, key, canvas, tiles, circle, sx, sy, size, tint);
+					drawStandIn(level, key, canvas, tiles, circle, sx, sy, size, tint, night);
 					continue;
 				}
 				if (!visible || tile == null || tile.texture() == null) {
@@ -268,7 +280,7 @@ public final class MapViewport {
 				if (circle != null) {
 					Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
 					if (inside != null) {
-						canvas.quad(tile.texture(), tiles, inside.corners(), inside.uvs(), tint);
+						drawTile(canvas, tile, tiles, inside.corners(), inside.uvs(), tint, night);
 						if (claimed != null) {
 							above.add(() -> canvas.quad(claimed, sampling, inside.corners(), inside.uvs(), tint));
 						}
@@ -278,7 +290,7 @@ public final class MapViewport {
 					}
 					continue;
 				}
-				canvas.rect(tile.texture(), tiles, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
+				drawTile(canvas, tile, tiles, sx, sy, size, 0, 0, 1, 1, tint, night);
 				if (claimed != null) {
 					above.add(() -> canvas.rect(claimed, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint));
 				}
@@ -288,7 +300,7 @@ public final class MapViewport {
 			}
 		}
 		if (this.drawsNear(view, lod)) {
-			drawNear(level, view, canvas, tiles, circle, tint);
+			drawNear(level, view, canvas, tiles, circle, tint, night);
 		}
 		if (lit != null) {
 			lit.run();
@@ -302,7 +314,7 @@ public final class MapViewport {
 	 * down. Blurry or rough, but the ground doesn't vanish while the right tile loads, which on a big
 	 * map takes a while. Draws nothing if none is in memory.
 	 */
-	private static void drawStandIn(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint) {
+	private static void drawStandIn(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint, float night) {
 		TileKey above = key;
 		for (int up = 1; key.lod() + up <= TileKey.MAX_LOD; up++) {
 			above = above.parent();
@@ -311,11 +323,11 @@ public final class MapViewport {
 				int span = 1 << up;
 				float u0 = Math.floorMod(key.tileU(), span) / (float) span;
 				float v0 = Math.floorMod(key.tileV(), span) / (float) span;
-				drawPart(canvas, tile, sampling, circle, sx, sy, size, u0, v0, u0 + 1F / span, v0 + 1F / span, tint);
+				drawPart(canvas, tile, sampling, circle, sx, sy, size, u0, v0, u0 + 1F / span, v0 + 1F / span, tint, night);
 				return;
 			}
 		}
-		drawFiner(level, key, canvas, sampling, circle, sx, sy, size, tint, FINER_STAND_INS);
+		drawFiner(level, key, canvas, sampling, circle, sx, sy, size, tint, night, FINER_STAND_INS);
 	}
 
 	/**
@@ -326,7 +338,7 @@ public final class MapViewport {
 	private static final int FINER_STAND_INS = 2;
 
 	/** Draws the four tiles one level finer than {@code key}, and in place of any not in memory, theirs. */
-	private static void drawFiner(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint, int levels) {
+	private static void drawFiner(MapLevel level, TileKey key, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, int tint, float night, int levels) {
 		if (key.lod() == 0 || levels == 0) {
 			return;
 		}
@@ -336,24 +348,52 @@ public final class MapViewport {
 				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + du, key.tileV() * 2 + dv, key.lod() - 1);
 				MapTile tile = level.standIn(child);
 				if (tile != null && tile.texture() != null) {
-					drawPart(canvas, tile, sampling, circle, sx + du * half, sy + dv * half, half, 0, 0, 1, 1, tint);
+					drawPart(canvas, tile, sampling, circle, sx + du * half, sy + dv * half, half, 0, 0, 1, 1, tint, night);
 				} else if (tile == null) {
-					drawFiner(level, child, canvas, sampling, circle, sx + du * half, sy + dv * half, half, tint, levels - 1);
+					drawFiner(level, child, canvas, sampling, circle, sx + du * half, sy + dv * half, half, tint, night, levels - 1);
 				}
 			}
 		}
 	}
 
 	/** Draws the part of a tile's texture from (u0, v0) to (u1, v1) in a square, inside the circle if the view is round. */
-	private static void drawPart(MapCanvas canvas, MapTile tile, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, float u0, float v0, float u1, float v1, int tint) {
+	private static void drawPart(MapCanvas canvas, MapTile tile, Sampling sampling, @Nullable Circle circle, float sx, float sy, float size, float u0, float v0, float u1, float v1, int tint, float night) {
 		if (circle != null) {
 			Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, u0, v0, u1, v1);
 			if (inside != null) {
-				canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
+				drawTile(canvas, tile, sampling, inside.corners(), inside.uvs(), tint, night);
 			}
 			return;
 		}
-		canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, u0, v0, u1, v1, tint);
+		drawTile(canvas, tile, sampling, sx, sy, size, u0, v0, u1, v1, tint, night);
+	}
+
+	/** A square of a tile's texture from (u0, v0) to (u1, v1); see the other {@link #drawTile}. */
+	private static void drawTile(MapCanvas canvas, MapTile tile, Sampling sampling, float sx, float sy, float size, float u0, float v0, float u1, float v1, int tint, float night) {
+		drawTile(
+			canvas, tile, sampling,
+			new float[] {sx, sy, sx, sy + size, sx + size, sy + size, sx + size, sy},
+			new float[] {u0, v0, u0, v1, u1, v1, u1, v0},
+			tint, night
+		);
+	}
+
+	/**
+	 * A tile's texture over these quads, as {@link MapCanvas#quad} draws it, {@code night} into the
+	 * night ({@link NightLook}): by day as it is, at night dimmed, with its block light if it has any.
+	 */
+	private static void drawTile(MapCanvas canvas, MapTile tile, Sampling sampling, float[] corners, float[] uvs, int tint, float night) {
+		if (night <= 0) {
+			canvas.quad(tile.texture(), sampling, corners, uvs, tint);
+			return;
+		}
+		int alpha = tint >>> 24;
+		MapTexture light = tile.light();
+		if (light == null) {
+			canvas.quad(tile.texture(), sampling, corners, uvs, NightLook.dim(night, alpha));
+			return;
+		}
+		canvas.nightTile(tile.texture(), sampling, light, corners, uvs, NightLook.params(night, sampling == Sampling.TILE_CRISP, alpha));
 	}
 
 	/**
@@ -364,7 +404,7 @@ public final class MapViewport {
 		return lod > 0 && view.follows() && this.opacity >= 1;
 	}
 
-	private static void drawNear(MapLevel level, View view, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, int tint) {
+	private static void drawNear(MapLevel level, View view, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, int tint, float night) {
 		int units = Projection.TILE_UNITS;
 		float size = (float) (units * view.zoom());
 		int nearU = (int) Math.floor(view.centerU() / units);
@@ -380,19 +420,12 @@ public final class MapViewport {
 				if (!visible || tile == null || tile.texture() == null) {
 					continue;
 				}
-				if (circle == null) {
-					canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
-					continue;
-				}
-				Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
-				if (inside != null) {
-					canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
-				}
+				drawPart(canvas, tile, sampling, circle, sx, sy, size, 0, 0, 1, 1, tint, night);
 			}
 		}
 	}
 
-	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view) {
+	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, float night) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
 		// Zoomed out past the detailed zoom, the fog's noise grows with the view so it keeps its
@@ -430,7 +463,9 @@ public final class MapViewport {
 		// The low five bits of the noise offset's red byte hold how see-through the fog is, 0 for
 		// not at all, so a caller that sets nothing there gets the fog it always did.
 		int veil = Math.round((1 - this.opacity) * OPACITY_CODES);
-		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32) << 8 | fogCode;
+		// The green byte's low five bits: how far into the night, in 31sts, which dims the fog too.
+		int dark = Math.round(night * 31);
+		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32 | dark) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
 		if (this.drawFogLayer(canvas, view, originU, originV, span, params)) {

@@ -167,6 +167,12 @@ public final class TileBaker {
 	private float outDepth;
 	/** Blocks of water the last trace looked through to what it hit; 0 when it met none. */
 	private float outWater;
+	/**
+	 * In the sky view, the block light (0..15) in front of the face the last trace hit, or the
+	 * block's own if it's a lamp, which lights the map at night. Water over it adds none, as on the
+	 * GPU, which has no room to keep the water's.
+	 */
+	private int outBlockLight;
 	// The block the last trace stopped on, when it was solid, for the overlays.
 	private boolean hitSolid;
 	private boolean hitTop;
@@ -378,7 +384,7 @@ public final class TileBaker {
 		}
 		int[] pixels = new int[count];
 		float[] linear = new float[count * 4];
-		baker.bakePixels(x0, y0, width, height, pixels, null, linear);
+		baker.bakePixels(x0, y0, width, height, pixels, null, linear, null);
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
 		baker.surfaceOnly = true;
 		for (int py = 0; py < height; py++) {
@@ -552,21 +558,34 @@ public final class TileBaker {
 	 * keeps a bake at the edge of loaded chunks from erasing what was saved.
 	 */
 	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
-		return bake(key, source, looks, blocks, fogOfWar, saved, null);
+		return bake(key, source, looks, blocks, fogOfWar, saved, null, null);
 	}
 
 	/** Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null. */
 	public static TileImage bake(
 		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
 	) {
+		return bake(key, source, looks, blocks, fogOfWar, saved, null, overlays);
+	}
+
+	/**
+	 * Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null.
+	 * {@code savedLight} is the saved tile's {@link BlockLight}, kept with the saved pixels it goes with.
+	 */
+	public static TileImage bake(
+		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, byte @Nullable [] savedLight,
+		@Nullable Overlays overlays
+	) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
 			byte[] info = overlays == null ? null : new byte[size * size];
-			baker.bakePixels(0, 0, size, size, pixels, info, null);
+			byte[] pixelLight = baker.lit ? null : new byte[size * size];
+			baker.bakePixels(0, 0, size, size, pixels, info, null, pixelLight);
+			byte[] blockLight = pixelLight == null ? null : BlockLight.shrink(pixelLight, pixels, saved, savedLight, 0, 0, size);
 			merge(pixels, saved, 0, 0, size);
-			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
+			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info).withBlockLight(blockLight);
 		}
 		int perRow = size / TileImage.BLOCK;
 		List<TileImage.Patch> patches = new ArrayList<>();
@@ -575,9 +594,12 @@ public final class TileBaker {
 			int by = i / perRow;
 			int[] pixels = new int[TileImage.BLOCK * TileImage.BLOCK];
 			byte[] info = overlays == null ? null : new byte[TileImage.BLOCK * TileImage.BLOCK];
-			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels, info, null);
+			byte[] pixelLight = baker.lit ? null : new byte[TileImage.BLOCK * TileImage.BLOCK];
+			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels, info, null, pixelLight);
+			byte[] blockLight = pixelLight == null ? null
+				: BlockLight.shrink(pixelLight, pixels, saved, savedLight, bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK);
 			merge(pixels, saved, bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK);
-			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK), info));
+			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK), info, blockLight));
 		}
 		if (VoxelReader.DEBUG && !baker.reader.missing.isEmpty()) {
 			StringBuilder sb = new StringBuilder();
@@ -601,15 +623,18 @@ public final class TileBaker {
 		baker.fourSamples = true;
 		int size = Projection.TILE_PIXELS;
 		int[] pixels = new int[size * size];
-		baker.bakePixels(0, 0, size, size, pixels, info, null);
+		baker.bakePixels(0, 0, size, size, pixels, info, null, null);
 		return pixels;
 	}
 
 	/** A tile drawn on the GPU, merged with what was saved the same way a traced bake is. */
-	public static TileImage gpuImage(TileKey key, int[] pixels, int @Nullable [] saved, byte @Nullable [] info) {
-		merge(pixels, saved, 0, 0, Projection.TILE_PIXELS);
+	public static TileImage gpuImage(
+		TileKey key, int[] pixels, int @Nullable [] saved, byte @Nullable [] info, byte @Nullable [] pixelLight, byte @Nullable [] savedLight
+	) {
 		int size = Projection.TILE_PIXELS;
-		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
+		byte[] blockLight = pixelLight == null ? null : BlockLight.shrink(pixelLight, pixels, saved, savedLight, 0, 0, size);
+		merge(pixels, saved, 0, 0, size);
+		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info).withBlockLight(blockLight);
 	}
 
 	/** A full tile image from level-0 pixels: mips and fog coverage. */
@@ -640,7 +665,7 @@ public final class TileBaker {
 	 * into it: the pixel's colour in linear light with each sample's own cave light taken out
 	 * (all but a side's darkening), then how strongly an outline darkens it, 0 for none.
 	 */
-	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info, float @Nullable [] linear) {
+	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info, float @Nullable [] linear, byte @Nullable [] blockLight) {
 		if (this.startY <= this.limitY) {
 			return;
 		}
@@ -665,6 +690,7 @@ public final class TileBaker {
 				float ur = 0;
 				float ug = 0;
 				float ub = 0;
+				int lightSum = 0;
 				int known = 0;
 				for (int s = 0; s < samples.length; s++) {
 					double u = minU + (px0 + x - border + samples[s][0]) * unitsPerPixel;
@@ -697,6 +723,7 @@ public final class TileBaker {
 						b += this.outB;
 						d += this.outDepth;
 						wd += this.outWater;
+						lightSum += this.outBlockLight;
 						known++;
 					}
 				}
@@ -704,6 +731,9 @@ public final class TileBaker {
 					pixels[y * w + x] = this.abgr(r / known, g / known, b / known, known * 255 / samples.length);
 					int ix = x - border;
 					int iy = y - border;
+					if (blockLight != null && ix >= 0 && iy >= 0 && ix < width && iy < height) {
+						blockLight[iy * width + ix] = (byte) BlockLight.encode(lightSum, known);
+					}
 					if (linear != null && ix >= 0 && iy >= 0 && ix < width && iy < height) {
 						int i = (iy * width + ix) * 4;
 						linear[i] = ur / known;
@@ -807,6 +837,7 @@ public final class TileBaker {
 
 		boolean skippingRock = this.lit;
 		this.hitSolid = false;
+		this.outBlockLight = 0;
 		// Colour picked up from plants and glass on the way down, applied to the surface below.
 		float overR = 0;
 		float overG = 0;
@@ -1106,6 +1137,8 @@ public final class TileBaker {
 			);
 			float sky = this.style.skyOcclusion() > 0 ? (top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by)) : 1;
 			this.lighting.surface(lambert, shadowed, ao, sky, emission, top ? 1 : SIDE, hitY, this.light);
+			// A lamp glows at night by its own light, whatever falls on its face.
+			this.outBlockLight = Math.max(this.reader.blockLight(x, frontY, frontZ), this.looks.emission[id]);
 			this.outR = this.albedoR * this.light[0];
 			this.outG = this.albedoG * this.light[1];
 			this.outB = this.albedoB * this.light[2];
