@@ -204,8 +204,8 @@ bool clear;
 // Every mask texel this pixel can read is fully unknown: every known share is exactly 0, so the
 // mask reads are skipped. The noise still shapes the fog there, so its reads stay.
 bool deep;
-// Elsewhere blue holds the highest cloud level any cell within the clouds' reach can stand at, in
-// 32nds of 255 (MapViewport.writeCloudTops): the march starts just above it, and there is none at 0.
+// The highest level any cell the clouds read from this pixel can stand at: the march starts just
+// above it, and there are none at 0. Set in main from the cells' spans.
 float cloudTop = CLOUD_LEVELS;
 
 // The known share at uv, without the read where the answer is already known.
@@ -300,6 +300,12 @@ float sameCover(vec2 p, float size, float k) {
     float low = floor(span / 6.0);
     float high = span - low * 6.0;
     return k <= low ? 1.0 : (k > high ? 0.0 : -1.0);
+}
+
+// The highest level among the cells around a cell (MapViewport.levelSpans).
+float spanHigh(ivec2 at) {
+    float span = floor(texelFetch(Sampler2, at, 0).a * 255.0 / 7.0 + 0.5);
+    return span - floor(span / 6.0) * 6.0;
 }
 
 float levelCover(vec2 p, float size, float k) {
@@ -526,9 +532,7 @@ void main() {
     ivec2 texel = clamp(ivec2(floor(maskUv * MASK_TEXELS)), ivec2(0), ivec2(int(MASK_TEXELS) - 1));
     vec4 flags = texelFetch(Sampler0, texel, 0);
     clear = flags.g > 0.5;
-    float blue = floor(flags.b * 255.0 + 0.5);
-    deep = blue > 200.0;
-    cloudTop = deep ? CLOUD_LEVELS : min(CLOUD_LEVELS, floor(blue / 32.0 + 0.5));
+    deep = flags.b > 0.5;
 
     vec3 lit = cave ? vec3(0.24, 0.26, 0.33) : vec3(0.97, 0.97, 0.99);
     vec3 shade = cave ? vec3(0.035, 0.04, 0.055) : vec3(0.48, 0.55, 0.67);
@@ -572,6 +576,13 @@ void main() {
         cellSize = size;
         cellFirst = originCells * perStep - CELL_MARGIN;
         cellFirst2 = originCells * (perStep / 2) - CELL_MARGIN;
+        // The highest level the march can meet: every cell a point of the line of sight reads is
+        // within the spans of the cell under the ground point and the cell three south, which the
+        // line of sight leans into. Not while two cell sizes are blended.
+        if (cellsReady && !deep && (handover <= 0.0 || handover >= 1.0)) {
+            ivec2 here = ivec2(floor(p0 / size - 0.5)) - cellFirst;
+            cloudTop = max(spanHigh(here), spanHigh(here + ivec2(0, 3)));
+        }
         vec4 c;
         float shadow = 0.0;
         if (clear || cloudTop < 0.5) {
