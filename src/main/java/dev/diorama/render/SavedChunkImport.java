@@ -148,6 +148,42 @@ public final class SavedChunkImport {
 		this.thread.setPriority(Thread.MIN_PRIORITY);
 	}
 
+	/**
+	 * Whether the map's folder has chunks drawn before tiles kept their block light, which a sky view
+	 * with a night draws again once (see {@link Progress}), so the save is read for them even where
+	 * the map doesn't fill in from it.
+	 */
+	public static boolean needsRelight(MapLevel map, ClientLevel level) {
+		Path folder = map.importFolder();
+		if (folder == null || map.roofless() || level.dimensionType().hasFixedTime()) {
+			return false;
+		}
+		try (java.io.DataInputStream in = new java.io.DataInputStream(Files.newInputStream(folder.resolve("saved-chunks.bin")))) {
+			int magic = in.readInt();
+			if (magic == Progress.BEFORE_LIGHT) {
+				return true;
+			}
+			if (magic != Progress.MAGIC) {
+				return false;
+			}
+			// A run that stopped partway left some to do.
+			java.io.DataInputStream data = new java.io.DataInputStream(new java.util.zip.InflaterInputStream(in));
+			int count = data.readInt();
+			for (int r = 0; r < count; r++) {
+				data.readInt();
+				data.readInt();
+				for (int i = 0; i < 1024; i++) {
+					if (data.readInt() == Progress.RELIGHT) {
+						return true;
+					}
+				}
+			}
+			return false;
+		} catch (java.io.IOException e) {
+			return false;
+		}
+	}
+
 	/** Starts drawing the save behind this map, or returns null when there's no save here. */
 	public static @Nullable SavedChunkImport start(MapLevel map, ClientLevel level, Consumer<List<Portals.Spot>> portals) {
 		SavedChunks save = SavedChunks.open(level, map.roofless());
@@ -182,6 +218,11 @@ public final class SavedChunkImport {
 
 	/** Whether the map remembers a saved chunk, each asked once, as a bake reads it many times. */
 	private boolean remembered(int chunkX, int chunkZ, int top) {
+		// Ground this map had before tiles kept their light is drawn again for it.
+		Progress progress = this.progress;
+		if (progress != null && progress.relight.contains(ChunkSnapshot.key(chunkX, chunkZ))) {
+			return true;
+		}
 		MapMemory memory = this.map.memory();
 		return memory != null && this.remembered.computeIfAbsent(ChunkSnapshot.key(chunkX, chunkZ), k -> memory.showsChunk(chunkX, chunkZ, top));
 	}
@@ -270,7 +311,9 @@ public final class SavedChunkImport {
 				this.progress.saveIfChanged();
 			}
 			this.folder = folder;
-			this.progress = Progress.load(folder.resolve("saved-chunks.bin"));
+			// A sky view with a night draws block light, which tiles drawn before it was kept lack.
+			boolean night = !this.map.roofless() && !this.save.level().dimensionType().hasFixedTime();
+			this.progress = Progress.load(folder.resolve("saved-chunks.bin"), night);
 			this.plans.clear();
 			this.heldUntil.clear();
 			this.drawn.clear();
@@ -639,7 +682,9 @@ public final class SavedChunkImport {
 				this.chunksDone++;
 				continue;
 			}
-			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
+			// Ground this map already had is drawn again for its light even where it doesn't fill in.
+			if (plan.onlyRemembered && progress.time(regionX, regionZ, i) != Progress.RELIGHT
+				&& (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
 				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
 				this.chunksDone++;
 				continue;
@@ -716,10 +761,14 @@ public final class SavedChunkImport {
 	/**
 	 * Which saved chunks need no drawing: for each, when the save had last written it at the time,
 	 * {@link #LIVE}, {@link #NOT_REMEMBERED} or {@link #CHANGED}. Kept in {@code saved-chunks.bin}:
-	 * {@code DSC1}, then deflated, the region count and, per region, its x, z and 1024 values.
+	 * {@code DSC2}, then deflated, the region count and, per region, its x, z and 1024 values.
+	 * {@code DSC1} is the same from before tiles kept their block light: in a sky view that gets
+	 * dark at night, everything it drew counts as {@link #RELIGHT}, so it's all drawn once more,
+	 * with its light (#204).
 	 */
 	private static final class Progress {
-		private static final int MAGIC = 0x44534331;
+		private static final int MAGIC = 0x44534332;
+		private static final int BEFORE_LIGHT = 0x44534331;
 		/**
 		 * The map saw this chunk live and saved its tiles, and the game saves a chunk it had loaded
 		 * a little later: not news. Without this, every place the player walks would be drawn twice.
@@ -729,8 +778,19 @@ public final class SavedChunkImport {
 		static final int NOT_REMEMBERED = -2;
 		/** Drawn once, and changed since: no save time, so it's work, and not a first drawing either. */
 		static final int CHANGED = 1;
+		/**
+		 * Drawn before tiles kept their block light: work once, to draw it with its light, on any map
+		 * that has it, whether or not that map fills in from the save.
+		 */
+		static final int RELIGHT = 2;
 		private final Path file;
 		private final Map<Long, int[]> times = new HashMap<>();
+		/**
+		 * The chunks marked {@link #RELIGHT} when this was read, kept for the whole run: the map had
+		 * them, so a map that doesn't fill in may still read them, and the chunks around them, for
+		 * their light. By {@link ChunkSnapshot#key}.
+		 */
+		final it.unimi.dsi.fastutil.longs.LongOpenHashSet relight = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 		private boolean changed;
 		/** When the map last moved away from this folder, in seconds, or 0 if it's been here since. */
 		private int leftAt;
@@ -740,7 +800,7 @@ public final class SavedChunkImport {
 			this.file = file;
 		}
 
-		static Progress load(Path file) {
+		static Progress load(Path file, boolean night) {
 			Progress progress = new Progress(file);
 			Path left = file.resolveSibling(MapMemory.LEFT);
 			try {
@@ -754,9 +814,11 @@ public final class SavedChunkImport {
 				return progress;
 			}
 			try (DataInputStream in = new DataInputStream(Files.newInputStream(file))) {
-				if (in.readInt() != MAGIC) {
+				int magic = in.readInt();
+				if (magic != MAGIC && magic != BEFORE_LIGHT) {
 					return progress;
 				}
+				boolean relight = magic == BEFORE_LIGHT && night;
 				DataInputStream data = new DataInputStream(new InflaterInputStream(in));
 				int count = data.readInt();
 				for (int r = 0; r < count; r++) {
@@ -765,6 +827,14 @@ public final class SavedChunkImport {
 					int[] times = new int[1024];
 					for (int i = 0; i < 1024; i++) {
 						times[i] = data.readInt();
+						// Drawn there before, live or from the save: draw it again. What wasn't drawn stays so.
+						if (relight && (times[i] > RELIGHT || times[i] == LIVE || times[i] == CHANGED)) {
+							times[i] = RELIGHT;
+							progress.changed = true;
+						}
+						if (times[i] == RELIGHT) {
+							progress.relight.add(ChunkSnapshot.key(x << 5 | i & 31, z << 5 | i >> 5));
+						}
 					}
 					progress.times.put(SavedChunks.regionKey(x, z), times);
 				}

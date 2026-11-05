@@ -37,6 +37,10 @@ final class BlazeTexture implements LegacyTexture {
 		RenderSystem.setShaderTexture(slot, this.texture);
 	}
 
+	GpuTexture texture() {
+		return this.texture;
+	}
+
 	@Override
 	public void close() {
 		this.texture.close();

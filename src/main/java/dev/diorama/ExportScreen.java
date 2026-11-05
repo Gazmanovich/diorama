@@ -75,6 +75,8 @@ public final class ExportScreen extends Screen {
 	private @Nullable Button save;
 	/** Whether the player's drawings go in the image; only asked when this map has some. */
 	private boolean withDrawings = true;
+	/** Whether the image is drawn at night, as Xaero's Nighttime option does; only asked where the sky has a night. */
+	private boolean atNight;
 	/** What the current press is doing: the {@link #LEFT}... bits, {@link #MOVE}, {@link #PAN}, or 0. */
 	private int grip;
 	private int pressButton = -1;
@@ -122,6 +124,25 @@ public final class ExportScreen extends Screen {
 				public void onPress() {
 					super.onPress();
 					ExportScreen.this.withDrawings = this.selected();
+				}
+			});
+			*///?}
+		}
+		if (this.hasNight()) {
+			int y = this.drawings().isEmpty() ? 104 : 128;
+			//? if >=1.21 {
+			this.addRenderableWidget(Checkbox.builder(Component.translatable("diorama.export.night"), this.font)
+				.pos(6, y)
+				.selected(this.atNight)
+				.onValueChange((box, value) -> this.atNight = value)
+				.build());
+			//?} else {
+			/*Component label = Component.translatable("diorama.export.night");
+			this.addRenderableWidget(new Checkbox(6, y, 24 + this.font.width(label), 20, label, this.atNight) {
+				@Override
+				public void onPress() {
+					super.onPress();
+					ExportScreen.this.atNight = this.selected();
 				}
 			});
 			*///?}
@@ -203,6 +224,8 @@ public final class ExportScreen extends Screen {
 		double fullU = this.centerU - (SIDEBAR / 2.0) / this.zoom;
 		double fullV = this.centerV + (FOOTER / 2.0) / this.zoom;
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, fullU, fullV, this.zoom, TileKey.SURFACE);
+		// The preview shows the image as it will be saved: by day, or at night if asked.
+		this.viewport.night(this.atNight && this.hasNight() ? 1 : 0);
 		this.viewport.draw(graphics, session.map(), view);
 		if (this.withDrawings) {
 			// As they'll be in the image, so the preview is what gets saved.
@@ -403,6 +426,12 @@ public final class ExportScreen extends Screen {
 		this.zoom = this.fitZoom(box);
 	}
 
+	/** Whether this dimension's sky view has a night to draw: not under a roof, and its time moves. */
+	private boolean hasNight() {
+		MapSession session = MapSession.get();
+		return session != null && !session.map().roofless() && this.minecraft.level != null && !this.minecraft.level.dimensionType().hasFixedTime();
+	}
+
 	/** The drawings on this map of this dimension, as the map shows them. */
 	private List<Drawing> drawings() {
 		DrawingStore store = DrawingStore.get();
@@ -420,7 +449,8 @@ public final class ExportScreen extends Screen {
 			return;
 		}
 		ImageExport.Area area = ImageExport.Area.ofUnits(this.lod(box), box[0], box[1], box[2], box[3]);
-		if (MapExport.start(store, area, session.map().roofless(), this.withDrawings ? this.drawings() : List.of())) {
+		float night = this.atNight && this.hasNight() ? 1 : 0;
+		if (MapExport.start(store, area, session.map().roofless(), night, this.withDrawings ? this.drawings() : List.of())) {
 			this.onClose();
 		}
 	}

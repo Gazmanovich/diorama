@@ -187,6 +187,14 @@ public final class ImageExport {
 	 * progress from 0 to 1. Slow for big areas; not on the render thread.
 	 */
 	public static void write(TileStore store, Area area, Path file, Finish finish, DoubleConsumer progress) throws IOException {
+		write(store, area, file, finish, 0, progress);
+	}
+
+	/**
+	 * The same, the tiles drawn {@code night} into the night as the map draws them
+	 * ({@link dev.diorama.render.NightLook}), before {@code finish}.
+	 */
+	public static void write(TileStore store, Area area, Path file, Finish finish, float night, DoubleConsumer progress) throws IOException {
 		int lod = area.lod();
 		long tileV0 = Math.floorDiv(area.y(), TILE);
 		long tileV1 = Math.floorDiv(area.y() + area.height() - 1, TILE);
@@ -194,6 +202,7 @@ public final class ImageExport {
 		long tileU1 = Math.floorDiv(area.x() + area.width() - 1, TILE);
 		int columns = (int) (tileU1 - tileU0 + 1);
 		int[][] tiles = new int[columns][];
+		byte[][] lights = new byte[columns][];
 		int[][] band = new int[TILE][];
 		Path temp = file.resolveSibling(file.getFileName() + ".tmp");
 		Files.createDirectories(file.toAbsolutePath().getParent());
@@ -201,7 +210,9 @@ public final class ImageExport {
 			png.text("Software", "Diorama");
 			for (long tv = tileV0; tv <= tileV1; tv++) {
 				for (int c = 0; c < columns; c++) {
-					tiles[c] = store.read(new TileKey(TileKey.SURFACE, (int) (tileU0 + c), (int) tv, lod));
+					TileStore.Saved saved = store.readSaved(new TileKey(TileKey.SURFACE, (int) (tileU0 + c), (int) tv, lod));
+					tiles[c] = saved == null ? null : saved.pixels();
+					lights[c] = saved == null ? null : saved.blockLight();
 				}
 				long rowStart = Math.max(area.y(), tv * TILE);
 				int rows = (int) (Math.min(area.y() + area.height(), (tv + 1) * TILE) - rowStart);
@@ -221,6 +232,12 @@ public final class ImageExport {
 							Arrays.fill(row, at, at + to - from, 0);
 						} else {
 							System.arraycopy(tile, ty * TILE + from, row, at, to - from);
+							if (night > 0) {
+								byte[] light = lights[c];
+								for (int x = from; x < to; x++) {
+									row[at + x - from] = dev.diorama.render.NightLook.light(row[at + x - from], light == null ? 0 : lightAt(light, x, ty), night);
+								}
+							}
 						}
 					}
 					finish.row(row, gy, area.x());
@@ -240,6 +257,24 @@ public final class ImageExport {
 			Files.deleteIfExists(temp);
 			throw e;
 		}
+	}
+
+	/** A tile's block light (0..1) under its pixel (x, y), blended between the values around it. */
+	private static float lightAt(byte[] light, int x, int y) {
+		int edge = dev.diorama.bake.BlockLight.EDGE;
+		float fx = (x + 0.5F) / dev.diorama.bake.BlockLight.SCALE - 0.5F;
+		float fy = (y + 0.5F) / dev.diorama.bake.BlockLight.SCALE - 0.5F;
+		int x0 = (int) Math.floor(fx);
+		int y0 = (int) Math.floor(fy);
+		float tx = fx - x0;
+		float ty = fy - y0;
+		int xa = Math.max(0, x0);
+		int xb = Math.min(edge - 1, x0 + 1);
+		int ya = Math.max(0, y0);
+		int yb = Math.min(edge - 1, y0 + 1);
+		float top = (light[ya * edge + xa] & 0xFF) * (1 - tx) + (light[ya * edge + xb] & 0xFF) * tx;
+		float bottom = (light[yb * edge + xa] & 0xFF) * (1 - tx) + (light[yb * edge + xb] & 0xFF) * tx;
+		return (top * (1 - ty) + bottom * ty) / 255;
 	}
 
 	/**

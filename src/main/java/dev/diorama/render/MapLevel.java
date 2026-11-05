@@ -485,8 +485,9 @@ public final class MapLevel implements ChunkSource {
 			// view only reaches down to the surface; cave slices can be anywhere below it.
 			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.newChunkTop(snapshot), this.topY, z0 + 15, true, true);
 		} else {
-			// Under a roof the sky view is lit by block light, so light is part of what's saved.
-			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
+			// Under a roof the sky view is lit by block light, so light is part of what's saved; and
+			// it's saved with the sky view for the night, where it reaches the surface (MapSession says).
+			boolean terrain = (changed[6] & (CHANGED_SURFACE | CHANGED_BLOCK_LIGHT)) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[4], changed[5], surface, terrain);
 		}
@@ -501,6 +502,11 @@ public final class MapLevel implements ChunkSource {
 	public static final int CHANGED_SURFACE = 1;
 	/** Change flag: only light changed, which the sky view shows only through spawn spots. */
 	public static final int CHANGED_SURFACE_LIGHT = 2;
+	/**
+	 * Change flag: block light changed near enough the surface to show, in a dimension whose sky
+	 * view keeps it for the night ({@code BlockLight}).
+	 */
+	public static final int CHANGED_BLOCK_LIGHT = 4;
 
 	/** Light from a changed block reaches this far, which matters for cave slices. */
 	private static final int LIGHT_REACH = 15;
@@ -815,14 +821,7 @@ public final class MapLevel implements ChunkSource {
 				this.dirty.computeIfAbsent(changedOverview, k -> new Dirty(0)).blocks.set(0);
 			}
 		}
-		TileImage image;
-		while ((image = this.finished.poll()) != null) {
-			this.bakeFinished(image);
-			// After the image reached the store, so a tile from the save either reads it or hears of it.
-			if (this.savedTilesBaking.contains(image.key())) {
-				this.savedTilesRaced.add(image.key());
-			}
-		}
+		this.takeFinished(Integer.MAX_VALUE);
 		SavedTile savedTile;
 		while ((savedTile = this.fromSave.poll()) != null) {
 			savedTile.taken().complete(this.tileFromSave(savedTile.image(), savedTile.store()));
@@ -894,6 +893,22 @@ public final class MapLevel implements ChunkSource {
 		}
 		this.wanted.clear();
 		this.evict();
+	}
+
+	/**
+	 * Takes up to {@code most} finished bakes, oldest first. Frames take one each between updates,
+	 * so a tile's upload doesn't land on the same frame as the next one's, or as the tick's work;
+	 * {@link #update} takes whatever is left. Render thread.
+	 */
+	public void takeFinished(int most) {
+		TileImage image;
+		for (int taken = 0; taken < most && (image = this.finished.poll()) != null; taken++) {
+			this.bakeFinished(image);
+			// After the image reached the store, so a tile from the save either reads it or hears of it.
+			if (this.savedTilesBaking.contains(image.key())) {
+				this.savedTilesRaced.add(image.key());
+			}
+		}
 	}
 
 	/** Takes a finished bake: shows it if a map still wants it, and saves it. */
@@ -1031,9 +1046,9 @@ public final class MapLevel implements ChunkSource {
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
-				int[] saved = store == null ? null : store.read(key);
+				TileStore.Saved saved = store == null ? null : store.readSaved(key);
 				ChunkSource source = this.sourceFor(store);
-				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, saved, overlays);
+				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays);
 				long spots = System.nanoTime();
 				this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
@@ -1061,17 +1076,17 @@ public final class MapLevel implements ChunkSource {
 	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
 		BAKERS.execute(() -> {
 			try {
-				int[] saved = store == null ? null : store.read(key);
+				TileStore.Saved saved = store == null ? null : store.readSaved(key);
 				ChunkSource source = this.sourceFor(store);
 				dev.diorama.bake.GpuMesher.Mesh mesh;
 				try {
-					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved));
 				} catch (BlockLooks.StatesRenumbered e) {
 					throw e;
 				} catch (Throwable t) {
 					Diorama.LOGGER.error("Failed to mesh tile {}; tracing it", key, t);
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
-					TileImage image = TileBaker.bake(key, source, looks, null, fog, saved, overlays);
+					TileImage image = TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays);
 					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					return;
 				}
@@ -1081,8 +1096,8 @@ public final class MapLevel implements ChunkSource {
 							dev.diorama.render.gpu.GpuBakeCheck.drawn(result.pixels() != null);
 						}
 						TileImage image = result.pixels() == null
-							? TileBaker.bake(key, source, looks, null, fog, saved, overlays)
-							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
+							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
 						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					} catch (Throwable t) {
 						logFailed("Failed to finish GPU tile {}", key, t);
@@ -1348,13 +1363,13 @@ public final class MapLevel implements ChunkSource {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
 		BAKERS.execute(() -> {
-			int[] pixels = null;
+			TileStore.Saved saved = null;
 			try {
-				pixels = store.read(key);
+				saved = store.readSaved(key);
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to load saved tile {}", key, t);
 			}
-			this.finished.add((pixels == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, pixels)).withGeneration(generation));
+			this.finished.add((saved == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, saved.pixels()).withBlockLight(saved.blockLight())).withGeneration(generation));
 		});
 	}
 
@@ -1596,7 +1611,7 @@ public final class MapLevel implements ChunkSource {
 		this.savedTilesRaced.remove(key);
 		this.savedTilesBaking.add(key);
 		try {
-			int[] saved = store.read(key);
+			TileStore.Saved saved = store.readSaved(key);
 			TileImage image = this.drawFromSave(key, source, looks, saved);
 			image = image.withSpots(TileSpots.pick(image, source, looks, false, store.spots(key))).withGeneration(generation);
 			CompletableFuture<Boolean> taken = new CompletableFuture<>();
@@ -1621,7 +1636,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/** A sky view tile from the save: on the GPU once this GPU has shown it draws them right, else traced. */
-	private TileImage drawFromSave(TileKey key, ChunkSource source, BlockLooks looks, int @Nullable [] saved) {
+	private TileImage drawFromSave(TileKey key, ChunkSource source, BlockLooks looks, TileStore.@Nullable Saved saved) {
 		int view = this.roofless() ? dev.diorama.render.gpu.GpuBakeCheck.UNDER_ROOF : dev.diorama.render.gpu.GpuBakeCheck.SKY;
 		if (this.savedTilesOnGpu()) {
 			try {
@@ -1635,7 +1650,7 @@ public final class MapLevel implements ChunkSource {
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(true);
 					// The check may have failed this GPU while the tile was out.
 					if (dev.diorama.render.gpu.GpuBakeCheck.trusted(view)) {
-						return TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+						return TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
 					}
 				}
 				if (result != null && !result.declined()) {
@@ -1648,7 +1663,19 @@ public final class MapLevel implements ChunkSource {
 				dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
 			}
 		}
-		return TileBaker.bake(key, source, looks, null, false, saved, null);
+		return TileBaker.bake(key, source, looks, null, false, pixelsOf(saved), lightOf(saved), null, null);
+	}
+
+	private static int @Nullable [] pixelsOf(TileStore.@Nullable Saved saved) {
+		return saved == null ? null : saved.pixels();
+	}
+
+	private static byte @Nullable [] lightOf(TileStore.@Nullable Saved saved) {
+		return saved == null ? null : saved.blockLight();
+	}
+
+	private static int @Nullable [] spotsOf(TileStore.@Nullable Saved saved) {
+		return saved == null ? null : saved.spots();
 	}
 
 	/**

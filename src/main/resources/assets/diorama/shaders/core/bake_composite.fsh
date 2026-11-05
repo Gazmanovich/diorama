@@ -27,7 +27,8 @@ uniform sampler2D WaterColor;
 uniform sampler2D WaterDepth;
 
 layout(location = 0) out vec4 fragColor;
-// The overlay bits of the pixel's first sample, as the tracer records them.
+// The overlay bits of the pixel's first sample, as the tracer records them, and the block light
+// averaged over its known samples, as TileBaker.bakePixels does.
 layout(location = 1) out vec4 fragInfo;
 
 const float OUTLINE_DEPTH = 1.5;
@@ -104,6 +105,7 @@ void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy) + ivec2(1);
     fragInfo = vec4(texelFetch(SceneAux, pixel * 2, 0).r, 0.0, 0.0, 0.0);
     vec3 sum = vec3(0.0);
+    float lightSum = 0.0;
     int known = 0;
     for (int i = 0; i < 4; i++) {
         ivec2 s = pixel * 2 + ivec2(i & 1, i >> 1);
@@ -143,12 +145,14 @@ void main() {
             }
         }
         sum += c;
+        lightSum += aux.a;
         known++;
     }
     if (known == 0) {
         fragColor = vec4(0.0);
         return;
     }
+    fragInfo.g = lightSum / float(known);
     vec3 c = sum / float(known);
     float saturation = Grade.x;
     float exposure = Grade.y;

@@ -188,7 +188,11 @@ final class CraftPainter {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		MapCanvas canvas = MapCanvas.of(graphics);
 		Circle circle = view.round() ? Circle.in(view) : null;
-		int tint = Math.round(Math.max(0, Math.min(1, opacity)) * 255) << 24 | 0xFFFFFF;
+		int alpha = Math.round(Math.max(0, Math.min(1, opacity)) * 255);
+		// Dimmed at night with the ground under them.
+		dev.diorama.MapSession session = dev.diorama.MapSession.get();
+		float night = session == null ? 0 : dev.diorama.render.NightLook.forView(session.map(), layer);
+		int tint = dev.diorama.render.NightLook.dim(night, alpha);
 		// Sampled as the tiles are, so the crafts match the ground.
 		Sampling sampling = MapViewport.sampling(view);
 		// Every shadow under every craft: a craft flying over another's shadow covers it.

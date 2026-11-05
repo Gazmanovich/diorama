@@ -165,6 +165,17 @@ public final class MapSession {
 		}
 	}
 
+	/**
+	 * Takes a finished tile, unless the frame already drew a GPU bake ({@code baked}). Call every
+	 * frame, on the render thread.
+	 */
+	public static void frame(boolean baked) {
+		MapSession session = current;
+		if (session != null && !baked && session.level == mc().level) {
+			session.map.takeFinished(1);
+		}
+	}
+
 	/** Keeps the session in step with the client's level. Call every client tick. */
 	public static void tick(Minecraft mc) {
 		MapSession session = forLevel(mc.level);
@@ -337,23 +348,49 @@ public final class MapSession {
 	 * own work (a torch placed, a wall opened, a roof closed). Cave slices draw light, and so do
 	 * spawn spots, so the surface re-bakes too while they're on.
 	 */
-	public static void lightSectionChanged(ClientChunkCache source, SectionPos section) {
+	public static void lightSectionChanged(ClientChunkCache source, SectionPos section, boolean blockLight) {
 		if (current != null && current.level.getChunkSource() == source) {
 			int x0 = section.minBlockX();
 			int y0 = section.minBlockY();
 			int z0 = section.minBlockZ();
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			if (blockLight && current.keepsBlockLight() && current.reachesSurface(section.x(), section.z(), y0 + 15)) {
+				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
+			}
 			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
 		}
 	}
 
-	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ) {
+	/**
+	 * Server light for a chunk was applied; {@code blockLight} has a bit for each light section
+	 * (from one below the world's lowest) whose block light it sent.
+	 */
+	public static void lightUpdated(ClientLevel level, int chunkX, int chunkZ, java.util.BitSet blockLight) {
 		if (current != null && current.level == level) {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			int highest = blockLight.length() - 1;
+			if (highest >= 0 && current.keepsBlockLight()
+				&& current.reachesSurface(chunkX, chunkZ, ((level.getMinSectionY() - 1 + highest) << 4) + 15)) {
+				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
+			}
 			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
+	}
+
+	/**
+	 * Whether a block light change reaching up to {@code top} in this chunk can show in the sky view:
+	 * up to its lowest visible surface or higher. A torch placed deep in a mine can't.
+	 */
+	private boolean reachesSurface(int chunkX, int chunkZ, int top) {
+		dev.diorama.data.ChunkSnapshot chunk = this.map.worldChunk(chunkX, chunkZ);
+		return chunk == null || top >= chunk.floorY;
+	}
+
+	/** Whether this dimension's sky view keeps its block light, for the night: it isn't under a roof, and its time moves. */
+	private boolean keepsBlockLight() {
+		return !this.map.roofless() && !this.level.dimensionType().hasFixedTime();
 	}
 
 	/**
@@ -457,7 +494,14 @@ public final class MapSession {
 	 */
 	private void updateSavedChunks(Minecraft mc) {
 		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
-		boolean on = (fill || this.map.memory() != null) && mc.getSingleplayerServer() != null;
+		if (this.relight == null) {
+			this.relight = mc.getSingleplayerServer() != null && SavedChunkImport.needsRelight(this.map, this.level);
+		}
+		// Only for the relighting: done once it has gone through the save.
+		if (this.relight && !fill && this.map.memory() == null && this.savedChunks != null && this.savedChunks.idle()) {
+			this.relight = false;
+		}
+		boolean on = (fill || this.map.memory() != null || this.relight) && mc.getSingleplayerServer() != null;
 		if (on && this.savedChunks == null) {
 			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
 		} else if (!on && this.savedChunks != null) {
@@ -468,6 +512,9 @@ public final class MapSession {
 			this.savedChunks.onlyRemembered(!fill);
 		}
 	}
+
+	/** Whether ground drawn before tiles kept their block light is waiting to be drawn again from the save; null before it's checked. */
+	private @Nullable Boolean relight;
 
 	/** What's filling the map in from the save, or null if nothing is. */
 	public @Nullable SavedChunkImport savedChunks() {

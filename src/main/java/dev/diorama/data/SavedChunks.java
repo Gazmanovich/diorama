@@ -127,7 +127,8 @@ public final class SavedChunks {
 
 	/**
 	 * The save behind this level, or null when there's none to read: on a server, the save isn't
-	 * here. {@code withLight} keeps the save's light, which only a view from under a roof draws.
+	 * here. Block light is always kept; {@code withLight} keeps the sky light too, which only a view
+	 * from under a roof draws.
 	 */
 	public static @Nullable SavedChunks open(ClientLevel level, boolean withLight) {
 		IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
@@ -390,9 +391,12 @@ public final class SavedChunks {
 				}
 				biomes[i] = this.biomes.parse(NbtOps.INSTANCE, compound(section, "biomes")).resultOrPartial(e -> {
 				}).orElse(null);
-				if (finished && this.withLight) {
+				if (finished) {
+					// Block light lights every view at night; sky light only the view from under a roof.
 					blockLight[i] = light(section, "BlockLight");
-					skyLight[i] = light(section, "SkyLight");
+					if (this.withLight) {
+						skyLight[i] = light(section, "SkyLight");
+					}
 				}
 			}
 			CompoundTag heightmaps = compound(tag, "Heightmaps");

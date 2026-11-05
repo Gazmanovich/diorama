@@ -30,6 +30,9 @@ public final class MapPick {
 	private final int limitY;
 	/** Builds above an ordinary world's top, as the baker has them; null when no ray starts up there. */
 	private final @Nullable TallChunks tall;
+	private final TileKey tile;
+	/** The saved tile's spots, in the sky view: see {@link #passWhereSaved}. */
+	private int @Nullable [] savedSpots;
 	/** Where the last {@link #FOUND} pick stands; its x is the picked column. */
 	public int y;
 	public int z;
@@ -52,6 +55,7 @@ public final class MapPick {
 	private MapPick(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar, boolean fromWorldTop) {
 		this.source = source;
 		this.looks = looks;
+		this.tile = tile;
 		this.reader = new VoxelReader(source, looks);
 		this.fogOfWar = fogOfWar;
 		this.underRoof = source.roof() != ChunkSource.NO_ROOF;
@@ -62,6 +66,15 @@ public final class MapPick {
 			: this.roofless ? Math.min(source.roof(), source.maxY()) : fromWorldTop ? source.maxY() : TileBaker.localTop(tile, source, 0);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - TileBaker.CAVE_DEPTH) : source.minY();
 		this.tall = this.cave || this.roofless || fromWorldTop ? null : TallChunks.around(tile, source, this.startY);
+	}
+
+	/**
+	 * Lets rays through chunks the map has no data for above where the saved tile's rays stood,
+	 * as the baker does (see {@link TileSpots#passedWhenSaved}). Sky view only.
+	 */
+	public MapPick passWhereSaved(int @Nullable [] spots) {
+		this.savedSpots = this.cave || this.roofless || this.tile.lod() != 0 ? null : spots;
+		return this;
 	}
 
 	/**
@@ -93,7 +106,7 @@ public final class MapPick {
 		while (by >= this.limitY) {
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				if (this.tall == null || by < this.tall.missingTop) {
+				if ((this.tall == null || by < this.tall.missingTop) && !TileSpots.passedWhenSaved(this.tile, this.savedSpots, x, by, bz)) {
 					return UNKNOWN;
 				}
 				id = VoxelReader.AIR_ID;
