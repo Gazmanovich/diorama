@@ -74,9 +74,14 @@ layout(std140) uniform DynamicTransforms {
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
-// What would otherwise be worked out from the mask for every pixel, worked out once per mask texel
-// (MapViewport.writeSoft): red is the known share blurred as knownSoft reads it.
+// What would otherwise be worked out from the mask for every pixel, worked out once instead
+// (MapViewport.writeCells): in red each cloud cell's level in fifths, a texel a cell from
+// CELL_MARGIN cells before the mask's first, in green the same for cells twice the size while the
+// zoom hands over, and in blue, a texel a mask texel, the known share blurred as knownSoft reads
+// it. Alpha at (0, 0) is 1 when the cells are there; with too many for the texture they aren't.
 uniform sampler2D Sampler2;
+const int CELL_MARGIN = 7;
+const float SOFT_TEXELS = 256.0;
 
 //? if >=26.3 {
 layout(location = 0) in vec2 maskUv;
@@ -169,6 +174,12 @@ const float PILLOW = 1.0;
 const float GROUND_SHADOW = 0.3;
 // Map units at uv 0, from the noise origin, so cells stay put as the view moves.
 vec2 originMap;
+// Whether the detail texture has the cells' levels, the size of the cells drawn, and the cell at
+// the detail texture's first texel, for that size and for twice it.
+bool cellsReady = false;
+float cellSize = 1.0;
+ivec2 cellFirst;
+ivec2 cellFirst2;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -210,7 +221,8 @@ float knownSoft(vec2 uv) {
     if (deep) {
         return 0.0;
     }
-    return texture(Sampler2, uv).r;
+    vec2 at = clamp(uv * SOFT_TEXELS, vec2(0.5), vec2(SOFT_TEXELS - 0.5));
+    return texture(Sampler2, at / vec2(textureSize(Sampler2, 0))).b;
 }
 
 float noiseLayer(vec2 n) {
@@ -280,10 +292,30 @@ float levelCover(vec2 p, float size, float k) {
     vec2 g = p / size - 0.5;
     vec2 i = floor(g);
     vec2 f = smoothstep(0.5 - ROUND, 0.5 + ROUND, g - i);
-    float a = step(k, cellLevel(i, size));
-    float b = step(k, cellLevel(i + vec2(1.0, 0.0), size));
-    float c = step(k, cellLevel(i + vec2(0.0, 1.0), size));
-    float d = step(k, cellLevel(i + vec2(1.0, 1.0), size));
+    float a;
+    float b;
+    float c;
+    float d;
+    if (cellsReady) {
+        // Worked out already: the cells' levels from the detail texture.
+        bool doubled = size > cellSize * 1.5;
+        ivec2 at = ivec2(i) - (doubled ? cellFirst2 : cellFirst);
+        vec4 l00 = texelFetch(Sampler2, at, 0);
+        vec4 l10 = texelFetch(Sampler2, at + ivec2(1, 0), 0);
+        vec4 l01 = texelFetch(Sampler2, at + ivec2(0, 1), 0);
+        vec4 l11 = texelFetch(Sampler2, at + ivec2(1, 1), 0);
+        vec4 levels = floor((doubled ? vec4(l00.g, l10.g, l01.g, l11.g) : vec4(l00.r, l10.r, l01.r, l11.r)) * CLOUD_LEVELS + 0.5);
+        vec4 over = step(vec4(k), levels);
+        a = over.x;
+        b = over.y;
+        c = over.z;
+        d = over.w;
+    } else {
+        a = step(k, cellLevel(i, size));
+        b = step(k, cellLevel(i + vec2(1.0, 0.0), size));
+        c = step(k, cellLevel(i + vec2(0.0, 1.0), size));
+        d = step(k, cellLevel(i + vec2(1.0, 1.0), size));
+    }
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
@@ -490,9 +522,18 @@ void main() {
         // Cells double in size halfway between two zoom steps, handing over quickly: two layouts
         // blended for long would show as ghost clouds.
         float handover = smoothstep(0.42, 0.58, scaleFraction);
+        int perStep = 10;
         if (handover >= 1.0) {
             size *= 2.0;
+            perStep = 5;
         }
+        // The noise origin is ten cells of the base size from map 0 for each eighth of the coarse
+        // noise period it moves.
+        ivec2 originCells = ivec2(floor(offsetBytes / 32.0));
+        cellsReady = texelFetch(Sampler2, ivec2(0), 0).a > 0.5;
+        cellSize = size;
+        cellFirst = originCells * perStep - CELL_MARGIN;
+        cellFirst2 = originCells * (perStep / 2) - CELL_MARGIN;
         vec4 c;
         float shadow = 0.0;
         if (clear || cloudTop < 0.5) {
