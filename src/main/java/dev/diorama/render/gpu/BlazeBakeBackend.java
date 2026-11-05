@@ -210,6 +210,7 @@ final class BlazeBakeBackend implements BakeBackend {
 	private static final RenderPipeline WATER = faces("bake_water", "WATER", FACE)
 		.withBindGroupLayout(SHADOW_MAP)
 		.withBindGroupLayout(SKY)
+		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(target(GpuFormat.RGBA16_FLOAT))
 		.withDepthStencilState(DepthStencilState.DEFAULT)
 		.build();
@@ -373,6 +374,8 @@ final class BlazeBakeBackend implements BakeBackend {
 					pass.setUniform("DioramaBake", t.ubo);
 					bind(pass, "ShadowMap", t.shadowView, nearest);
 					bind(pass, "Sky", t.skyView, nearest);
+					// For the shadows the shadow map misses, as on the ground.
+					bind(pass, "Voxels", t.voxelsView, t.voxelSampler);
 					pass.setVertexBuffer(0, t.corners.slice());
 					pass.setIndexBuffer(indices, indexType);
 					pass.setVertexBuffer(1, faceBuffer.slice(opaqueBytes + tintedBytes, waterBytes));
