@@ -4,6 +4,7 @@ import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
+import dev.diorama.render.gpu.FogLayer;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
@@ -432,6 +433,9 @@ public final class MapViewport {
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
+		if (FogLayer.supported() && this.drawFogLayer(canvas, view, mu0, mv0, mu1, mv1, params)) {
+			return;
+		}
 		if (view.round()) {
 			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1);
 			if (disc != null) {
@@ -446,6 +450,54 @@ public final class MapViewport {
 			params
 		);
 	}
+
+	/**
+	 * The fog at half the screen's resolution, scaled up: drawn into {@link FogLayer} when anything it
+	 * shows changes (the mask, the view, the parameters) or a game tick goes by, which moves the
+	 * clouds' slow drift on, and otherwise shown again as it is. False if the layer couldn't be drawn.
+	 */
+	private boolean drawFogLayer(MapCanvas canvas, View view, float mu0, float mv0, float mu1, float mv1, int params) {
+		double scale = Minecraft.getInstance().getWindow().getGuiScale() / 2.0;
+		int width = Math.max(1, (int) Math.ceil(view.width() * scale));
+		int height = Math.max(1, (int) Math.ceil(view.height() * scale));
+		if (this.fogLayer == null) {
+			this.fogLayer = new FogLayer();
+		}
+		var world = Minecraft.getInstance().level;
+		LayerKey key = new LayerKey(this.fogSerial, params, width, height, mu0, mv0, mu1, mv1, world == null ? 0 : world.getGameTime());
+		if (!key.equals(this.layerKey) || this.fogLayer.texture() == null) {
+			if (!this.fogLayer.render(this.maskTexture, FogTextures.noise(), this.detailTexture, width, height, mu0, mv0, mu1, mv1, params | LAYER_CODE << 24)) {
+				return false;
+			}
+			this.layerKey = key;
+		}
+		MapTexture layer = this.fogLayer.texture();
+		float su = width / (float) this.fogLayer.size();
+		float sv = height / (float) this.fogLayer.size();
+		float x1 = view.x() + view.width();
+		float y1 = view.y() + view.height();
+		if (view.round()) {
+			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), x1, y1, 0, 0, su, sv);
+			if (disc != null) {
+				canvas.quad(layer, Sampling.CLAMP_LINEAR, disc.corners(), disc.uvs(), 0xFFFFFFFF);
+			}
+		} else {
+			canvas.rect(layer, Sampling.CLAMP_LINEAR, view.x(), view.y(), x1, y1, 0, 0, su, sv, 0xFFFFFFFF);
+		}
+		return true;
+	}
+
+	/** In the fog parameters' alpha byte: draw into the layer (fog.fsh writes, rather than discards, where there is none). */
+	private static final int LAYER_CODE = 2;
+
+	/** Everything the layer shows: when it differs from what was drawn, the layer is drawn again. */
+	private record LayerKey(long serial, int params, int width, int height, float u0, float v0, float u1, float v1, long tick) {
+	}
+
+	private @Nullable FogLayer fogLayer;
+	private @Nullable LayerKey layerKey;
+	/** Goes up whenever the mask or detail textures change. */
+	private long fogSerial;
 
 	private void buildMask(MapLevel level, View view, double originU, double originV, double texel, int scaleSteps, int fraction, boolean fast) {
 		// Cloud cells double halfway to the next step; while they hand over, both sizes are drawn.
@@ -647,6 +699,7 @@ public final class MapViewport {
 		this.cellGrid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
 		this.writeCells(true);
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
+		this.fogSerial++;
 	}
 
 	/**
@@ -795,6 +848,7 @@ public final class MapViewport {
 		if (this.maskTexture != null) {
 			this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 		}
+		this.fogSerial++;
 	}
 
 	/** The drawn heights into the mask's alpha. */
@@ -1282,6 +1336,11 @@ public final class MapViewport {
 			this.detailTexture.close();
 			this.detailTexture = null;
 		}
+		if (this.fogLayer != null) {
+			this.fogLayer.close();
+			this.fogLayer = null;
+		}
+		this.layerKey = null;
 		this.maskInputs = null;
 	}
 }

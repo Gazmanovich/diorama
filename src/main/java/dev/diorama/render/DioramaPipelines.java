@@ -29,6 +29,15 @@ public final class DioramaPipelines {
 	//?} else {
 	/*public static final RenderPipeline FOG = mapPipeline("fog", 3);
 	*///?}
+	/**
+	 * The same fog into the half-resolution layer the map shows it from (FogLayer): written as it
+	 * is, not blended, so the layer holds the fog's own colour and cover.
+	 */
+	//? if >=26.2 {
+	public static final RenderPipeline FOG_LAYER = mapPipeline("fog", "fog_layer", BindGroupLayouts.SAMPLER0_SAMPLER1_SAMPLER2, false);
+	//?} else {
+	/*public static final RenderPipeline FOG_LAYER = mapPipeline("fog", "fog_layer", 3, false);
+	*///?}
 	/** A tile with its mip levels in sampler 0; see {@code tile.fsh}. */
 	//? if >=26.2 {
 	public static final RenderPipeline TILE = mapPipeline("tile", BindGroupLayouts.SAMPLER0);
@@ -40,41 +49,51 @@ public final class DioramaPipelines {
 	 * One of the map's own shaders, with the fog's vertex shader. Each version builds it like its
 	 * own vanilla GUI_TEXTURED_SNIPPET, with the globals added.
 	 */
-	//? if >=26.3 {
+	//? if >=26.2 {
 	private static RenderPipeline mapPipeline(String name, BindGroupLayout samplers) {
+		return mapPipeline(name, name, samplers, true);
+	}
+	//?} else {
+	/*private static RenderPipeline mapPipeline(String name, int samplers) {
+		return mapPipeline(name, name, samplers, true);
+	}
+	*///?}
+
+	//? if >=26.3 {
+	private static RenderPipeline mapPipeline(String name, String location, BindGroupLayout samplers, boolean blended) {
 		return register(RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-			.withLocation(Diorama.id("pipeline/" + name))
+			.withLocation(Diorama.id("pipeline/" + location))
 			.withBindGroupLayout(BindGroupLayouts.PROJECTION)
 			.withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withBindGroupLayout(samplers)
-			.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : WRITE_AS_IS)
 			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
 			.build());
 	}
 	//?} else if >=26.2 {
-	/*private static RenderPipeline mapPipeline(String name, BindGroupLayout samplers) {
+	/*private static RenderPipeline mapPipeline(String name, String location, BindGroupLayout samplers, boolean blended) {
 		return register(RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-			.withLocation(Diorama.id("pipeline/" + name))
+			.withLocation(Diorama.id("pipeline/" + location))
 			.withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withBindGroupLayout(samplers)
-			.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : WRITE_AS_IS)
 			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
 			.build());
 	}
 	*///?} else if >=26.1 {
-	/*private static RenderPipeline mapPipeline(String name, int samplers) {
+	/*private static RenderPipeline mapPipeline(String name, String location, int samplers, boolean blended) {
 		RenderPipeline.Builder builder = RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET, RenderPipelines.GLOBALS_SNIPPET)
-			.withLocation(Diorama.id("pipeline/" + name))
+			.withLocation(Diorama.id("pipeline/" + location))
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withSampler("Sampler0")
-			.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : ColorTargetState.DEFAULT)
 			.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS);
 		if (samplers > 1) {
 			builder.withSampler("Sampler1");
@@ -85,15 +104,19 @@ public final class DioramaPipelines {
 		return register(builder.build());
 	}
 	*///?} else {
-	/*private static RenderPipeline mapPipeline(String name, int samplers) {
+	/*private static RenderPipeline mapPipeline(String name, String location, int samplers, boolean blended) {
 		RenderPipeline.Builder builder = RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET, RenderPipelines.GLOBALS_SNIPPET)
-			.withLocation(Diorama.id("pipeline/" + name))
+			.withLocation(Diorama.id("pipeline/" + location))
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withSampler("Sampler0")
-			.withBlend(BlendFunction.TRANSLUCENT)
 			.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
 			.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST);
+		if (blended) {
+			builder.withBlend(BlendFunction.TRANSLUCENT);
+		} else {
+			builder.withoutBlend();
+		}
 		if (samplers > 1) {
 			builder.withSampler("Sampler1");
 		}
@@ -103,6 +126,10 @@ public final class DioramaPipelines {
 		return register(builder.build());
 	}
 	*///?}
+
+	//? if >=26.2 {
+	private static final ColorTargetState WRITE_AS_IS = ColorTargetState.DEFAULT;
+	//?}
 
 	private DioramaPipelines() {
 	}

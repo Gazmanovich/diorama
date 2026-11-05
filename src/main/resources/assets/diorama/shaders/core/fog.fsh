@@ -516,7 +516,9 @@ void main() {
     float fogOpacity = 1.0 - mod(offsetBytes.r, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
-    fast = mod(alphaCode, 16.0) >= 2.0;
+    // In the low nibble: 4 for Fast, 1 for smoke, 2 into the half-resolution layer (FogLayer).
+    fast = mod(floor(mod(alphaCode, 16.0) / 4.0), 2.0) >= 1.0;
+    bool layer = mod(floor(mod(alphaCode, 16.0) / 2.0), 2.0) >= 1.0;
     bool smoke = mod(alphaCode, 2.0) >= 1.0;
     float fogCode = floor(params.b * 255.0 + 0.5);
     bool cave = fogCode >= 128.0;
@@ -690,7 +692,13 @@ void main() {
         alpha *= keep;
     }
     if (alpha <= 0.002) {
-        discard;
+        if (!layer) {
+            discard;
+        }
+        // The layer is shown scaled up, filtered between its texels: an empty one keeps a fog
+        // colour, so the fog's edge blends toward that rather than toward black.
+        fragColor = vec4(mix(shade, lit, 0.7), 0.0);
+        return;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
     fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
