@@ -68,7 +68,7 @@ public final class DioramaPipelines {
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withBindGroupLayout(samplers)
-			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : WRITE_AS_IS)
+			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : ColorTargetState.DEFAULT)
 			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
 			.build());
@@ -81,7 +81,7 @@ public final class DioramaPipelines {
 			.withVertexShader(Diorama.id("core/fog"))
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withBindGroupLayout(samplers)
-			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : WRITE_AS_IS)
+			.withColorTargetState(blended ? new ColorTargetState(BlendFunction.TRANSLUCENT) : ColorTargetState.DEFAULT)
 			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
 			.build());
@@ -126,10 +126,6 @@ public final class DioramaPipelines {
 		return register(builder.build());
 	}
 	*///?}
-
-	//? if >=26.2 {
-	private static final ColorTargetState WRITE_AS_IS = ColorTargetState.DEFAULT;
-	//?}
 
 	private DioramaPipelines() {
 	}

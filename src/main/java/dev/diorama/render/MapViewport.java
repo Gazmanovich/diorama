@@ -433,7 +433,7 @@ public final class MapViewport {
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
-		if (FogLayer.supported() && this.drawFogLayer(canvas, view, mu0, mv0, mu1, mv1, params)) {
+		if (this.drawFogLayer(canvas, view, mu0, mv0, mu1, mv1, params)) {
 			return;
 		}
 		if (view.round()) {
@@ -466,7 +466,11 @@ public final class MapViewport {
 		var world = Minecraft.getInstance().level;
 		LayerKey key = new LayerKey(this.fogSerial, params, width, height, mu0, mv0, mu1, mv1, world == null ? 0 : world.getGameTime());
 		if (!key.equals(this.layerKey) || this.fogLayer.texture() == null) {
-			if (!this.fogLayer.render(this.maskTexture, FogTextures.noise(), this.detailTexture, width, height, mu0, mv0, mu1, mv1, params | LAYER_CODE << 24)) {
+			// A texel more each way than is shown, the mask range stretched to match, so what's
+			// shown never blends with a texel the layer didn't draw.
+			float wideU = mu0 + (mu1 - mu0) * (width + 1) / width;
+			float wideV = mv0 + (mv1 - mv0) * (height + 1) / height;
+			if (!this.fogLayer.render(canvas, this.maskTexture, FogTextures.noise(), this.detailTexture, width + 1, height + 1, mu0, mv0, wideU, wideV, params | LAYER_CODE << 24)) {
 				return false;
 			}
 			this.layerKey = key;

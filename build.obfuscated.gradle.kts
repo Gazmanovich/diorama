@@ -63,7 +63,7 @@ tasks.withType<ProcessResources>().configureEach {
 // the mod's namespace on 1.21.2-1.21.4, from the minecraft namespace (by name) before.
 tasks.named<ProcessResources>("processResources") {
 	if (sc.current.parsed >= "1.21.2") {
-		exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/minecraft/shaders/core/diorama_tile.json")
+		exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/minecraft/shaders/core/diorama_fog_layer.json", "assets/minecraft/shaders/core/diorama_tile.json")
 	}
 	if (sc.current.parsed < "1.21.2" || sc.current.parsed >= "1.21.5") {
 		exclude("assets/diorama/shaders/core/fog.json", "assets/diorama/shaders/core/tile.json")

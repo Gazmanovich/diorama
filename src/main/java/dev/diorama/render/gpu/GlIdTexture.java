@@ -13,6 +13,8 @@ import org.lwjgl.system.MemoryUtil;
 final class GlIdTexture implements LegacyTexture {
 	private static final int TEXTURE_2D = 3553;
 	private final int id;
+	// A framebuffer drawing into the texture, made the first time FogLayer draws into it.
+	private int framebuffer = -1;
 
 	GlIdTexture(int size, int levels) {
 		this.id = TextureUtil.generateTextureId();
@@ -51,8 +53,21 @@ final class GlIdTexture implements LegacyTexture {
 		RenderSystem.setShaderTexture(slot, this.id);
 	}
 
+	// The framebuffer that draws into this texture: GL_FRAMEBUFFER, its first colour attachment.
+	int framebuffer() {
+		if (this.framebuffer < 0) {
+			this.framebuffer = GlStateManager.glGenFramebuffers();
+			GlStateManager._glBindFramebuffer(36160, this.framebuffer);
+			GlStateManager._glFramebufferTexture2D(36160, 36064, TEXTURE_2D, this.id, 0);
+		}
+		return this.framebuffer;
+	}
+
 	@Override
 	public void close() {
+		if (this.framebuffer >= 0) {
+			GlStateManager._glDeleteFramebuffers(this.framebuffer);
+		}
 		TextureUtil.releaseTextureId(this.id);
 	}
 }

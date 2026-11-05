@@ -43,6 +43,6 @@ tasks.withType<ProcessResources>().configureEach {
 
 // Shader program files that only versions before 1.21.5 read.
 tasks.named<ProcessResources>("processResources") {
-	exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/diorama/shaders/core/fog.json")
+	exclude("assets/minecraft/shaders/core/diorama_fog.json", "assets/minecraft/shaders/core/diorama_fog_layer.json", "assets/diorama/shaders/core/fog.json")
 	exclude("assets/minecraft/shaders/core/diorama_tile.json", "assets/diorama/shaders/core/tile.json")
 }
