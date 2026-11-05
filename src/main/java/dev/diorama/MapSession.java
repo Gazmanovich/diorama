@@ -337,12 +337,15 @@ public final class MapSession {
 	 * own work (a torch placed, a wall opened, a roof closed). Cave slices draw light, and so do
 	 * spawn spots, so the surface re-bakes too while they're on.
 	 */
-	public static void lightSectionChanged(ClientChunkCache source, SectionPos section) {
+	public static void lightSectionChanged(ClientChunkCache source, SectionPos section, boolean blockLight) {
 		if (current != null && current.level.getChunkSource() == source) {
 			int x0 = section.minBlockX();
 			int y0 = section.minBlockY();
 			int z0 = section.minBlockZ();
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			if (blockLight && current.keepsBlockLight()) {
+				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
+			}
 			current.schedule(section.x(), section.z(), CHANGE_DELAY_MS, new int[] {x0, y0, z0, x0 + 15, y0 + 15, z0 + 15, surface});
 		}
 	}
@@ -352,8 +355,16 @@ public final class MapSession {
 			int x0 = chunkX << 4;
 			int z0 = chunkZ << 4;
 			int surface = current.map.spawnSpots() || current.map.roofless() ? MapLevel.CHANGED_SURFACE_LIGHT : 0;
+			if (current.keepsBlockLight()) {
+				surface |= MapLevel.CHANGED_BLOCK_LIGHT;
+			}
 			current.schedule(chunkX, chunkZ, CHANGE_DELAY_MS, new int[] {x0, level.getMinY(), z0, x0 + 15, level.getMaxY(), z0 + 15, surface});
 		}
+	}
+
+	/** Whether this dimension's sky view keeps its block light, for the night: it isn't under a roof, and its time moves. */
+	private boolean keepsBlockLight() {
+		return !this.map.roofless() && !this.level.dimensionType().hasFixedTime();
 	}
 
 	/**

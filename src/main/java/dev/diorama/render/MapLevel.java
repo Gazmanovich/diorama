@@ -485,8 +485,10 @@ public final class MapLevel implements ChunkSource {
 			// view only reaches down to the surface; cave slices can be anywhere below it.
 			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.newChunkTop(snapshot), this.topY, z0 + 15, true, true);
 		} else {
-			// Under a roof the sky view is lit by block light, so light is part of what's saved.
-			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
+			// Under a roof the sky view is lit by block light, so light is part of what's saved; and
+			// it's saved with the sky view for the night, where it's near enough the surface to show.
+			boolean nightLight = (changed[6] & CHANGED_BLOCK_LIGHT) != 0 && changed[4] >= snapshot.floorY;
+			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0 || nightLight;
 			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[4], changed[5], surface, terrain);
 		}
@@ -501,6 +503,8 @@ public final class MapLevel implements ChunkSource {
 	public static final int CHANGED_SURFACE = 1;
 	/** Change flag: only light changed, which the sky view shows only through spawn spots. */
 	public static final int CHANGED_SURFACE_LIGHT = 2;
+	/** Change flag: block light changed in a dimension whose sky view keeps it, for the night ({@code BlockLight}). */
+	public static final int CHANGED_BLOCK_LIGHT = 4;
 
 	/** Light from a changed block reaches this far, which matters for cave slices. */
 	private static final int LIGHT_REACH = 15;
