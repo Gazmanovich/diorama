@@ -79,6 +79,8 @@ uniform sampler2D Sampler1;
 // CELL_MARGIN cells before the mask's first, in green the same for cells twice the size while the
 // zoom hands over, and in blue, a texel a mask texel, the known share blurred as knownSoft reads
 // it. Alpha at (0, 0) is 1 when the cells are there; with too many for the texture they aren't.
+// Elsewhere alpha is, for cells of the size drawn, the lowest and highest level of the cells from
+// three before to four after each way, as (low * 6 + high) * 7 / 255.
 uniform sampler2D Sampler2;
 const int CELL_MARGIN = 7;
 const float SOFT_TEXELS = 256.0;
@@ -288,7 +290,23 @@ float cellLevel(vec2 cell, float size) {
 
 // How much of a point is under cells at level k or above: the four nearest cells blended, with the
 // blend squeezed into a band at each cell's edge, so runs of cells read as one with round corners.
+// Whether level k's cover is the same all round p, however the edges curl: 1 if every cell a point
+// within 1.45 cells of p can read is at k or above, 0 if every one is under it, else -1.
+float sameCover(vec2 p, float size, float k) {
+    if (!cellsReady || size > cellSize * 1.5) {
+        return -1.0;
+    }
+    float span = floor(texelFetch(Sampler2, ivec2(floor(p / size - 0.5)) - cellFirst, 0).a * 255.0 / 7.0 + 0.5);
+    float low = floor(span / 6.0);
+    float high = span - low * 6.0;
+    return k <= low ? 1.0 : (k > high ? 0.0 : -1.0);
+}
+
 float levelCover(vec2 p, float size, float k) {
+    float same = sameCover(p, size, k);
+    if (same >= 0.0) {
+        return same;
+    }
     vec2 g = p / size - 0.5;
     vec2 i = floor(g);
     vec2 f = smoothstep(0.5 - ROUND, 0.5 + ROUND, g - i);
@@ -340,14 +358,25 @@ vec2 warped(vec2 p, float size, float k) {
 
 // Level cover with wisps eaten out of its edges: the noise only takes away, and only where the
 // cover is thinning, so the middle of a level stays whole and revealed land stays clear.
-float wispCover(vec2 p, float size, float k) {
-    float cover = levelCover(warped(p, size, k), size, k);
+// A level's cover at p with its edges curled, before the wisps bite into it.
+float curledCover(vec2 p, float size, float k) {
+    // The same all round, however they curl: no need to read the curls.
+    float same = sameCover(p, size, k);
+    return same >= 0.0 ? same : levelCover(warped(p, size, k), size, k);
+}
+
+// Wisps bitten out of a curled cover.
+float bitten(float cover, vec2 p, float size) {
     // Wholly in or out of the level, the bite takes nothing: no need to read the wisps.
     if (cover <= 0.0 || cover >= 1.0) {
         return cover;
     }
     float bite = smoothstep(0.35, 0.75, wispAt(p, size));
     return cover - WISP * bite * (1.0 - cover) * cover * 2.0;
+}
+
+float wispCover(vec2 p, float size, float k) {
+    return bitten(curledCover(p, size, k), p, size);
 }
 
 // Above 0 inside a cloud. A level's slab needs a quarter of cover at its middle height, three
@@ -388,9 +417,10 @@ vec4 terraceSurface(vec2 p, float h, float size, float level, float hTop, float 
     float farEdge = 1.0 - levelCover(p - sunward, size, k);
     vec3 color = terraceColor(h, level, hTop, blocked, sunEdge, farEdge);
     // Solid inside; toward the edge it frays into strands drawn out along the wind.
-    float cover = wispCover(p, size, k);
+    float curled = curledCover(p, size, k);
+    float cover = bitten(curled, p, size);
     float fringe = cover - 0.25;
-    float edge = 1.0 - smoothstep(0.55, 0.95, levelCover(warped(p, size, k), size, k));
+    float edge = 1.0 - smoothstep(0.55, 0.95, curled);
     vec2 along = vec2(p.x * 0.35, p.y * 1.4);
     float strands = smoothstep(0.25, 0.75, wispAt(along + 53.0, size * 0.5));
     float alpha = CLOUD_ALPHA * smoothstep(0.0, EDGE_SOFT, fringe) * mix(1.0, strands, edge * STRANDS);

@@ -1073,14 +1073,73 @@ public final class MapViewport {
 		}
 		if (cells) {
 			int[] noise = FogTextures.noiseBytes();
+			this.cellStamp++;
 			this.cellLevels(grid, 1, 0, pixels, edge, noise);
 			if (grid.handover()) {
 				this.cellLevels(grid, 2, 8, pixels, edge, noise);
 			}
+			this.levelSpans(grid.count(grid.mult()), pixels, edge);
+			// Alpha at the first cell, never read as one (it's CELL_MARGIN before the mask's first, the
+			// mask's edge a margin before the view's): the cells are there.
 			pixels[0] |= 0xFF000000;
 		}
 		if (this.detailTexture != null) {
 			this.detailTexture.write(0, 0, 0, edge, pixels);
+		}
+	}
+
+	/** Cells each side of a cell that a point in it can read: 1.45 for the curls, one for the blend, and one to spare. */
+	private static final int SPAN_BEFORE = 3;
+	private static final int SPAN_AFTER = 4;
+	/** The cells of the size drawn: their levels, and which were worked out this time (this stamp). */
+	private final byte[] cellLevel = new byte[DETAIL * DETAIL];
+	private final int[] cellDone = new int[DETAIL * DETAIL];
+	private int cellStamp;
+	private final byte[] spanLow = new byte[DETAIL * DETAIL];
+	private final byte[] spanHigh = new byte[DETAIL * DETAIL];
+
+	/**
+	 * Into alpha, for each cell of the size drawn: the lowest and highest level of the cells from
+	 * {@link #SPAN_BEFORE} before it to {@link #SPAN_AFTER} after it each way, as (low * 6 + high) * 7.
+	 * Where a level is no higher than the lowest there, or above the highest, its cover is 1 or 0
+	 * all round however the edges curl, and the shader needn't read it. A cell not worked out could
+	 * be any level, so near one there is no shortcut.
+	 */
+	private void levelSpans(int count, int[] pixels, int edge) {
+		// Along each row, then down each column of those.
+		for (int j = 0; j < count; j++) {
+			for (int i = 0; i < count; i++) {
+				int low = 5;
+				int high = 0;
+				for (int d = -SPAN_BEFORE; d <= SPAN_AFTER; d++) {
+					int at = j * count + i + d;
+					if (i + d < 0 || i + d >= count || this.cellDone[at] != this.cellStamp) {
+						low = 0;
+						high = 5;
+						break;
+					}
+					low = Math.min(low, this.cellLevel[at]);
+					high = Math.max(high, this.cellLevel[at]);
+				}
+				this.spanLow[j * count + i] = (byte) low;
+				this.spanHigh[j * count + i] = (byte) high;
+			}
+		}
+		for (int j = 0; j < count; j++) {
+			for (int i = 0; i < count; i++) {
+				int low = 5;
+				int high = 0;
+				for (int d = -SPAN_BEFORE; d <= SPAN_AFTER; d++) {
+					if (j + d < 0 || j + d >= count) {
+						low = 0;
+						high = 5;
+						break;
+					}
+					low = Math.min(low, this.spanLow[(j + d) * count + i]);
+					high = Math.max(high, this.spanHigh[(j + d) * count + i]);
+				}
+				pixels[j * edge + i] |= (low * 6 + high) * 7 << 24;
+			}
 		}
 	}
 
@@ -1109,7 +1168,12 @@ public final class MapViewport {
 			for (int ci = fromU; ci <= toU; ci++) {
 				double posU = (firstU + ci + 0.5) * size;
 				double x = (posU - mapU) / grid.texel();
-				pixels[cj * edge + ci] |= this.cellLevel(x, y, posU, posV, size, noise) * 51 << shift;
+				int level = this.cellLevel(x, y, posU, posV, size, noise);
+				pixels[cj * edge + ci] |= level * 51 << shift;
+				if (times == 1) {
+					this.cellLevel[cj * count + ci] = (byte) level;
+					this.cellDone[cj * count + ci] = this.cellStamp;
+				}
 			}
 		}
 	}
