@@ -82,16 +82,44 @@ float caster_gap(vec3 p) {
     return occluder - dot(p, SunDir.xyz);
 }
 
+// The spots a nudged ray is looked for at, over the shadow distance (see sunlight).
+const int NUDGED_STEPS = 8;
+
+// Whether a ray from p toward the sun nudged by jitter meets a caster g blocks out, found over
+// some spot: that far out the ray is over p + jitter * g, so it does if there's one in reach there.
+bool nudged_meets(vec3 p, vec3 jitter, float g) {
+    if (g <= Shadow.x || g >= SunDir.w) {
+        return false;
+    }
+    float there = caster_gap(p + jitter * g);
+    return there > Shadow.x && there < SunDir.w;
+}
+
 // 1 where the sun reaches p, 0 where a block within the shadow distance is in the way. The
-// tracer aims each sample's shadow ray at a slightly different sun; a ray toward a nudged sun
-// drifts by the nudge times the distance to the caster, so look again that far over.
+// tracer aims each sample's shadow ray at a slightly different sun, which softens shadow edges,
+// and the shadow map only holds the sun's own direction. A nudged ray meets the casters the
+// sun's own ray from p meets, unless it drifts past them first, and on the outer side of a
+// shadow's edge it also meets casters that ray passes by. Those are found by looking along the
+// nudged ray for a spot whose caster is about as far from it as the ray is out: looking only
+// over p left the outer sides of edges lit, and the map brighter than the tracer's along every
+// shadow, enough in a city of tall builds to fail GPU baking's check.
 float sunlight(vec3 p, vec3 jitter) {
-    float gap = caster_gap(p);
-    if (gap <= Shadow.x || gap >= SunDir.w) {
+    if (nudged_meets(p, jitter, caster_gap(p))) {
+        return 0.0;
+    }
+    if (jitter == vec3(0.0)) {
         return 1.0;
     }
-    float nudged = caster_gap(p + jitter * gap);
-    return nudged > Shadow.x && nudged < SunDir.w ? 0.0 : 1.0;
+    float step = SunDir.w / float(NUDGED_STEPS);
+    for (int i = 0; i < NUDGED_STEPS; i++) {
+        // t blocks out the ray is over this spot: a caster about t from it is one it can meet.
+        float t = (float(i) + 0.5) * step;
+        float g = caster_gap(p + jitter * t);
+        if (abs(g - t) <= 0.5 * step && nudged_meets(p, jitter, g)) {
+            return 0.0;
+        }
+    }
+    return 1.0;
 }
 
 // Corner occlusion as it dims the sunlight, as TileBaker.shade; the sky light gets the deeper of it and ao.
