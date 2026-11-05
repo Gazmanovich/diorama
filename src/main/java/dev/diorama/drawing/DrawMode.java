@@ -667,6 +667,7 @@ public final class DrawMode {
 	/**
 	 * Pixel art centred on a 20-pixel button at (x, y), as one shape: a rectangle per run of lit
 	 * pixels in a row. A fill per pixel cost a GUI element each, every frame the map is open.
+	 * Before 1.21.6 the runs stay vanilla fills, whose depth test the map's own shapes don't share.
 	 */
 	public static void icon(GuiGraphicsExtractor graphics, String[] rows, int x, int y, int argb) {
 		int h = rows.length;
@@ -713,7 +714,13 @@ public final class DrawMode {
 				corners[k++] = top;
 			}
 		}
+		//? if >=1.21.6 {
 		MapCanvas.of(graphics).solid(corners, argb);
+		//?} else {
+		/*for (int i = 0; i < corners.length; i += 8) {
+			graphics.fill((int) corners[i], (int) corners[i + 1], (int) corners[i + 4], (int) corners[i + 5], argb);
+		}
+		*///?}
 	}
 
 	/** A one-pixel frame like a vanilla button's highlight. */
