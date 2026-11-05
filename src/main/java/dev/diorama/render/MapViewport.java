@@ -1088,9 +1088,12 @@ public final class MapViewport {
 		}
 	}
 
-	/** Cells each side of a cell that a point in it can read: 1.45 for the curls, one for the blend, and one to spare. */
-	private static final int SPAN_BEFORE = 3;
-	private static final int SPAN_AFTER = 4;
+	/**
+	 * Cells each side of a cell that a point in it can read: a point curled up to 1.45 cells away
+	 * reads the cell under it, two before at most, and the one after that, three after at most.
+	 */
+	private static final int SPAN_BEFORE = 2;
+	private static final int SPAN_AFTER = 3;
 	/** The cells of the size drawn: their levels, and which were worked out this time (this stamp). */
 	private final byte[] cellLevel = new byte[DETAIL * DETAIL];
 	private final int[] cellDone = new int[DETAIL * DETAIL];

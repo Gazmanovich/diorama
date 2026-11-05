@@ -80,7 +80,7 @@ uniform sampler2D Sampler1;
 // zoom hands over, and in blue, a texel a mask texel, the known share blurred as knownSoft reads
 // it. Alpha at (0, 0) is 1 when the cells are there; with too many for the texture they aren't.
 // Elsewhere alpha is, for cells of the size drawn, the lowest and highest level of the cells from
-// three before to four after each way, as (low * 6 + high) * 7 / 255.
+// two before to three after each way, as (low * 6 + high) * 7 / 255.
 uniform sampler2D Sampler2;
 const int CELL_MARGIN = 7;
 const float SOFT_TEXELS = 256.0;
