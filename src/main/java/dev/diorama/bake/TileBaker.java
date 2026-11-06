@@ -745,14 +745,16 @@ public final class TileBaker {
 							// Samples on faces lit differently are each unlit by their own light; ones
 							// lit by none of it, like the cut face, are kept as they are.
 							float[] lit = this.unlit;
+							float fog = 0;
 							if (this.surfaceLight == -1) {
 								java.util.Arrays.fill(lit, 1);
 							} else {
 								TileSurface.caveLightOf(this.surfaceLight, this.surfaceLight & 15, lit);
+								fog = TileSurface.fog(this.surfaceLight);
 							}
-							ur += this.outR / Math.max(1e-3F, lit[0]);
-							ug += this.outG / Math.max(1e-3F, lit[1]);
-							ub += this.outB / Math.max(1e-3F, lit[2]);
+							ur += (this.outR - Lighting.CAVE_FOG[0] * fog) / Math.max(1e-3F, lit[0]);
+							ug += (this.outG - Lighting.CAVE_FOG[1] * fog) / Math.max(1e-3F, lit[1]);
+							ub += (this.outB - Lighting.CAVE_FOG[2] * fog) / Math.max(1e-3F, lit[2]);
 						}
 						if (s == 0 && info != null && this.hitSolid) {
 							int ix = x - border;

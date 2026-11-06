@@ -45,6 +45,11 @@ public record TileSurface(int revision, int x0, int y0, int width, int height, f
 		return blockLight | skyLight << 4 | emission << 8 | Math.round(ao * 255) << 12 | Math.round(fade * 255) << 20;
 	}
 
+	/** How much of {@link Lighting#CAVE_FOG} lies over the surface {@code packed} ({@link #caveLight}) lights, which no light brightens. */
+	static float fog(int packed) {
+		return (packed & WATER) != 0 ? 0 : 1 - (packed >> 20 & 255) / 255.0F;
+	}
+
 	/**
 	 * The light on the surface at pixel index {@code i} of a cave slice, lit as the tile was but
 	 * with block light {@code blockLight}, in linear light; see {@link #caveLightOf}.

@@ -72,7 +72,9 @@ public record SurfaceArea(int tileU0, int tileV0, int columns, int rows, @Nullab
 		surface.caveLight(i, blockLight, scratch);
 		int albedo = surface.albedo()[i];
 		float[] lin = TileBaker.SRGB_TO_LINEAR;
-		int pixel = TileBaker.abgr(style, lin[albedo >> 16 & 0xFF] * scratch[0], lin[albedo >> 8 & 0xFF] * scratch[1], lin[albedo & 0xFF] * scratch[2], alpha * (albedo >>> 24) / 255);
+		float fog = TileSurface.fog(surface.light()[i]);
+		int pixel = TileBaker.abgr(style, lin[albedo >> 16 & 0xFF] * scratch[0] + Lighting.CAVE_FOG[0] * fog, lin[albedo >> 8 & 0xFF] * scratch[1] + Lighting.CAVE_FOG[1] * fog,
+			lin[albedo & 0xFF] * scratch[2] + Lighting.CAVE_FOG[2] * fog, alpha * (albedo >>> 24) / 255);
 		float outline = surface.outline()[i];
 		return outline > 0 ? TileBaker.darken(pixel, 1 - style.outline() * outline) : pixel;
 	}
