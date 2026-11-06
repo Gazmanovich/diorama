@@ -248,8 +248,10 @@ final class DrawingTest {
 		world.getServer().runCommand("fill " + (cx - 40) + " " + (base + 1) + " " + (z0 - 6) + " " + (cx + 30) + " " + (base + 30) + " " + (z0 + 6) + " air");
 		world.getServer().runCommand("fill " + (cx - 40) + " " + (base - 3) + " " + (z0 - 6) + " " + (cx + 30) + " " + base + " " + (z0 + 6) + " smooth_stone");
 		world.getServer().runCommand("fill " + (cx + 16) + " " + (base + 1) + " " + (z0 - 4) + " " + (cx + 24) + " " + (base + 12) + " " + (z0 + 4) + " stone_bricks");
-		world.getServer().runCommand("setblock " + (cx - 36) + " " + base + " " + z0 + " gold_block");
-		world.getServer().runCommand("setblock " + (cx + 20) + " " + (base + 12) + " " + z0 + " gold_block");
+		world.getServer().runCommand("fill " + (cx - 37) + " " + base + " " + (z0 - 1) + " " + (cx - 35) + " " + base + " " + (z0 + 1) + " gold_block");
+		world.getServer().runCommand("fill " + (cx + 19) + " " + (base + 12) + " " + (z0 - 1) + " " + (cx + 21) + " " + (base + 12) + " " + (z0 + 1) + " gold_block");
+		// What the fills broke, off the picture.
+		world.getServer().runCommand("kill @e[type=item]");
 		context.waitTicks(40);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx - 8 + 0.5, Projection.v(base + 6, z0 + 0.5), 3.2, TileKey.SURFACE));
 		settle(context, 100);
