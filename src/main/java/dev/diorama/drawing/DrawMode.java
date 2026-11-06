@@ -359,6 +359,11 @@ public final class DrawMode {
 		return false;
 	}
 
+	/** Whether a drag with the left button is under way: the pen, the eraser or the measuring tool. */
+	public boolean holding() {
+		return this.penDown || this.erasing || this.measure.dragging();
+	}
+
 	/** A drag on the map with the left button down. True if draw mode took it. */
 	public boolean drag(MapViewport.View view, Font font, String dimension, double x, double y) {
 		if (this.penDown) {
@@ -373,7 +378,11 @@ public final class DrawMode {
 			return true;
 		}
 		if (this.measure.dragging()) {
-			this.measure.move(mapPoint(view, x, y), this.picker.at(x, y));
+			double[] at = mapPoint(view, x, y);
+			// The map draws this every frame while another button pans; a block lookup only where the end moved.
+			if (!this.measure.endsAt(at)) {
+				this.measure.move(at, this.picker.at(x, y));
+			}
 			return true;
 		}
 		return false;

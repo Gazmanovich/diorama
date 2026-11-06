@@ -455,8 +455,14 @@ public final class MapScreen extends Screen {
 		if (!elsewhere) {
 			session.crafts().draw(graphics, view, a, 1);
 		}
+		if (this.draw.holding() && this.pressButton != InputConstants.MOUSE_BUTTON_LEFT) {
+			// The left button is still down for the pen, eraser or measuring tool, but another button was
+			// pressed over it (the middle one, to pan). The game sends drags for the latest press only, and
+			// none once that is let go, so the drawing follows the cursor from here instead.
+			this.draw.drag(view, this.font, this.dimension(), mouseX, mouseY);
+		}
 		DrawingStore drawings = DrawingStore.get();
-		if (drawings != null && (this.draw.active() || Settings.get().drawings != Settings.DrawingsShown.OFF)) {
+		if (drawings != null && (this.draw.active()|| Settings.get().drawings != Settings.DrawingsShown.OFF)) {
 			this.draw.drawMap(graphics, this.font, view, drawings.in(this.dimension()), mouseX, mouseY, !this.overControls(mouseX, mouseY));
 		}
 		boolean caves = this.layer != TileKey.SURFACE;
@@ -772,6 +778,12 @@ public final class MapScreen extends Screen {
 				this.layer = slice;
 				this.layerPicked = true;
 			}
+		}
+		if (button == InputConstants.MOUSE_BUTTON_LEFT && button != this.pressButton && this.draw.holding() && this.lastView != null) {
+			// Another button was pressed while drawing with the left: letting go of the left still ends the stroke,
+			// erase or measurement.
+			this.draw.release(this.lastView, this.font, this.dimension(), x, y, button, true);
+			return true;
 		}
 		// Only the release of the latest press counts: letting go of a button held since before
 		// the menu opened mustn't close it.

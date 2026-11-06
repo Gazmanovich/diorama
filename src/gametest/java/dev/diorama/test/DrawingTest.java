@@ -200,6 +200,40 @@ final class DrawingTest {
 		context.takeScreenshot("drawing-01c-measure-slant");
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 
+		// Panning with the middle button half-way through a measurement (#284): the far end stays
+		// under the cursor afterwards, and letting go of the left button still ends the measurement.
+		float[] from = gui(context, cx - 12, base + 1, cz + 8);
+		float[] partWay = gui(context, cx - 4, base + 1, cz + 8);
+		moveTo(context, from[0], from[1]);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		for (int i = 1; i <= 3; i++) {
+			moveTo(context, from[0] + (partWay[0] - from[0]) * i / 3, partWay[1]);
+		}
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_MIDDLE);
+		for (int i = 1; i <= 4; i++) {
+			moveTo(context, partWay[0] - 10 * i, partWay[1] - 5 * i);
+		}
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_MIDDLE);
+		float[] to = gui(context, cx + 12, base + 1, cz + 8);
+		float[] panned = {(float) partWay[0] - 40, (float) partWay[1] - 20};
+		for (int i = 1; i <= 6; i++) {
+			moveTo(context, panned[0] + (to[0] - panned[0]) * i / 6, panned[1] + (to[1] - panned[1]) * i / 6);
+		}
+		context.waitTicks(3);
+		int held = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measured());
+		String heldReading = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measuredText());
+		context.takeScreenshot("drawing-01d-measure-panned");
+		expect(held >= 23 && held <= 25 && heldReading != null && heldReading.contains("east"),
+			"the measurement to follow the cursor after a middle-button pan, about 24 blocks east, read " + heldReading);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		moveTo(context, to[0] + 30, to[1] + 30);
+		context.waitTicks(3);
+		int letGo = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measured());
+		expect(letGo == held, "letting go of the left button to end the measurement where it was, read " + letGo + " after " + held);
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, 3.2, TileKey.SURFACE));
+		settle(context, 20);
+
 		// Esc leaves draw mode but not the map.
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 		boolean stillMap = context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen map && !map.drawMode().active());

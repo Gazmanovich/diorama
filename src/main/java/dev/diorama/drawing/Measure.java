@@ -2,6 +2,7 @@ package dev.diorama.drawing;
 
 import dev.diorama.render.MapViewport;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.gui.Font;
@@ -67,6 +68,10 @@ public final class Measure {
 	void move(double[] mapPoint, CompletableFuture<@Nullable BlockPos> pick) {
 		this.to = mapPoint;
 		this.toEnd.ask(pick);
+	}
+
+	boolean endsAt(double[] mapPoint) {
+		return Arrays.equals(this.to, mapPoint);
 	}
 
 	void end() {
