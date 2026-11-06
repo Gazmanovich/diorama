@@ -361,6 +361,9 @@ public final class SavedChunkImport {
 			if (this.progress != null) {
 				this.progress.saveIfChanged();
 			}
+			// Nothing saves there again once the lock is let go, not even a save that just failed.
+			this.progress = null;
+			this.folder = null;
 			this.leaveFolder();
 			if (!this.takeFolder(folder)) {
 				return;
