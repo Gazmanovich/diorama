@@ -264,6 +264,11 @@ public final class SavedChunkImport {
 		return progress != null && progress.time(chunkX >> 5, chunkZ >> 5, index(chunkX, chunkZ)) > 0;
 	}
 
+	/** For tests: whether the fill's thread and its workers have all ended since it was stopped. */
+	public boolean finished() {
+		return !this.thread.isAlive() && this.workers.isTerminated();
+	}
+
 	private boolean stopped() {
 		return this.stop.getCount() == 0;
 	}

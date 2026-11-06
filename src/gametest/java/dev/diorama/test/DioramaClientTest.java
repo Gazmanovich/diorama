@@ -273,6 +273,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
+				waitForGroundInView(context);
 			}
 		}
 		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
@@ -303,6 +304,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
+		}
+		if (tests.contains("leave-during-fill")) {
+			LeaveDuringFillTest.run(context);
 		}
 		if (tests.contains("tall-world")) {
 			TallWorldTest.run(context);
@@ -6152,6 +6156,34 @@ public class DioramaClientTest implements FabricClientGameTest {
 			throw new AssertionError("The " + name + " waypoint isn't where the test put it: " + missed);
 		}
 		return waypoint;
+	}
+
+	/**
+	 * Waits until the client has every chunk in view around the player, which the server can only
+	 * send once it has finished generating them. Leave a world while the server is still generating
+	 * and Minecraft 1.21-1.21.1 can stop for good on "Saving world": the shutdown keeps putting back
+	 * a chunk that a generation still holds (ChunkMap.scheduleUnload), and that generation needs
+	 * the server thread the loop keeps busy. The game does that without the map too, so the tests
+	 * that teleport to new ground and then leave wait for it to be generated first.
+	 */
+	static void waitForGroundInView(ClientGameTestContext context) {
+		context.waitFor(mc -> {
+			if (mc.level == null || mc.player == null) {
+				return false;
+			}
+			// One less than the view: the server's edge is round, and the corners of a square aren't sent.
+			int radius = mc.options.renderDistance().get() - 1;
+			int centerX = mc.player.blockPosition().getX() >> 4;
+			int centerZ = mc.player.blockPosition().getZ() >> 4;
+			for (int dx = -radius; dx <= radius; dx++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					if (dx * dx + dz * dz <= radius * radius && mc.level.getChunkSource().getChunk(centerX + dx, centerZ + dz, false) == null) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}, 2400);
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
