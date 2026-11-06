@@ -17,8 +17,8 @@ import net.minecraft.server.MinecraftServer;
  */
 final class LeaveDuringFillTest {
 	private static final int ROUNDS = 6;
-	/** Chunks a side of the ground made each round: more than one tile's worth, so the fill has work left when the world is left. */
-	private static final int CHUNKS = 8;
+	/** Chunks a side of the ground made each round: as many as one forceload takes, many tiles' worth, so the fill has work left when the world is left. */
+	private static final int CHUNKS = 16;
 
 	private LeaveDuringFillTest() {
 	}
@@ -48,16 +48,14 @@ final class LeaveDuringFillTest {
 				int z = 4000;
 				// On a chunk's corner, so the square forced is the square checked.
 				makeUnseenGround(context, world, (x + 320) & ~15, z);
+				// Somewhere new, as the 0.8.0 smoke test did before leaving, so the map has new ground to
+				// draw live too. Generated before leaving, which Minecraft 1.21.1 needs (see waitUntilGenerated).
+				world.getServer().runCommand("tp @a " + x + " 200 " + z);
+				DioramaClientTest.waitUntilGenerated(context, world);
+				// Then the fill lists the save and the world is left on its first tile since.
 				int before = context.computeOnClient(mc -> MapSession.get().savedChunks().drawnCount());
 				context.runOnClient(mc -> MapSession.get().savedChunks().rescanSoon());
-				// Somewhere new, as the 0.8.0 smoke test did before leaving, so the map has new ground to
-				// draw live too.
-				world.getServer().runCommand("tp @a " + x + " 200 " + z);
-				context.waitFor(mc -> MapSession.get() != null && MapSession.get().savedChunks() != null
-					&& MapSession.get().savedChunks().drawnCount() > before, 6000);
-				// Generated before leaving, which Minecraft 1.21.1 needs (see waitUntilGenerated). The
-				// fill has thousands of chunks left by then.
-				DioramaClientTest.waitUntilGenerated(context, world);
+				context.waitFor(mc -> MapSession.get().savedChunks().drawnCount() > before, 6000);
 				job = context.computeOnClient(mc -> MapSession.get().savedChunks());
 				if (job.chunksLeft() == 0) {
 					throw new AssertionError("Round " + round + ": the fill had nothing left to draw when the world was left");
