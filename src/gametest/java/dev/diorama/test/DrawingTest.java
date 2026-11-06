@@ -209,11 +209,14 @@ final class DrawingTest {
 		for (int i = 1; i <= 3; i++) {
 			moveTo(context, from[0] + (partWay[0] - from[0]) * i / 3, partWay[1]);
 		}
+		double unpanned = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().centerU());
 		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_MIDDLE);
 		for (int i = 1; i <= 4; i++) {
 			moveTo(context, partWay[0] - 10 * i, partWay[1] - 5 * i);
 		}
 		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_MIDDLE);
+		double pannedU = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().centerU());
+		expect(pannedU > unpanned + 5, "the middle-button drag to pan the map east of where it was, moved " + (pannedU - unpanned));
 		float[] to = gui(context, cx + 12, base + 1, cz + 8);
 		float[] panned = {(float) partWay[0] - 40, (float) partWay[1] - 20};
 		for (int i = 1; i <= 6; i++) {
@@ -229,7 +232,8 @@ final class DrawingTest {
 		moveTo(context, to[0] + 30, to[1] + 30);
 		context.waitTicks(3);
 		int letGo = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().measured());
-		expect(letGo == held, "letting go of the left button to end the measurement where it was, read " + letGo + " after " + held);
+		boolean stillHolding = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawMode().holding());
+		expect(letGo == held && !stillHolding, "letting go of the left button to end the measurement where it was, read " + letGo + " after " + held);
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx + 0.5, v, 3.2, TileKey.SURFACE));
 		settle(context, 20);
