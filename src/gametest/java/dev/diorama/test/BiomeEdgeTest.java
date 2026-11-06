@@ -12,10 +12,12 @@ import java.nio.file.Path;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Grass at the edge of what the client has loaded is the colour of its own biome ({@code biome-edge},
@@ -76,44 +78,66 @@ final class BiomeEdgeTest {
 			context.takeScreenshot("biome-edge-wide");
 			context.setScreen(() -> null);
 
-			String wrong = context.computeOnClient(mc -> {
-				var holder = mc.level.getBiome(mc.player.blockPosition());
-				if (!holder.is(Biomes.SAVANNA)) {
-					return "the data pack's dimension isn't savanna: " + holder;
-				}
-				Biome savanna = holder.value();
-				int grass = BiomeColors.GRASS_COLOR_RESOLVER.getColor(savanna, 0, 0) & 0xFFFFFF;
-				StringBuilder found = new StringBuilder();
-				int chunks = 0;
-				int off = 0;
-				for (int cx = -VIEW - 2; cx <= edge + 1; cx++) {
-					for (int cz = -VIEW - 2; cz <= VIEW + 2; cz++) {
-						ChunkSnapshot chunk = MapSession.get().map().worldChunk(cx, cz);
-						if (chunk == null) {
-							continue;
-						}
-						chunks++;
-						int[] tints = BiomeTints.of(chunk).grass();
-						for (int i = 0; i < 256; i++) {
-							if (tints[i] != grass) {
-								if (off++ == 0) {
-									found.append(String.format("chunk %d,%d column %d,%d is %06x, savanna is %06x; ", cx, cz, i & 15, i >> 4, tints[i], grass));
-								}
-							}
-						}
-					}
-				}
-				if (chunks < 20) {
-					return "only " + chunks + " loaded chunks to check";
-				}
-				return off == 0 ? null : found.toString() + off + " columns of " + chunks + " chunks in all (edge chunk x " + edge + ")";
-			});
+			String wrong = context.computeOnClient(mc -> offColumns(edge, at -> {
+				ChunkSnapshot chunk = MapSession.get().map().worldChunk(at[0], at[1]);
+				return chunk == null ? null : BiomeTints.of(chunk).grass();
+			}));
 			if (wrong != null) {
 				throw new AssertionError("Grass at the edge of the loaded chunks isn't its biome's colour: " + wrong);
+			}
+			// With the biome blend off, a column whose one lookup lands in a missing chunk has nothing
+			// to blend and takes its own biome. The map takes the radius when it snapshots a chunk.
+			int blend = context.computeOnClient(mc -> mc.options.biomeBlendRadius().get());
+			try {
+				context.runOnClient(mc -> mc.options.biomeBlendRadius().set(0));
+				String unblended = context.computeOnClient(mc -> offColumns(edge, at ->
+					mc.level.getChunkSource().hasChunk(at[0], at[1])
+						? BiomeTints.blend(ChunkSnapshot.take(mc.level.getChunk(at[0], at[1]), mc.level)).grass()
+						: null));
+				if (unblended != null) {
+					throw new AssertionError("With the biome blend off, grass at the edge of the loaded chunks isn't its biome's colour: " + unblended);
+				}
+			} finally {
+				context.runOnClient(mc -> mc.options.biomeBlendRadius().set(blend));
 			}
 		} finally {
 			context.runOnClient(mc -> mc.options.renderDistance().set(distance));
 		}
+	}
+
+	/**
+	 * Where the grass tints {@code tints} gives for each loaded chunk, null where it has none, aren't
+	 * savanna's; null when every column is. On the client thread.
+	 */
+	private static @Nullable String offColumns(int edge, java.util.function.Function<int[], int @Nullable []> tints) {
+		Minecraft mc = Minecraft.getInstance();
+		var holder = mc.level.getBiome(mc.player.blockPosition());
+		if (!holder.is(Biomes.SAVANNA)) {
+			return "the data pack's dimension isn't savanna: " + holder;
+		}
+		Biome savanna = holder.value();
+		int grass = BiomeColors.GRASS_COLOR_RESOLVER.getColor(savanna, 0, 0) & 0xFFFFFF;
+		StringBuilder found = new StringBuilder();
+		int chunks = 0;
+		int off = 0;
+		for (int cx = -VIEW - 2; cx <= edge + 1; cx++) {
+			for (int cz = -VIEW - 2; cz <= VIEW + 2; cz++) {
+				int[] columns = tints.apply(new int[] {cx, cz});
+				if (columns == null) {
+					continue;
+				}
+				chunks++;
+				for (int i = 0; i < 256; i++) {
+					if (columns[i] != grass && off++ == 0) {
+						found.append(String.format("chunk %d,%d column %d,%d is %06x, savanna is %06x; ", cx, cz, i & 15, i >> 4, columns[i], grass));
+					}
+				}
+			}
+		}
+		if (chunks < 20) {
+			return "only " + chunks + " loaded chunks to check";
+		}
+		return off == 0 ? null : found.toString() + off + " columns of " + chunks + " chunks in all (edge chunk x " + edge + ")";
 	}
 
 	/** A flat savanna dimension, for the world's data packs folder. */
