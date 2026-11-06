@@ -32,6 +32,8 @@ final class LeaveDuringFillTest {
 				? context.worldBuilder().adjustSettings(s -> {
 					s.setName("Diorama Leave Fill");
 					s.setSeed("leave-during-fill");
+					// No fall from the teleports' height to die of.
+					s.setGameMode(net.minecraft.client.gui.screens.worldselection.WorldCreationUiState.SelectedGameMode.CREATIVE);
 				}).create()
 				: save.open()) {
 				save = world.getWorldSave();
@@ -42,12 +44,13 @@ final class LeaveDuringFillTest {
 				int before = context.computeOnClient(mc -> MapSession.get().savedChunks().drawnCount());
 				context.runOnClient(mc -> MapSession.get().savedChunks().rescanSoon());
 				// Somewhere new, as the 0.8.0 smoke test did before leaving, so the map has new ground to
-				// draw live too. Generated before leaving, which Minecraft 1.21-1.21.1 needs (see
-				// waitForGroundInView); the fill has thousands of chunks left by then.
+				// draw live too.
 				world.getServer().runCommand("tp @a " + x + " 200 " + z);
-				DioramaClientTest.waitForGroundInView(context);
 				context.waitFor(mc -> MapSession.get() != null && MapSession.get().savedChunks() != null
 					&& MapSession.get().savedChunks().drawnCount() > before, 6000);
+				// Generated before leaving, which Minecraft 1.21.1 needs (see waitUntilGenerated). The
+				// fill has thousands of chunks left by then.
+				DioramaClientTest.waitUntilGenerated(context, world);
 				job = context.computeOnClient(mc -> MapSession.get().savedChunks());
 				if (job.chunksLeft() == 0) {
 					throw new AssertionError("Round " + round + ": the fill finished before the world was left, so leaving didn't interrupt it");

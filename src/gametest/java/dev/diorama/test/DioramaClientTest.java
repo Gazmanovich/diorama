@@ -273,7 +273,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
-				waitForGroundInView(context);
+				waitUntilGenerated(context, world);
 			}
 		}
 		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
@@ -6159,14 +6159,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/**
-	 * Waits until the client has every chunk in view around the player, which the server can only
-	 * send once it has finished generating them. Leave a world while the server is still generating
-	 * and Minecraft 1.21-1.21.1 can stop for good on "Saving world": the shutdown keeps putting back
-	 * a chunk that a generation still holds (ChunkMap.scheduleUnload), and that generation needs
-	 * the server thread the loop keeps busy. The game does that without the map too, so the tests
-	 * that teleport to new ground and then leave wait for it to be generated first.
+	 * Waits until the server has finished generating: the ground in view around the player is on the
+	 * client, and no chunk is held by a generation step. Leave a world while one is and Minecraft
+	 * 1.21.1 can stop for good on "Saving world": the shutdown keeps putting back a chunk it's
+	 * unloading for as long as a generation step holds it (ChunkMap.scheduleUnload asks
+	 * ChunkHolder.isReadyForSaving), and the step needs the server thread that loop keeps busy.
+	 * The game does this without the map too, and 1.21.4 has it fixed, so the tests that make new
+	 * ground and then leave wait for it to be generated first.
 	 */
-	static void waitForGroundInView(ClientGameTestContext context) {
+	static void waitUntilGenerated(ClientGameTestContext context, TestSingleplayerContext world) {
 		context.waitFor(mc -> {
 			if (mc.level == null || mc.player == null) {
 				return false;
@@ -6184,6 +6185,39 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			return true;
 		}, 2400);
+		int ticks = 0;
+		for (; world.getServer().computeOnServer(DioramaClientTest::generating); ticks++) {
+			if (ticks > 2400) {
+				throw new AssertionError("The server never finished generating");
+			}
+			context.waitTick();
+		}
+		Diorama.LOGGER.info("Waited {} ticks for the server to finish generating", ticks);
+	}
+
+	/**
+	 * Whether a generation step holds any chunk, loaded or on its way out. Read by name, which only
+	 * the development runs have: elsewhere, and before 1.21, it says no.
+	 */
+	private static boolean generating(net.minecraft.server.MinecraftServer server) {
+		try {
+			java.lang.reflect.Method refCount = net.minecraft.server.level.ChunkHolder.class.getMethod("getGenerationRefCount");
+			for (net.minecraft.server.level.ServerLevel level : server.getAllLevels()) {
+				net.minecraft.server.level.ChunkMap chunkMap = level.getChunkSource().chunkMap;
+				for (String name : new String[] {"updatingChunkMap", "pendingUnloads"}) {
+					java.lang.reflect.Field field = net.minecraft.server.level.ChunkMap.class.getDeclaredField(name);
+					field.setAccessible(true);
+					for (Object holder : ((java.util.Map<?, ?>) field.get(chunkMap)).values()) {
+						if ((int) refCount.invoke(holder) != 0) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return false;
+		}
 	}
 
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
