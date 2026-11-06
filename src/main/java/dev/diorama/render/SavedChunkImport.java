@@ -91,6 +91,11 @@ public final class SavedChunkImport {
 	 */
 	private static final boolean PACED = MapLevel.BAKER_COUNT == 1;
 
+	/** The fill keeping its progress in each folder; see {@link #takeFolder}. */
+	private static final Map<Path, SavedChunkImport> FOLDER_OWNERS = new ConcurrentHashMap<>();
+	/** The longest a fill waits for the one before it in its folder: past this, something is stuck and it goes ahead. */
+	private static final long OWNER_WAIT_MS = 30_000;
+
 	private final MapLevel map;
 	private final SavedChunks save;
 	private final SavedChunkSource source;
@@ -302,6 +307,28 @@ public final class SavedChunkImport {
 		if (this.progress != null) {
 			this.progress.saveIfChanged();
 		}
+		if (this.folder != null) {
+			FOLDER_OWNERS.remove(this.folder, this);
+		}
+	}
+
+	/**
+	 * Makes this the fill keeping its progress in the folder, once the one before it there has
+	 * ended. A fill stops without waiting for its tile in progress, so leaving never waits on a bake,
+	 * and saves its progress once that tile is done. Back in the same world or dimension seconds
+	 * later, the new fill would read the progress before that and the old one's save would land on
+	 * top of the new one's. Says false if this fill was stopped meanwhile.
+	 */
+	private boolean takeFolder(Path folder) {
+		SavedChunkImport before = FOLDER_OWNERS.put(folder, this);
+		long deadline = System.currentTimeMillis() + OWNER_WAIT_MS;
+		while (before != null && before != this && before.thread.isAlive() && System.currentTimeMillis() < deadline) {
+			if (this.pause(100)) {
+				FOLDER_OWNERS.remove(folder, this);
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private void step() {
@@ -314,6 +341,12 @@ public final class SavedChunkImport {
 		if (!folder.equals(this.folder)) {
 			if (this.progress != null) {
 				this.progress.saveIfChanged();
+			}
+			if (this.folder != null) {
+				FOLDER_OWNERS.remove(this.folder, this);
+			}
+			if (!this.takeFolder(folder)) {
+				return;
 			}
 			this.folder = folder;
 			// A sky view with a night draws block light, which tiles drawn before it was kept lack.

@@ -62,6 +62,8 @@ start=$(date +%s)
 # thread-dumps/ in the results. A hang that ends in a test timeout minutes later would otherwise
 # leave nothing to tell where it stuck.
 watch_hang() {
+	# Not holding the run's lock: a sleep left over after the run would keep the next run out.
+	exec 9>&-
 	local quiet=${HANG_DUMP_SECONDS:-180} dumps=0 log="$run/logs/latest.log" last=0
 	while [ $dumps -lt 3 ]; do
 		sleep 15
@@ -77,7 +79,7 @@ watch_hang() {
 					continue
 				fi
 				local out=~/thread-dumps/$(date +%H%M%S)-$pid.txt
-				~/jdk25/bin/jcmd "$pid" Thread.print -l > "$out" 2>&1 || kill -QUIT "$pid"
+				timeout 60 ~/jdk25/bin/jcmd "$pid" Thread.print -l > "$out" 2>&1 || kill -QUIT "$pid"
 			done
 			mark "game log quiet for $((now - changed)) s: threads dumped"
 			dumps=$((dumps + 1))
