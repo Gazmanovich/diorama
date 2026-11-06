@@ -22,15 +22,25 @@ import org.jspecify.annotations.Nullable;
  * where the map's u is x; turning keeps north, south, east and west among themselves. Where the
  * map shows no ground under the last point, Shift keeps the line level on the picture instead.
  */
-final class GroundSnap {
+public final class GroundSnap {
 	/** How far a guess at the ground's height goes from the first, each way. */
 	private static final int REACH = 512;
 	/** Guesses at most, for one place: halving {@link #REACH} twice over takes 10. */
 	private static final int MAX_GUESSES = 16;
-	/** How long a click waits for each answer from a saved tile; usually a few milliseconds. */
-	private static final long WAIT_MS = 50;
+	/**
+	 * How long a click waits, all told, for the answers from saved tiles; each usually takes a few
+	 * milliseconds. Past it, the point takes the height guessed so far.
+	 */
+	private static final long CLICK_WAIT_NS = TimeUnit.MILLISECONDS.toNanos(200);
 
-	private final Measure.Picker picker;
+	/** The block the map shows at a map point, in the world; null in the answer where it shows none. */
+	public interface Picker {
+		CompletableFuture<@Nullable BlockPos> at(double u, double v);
+	}
+
+	private final Picker picker;
+	/** The view's layer the answers below are for: the surface, or a cave slice. */
+	private int layer = Integer.MIN_VALUE;
 	/** The ground under the last point clicked; null before the first. */
 	private @Nullable Ground anchor;
 	/** The ground about the cursor: how high it is there. */
@@ -38,35 +48,48 @@ final class GroundSnap {
 	/** How high the ground is where the point Shift keeps to is. */
 	private @Nullable Landing landing;
 
-	GroundSnap(Measure.Picker picker) {
+	GroundSnap(Picker picker) {
 		this.picker = picker;
 	}
 
 	/** A point was clicked without Shift: the next one keeps to the ground under it. */
 	void clicked(MapViewport.View view, double[] point) {
-		this.anchor = this.ask(view, point[0], point[1]);
+		this.forgetOtherLayers(view);
+		this.anchor = this.ask(point[0], point[1]);
+	}
+
+	/** Answers from the surface say nothing about a cave slice, or the other way round. */
+	private void forgetOtherLayers(MapViewport.View view) {
+		if (view.layer() != this.layer) {
+			this.layer = view.layer();
+			this.anchor = null;
+			this.under = null;
+			this.landing = null;
+		}
 	}
 
 	/**
 	 * The point Shift keeps the cursor's to, from {@code last}, in map space; null where the map
 	 * shows no ground under {@code last}, or hasn't said yet. With {@code click} it waits a little
-	 * for the map's answers, and the point becomes the one the next keeps to.
+	 * for the map's answers, and the point becomes the one the next keeps to. Where the map shows
+	 * no ground at the place it keeps to (hidden behind a hill, or never mapped), the point is
+	 * there at the height about the cursor.
 	 */
 	double @Nullable [] snap(MapViewport.View view, double[] last, double[] cursor, boolean click) {
+		this.forgetOtherLayers(view);
+		long deadline = click ? System.nanoTime() + CLICK_WAIT_NS : 0;
 		Ground anchor = this.anchor;
 		if (anchor == null || anchor.u != last[0] || anchor.v != last[1]) {
-			// A point from before a resize built this anew: ask again.
-			anchor = this.anchor = this.ask(view, last[0], last[1]);
+			// A point from before a resize built this anew, or from another layer: ask again.
+			anchor = this.anchor = this.ask(last[0], last[1]);
 		}
-		if (click) {
-			anchor.await();
-		}
+		anchor.await(deadline);
 		double[] from = anchor.point();
 		if (from == null) {
 			return null;
 		}
 		if (this.under == null || this.under.answered() && (this.under.u != cursor[0] || this.under.v != cursor[1]) || click) {
-			Ground fresh = this.ask(view, cursor[0], cursor[1]);
+			Ground fresh = this.ask(cursor[0], cursor[1]);
 			// Until it answers, the last answer still says about how high the ground is here.
 			if (this.under != null) {
 				BlockPos before = this.under.block();
@@ -74,9 +97,7 @@ final class GroundSnap {
 			}
 			this.under = fresh;
 		}
-		if (click) {
-			this.under.await();
-		}
+		this.under.await(deadline);
 		BlockPos about = this.under.block();
 		int cursorY = about != null ? about.getY() : this.under.previous != Integer.MIN_VALUE ? this.under.previous : (int) from[1];
 		double cursorZ = Projection.zAt(cursor[1], cursorY);
@@ -99,19 +120,19 @@ final class GroundSnap {
 			int guess = landing != null && landing.found ? landing.guess : cursorY;
 			landing = this.landing = new Landing(blockX, blockZ, guess);
 		}
-		landing.advance(view, x, z, click);
+		landing.advance(x, z, deadline);
 		double[] point = {x, Projection.v(landing.guess, z)};
 		if (click) {
 			this.anchor = landing.found
 				? new Ground(point[0], point[1], CompletableFuture.completedFuture(null), new BlockPos(blockX, landing.guess, blockZ))
-				: this.ask(view, point[0], point[1]);
+				: this.ask(point[0], point[1]);
 			this.landing = null;
 		}
 		return point;
 	}
 
-	private Ground ask(MapViewport.View view, double u, double v) {
-		return new Ground(u, v, this.picker.at(view.screenX(u), view.screenY(v)), null);
+	private Ground ask(double u, double v) {
+		return new Ground(u, v, this.picker.at(u, v), null);
 	}
 
 	/**
@@ -168,13 +189,14 @@ final class GroundSnap {
 			return new double[] {this.u, block.getY(), z};
 		}
 
-		/** Waits a little for the answer; for clicks. */
-		void await() {
-			if (this.answered) {
+		/** Waits for the answer until {@code deadline} ({@link System#nanoTime}); 0 doesn't wait. */
+		void await(long deadline) {
+			long left = deadline - System.nanoTime();
+			if (this.answered || deadline == 0 || left <= 0) {
 				return;
 			}
 			try {
-				this.pick.get(WAIT_MS, TimeUnit.MILLISECONDS);
+				this.pick.get(left, TimeUnit.NANOSECONDS);
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 			} catch (ExecutionException | TimeoutException e) {
@@ -210,15 +232,16 @@ final class GroundSnap {
 			this.high = guess + REACH;
 		}
 
-		/** Takes in what the map has answered, and asks again, at the place's point {@code (x, z)}; with {@code wait}, until done. */
-		void advance(MapViewport.View view, double x, double z, boolean wait) {
+		/**
+		 * Takes in what the map has answered, and asks again, at the place's point {@code (x, z)};
+		 * with a {@code deadline}, waiting for the answers until then.
+		 */
+		void advance(double x, double z, long deadline) {
 			while (!this.done) {
 				if (this.asked == null) {
-					this.asked = GroundSnap.this.ask(view, x, Projection.v(this.guess, z));
+					this.asked = GroundSnap.this.ask(x, Projection.v(this.guess, z));
 				}
-				if (wait) {
-					this.asked.await();
-				}
+				this.asked.await(deadline);
 				if (!this.asked.answered()) {
 					return;
 				}

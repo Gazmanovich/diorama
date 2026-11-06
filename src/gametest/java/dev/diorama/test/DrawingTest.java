@@ -238,8 +238,8 @@ final class DrawingTest {
 
 	/**
 	 * Shift keeps a line straight on the ground (#285). On the tilted map a place higher up shows
-	 * higher on the picture, so a line kept level on the picture from low ground ends a block south
-	 * for every 0.84 block it climbs. From a gold block on flat ground, Shift and a click on a tower
+	 * higher on the picture, so a line kept level on the picture from low ground ends 0.84 of a
+	 * block south for every block it climbs. From a gold block on flat ground, Shift and a click on a tower
 	 * 12 blocks higher, a little north of the gold block on its top, must end on that block: due
 	 * east, the same z.
 	 */

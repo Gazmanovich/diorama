@@ -81,7 +81,7 @@ public final class DrawMode {
 	/** Finds the block under a screen point, for the measuring tool. */
 	private Measure.Picker picker = (x, y) -> java.util.concurrent.CompletableFuture.completedFuture(null);
 	/** Where Shift keeps the next point of a line or area, on the ground. */
-	private GroundSnap ground = new GroundSnap(this.picker);
+	private GroundSnap ground = new GroundSnap((u, v) -> java.util.concurrent.CompletableFuture.completedFuture(null));
 	/** The dimension whose map is being drawn on. */
 	private Supplier<String> dimension = () -> "";
 	/** Gives a widget the screen's keyboard focus. */
@@ -115,13 +115,13 @@ public final class DrawMode {
 	 * being drawn carries over: a note typed so far is kept, a pen stroke ends where it got to, an
 	 * erase stays undoable, and the points of a line or area stay (they're in map space).
 	 */
-	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker, Supplier<String> dimension) {
+	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker, GroundSnap.Picker mapPicker, Supplier<String> dimension) {
 		this.commitNote();
 		this.endGesture();
 		this.dimension = dimension;
 		this.focus = focus;
 		this.picker = picker;
-		this.ground = new GroundSnap(picker);
+		this.ground = new GroundSnap(mapPicker);
 		this.toolButtons.clear();
 		this.paletteOpen = false;
 		// The screen being rebuilt never sends the release a palette press was waiting for.
