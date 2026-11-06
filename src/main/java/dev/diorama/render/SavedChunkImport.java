@@ -91,10 +91,11 @@ public final class SavedChunkImport {
 	 */
 	private static final boolean PACED = MapLevel.BAKER_COUNT == 1;
 
-	/** The fill keeping its progress in each folder; see {@link #takeFolder}. */
-	private static final Map<Path, SavedChunkImport> FOLDER_OWNERS = new ConcurrentHashMap<>();
-	/** The longest a fill waits for the one before it in its folder: past this, something is stuck and it goes ahead. */
-	private static final long OWNER_WAIT_MS = 30_000;
+	/** The fills that may still save progress in each folder, each with its place in line; see {@link #takeFolder}. */
+	private static final Map<Path, Map<SavedChunkImport, Long>> FOLDER_WRITERS = new ConcurrentHashMap<>();
+	private static final java.util.concurrent.atomic.AtomicLong FOLDER_LINE = new java.util.concurrent.atomic.AtomicLong();
+	/** How long a fill waits for an earlier one in its folder before the log says so. */
+	private static final long WRITER_WAIT_WARN_MS = 30_000;
 
 	private final MapLevel map;
 	private final SavedChunks save;
@@ -308,27 +309,60 @@ public final class SavedChunkImport {
 			this.progress.saveIfChanged();
 		}
 		if (this.folder != null) {
-			FOLDER_OWNERS.remove(this.folder, this);
+			this.leaveFolder(this.folder);
 		}
 	}
 
 	/**
-	 * Makes this the fill keeping its progress in the folder, once the one before it there has
-	 * ended. A fill stops without waiting for its tile in progress, so leaving never waits on a bake,
-	 * and saves its progress once that tile is done. Back in the same world or dimension seconds
-	 * later, the new fill would read the progress before that and the old one's save would land on
-	 * top of the new one's. Says false if this fill was stopped meanwhile.
+	 * Lines this fill up to keep its progress in the folder, and waits until every fill that lined
+	 * up there before it has ended. A fill stops without waiting for its tile in progress, so leaving
+	 * never waits on a bake, and saves its progress once that tile is done. Back in the same world or
+	 * dimension seconds later, the new fill would otherwise read the progress from before that save,
+	 * and the old fill's save would land on top of the new one's. The wait is on this fill's own
+	 * thread, with no time limit: going ahead early is what it's there to stop. Says false, out of
+	 * line again, if this fill was stopped meanwhile.
 	 */
 	private boolean takeFolder(Path folder) {
-		SavedChunkImport before = FOLDER_OWNERS.put(folder, this);
-		long deadline = System.currentTimeMillis() + OWNER_WAIT_MS;
-		while (before != null && before != this && before.thread.isAlive() && System.currentTimeMillis() < deadline) {
+		long place = FOLDER_LINE.incrementAndGet();
+		FOLDER_WRITERS.compute(folder, (key, writers) -> {
+			Map<SavedChunkImport, Long> line = writers == null ? new ConcurrentHashMap<>() : writers;
+			line.put(this, place);
+			return line;
+		});
+		long warnAt = System.currentTimeMillis() + WRITER_WAIT_WARN_MS;
+		while (this.earlierWriterAlive(folder, place)) {
 			if (this.pause(100)) {
-				FOLDER_OWNERS.remove(folder, this);
+				this.leaveFolder(folder);
 				return false;
+			}
+			if (warnAt != 0 && System.currentTimeMillis() > warnAt) {
+				Diorama.LOGGER.warn("Drawing saved chunks into {} waits for an earlier fill there to finish", folder);
+				warnAt = 0;
 			}
 		}
 		return true;
+	}
+
+	/** Whether a fill that lined up in the folder before {@code place} is still running. */
+	private boolean earlierWriterAlive(Path folder, long place) {
+		Map<SavedChunkImport, Long> line = FOLDER_WRITERS.get(folder);
+		if (line == null) {
+			return false;
+		}
+		for (Map.Entry<SavedChunkImport, Long> writer : line.entrySet()) {
+			if (writer.getKey() != this && writer.getValue() < place && writer.getKey().thread.isAlive()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Takes this fill out of the folder's line: it won't save progress there again. */
+	private void leaveFolder(Path folder) {
+		FOLDER_WRITERS.computeIfPresent(folder, (key, line) -> {
+			line.remove(this);
+			return line.isEmpty() ? null : line;
+		});
 	}
 
 	private void step() {
@@ -343,7 +377,7 @@ public final class SavedChunkImport {
 				this.progress.saveIfChanged();
 			}
 			if (this.folder != null) {
-				FOLDER_OWNERS.remove(this.folder, this);
+				this.leaveFolder(this.folder);
 			}
 			if (!this.takeFolder(folder)) {
 				return;
