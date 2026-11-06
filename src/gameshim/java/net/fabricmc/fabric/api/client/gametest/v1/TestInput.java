@@ -50,6 +50,12 @@ public interface TestInput {
 	/** Releases a key or mouse button held with {@link #holdKey}. */
 	void releaseKey(KeyMapping keyMapping);
 
+	/** Presses the left Shift key and keeps it held: the game reads it as held, and gets its press. */
+	void holdShift();
+
+	/** Releases Shift held with {@link #holdShift}. */
+	void releaseShift();
+
 	/** Types the characters, as the keyboard would send them to the focused text field. */
 	void typeChars(String chars);
 

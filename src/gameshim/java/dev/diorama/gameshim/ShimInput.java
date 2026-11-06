@@ -79,11 +79,7 @@ final class ShimInput implements TestInput {
 	@Override
 	public void pressKey(int key) {
 		ShimThreading.checkOnTestThread("pressKey");
-		//? if >=26.3 {
-		InputConstants.Key pressed = InputConstants.Type.KEYBOARD.getOrCreate(key);
-		//?} else {
-		/*InputConstants.Key pressed = InputConstants.Type.KEYSYM.getOrCreate(key);
-		*///?}
+		InputConstants.Key pressed = keyboardKey(key);
 		context.runOnClient(minecraft -> {
 			key(minecraft, pressed, InputConstants.PRESS);
 			key(minecraft, pressed, InputConstants.RELEASE);
@@ -111,6 +107,24 @@ final class ShimInput implements TestInput {
 			return;
 		}
 		context.runOnClient(minecraft -> key(minecraft, key, InputConstants.RELEASE));
+	}
+
+	@Override
+	public void holdShift() {
+		ShimThreading.checkOnTestThread("holdShift");
+		if (HeldKeys.hold(InputConstants.KEY_LSHIFT)) {
+			InputConstants.Key key = keyboardKey(InputConstants.KEY_LSHIFT);
+			context.runOnClient(minecraft -> key(minecraft, key, InputConstants.PRESS));
+		}
+	}
+
+	@Override
+	public void releaseShift() {
+		ShimThreading.checkOnTestThread("releaseShift");
+		if (HeldKeys.release(InputConstants.KEY_LSHIFT)) {
+			InputConstants.Key key = keyboardKey(InputConstants.KEY_LSHIFT);
+			context.runOnClient(minecraft -> key(minecraft, key, InputConstants.RELEASE));
+		}
 	}
 
 	@Override
@@ -165,8 +179,18 @@ final class ShimInput implements TestInput {
 		for (int button : new ArrayList<>(mouseDown)) {
 			releaseMouse(button);
 		}
+		releaseShift();
 		context.runOnClient(minecraft -> moveTo(minecraft,
 			minecraft.getWindow().getScreenWidth() * 0.5, minecraft.getWindow().getScreenHeight() * 0.5));
+	}
+
+	/** A key code ({@code InputConstants.KEY_*}) as a key. */
+	private static InputConstants.Key keyboardKey(int key) {
+		//? if >=26.3 {
+		return InputConstants.Type.KEYBOARD.getOrCreate(key);
+		//?} else {
+		/*return InputConstants.Type.KEYSYM.getOrCreate(key);
+		*///?}
 	}
 
 	private static void key(Minecraft minecraft, InputConstants.Key key, int action) {
