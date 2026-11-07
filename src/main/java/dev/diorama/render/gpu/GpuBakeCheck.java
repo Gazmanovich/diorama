@@ -297,9 +297,19 @@ public final class GpuBakeCheck {
 				return;
 			}
 			GpuBakeRecord record = GpuBakeRecord.load();
-			if (!readMark(record)) {
-				mark(record, device, modVersion());
+			if (readMark(record)) {
+				return;
 			}
+			String mod = modVersion();
+			// Another game in this folder may have gone down on this card since this one opened.
+			Off saved = forcedOn() ? null : record.result(device, mod);
+			if (saved != null) {
+				off = saved;
+				Diorama.LOGGER.warn("GPU baking turned off on {}: {} in another game. Tiles are traced on the CPU instead.", device, saved);
+				record.save();
+				return;
+			}
+			mark(record, device, mod);
 		}
 	}
 
