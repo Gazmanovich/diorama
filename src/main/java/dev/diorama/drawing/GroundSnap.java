@@ -41,6 +41,8 @@ public final class GroundSnap {
 	private final Picker picker;
 	/** The view's layer the answers below are for: the surface, or a cave slice. */
 	private int layer = Integer.MIN_VALUE;
+	/** The way the map faced for them: their blocks are in its turned space. */
+	private @Nullable Facing facing;
 	/** The ground under the last point clicked; null before the first. */
 	private @Nullable Ground anchor;
 	/** The ground about the cursor: how high it is there. */
@@ -52,16 +54,25 @@ public final class GroundSnap {
 		this.picker = picker;
 	}
 
-	/** A point was clicked without Shift: the next one keeps to the ground under it. */
+	/**
+	 * A point was clicked without Shift: the next one keeps to the ground under it. What was found
+	 * for the point before is dropped: this may be a new line, in another dimension.
+	 */
 	void clicked(MapViewport.View view, double[] point) {
 		this.forgetOtherLayers(view);
 		this.anchor = this.ask(point[0], point[1]);
+		this.landing = null;
 	}
 
-	/** Answers from the surface say nothing about a cave slice, or the other way round. */
+	/**
+	 * Answers from the surface say nothing about a cave slice, or the other way round; nor do
+	 * blocks in a map turned another way.
+	 */
 	private void forgetOtherLayers(MapViewport.View view) {
-		if (view.layer() != this.layer) {
+		Facing facing = Projection.facing();
+		if (view.layer() != this.layer || facing != this.facing) {
 			this.layer = view.layer();
+			this.facing = facing;
 			this.anchor = null;
 			this.under = null;
 			this.landing = null;
@@ -116,7 +127,7 @@ public final class GroundSnap {
 		int blockX = (int) Math.floor(x);
 		int blockZ = (int) Math.floor(z);
 		Landing landing = this.landing;
-		if (landing == null || landing.blockX != blockX || landing.blockZ != blockZ) {
+		if (landing == null || landing.blockX != blockX || landing.blockZ != blockZ || click && landing.done && !landing.found) {
 			// The ground beside the last place is about as high, and the cursor's place is near.
 			int guess = landing != null && landing.found ? landing.guess : cursorY;
 			landing = this.landing = new Landing(blockX, blockZ, guess);
