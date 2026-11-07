@@ -20,32 +20,22 @@ public final class ExportFog implements ImageExport.Finish {
 	private static final float FOG_HEIGHT = 10;
 	private static final float BLUR_UNITS = 7;
 	private static final float NO_FOG_KNOWN = 0.95F;
-	// fog.fsh's clouds and the soft fog over them; change both together.
-	private static final float FOG_MIX = 0.5F;
 	private static final float LOWEST = 0.12F;
-	private static final float SHADOW = 1.6F;
 	/** The sun shading of fog without clouds: smoke's. */
 	private static final float FOG_SHADOW = 0.7F;
-	private static final float CLOUD_CELL = 12.8F;
-	private static final float CLOUD_LEVELS = 5;
-	private static final float LEVEL_THICK = 0.9F;
-	private static final float STAIR_NOISE = 0.6F;
-	private static final float ROUND = 0.45F;
-	private static final float EDGE_SOFT = 0.5F;
-	private static final float PROFILE = 4;
-	private static final float CLOUD_ALPHA = 0.95F;
-	private static final float WISP = 1.5F;
-	private static final float STRANDS = 1;
-	private static final float WARP = 2;
-	private static final float HAZE = 0.5F;
-	private static final float HALO = 0.25F;
-	private static final float DEPTH_DARK = 0.65F;
-	private static final float PILLOW = 1;
-	private static final float GROUND_SHADOW = 0.3F;
-	/** How far from explored land the clouds over never-explored land reach full height, in cells a level; as MapViewport. */
-	private static final float CELLS_PER_LEVEL = 5;
-	private static final float SUN_U = -0.928477F;
-	private static final float SUN_V = -0.371391F;
+	// fog.fsh's clouds; change both together.
+	private static final float CLOUD_CELL = (float) VanillaClouds.CELL;
+	private static final float CLOUD_PIXELS = 40;
+	private static final float CLOUD_RAMP = (float) VanillaClouds.RAMP;
+	private static final float CLOUD_ROUND = 0.2F;
+	private static final float CLOUD_THICK = 0.55F;
+	private static final float[] CLOUD_TOP = {0.85F, 0.865F, 0.905F};
+	private static final float[] CLOUD_SIDE_HIGH = {0.72F, 0.75F, 0.84F};
+	private static final float[] CLOUD_SIDE_LOW = {0.55F, 0.59F, 0.72F};
+	private static final float[] CLOUD_SHADED = {0.70F, 0.73F, 0.83F};
+	private static final float GROUND_SHADOW = 0.22F;
+	private static final float SUN_U = -0.529999F;
+	private static final float SUN_V = -0.847998F;
 	/**
 	 * The most mask texels a side. Bigger exports get coarser texels, as the map's own fog does when
 	 * zoomed far out, so the mask stays tens of megabytes however big the image is.
@@ -79,6 +69,22 @@ public final class ExportFog implements ImageExport.Finish {
 	private final float[] shade;
 	private final int background;
 	private final float[] moonlit;
+	/** The signed distance from explored land per mask texel, map units, positive over the unexplored. */
+	private float[] signed;
+	/** As fog.fsh: the base cell, the grid's cells in base cells, the two sizes drawn and how far the first has grown into the second. */
+	private float cloudBase;
+	private int gridMult;
+	private int cloudSize;
+	private float cloudGrow;
+	private float bigShare;
+	/** Map units a screen pixel stands for. */
+	private float pixelUnits;
+	/** The codes of the cells at the two sizes drawn, over the mask, from cell (codeU[i], codeV[i]), codeW[i] a row. */
+	private final int[][] codes = new int[2][];
+	private final long[] codeU = new long[2];
+	private final long[] codeV = new long[2];
+	private final int[] codeW = new int[2];
+	private final int[] codeH = new int[2];
 
 	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke, float night) {
 		this.lod = lod;
@@ -124,10 +130,11 @@ public final class ExportFog implements ImageExport.Finish {
 		// About four export pixels per texel, as on screen, and never under the 2 units the screen stops at.
 		float texel = (float) Math.max(2, 1 << lod);
 		double margin = 64 + 24 * Math.pow(2, steps + 1);
-		// The clouds climb with distance from explored land, which can lie past the margin: read as
-		// far as the climb reaches, or the terraces at the picture's edge depend on where it's cut.
+		// The clouds read cells and distances a few of the biggest cells drawn away, and their see-
+		// through band reaches into explored land: read that far, or the clouds at the picture's edge
+		// depend on where it's cut.
 		if (!smoke) {
-			margin += CLOUD_LEVELS * CELLS_PER_LEVEL * CLOUD_CELL * Math.pow(2, steps);
+			margin += 2 * CLOUD_RAMP + 4 * CLOUD_CELL * Math.pow(2, steps + 3);
 		}
 		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
 		while (span / texel > MAX_MASK) {
@@ -181,7 +188,11 @@ public final class ExportFog implements ImageExport.Finish {
 		if (MapStyle.get().roundedFog() && texel < 16) {
 			fog.roundOff(Math.max(1, Math.round(10 / texel)));
 		}
-		fog.climb();
+		if (fog.clouds) {
+			fog.cloudSetup(pixelsPerUnit);
+		} else {
+			java.util.Arrays.fill(fog.lift, 1);
+		}
 		fog.markReach();
 		return fog;
 	}
@@ -205,69 +216,6 @@ public final class ExportFog implements ImageExport.Finish {
 		noiseG = g;
 		noiseB = b;
 		noiseA = a;
-	}
-
-	/**
-	 * The clouds' climb over never-explored land, as {@code MapViewport.liftTargets} without a
-	 * remembered map: a level every few cells away from explored land, full height with none.
-	 */
-	private void climb() {
-		int w = this.maskW;
-		int h = this.maskH;
-		int[] d = new int[w * h];
-		boolean any = false;
-		for (int i = 0; i < d.length; i++) {
-			boolean explored = this.known[i] >= 0.5F;
-			any |= explored;
-			d[i] = explored ? 0 : Integer.MAX_VALUE / 2;
-		}
-		if (!this.clouds || !any) {
-			java.util.Arrays.fill(this.lift, 1);
-			return;
-		}
-		for (int j = 0; j < h; j++) {
-			for (int i = 0; i < w; i++) {
-				int k = j * w + i;
-				int v = d[k];
-				if (i > 0) {
-					v = Math.min(v, d[k - 1] + 3);
-				}
-				if (j > 0) {
-					v = Math.min(v, d[k - w] + 3);
-					if (i > 0) {
-						v = Math.min(v, d[k - w - 1] + 4);
-					}
-					if (i < w - 1) {
-						v = Math.min(v, d[k - w + 1] + 4);
-					}
-				}
-				d[k] = v;
-			}
-		}
-		for (int j = h - 1; j >= 0; j--) {
-			for (int i = w - 1; i >= 0; i--) {
-				int k = j * w + i;
-				int v = d[k];
-				if (i < w - 1) {
-					v = Math.min(v, d[k + 1] + 3);
-				}
-				if (j < h - 1) {
-					v = Math.min(v, d[k + w] + 3);
-					if (i < w - 1) {
-						v = Math.min(v, d[k + w + 1] + 4);
-					}
-					if (i > 0) {
-						v = Math.min(v, d[k + w - 1] + 4);
-					}
-				}
-				d[k] = v;
-			}
-		}
-		double climbThirds = 3 * CLOUD_LEVELS * CELLS_PER_LEVEL * CLOUD_CELL * (1 << this.scaleSteps) / this.texel;
-		for (int i = 0; i < d.length; i++) {
-			// Kept to bytes, like the mask's alpha.
-			this.lift[i] = Math.round((float) Math.min(1, d[i] / climbThirds) * 255) / 255F;
-		}
 	}
 
 	/** {@link MapViewport}'s rounding of the known area, so the edge follows a smooth line. */
@@ -317,10 +265,9 @@ public final class ExportFog implements ImageExport.Finish {
 		double layerShift = FOG_HEIGHT * COS_PITCH / this.texel;
 		double sun = 9.0 * (1 << (this.scaleSteps + 1)) / this.texel;
 		double slack = 1.5;
-		// The clouds' reach too: MapViewport.fogReach.
-		double cell = this.clouds ? 2 * CLOUD_CELL * (1 << this.scaleSteps) / this.texel : 0;
-		double around = 4 * cell;
-		double lean = CLOUD_LEVELS * LEVEL_THICK * cell * COS_PITCH;
+		// Only smoke reads them: the clouds have shortcuts of their own.
+		double around = 0;
+		double lean = 0;
 		int west = (int) Math.ceil(Math.max(Math.max(blur, sun), around) + slack);
 		int east = (int) Math.ceil(Math.max(blur, around) + slack);
 		int north = (int) Math.ceil(Math.max(Math.max(blur, sun * 0.4), around) + slack);
@@ -379,6 +326,9 @@ public final class ExportFog implements ImageExport.Finish {
 	private int paint(int abgr, long x, long y, Pixel p) {
 		double u = (x + 0.5) * this.unitsPerPixel;
 		double v = (y + 0.5) * this.unitsPerPixel;
+		if (this.clouds) {
+			return this.paintClouds(abgr, u, v);
+		}
 		float liftHere = this.sampleLift(u, v);
 		int ti = (int) Math.floor((u - this.originU) / this.texel);
 		int tj = (int) Math.floor((v - this.originV) / this.texel);
@@ -387,7 +337,6 @@ public final class ExportFog implements ImageExport.Finish {
 		p.deep = flag == 2;
 
 		float jitter = hash(x, y) - 0.5F;
-		float[] cloud = this.clouds ? this.cloudsAt(u, v, jitter, p) : null;
 		float r = 0;
 		float g = 0;
 		float b = 0;
@@ -406,7 +355,7 @@ public final class ExportFog implements ImageExport.Finish {
 			double probeV = gv + toSunV;
 			float toward = this.thicknessAt(probeU, probeV, p.clear ? 1 : this.knownAt(probeU, probeV, p), p);
 			float occlusion = clamp((toward - th) / FOG_HEIGHT * 2.2F);
-			float light = clamp(0.2F + 0.7F * (h / FOG_HEIGHT) + 0.3F - occlusion * (this.clouds ? SHADOW : FOG_SHADOW));
+			float light = clamp(0.2F + 0.7F * (h / FOG_HEIGHT) + 0.3F - occlusion * FOG_SHADOW);
 			float layerAlpha = a * 0.45F;
 			r += (1 - alpha) * layerAlpha * mix(this.shade[0], this.lit[0], light);
 			g += (1 - alpha) * layerAlpha * mix(this.shade[1], this.lit[1], light);
@@ -445,14 +394,6 @@ public final class ExportFog implements ImageExport.Finish {
 		b += (1 - alpha) * empty * coverB;
 		alpha += (1 - alpha) * empty;
 
-		if (cloud != null) {
-			// The fog rolls over the cloud terraces: its premultiplied colour over theirs.
-			float a = alpha * FOG_MIX;
-			r = r * FOG_MIX + (1 - a) * cloud[0];
-			g = g * FOG_MIX + (1 - a) * cloud[1];
-			b = b * FOG_MIX + (1 - a) * cloud[2];
-			alpha = 1 - (1 - a) * (1 - cloud[3]);
-		}
 		r *= this.moonlit[0];
 		g *= this.moonlit[1];
 		b *= this.moonlit[2];
@@ -512,191 +453,277 @@ public final class ExportFog implements ImageExport.Finish {
 	}
 
 	/**
-	 * fog.fsh's clouds over a point, still in time: premultiplied colour and how much they
-	 * cover, haze and shadow included; null-free, {0, 0, 0, 0} where there are none.
+	 * Works out what the clouds need for the export's zoom, as fog.fsh does per pixel: the cell
+	 * sizes drawn (an export pixel is a screen pixel at GUI scale 2), the signed distance from
+	 * explored land, as MapViewport.cloudDistances without a remembered map, and the cells' codes.
 	 */
-	private float[] cloudsAt(double u, double v, float jitter, Pixel p) {
-		float size = CLOUD_CELL * (float) (1 << this.scaleSteps);
-		float handover = smoothstep(0.42F, 0.58F, this.scaleFraction);
-		if (handover >= 1) {
-			size *= 2;
+	private void cloudSetup(double pixelsPerUnit) {
+		this.pixelUnits = (float) (1 / pixelsPerUnit);
+		this.cloudBase = CLOUD_CELL * (1 << this.scaleSteps);
+		this.gridMult = this.scaleFraction >= 0.58F ? 2 : 1;
+		float size = (float) (Math.log(CLOUD_PIXELS * this.pixelUnits / this.cloudBase) / Math.log(2));
+		size = Math.max((float) (Math.log(this.gridMult) / Math.log(2)), Math.min(3, size));
+		this.cloudSize = Math.min((int) Math.floor(size), 3);
+		this.cloudGrow = this.cloudSize >= 3 ? 0 : smoothstep(0.2F, 0.8F, size - this.cloudSize);
+		this.bigShare = smoothstep(-0.6F, 1, (float) (Math.log(CLOUD_PIXELS * this.pixelUnits / CLOUD_CELL) / Math.log(2)));
+
+		int w = this.maskW;
+		int h = this.maskH;
+		int[] toKnown = new int[w * h];
+		int[] toUnknown = new int[w * h];
+		for (int k = 0; k < w * h; k++) {
+			boolean known = this.known[k] >= 0.5F;
+			toKnown[k] = known ? 0 : Integer.MAX_VALUE / 2;
+			toUnknown[k] = known ? Integer.MAX_VALUE / 2 : 0;
 		}
-		float[] c;
-		float shadow = 0;
-		if (p.clear) {
-			c = new float[] {0, 0, 0, 1};
-			handover = 0;
-		} else if (p.deep) {
-			c = this.flatTop(u, v, size, jitter);
-			shadow = GROUND_SHADOW;
-		} else {
-			c = this.clouds(u, v, size, jitter);
-			shadow = GROUND_SHADOW * this.groundShadow(u, v, size);
+		chamfer(toKnown, w, h);
+		chamfer(toUnknown, w, h);
+		float far = Math.max(w, h) * 3;
+		float[] s = new float[w * h];
+		for (int k = 0; k < w * h; k++) {
+			s[k] = (Math.min(toKnown[k], far) - Math.min(toUnknown[k], far)) / 3F * this.texel;
 		}
-		if (handover > 0 && handover < 1) {
-			float[] c2 = p.deep ? this.flatTop(u, v, size * 2, jitter) : this.clouds(u, v, size * 2, jitter);
-			float shadow2 = GROUND_SHADOW * (p.deep ? 1 : this.groundShadow(u, v, size * 2));
-			for (int i = 0; i < 4; i++) {
-				c[i] = mix(c[i], c2[i], handover);
+		float[] t = new float[w * h];
+		for (int pass = 0; pass < 3; pass++) {
+			for (int j = 0; j < h; j++) {
+				for (int i = 0; i < w; i++) {
+					float sum = 0;
+					for (int d = -2; d <= 2; d++) {
+						sum += s[j * w + Math.max(0, Math.min(w - 1, i + d))];
+					}
+					t[j * w + i] = sum / 5;
+				}
 			}
-			shadow = mix(shadow, shadow2, handover);
+			for (int j = 0; j < h; j++) {
+				for (int i = 0; i < w; i++) {
+					float sum = 0;
+					for (int d = -2; d <= 2; d++) {
+						sum += t[Math.max(0, Math.min(h - 1, j + d)) * w + i];
+					}
+					s[j * w + i] = sum / 5;
+				}
+			}
 		}
-		float through = c[3];
-		float soft = this.knownSoft(u, v, p);
-		float halo = HALO * (1 - smoothstep(0.55F, 1, soft));
-		float empty = 1 - smoothstep(0.3F, 0.85F, this.knownAt(u, v, p));
-		float mist = Math.max(halo, empty);
-		float r = c[0] + through * mist * 0.64F;
-		float g = c[1] + through * mist * 0.75F;
-		float b = c[2] + through * mist * 0.9F;
-		through *= 1 - mist;
-		return new float[] {r, g, b, 1 - through * (1 - shadow)};
-	}
-
-	private float cellLevel(double cu, double cv, float size) {
-		double pu = (cu + 0.5) * size;
-		double pv = (cv + 0.5) * size;
-		if (this.sample(pu, pv) >= 0.5F) {
-			return 0;
+		// The shader reads it from a byte, two map units a step, 128 at the edge.
+		for (int k = 0; k < s.length; k++) {
+			s[k] = (Math.max(0, Math.min(255, Math.round(s[k] / 2) + 128)) - 128) * 2;
 		}
-		float n = noise(noiseR, pu / (size * 20) + 0.21, pv / (size * 20) + 0.21);
-		return Math.max(1, Math.min(CLOUD_LEVELS, (float) Math.ceil(this.sampleLift(pu, pv) * CLOUD_LEVELS + (n - 0.5F) * STAIR_NOISE)));
-	}
+		this.signed = s;
 
-	private float levelCover(double pu, double pv, float size, float k) {
-		double gx = pu / size - 0.5;
-		double gy = pv / size - 0.5;
-		double ix = Math.floor(gx);
-		double iy = Math.floor(gy);
-		float fx = smoothstep(0.5F - ROUND, 0.5F + ROUND, (float) (gx - ix));
-		float fy = smoothstep(0.5F - ROUND, 0.5F + ROUND, (float) (gy - iy));
-		float a = this.cellLevel(ix, iy, size) >= k ? 1 : 0;
-		float b = this.cellLevel(ix + 1, iy, size) >= k ? 1 : 0;
-		float c = this.cellLevel(ix, iy + 1, size) >= k ? 1 : 0;
-		float d = this.cellLevel(ix + 1, iy + 1, size) >= k ? 1 : 0;
-		return mix(mix(a, b, fx), mix(c, d, fx), fy);
-	}
-
-	private static float wispAt(double pu, double pv, float size) {
-		double nu = pu / (size * 4);
-		double nv = pv / (size * 4);
-		return noise(noiseG, nu, nv) * 0.6F + noise(noiseB, nu * 2, nv * 2) * 0.4F;
-	}
-
-	/** {u, v} pushed about by the swirling noise. */
-	private static double[] warped(double pu, double pv, float size, float k) {
-		double nu = pu / (size * 2.5);
-		double nv = pv / (size * 2.5);
-		float au = noise(noiseG, nu, nv) - 0.5F;
-		float av = noise(noiseB, nu + 0.37, nv + 0.37) - 0.5F;
-		float bu = noise(noiseA, nu * 3 + 0.11, nv * 3 + 0.11) - 0.5F;
-		float bv = noise(noiseG, nu * 3 + 0.71, nv * 3 + 0.71) - 0.5F;
-		float amount = WARP * size * (k <= 1 ? 0.35F : 1);
-		return new double[] {pu + (au + bu * 0.45F) * amount, pv + (av + bv * 0.45F) * amount};
-	}
-
-	private float wispCover(double pu, double pv, float size, float k) {
-		double[] w = warped(pu, pv, size, k);
-		float cover = this.levelCover(w[0], w[1], size, k);
-		float bite = smoothstep(0.35F, 0.75F, wispAt(pu, pv, size));
-		return cover - WISP * bite * (1 - cover) * cover * 2;
-	}
-
-	private float terraceInside(double pu, double pv, float h, float size, float level) {
-		float k = Math.max(1, Math.min(CLOUD_LEVELS, (float) Math.ceil(h / level)));
-		float t = (float) Math.pow(clamp(Math.abs(h - (k - 0.5F) * level) / (0.5F * level)), PROFILE);
-		return this.wispCover(pu, pv, size, k) - (0.25F + 0.5F * t);
-	}
-
-	/** The cloud surface met at height {@code h}: {r, g, b, alpha}. */
-	private float[] terraceSurface(double pu, double pv, float h, float size, float level, float hTop, float jitter) {
-		float k = Math.max(1, Math.min(CLOUD_LEVELS, (float) Math.ceil(h / level)));
-		float up = (float) Math.pow(clamp(h / level - (k - 1)), 0.8);
-		double tu = SUN_U * size * 0.4F;
-		double tv = SUN_V * size * 0.4F;
-		float blocked = this.levelCover(pu + tu * (1 + jitter * 0.5F), pv + tv * (1 + jitter * 0.5F), size, k)
-			+ this.levelCover(pu + tu * (2 + jitter * 0.5F), pv + tv * (2 + jitter * 0.5F), size, k + 1);
-		float shading = (0.12F + 0.5F * up) * (2 - SHADOW * blocked * (1 - up * up));
-		double su = SUN_U * size * 0.35F;
-		double sv = SUN_V * size * 0.35F;
-		float sunEdge = 1 - this.levelCover(pu + su, pv + sv, size, k);
-		float farEdge = 1 - this.levelCover(pu - su, pv - sv, size, k);
-		shading *= mix(1, 1 + PILLOW * (0.3F * sunEdge - 0.45F * farEdge), up);
-		float depth = mix(DEPTH_DARK, 1, k / CLOUD_LEVELS);
-		float hazeShare = HAZE * (float) Math.pow(1 - h / hTop, 1.5);
-		float[] sky = {0.56F, 0.65F, 0.77F};
-		float[] sunlight = {1.0F, 0.93F, 0.82F};
-		float[] haze = {0.64F, 0.75F, 0.9F};
-		float[] out = new float[4];
-		for (int i = 0; i < 3; i++) {
-			float color = (sky[i] * (1 - 0.35F * shading) + sunlight[i] * 0.5F * (0.1F + shading)) * depth;
-			out[i] = mix(Math.min(color, 1), haze[i], hazeShare);
+		for (int n = 0; n < 2; n++) {
+			int level = Math.min(this.cloudSize + n, 3);
+			double cell = this.cloudBase * (1 << level);
+			long u0 = (long) Math.floor(this.originU / cell) - 1;
+			long v0 = (long) Math.floor(this.originV / cell) - 1;
+			int cw = (int) Math.ceil(w * this.texel / cell) + 3;
+			int ch = (int) Math.ceil(h * this.texel / cell) + 3;
+			int[] c = new int[cw * ch];
+			for (int j = 0; j < ch; j++) {
+				for (int i = 0; i < cw; i++) {
+					long cu = u0 + i;
+					long cv = v0 + j;
+					c[j * cw + i] = VanillaClouds.code(this.signedAt((cu + 0.5) * cell, (cv + 0.5) * cell), cu, cv, this.scaleSteps + level);
+				}
+			}
+			this.codes[n] = c;
+			this.codeU[n] = u0;
+			this.codeV[n] = v0;
+			this.codeW[n] = cw;
+			this.codeH[n] = ch;
 		}
-		float cover = this.wispCover(pu, pv, size, k);
-		float fringe = cover - 0.25F;
-		double[] w = warped(pu, pv, size, k);
-		float edge = 1 - smoothstep(0.55F, 0.95F, this.levelCover(w[0], w[1], size, k));
-		float strands = smoothstep(0.25F, 0.75F, wispAt(pu * 0.35 + 53, pv * 1.4 + 53, size * 0.5F));
-		out[3] = CLOUD_ALPHA * smoothstep(0, EDGE_SOFT, fringe) * mix(1, strands, edge * STRANDS);
-		return out;
 	}
 
-	/** fog.fsh's march down the line of sight: premultiplied colour and how much shows through. */
-	/** fog.fsh's flatTop: what {@link #clouds} returns over plain never-explored land, without the march. */
-	private float[] flatTop(double u, double v, float size, float jitter) {
-		float level = size * LEVEL_THICK;
-		float hTop = CLOUD_LEVELS * level;
-		float dh = hTop / (CLOUD_LEVELS * 3);
-		float h = hTop - (0.5F + jitter * 0.9F) * dh / 8;
-		float[] hit = this.terraceSurface(u, v + h * COS_PITCH, h, size, level, hTop, jitter);
-		return new float[] {hit[0] * hit[3], hit[1] * hit[3], hit[2] * hit[3], 1 - hit[3]};
+	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer, over a w by h grid. */
+	private static void chamfer(int[] d, int w, int h) {
+		for (int j = 0; j < h; j++) {
+			for (int i = 0; i < w; i++) {
+				int k = j * w + i;
+				int v = d[k];
+				if (i > 0) {
+					v = Math.min(v, d[k - 1] + 3);
+				}
+				if (j > 0) {
+					v = Math.min(v, d[k - w] + 3);
+					if (i > 0) {
+						v = Math.min(v, d[k - w - 1] + 4);
+					}
+					if (i < w - 1) {
+						v = Math.min(v, d[k - w + 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
+		for (int j = h - 1; j >= 0; j--) {
+			for (int i = w - 1; i >= 0; i--) {
+				int k = j * w + i;
+				int v = d[k];
+				if (i < w - 1) {
+					v = Math.min(v, d[k + 1] + 3);
+				}
+				if (j < h - 1) {
+					v = Math.min(v, d[k + w] + 3);
+					if (i < w - 1) {
+						v = Math.min(v, d[k + w + 1] + 4);
+					}
+					if (i > 0) {
+						v = Math.min(v, d[k + w - 1] + 4);
+					}
+				}
+				d[k] = v;
+			}
+		}
 	}
 
-	private float[] clouds(double u, double v, float size, float jitter) {
-		float level = size * LEVEL_THICK;
-		float hTop = CLOUD_LEVELS * level;
-		int steps = (int) CLOUD_LEVELS * 3;
-		float dh = hTop / steps;
-		float last = hTop;
-		boolean wasInside = false;
-		int surfaces = 0;
-		float through = 1;
+	/** The signed distance at a point, filtered linearly and clamped at the edge, like the texture. */
+	private float signedAt(double u, double v) {
+		double fx = (u - this.originU) / this.texel - 0.5;
+		double fy = (v - this.originV) / this.texel - 0.5;
+		int x0 = (int) Math.floor(fx);
+		int y0 = (int) Math.floor(fy);
+		float tx = (float) Math.max(0, Math.min(1, fx - x0));
+		float ty = (float) Math.max(0, Math.min(1, fy - y0));
+		int xa = Math.max(0, Math.min(this.maskW - 1, x0));
+		int xb = Math.max(0, Math.min(this.maskW - 1, x0 + 1));
+		int ya = Math.max(0, Math.min(this.maskH - 1, y0));
+		int yb = Math.max(0, Math.min(this.maskH - 1, y0 + 1));
+		float top = mix(this.signed[ya * this.maskW + xa], this.signed[ya * this.maskW + xb], tx);
+		float bottom = mix(this.signed[yb * this.maskW + xa], this.signed[yb * this.maskW + xb], tx);
+		return mix(top, bottom, ty);
+	}
+
+	/** fog.fsh's cloudRaw: how much of a point is under a layer at one of the two sizes drawn, 0.5 the edge. */
+	private float cloudRaw(double u, double v, int n, int bit) {
+		int level = Math.min(this.cloudSize + n, 3);
+		double size = this.cloudBase * (1 << level);
+		double gu = u / size - 0.5;
+		double gv = v / size - 0.5;
+		long iu = (long) Math.floor(gu);
+		long iv = (long) Math.floor(gv);
+		float fu = smoothstep(0.5F - CLOUD_ROUND, 0.5F + CLOUD_ROUND, (float) (gu - iu));
+		float fv = smoothstep(0.5F - CLOUD_ROUND, 0.5F + CLOUD_ROUND, (float) (gv - iv));
+		float a = this.cell(n, iu, iv) / bit % 2;
+		float b = this.cell(n, iu + 1, iv) / bit % 2;
+		float c = this.cell(n, iu, iv + 1) / bit % 2;
+		float d = this.cell(n, iu + 1, iv + 1) / bit % 2;
+		return mix(mix(a, b, fu), mix(c, d, fu), fv);
+	}
+
+	private int cell(int n, long u, long v) {
+		int i = (int) Math.max(0, Math.min(this.codeW[n] - 1, u - this.codeU[n]));
+		int j = (int) Math.max(0, Math.min(this.codeH[n] - 1, v - this.codeV[n]));
+		return this.codes[n][j * this.codeW[n] + i];
+	}
+
+	private float cloudShape(double u, double v, int bit) {
+		float a = this.cloudRaw(u, v, 0, bit);
+		return this.cloudGrow > 0 ? mix(a, this.cloudRaw(u, v, 1, bit), this.cloudGrow) : a;
+	}
+
+	private float cloudCover(double u, double v, int bit) {
+		float aa = (float) Math.max(0.01, Math.min(0.5, this.pixelUnits / (this.cloudBase * Math.pow(2, this.cloudSize + this.cloudGrow))));
+		return smoothstep(0.48F - aa, 0.52F + aa, this.cloudShape(u, v, bit));
+	}
+
+	/** fog.fsh's bigHeight. */
+	private float bigHeight(double u, double v, double wrap) {
+		float fine = noise(noiseR, u * 2 / wrap + 0.41, v * 2 / wrap + 0.27);
+		float coarse = noise(noiseR, u / wrap + 0.41, v / wrap + 0.27);
+		return mix(fine, coarse, this.scaleFraction);
+	}
+
+	/** fog.fsh's surface path for one export pixel: the clouds and the cover, over the tile and the backdrop. */
+	private int paintClouds(int abgr, double u, double v) {
+		float big = 1;
+		if (this.bigShare > 0) {
+			double wrap = NOISE_PERIOD * Math.pow(2, this.scaleSteps + 1);
+			double e = wrap / 48;
+			float h0 = this.bigHeight(u, v, wrap);
+			float nx = -(this.bigHeight(u + e, v, wrap) - h0) * 9;
+			float ny = -(this.bigHeight(u, v + e, wrap) - h0) * 9;
+			float len = (float) Math.sqrt(nx * nx + ny * ny + 1);
+			float sl = (float) Math.sqrt(0.45 * 0.45 + 0.55 * 0.55 + 0.7 * 0.7);
+			float dot = (nx * -0.45F + ny * -0.55F + 0.7F) / (len * sl);
+			float light = clamp(dot * 1.1F - 0.2F + 0.8F * (h0 - 0.5F));
+			big = mix(1, mix(0.92F, 1.03F, light), this.bigShare);
+		}
+		float size = (float) (this.cloudBase * Math.pow(2, this.cloudSize + this.cloudGrow));
+		float thick = size * CLOUD_THICK;
+		float ramp = (float) (CLOUD_RAMP * Math.min(1, 1 / Math.sqrt(size / CLOUD_CELL)));
+		boolean tall = thick * COS_PITCH / this.pixelUnits >= 10;
 		float r = 0;
 		float g = 0;
 		float b = 0;
-		for (int s = 0; s < steps; s++) {
-			float h = hTop - (s + 0.5F + jitter * 0.9F) * dh;
-			boolean inside = this.terraceInside(u, v + h * COS_PITCH, h, size, level) > 0;
-			if (inside && !wasInside) {
-				float above = last;
-				float below = h;
-				for (int i = 0; i < 3; i++) {
-					float mid = 0.5F * (above + below);
-					if (this.terraceInside(u, v + mid * COS_PITCH, mid, size, level) > 0) {
-						below = mid;
-					} else {
-						above = mid;
-					}
-				}
-				float[] hit = this.terraceSurface(u, v + below * COS_PITCH, below, size, level, hTop, jitter);
-				r += through * hit[3] * hit[0];
-				g += through * hit[3] * hit[1];
-				b += through * hit[3] * hit[2];
-				through *= 1 - hit[3];
-				surfaces++;
-				if (surfaces >= 2 || through < 0.1F) {
-					break;
-				}
+		float through = 1;
+		for (int k = 3; k >= 1; k--) {
+			int bit = k == 3 ? 4 : k == 2 ? 2 : 1;
+			float top = k * thick;
+			double pv = v + top * COS_PITCH;
+			float face = this.cloudCover(u, pv, bit);
+			float w1 = this.cloudCover(u, v + (top - (tall ? 0.33F : 0.5F) * thick) * COS_PITCH, bit);
+			float w2 = tall ? this.cloudCover(u, v + (top - 0.66F * thick) * COS_PITCH, bit) : w1;
+			float w3 = this.cloudCover(u, v + (top - 0.97F * thick) * COS_PITCH, bit);
+			float a1 = Math.max(w1 - face, 0);
+			float a2 = Math.max(w2 - Math.max(face, w1), 0);
+			float a3 = Math.max(w3 - Math.max(Math.max(face, w1), w2), 0);
+			float a = Math.min(face + a1 + a2 + a3, 1);
+			if (a <= 0.001F) {
+				continue;
 			}
-			wasInside = inside;
-			last = h;
+			float shaded = 0;
+			if (k < 3) {
+				for (int up = k + 1; up <= 3; up++) {
+					float lift = (up - k) * thick;
+					shaded = Math.max(shaded, this.cloudShape(u + SUN_U * lift * 1.2, pv + lift * COS_PITCH + SUN_V * lift * 1.2, up == 3 ? 4 : 2));
+				}
+				shaded = smoothstep(0.15F, 0.85F, shaded) * (1 - this.cloudCover(u, v + (top + thick) * COS_PITCH, k == 2 ? 4 : 2));
+			}
+			float sum = Math.max(face + a1 + a2 + a3, 1e-4F);
+			float sideBig = mix(1, big, 0.5F);
+			float[] color = new float[3];
+			for (int c = 0; c < 3; c++) {
+				float topColor = mix(CLOUD_TOP[c], CLOUD_SHADED[c], 0.8F * shaded) * big;
+				float sides = a1 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.85F) + a2 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.5F) + a3 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.15F);
+				color[c] = (face * topColor + sides * sideBig) / sum;
+			}
+			float alpha = 1;
+			if (k == 2) {
+				float s = this.signedAt(u, pv);
+				alpha = mix(mix(0.5F, 0.75F, clamp((s + ramp) / ramp)), 1, smoothstep(-4, 6, s));
+			}
+			alpha *= a;
+			r += through * alpha * color[0];
+			g += through * alpha * color[1];
+			b += through * alpha * color[2];
+			through *= 1 - alpha;
+			if (through < 0.01F) {
+				break;
+			}
 		}
-		return new float[] {r, g, b, through};
-	}
-
-	private float groundShadow(double u, double v, float size) {
-		double d = size * LEVEL_THICK * 1.5;
-		return smoothstep(0.3F, 0.6F, this.levelCover(u + SUN_U * d, v + SUN_V * d, size, 1));
+		if (through > 0.01F) {
+			double qu = u + SUN_U * 2 * thick * 0.6;
+			double qv = v + 2 * thick * COS_PITCH + SUN_V * 2 * thick * 0.6;
+			float s = this.signedAt(u, v);
+			through *= 1 - GROUND_SHADOW * smoothstep(0.1F, 0.9F, this.cloudShape(qu, qv, 2)) * mix(0.5F, 0.75F, clamp((s + ramp) / ramp));
+		}
+		// Ground with no map at all is never seen.
+		float cover = 1 - smoothstep(0.3F, 0.85F, this.sample(u, v));
+		r += through * cover * CLOUD_TOP[0];
+		g += through * cover * CLOUD_TOP[1];
+		b += through * cover * CLOUD_TOP[2];
+		through *= 1 - cover;
+		float alpha = 1 - through;
+		float ta = (abgr >>> 24) / 255F;
+		float gr = ((abgr & 0xFF) / 255F) * ta + ((this.background >> 16) & 0xFF) / 255F * (1 - ta);
+		float gg = (((abgr >> 8) & 0xFF) / 255F) * ta + ((this.background >> 8) & 0xFF) / 255F * (1 - ta);
+		float gb = (((abgr >> 16) & 0xFF) / 255F) * ta + (this.background & 0xFF) / 255F * (1 - ta);
+		if (alpha <= 0.002F) {
+			return 0xFF000000 | channel(gb) << 16 | channel(gg) << 8 | channel(gr);
+		}
+		float or = clamp(r / alpha * this.moonlit[0]) * alpha + gr * (1 - alpha);
+		float og = clamp(g / alpha * this.moonlit[1]) * alpha + gg * (1 - alpha);
+		float ob = clamp(b / alpha * this.moonlit[2]) * alpha + gb * (1 - alpha);
+		return 0xFF000000 | channel(ob) << 16 | channel(og) << 8 | channel(or);
 	}
 
 	private float knownBlur(double u, double v, float units) {
