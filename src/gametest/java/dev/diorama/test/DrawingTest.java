@@ -254,6 +254,8 @@ final class DrawingTest {
 		List<String> saved = context.computeOnClient(mc -> DrawingStore.open(WorldKey.current()).in(dimension).stream().map(DrawingTest::full).toList());
 		expect(live.size() == before + 5 && saved.equals(live), "the five drawings read back from the file as drawn: " + saved + " vs " + live);
 
+		shiftLine(context, world, cx, cz, base, dimension, before + 5);
+
 		// The minimap: lines and the area, not the note; then the setting turns them off there.
 		context.setScreen(() -> null);
 		settle(context, 40);
@@ -270,6 +272,96 @@ final class DrawingTest {
 		// from spectator, creative would keep them flying; survival lands them first.
 		world.getServer().runCommand("gamemode survival @a");
 		world.getServer().runCommand("gamemode creative @a");
+	}
+
+	/**
+	 * Shift keeps a line straight on the ground (#285). On the tilted map a place higher up shows
+	 * higher on the picture, so a line kept level on the picture from low ground ends 0.84 of a
+	 * block south for every block it climbs. From a gold block on flat ground, Shift and a click on a tower
+	 * 12 blocks higher, a little north of the gold block on its top, must end on that block: due
+	 * east, the same z.
+	 */
+	private static void shiftLine(ClientGameTestContext context, TestSingleplayerContext world, int cx, int cz, int base, String dimension, int count) {
+		int z0 = cz + 64;
+		world.getServer().runCommand("fill " + (cx - 40) + " " + (base + 1) + " " + (z0 - 6) + " " + (cx + 30) + " " + (base + 30) + " " + (z0 + 6) + " air");
+		world.getServer().runCommand("fill " + (cx - 40) + " " + (base - 3) + " " + (z0 - 6) + " " + (cx + 30) + " " + base + " " + (z0 + 6) + " smooth_stone");
+		world.getServer().runCommand("fill " + (cx + 16) + " " + (base + 1) + " " + (z0 - 4) + " " + (cx + 24) + " " + (base + 12) + " " + (z0 + 4) + " stone_bricks");
+		world.getServer().runCommand("fill " + (cx - 37) + " " + base + " " + (z0 - 1) + " " + (cx - 35) + " " + base + " " + (z0 + 1) + " gold_block");
+		world.getServer().runCommand("fill " + (cx + 19) + " " + (base + 12) + " " + (z0 - 1) + " " + (cx + 21) + " " + (base + 12) + " " + (z0 + 1) + " gold_block");
+		// What the fills broke, off the picture.
+		world.getServer().runCommand("kill @e[type=item]");
+		context.waitTicks(40);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cx - 8 + 0.5, Projection.v(base + 6, z0 + 0.5), 3.2, TileKey.SURFACE));
+		settle(context, 100);
+		click(context, widget(context, s -> s.drawButton()));
+		pickTool(context, 1);
+		float[] from = gui(context, cx - 36, base + 1, z0);
+		click(context, from[0], from[1]);
+		float[] towerTop = gui(context, cx + 20, base + 13, z0 - 2);
+		context.getInput().holdShift();
+		click(context, towerTop[0], towerTop[1]);
+		context.getInput().releaseShift();
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		frame(context);
+		Drawing line = last(context, dimension, count + 1);
+		double endU = line.points[2];
+		double endV = line.points[3];
+		double wantV = Projection.v(base + 13, z0 + 0.5);
+		// Leave draw mode, and hover over the line's end: the map says where that is.
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+		float[] end = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			return new float[] {view.screenX(endU), view.screenY(endV)};
+		});
+		moveTo(context, end[0], end[1]);
+		context.waitTicks(5);
+		context.takeScreenshot("drawing-06-shift-line");
+		expect(Math.abs(endU - (cx + 20.5)) < 0.5 && Math.abs(endV - wantV) < 0.3,
+			"a Shift line due east to the gold block on the tower, ending at map " + (cx + 20.5) + ", " + wantV + ", got " + endU + ", " + endV
+				+ " (" + Math.round((endV - wantV) / Projection.sin()) + " blocks south of it on the tower's top)");
+		// Gone again, so the minimap below shows what it did before.
+		click(context, widget(context, s -> s.drawButton()));
+		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
+		int left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
+		expect(left == count, "Undo takes the Shift line away again");
+
+		// Along the tower's south edge, pointing at its wall: the map shows the wall's blocks in the
+		// same row as the top, so the end has to climb to the top rather than stop on the wall.
+		// Clear south of the tower too, so the map shows the wall there, not trees in front of it.
+		world.getServer().runCommand("fill " + (cx + 10) + " " + (base + 1) + " " + (z0 + 7) + " " + (cx + 30) + " " + (base + 30) + " " + (z0 + 30) + " air");
+		world.getServer().runCommand("kill @e[type=item]");
+		context.waitTicks(40);
+		settle(context, 100);
+		pickTool(context, 1);
+		float[] edgeFrom = gui(context, cx - 36, base + 1, z0 + 4);
+		click(context, edgeFrom[0], edgeFrom[1]);
+		float[] wall = gui(context, cx + 20, base + 7, z0 + 5);
+		context.getInput().holdShift();
+		// Across the ground first, as a hand would go: the search then starts from the ground's height.
+		float[] across = gui(context, cx - 20, base + 1, z0 + 4);
+		moveTo(context, across[0], across[1]);
+		click(context, wall[0], wall[1]);
+		context.getInput().releaseShift();
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		frame(context);
+		Drawing edge = last(context, dimension, count + 1);
+		double edgeU = edge.points[2];
+		double edgeV = edge.points[3];
+		double edgeWant = Projection.v(base + 13, z0 + 4.5);
+		float[] wallSpot = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			return new float[] {view.screenX(edgeU), view.screenY(edgeV)};
+		});
+		moveTo(context, wallSpot[0], wallSpot[1]);
+		context.waitTicks(5);
+		context.takeScreenshot("drawing-06b-shift-line-edge");
+		expect(Math.abs(edgeU - (cx + 20.5)) < 0.5 && Math.abs(edgeV - edgeWant) < 0.5,
+			"a Shift line along the tower's south edge, pointing at its wall, ending on its top at map " + (cx + 20.5) + ", " + edgeWant
+				+ ", got " + edgeU + ", " + edgeV + " (" + Math.round((edgeV - edgeWant) / Projection.cos()) + " blocks down the wall)");
+		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
+		left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
+		expect(left == count, "Undo takes the edge line away again");
+		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 	}
 
 	private interface WidgetOf {

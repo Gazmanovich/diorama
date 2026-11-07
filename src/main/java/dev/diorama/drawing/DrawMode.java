@@ -31,7 +31,7 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li>Pen: drag to draw freehand.</li>
  *   <li>Line and Area: click points, double-click, right-click or Enter to finish; Shift keeps a
- *   segment straight or diagonal.</li>
+ *   segment due north, south, east or west, or diagonal, on the ground.</li>
  *   <li>Note: click a spot and type; Enter keeps it.</li>
  *   <li>Erase: click or drag over drawings.</li>
  *   <li>Measure: drag from one place to another; see {@link Measure}.</li>
@@ -81,6 +81,8 @@ public final class DrawMode {
 	private final Measure measure = new Measure();
 	/** Finds the block under a screen point, for the measuring tool. */
 	private Measure.Picker picker = (x, y) -> java.util.concurrent.CompletableFuture.completedFuture(null);
+	/** Where Shift keeps the next point of a line or area, on the ground. */
+	private GroundSnap ground = new GroundSnap((u, v) -> java.util.concurrent.CompletableFuture.completedFuture(null));
 	/** The dimension whose map is being drawn on. */
 	private Supplier<String> dimension = () -> "";
 	/** Gives a widget the screen's keyboard focus. */
@@ -116,12 +118,13 @@ public final class DrawMode {
 	 * being drawn carries over: a note typed so far is kept, a pen stroke ends where it got to, an
 	 * erase stays undoable, and the points of a line or area stay (they're in map space).
 	 */
-	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker, Supplier<String> dimension) {
+	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker, GroundSnap.Picker mapPicker, Supplier<String> dimension) {
 		this.commitNote();
 		this.endGesture();
 		this.dimension = dimension;
 		this.focus = focus;
 		this.picker = picker;
+		this.ground = new GroundSnap(mapPicker);
 		this.toolButtons.clear();
 		this.paletteOpen = false;
 		// The screen being rebuilt never sends the release a palette press was waiting for.
@@ -456,7 +459,7 @@ public final class DrawMode {
 				// So a third click starts afresh rather than counting as another double-click.
 				this.lastClickTime = 0;
 			} else {
-				this.points.add(this.snapped(view, x, y));
+				this.points.add(this.snapped(view, x, y, true));
 			}
 			return true;
 		}
@@ -599,7 +602,7 @@ public final class DrawMode {
 		if (this.active && !this.points.isEmpty()) {
 			List<double[]> shown = new ArrayList<>(this.points);
 			if (!this.penDown && overMap) {
-				shown.add(this.snapped(view, mouseX, mouseY));
+				shown.add(this.snapped(view, mouseX, mouseY, false));
 			}
 			preview = new Drawing(tool == Tool.AREA ? Drawing.Kind.AREA : Drawing.Kind.STROKE, "", color, flatten(shown), "");
 		} else if (this.active && tool == Tool.ERASE && overMap) {
@@ -761,18 +764,34 @@ public final class DrawMode {
 		};
 	}
 
-	/** The map point under the cursor, kept straight or diagonal from the last point while Shift is held. */
-	private double[] snapped(MapViewport.View view, double x, double y) {
+	/**
+	 * The map point under the cursor, kept due north, south, east or west of the last point, or
+	 * diagonal, on the ground while Shift is held; see {@link GroundSnap}. With {@code click}, it's
+	 * the next point.
+	 */
+	private double[] snapped(MapViewport.View view, double x, double y, boolean click) {
 		double[] point = mapPoint(view, x, y);
 		if (this.points.isEmpty() || !shiftDown()) {
+			if (click) {
+				this.ground.clicked(view, point);
+			}
 			return point;
 		}
 		double[] last = this.points.get(this.points.size() - 1);
+		double[] onGround = this.ground.snap(view, last, point, click);
+		if (onGround != null) {
+			return onGround;
+		}
+		// No ground shown under the last point: straight or diagonal on the picture.
 		double du = point[0] - last[0];
 		double dv = point[1] - last[1];
 		double length = Math.hypot(du, dv);
 		double angle = Math.round(Math.atan2(dv, du) / (Math.PI / 4)) * (Math.PI / 4);
-		return new double[] {last[0] + Math.cos(angle) * length, last[1] + Math.sin(angle) * length};
+		double[] level = {last[0] + Math.cos(angle) * length, last[1] + Math.sin(angle) * length};
+		if (click) {
+			this.ground.clicked(view, level);
+		}
+		return level;
 	}
 
 	private static double[] flatten(List<double[]> points) {

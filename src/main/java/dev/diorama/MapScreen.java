@@ -238,7 +238,8 @@ public final class MapScreen extends Screen {
 			this.menu = null;
 			this.draw.toggle();
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.draw.button")).build());
-		this.draw.init(this.font, this::addRenderableWidget, this::setFocused, (x, y) -> this.spotAt(x, y, false).thenApply(MapLevel.Spot::pos), this::dimension);
+		this.draw.init(this.font, this::addRenderableWidget, this::setFocused, (x, y) -> this.spotAt(x, y, false).thenApply(MapLevel.Spot::pos),
+			(u, v) -> this.spotAtMap(u, v, false).thenApply(MapLevel.Spot::pos), this::dimension);
 		this.placeControls();
 	}
 
@@ -871,14 +872,22 @@ public final class MapScreen extends Screen {
 	 * off the render thread, or with {@code readWorld} from the world's save where the tile has none.
 	 */
 	private CompletableFuture<MapLevel.Spot> spotAt(double screenX, double screenY, boolean readWorld) {
-		MapSession session = MapSession.get();
-		BlockLooks looks = BlockLooks.get();
 		MapViewport.View view = this.lastView;
-		if (session == null || looks == null || view == null) {
+		if (view == null) {
 			return CompletableFuture.completedFuture(MapLevel.Spot.NOTHING);
 		}
-		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
-		double v = TileSpots.rowMiddle(view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom());
+		return this.spotAtMap(view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom(),
+			view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom(), readWorld);
+	}
+
+	/** {@link #spotAt} for a map point, wherever the map has moved since. */
+	private CompletableFuture<MapLevel.Spot> spotAtMap(double u, double mapV, boolean readWorld) {
+		MapSession session = MapSession.get();
+		BlockLooks looks = BlockLooks.get();
+		if (session == null || looks == null) {
+			return CompletableFuture.completedFuture(MapLevel.Spot.NOTHING);
+		}
+		double v = TileSpots.rowMiddle(mapV);
 		if (this.otherDimension != null) {
 			// No chunks here, and the world's save is for where the player is.
 			return this.shownMap(session).savedSpot(this.layer, u, v, looks, false);
