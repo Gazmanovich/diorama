@@ -22,7 +22,8 @@ import net.fabricmc.loader.api.FabricLoader;
  * turns GPU baking off, so it can't spoil a map. So does a card too slow to bake without the
  * player feeling it, and any failure of the GPU code, down to a driver crash taking the game with
  * it. Each is saved per card ({@link GpuBakeRecord}), so the next session goes straight to the
- * tracer; turning the setting off and on again asks for a new try.
+ * tracer, except after a first mismatch, which the next session checks again; turning the setting
+ * off and on again asks for a new try.
  *
  * <p>Both bakes of a check tile read the same chunks (a {@code PinnedSource}), so any difference
  * past what the two sample patterns explain is the GPU's. Six kinds of bake are checked apart:
@@ -84,6 +85,11 @@ public final class GpuBakeCheck {
 	 * explored area the two sample patterns split pixels differently: matching drivers measured
 	 * up to 0.12% and 3.1% there. Alpha decides which pixels a merge keeps from the saved tile, so
 	 * it can't be loose: 8%, as the comparison test allows.
+	 *
+	 * <p>Those split pixels lie in a row along each edge of the unknown, so there are about as many
+	 * as the edge is long, however little of the tile is known. The alpha share is therefore taken
+	 * of at least {@link #PASS_PIXELS}: a tile with only a thin strip known, as the first tiles at
+	 * the edge of what has loaded often are, had one straight edge's row come to 8% of it.
 	 */
 	private static final double MAX_MISMATCH = 0.02;
 	private static final double MAX_ALPHA = 0.08;
@@ -112,6 +118,8 @@ public final class GpuBakeCheck {
 	private static boolean unproven;
 	/** The player asked for a new try: {@link #open} forgets this card's saved result. */
 	private static boolean retrying;
+	/** The card {@link #open} read the saved result for this session. */
+	private static @Nullable String openedDevice;
 	private static boolean closingHooked;
 	private static int failuresInARow;
 	/** The views, as {@link #mode} and the rest take them. */
@@ -193,6 +201,7 @@ public final class GpuBakeCheck {
 	static void open(@Nullable String device) {
 		synchronized (LOCK) {
 			opened = true;
+			openedDevice = device;
 			if (device == null) {
 				return;
 			}
@@ -205,7 +214,7 @@ public final class GpuBakeCheck {
 				record.starting = null;
 				if (!forcedOn()) {
 					Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
-					record.off.put(crashed, new GpuBakeRecord.Entry(Off.CRASHED, record.startingMod));
+					record.turnedOff(crashed, Off.CRASHED, record.startingMod == null ? "" : record.startingMod);
 				}
 			}
 			if (retrying) {
@@ -213,6 +222,9 @@ public final class GpuBakeCheck {
 				record.off.remove(device);
 			}
 			Off saved = forcedOn() ? null : record.result(device, mod);
+			if (!forcedOn() && saved == null && record.off.containsKey(device) && mod.equals(record.off.get(device).mod)) {
+				Diorama.LOGGER.info("GPU baking turned off once before on {} ({}); checking it again.", device, record.off.get(device).result);
+			}
 			if (saved != null) {
 				off = saved;
 				Diorama.LOGGER.info("GPU baking stays off on {}: {} here before. Tiles are traced on the CPU.", device, saved);
@@ -262,6 +274,15 @@ public final class GpuBakeCheck {
 		synchronized (LOCK) {
 			retrying = true;
 			if (off == null) {
+				if (opened && openedDevice != null) {
+					// This session's check is under way, past reading the saved result: forget it
+					// now, so a first mismatch from before doesn't count towards a second.
+					retrying = false;
+					GpuBakeRecord record = GpuBakeRecord.load();
+					if (record.off.remove(openedDevice) != null) {
+						record.save();
+					}
+				}
 				return;
 			}
 			off = null;
@@ -377,7 +398,7 @@ public final class GpuBakeCheck {
 			double mean = judged ? sum / both : 0;
 			double brighter = judged ? bias / both : 0;
 			double channel = judged ? Math.max(Math.abs(redBias), Math.max(Math.abs(greenBias), Math.abs(blueBias))) / both : 0;
-			double alpha = judged ? alphaDiffers / (double) both : 0;
+			double alpha = judged ? alphaDiffers / (double) Math.max(both, PASS_PIXELS) : 0;
 			double overlay = judged && overlays ? overlayDiffers / (double) both : 0;
 			// Every tile must match on its own: the two read the same chunks, so nothing but the
 			// GPU makes them differ, and matching tiles mustn't hide one that doesn't.
@@ -455,7 +476,7 @@ public final class GpuBakeCheck {
 		String device = GpuTileBaker.device();
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
-		record.off.put(device, new GpuBakeRecord.Entry(why, modVersion()));
+		record.turnedOff(device, why, modVersion());
 		if (unproven) {
 			clearMark(record);
 		}

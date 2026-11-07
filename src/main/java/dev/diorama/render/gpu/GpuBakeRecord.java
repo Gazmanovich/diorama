@@ -39,17 +39,34 @@ final class GpuBakeRecord {
 	static final class Entry {
 		GpuBakeCheck.Off result;
 		String mod;
+		/** Sessions this version of Diorama turned off on the card for this reason; 0 in older files. */
+		int times;
 
-		Entry(GpuBakeCheck.Off result, String mod) {
+		Entry(GpuBakeCheck.Off result, String mod, int times) {
 			this.result = result;
 			this.mod = mod;
+			this.times = times;
 		}
 	}
 
-	/** The saved result for a card, if it's from this version of Diorama. */
+	/**
+	 * The saved result for a card, if it's from this version of Diorama and counts. A first
+	 * {@link GpuBakeCheck.Off#NO_MATCH} doesn't: the next session checks the card again, since a
+	 * GPU that draws wrong does it again and a fluke shouldn't keep a card on the CPU for good.
+	 */
 	GpuBakeCheck.@Nullable Off result(String device, String mod) {
 		Entry entry = this.off.get(device);
-		return entry != null && mod.equals(entry.mod) ? entry.result : null;
+		if (entry == null || !mod.equals(entry.mod)) {
+			return null;
+		}
+		return entry.result == GpuBakeCheck.Off.NO_MATCH && entry.times == 1 ? null : entry.result;
+	}
+
+	/** Saves that this version turned off on the card, counting the sessions it has for this reason. */
+	void turnedOff(String device, GpuBakeCheck.Off why, String mod) {
+		Entry before = this.off.get(device);
+		int times = before != null && before.result == why && mod.equals(before.mod) ? before.times + 1 : 1;
+		this.off.put(device, new Entry(why, mod, times));
 	}
 
 	static GpuBakeRecord load() {
