@@ -219,7 +219,7 @@ public final class GpuBakeCheck {
 				record.off.remove(device);
 			}
 			Off saved = forcedOn() ? null : record.result(device, mod);
-			if (saved == null && record.off.containsKey(device) && mod.equals(record.off.get(device).mod)) {
+			if (!forcedOn() && saved == null && record.off.containsKey(device) && mod.equals(record.off.get(device).mod)) {
 				Diorama.LOGGER.info("GPU baking turned off once before on {} ({}); checking it again.", device, record.off.get(device).result);
 			}
 			if (saved != null) {
@@ -265,7 +265,8 @@ public final class GpuBakeCheck {
 
 	/**
 	 * The player turned the setting back on: forgets this card's result and checks it again. Before
-	 * the session's first bake the result hasn't been read yet, so that's when it's forgotten.
+	 * the session's first bake the result hasn't been read yet, so that's when it's forgotten; while
+	 * a check that already began runs on, it's forgotten if that check fails.
 	 */
 	public static void retry() {
 		synchronized (LOCK) {
@@ -464,6 +465,12 @@ public final class GpuBakeCheck {
 		String device = GpuTileBaker.device();
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
+		if (retrying) {
+			// The player asked for a new try after this session's check began: what was saved before
+			// doesn't count.
+			retrying = false;
+			record.off.remove(device);
+		}
 		record.turnedOff(device, why, modVersion());
 		if (unproven) {
 			clearMark(record);
