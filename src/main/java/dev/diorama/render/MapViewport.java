@@ -808,6 +808,7 @@ public final class MapViewport {
 			int dj = fresh ? 0 : (int) Math.round((originV - before.originV()) / texel);
 			if (fresh || Math.abs(di) >= MASK || Math.abs(dj) >= MASK) {
 				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
+				System.arraycopy(this.remembered, 0, this.rememberedShown, 0, this.rememberedShown.length);
 				this.liftMs = System.currentTimeMillis();
 			} else {
 				if (di != 0 || dj != 0) {
@@ -817,9 +818,11 @@ public final class MapViewport {
 							int fromJ = j + dj;
 							boolean inside = fromI >= 0 && fromI < MASK && fromJ >= 0 && fromJ < MASK;
 							this.liftMoved[j * MASK + i] = inside ? this.liftShown[fromJ * MASK + fromI] : this.liftTarget[j * MASK + i];
+							this.rememberedMoved[j * MASK + i] = inside ? this.rememberedShown[fromJ * MASK + fromI] : this.remembered[j * MASK + i];
 						}
 					}
 					System.arraycopy(this.liftMoved, 0, this.liftShown, 0, this.liftShown.length);
+					System.arraycopy(this.rememberedMoved, 0, this.rememberedShown, 0, this.rememberedShown.length);
 				}
 				this.lifting = !this.stepLift();
 			}
@@ -883,14 +886,15 @@ public final class MapViewport {
 	}
 
 	/**
-	 * The remembered share into green, at 0.4 for all of it, where green isn't the clear flag: the
-	 * shader lets that much of the old map show through the clouds.
+	 * The remembered share drawn, eased like the heights, into green, at 0.4 for all of it, where
+	 * green isn't the clear flag: the shader covers the old map softly by it, so a remembered tile
+	 * read a moment late fades in or out instead of switching.
 	 */
 	private void writeRemembered() {
 		for (int k = 0; k < MASK * MASK; k++) {
 			int pixel = this.maskPixels[k];
-			if ((pixel & 0xFF00) == 0) {
-				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
+			if ((pixel & 0xFF00) != 0xFF00) {
+				this.maskPixels[k] = pixel & ~0xFF00 | Math.round(this.rememberedShown[k] * 0.4F * 255) << 8;
 			}
 		}
 	}
@@ -900,8 +904,10 @@ public final class MapViewport {
 	private static final double CLOUD_CELL = 12.8;
 	private static final double CELLS_PER_LEVEL = 5;
 
-	/** How much of a remembered map is under each mask texel, 0 to 1. */
+	/** How much of a remembered map is under each mask texel, 0 to 1, and that drawn, easing toward it. */
 	private final float[] remembered = new float[MASK * MASK];
+	private final float[] rememberedShown = new float[MASK * MASK];
+	private final float[] rememberedMoved = new float[MASK * MASK];
 	/** How tall the fog stands over each texel, as a share of its full height: {@link #liftTargets}. */
 	private final float[] liftTarget = new float[MASK * MASK];
 	/** The heights drawn, easing toward the targets. */
@@ -1008,6 +1014,13 @@ public final class MapViewport {
 				this.liftShown[k] += Math.signum(diff) * step;
 				done = false;
 			}
+			float rememberedDiff = this.remembered[k] - this.rememberedShown[k];
+			if (Math.abs(rememberedDiff) <= step * 2) {
+				this.rememberedShown[k] = this.remembered[k];
+			} else {
+				this.rememberedShown[k] += Math.signum(rememberedDiff) * step * 2;
+				done = false;
+			}
 		}
 		return done;
 	}
@@ -1021,8 +1034,8 @@ public final class MapViewport {
 				this.maskPixels[k] &= 0xFF0000FF;
 			}
 			this.markReach(this.reach, true);
-			this.writeRemembered();
 		}
+		this.writeRemembered();
 		this.writeLift();
 	}
 
@@ -1104,7 +1117,7 @@ public final class MapViewport {
 				lineNotKnown += known == 0xFF ? 0 : 1;
 				// On the surface "fully unknown" is plain too: the clouds at full height, now and as
 				// they ease, and no old map under them. The shader draws a flat cloud top there.
-				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0;
+				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0 && this.rememberedShown[k] <= 0;
 				lineNotUnknown += known == 0 && plain ? 0 : 1;
 				notKnown[(j + 1) * row + i + 1] = notKnown[j * row + i + 1] + lineNotKnown;
 				notUnknown[(j + 1) * row + i + 1] = notUnknown[j * row + i + 1] + lineNotUnknown;
