@@ -118,6 +118,8 @@ public final class GpuBakeCheck {
 	private static boolean unproven;
 	/** The player asked for a new try: {@link #open} forgets this card's saved result. */
 	private static boolean retrying;
+	/** The card {@link #open} read the saved result for this session. */
+	private static @Nullable String openedDevice;
 	private static boolean closingHooked;
 	private static int failuresInARow;
 	/** The views, as {@link #mode} and the rest take them. */
@@ -199,6 +201,7 @@ public final class GpuBakeCheck {
 	static void open(@Nullable String device) {
 		synchronized (LOCK) {
 			opened = true;
+			openedDevice = device;
 			if (device == null) {
 				return;
 			}
@@ -265,13 +268,21 @@ public final class GpuBakeCheck {
 
 	/**
 	 * The player turned the setting back on: forgets this card's result and checks it again. Before
-	 * the session's first bake the result hasn't been read yet, so that's when it's forgotten; while
-	 * a check that already began runs on, it's forgotten if that check fails.
+	 * the session's first bake the result hasn't been read yet, so that's when it's forgotten.
 	 */
 	public static void retry() {
 		synchronized (LOCK) {
 			retrying = true;
 			if (off == null) {
+				if (opened && openedDevice != null) {
+					// This session's check is under way, past reading the saved result: forget it
+					// now, so a first mismatch from before doesn't count towards a second.
+					retrying = false;
+					GpuBakeRecord record = GpuBakeRecord.load();
+					if (record.off.remove(openedDevice) != null) {
+						record.save();
+					}
+				}
 				return;
 			}
 			off = null;
@@ -465,12 +476,6 @@ public final class GpuBakeCheck {
 		String device = GpuTileBaker.device();
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
-		if (retrying) {
-			// The player asked for a new try after this session's check began: what was saved before
-			// doesn't count.
-			retrying = false;
-			record.off.remove(device);
-		}
 		record.turnedOff(device, why, modVersion());
 		if (unproven) {
 			clearMark(record);
