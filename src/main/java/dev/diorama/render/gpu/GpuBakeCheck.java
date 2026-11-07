@@ -114,13 +114,18 @@ public final class GpuBakeCheck {
 	private static volatile @Nullable Off off;
 	/** Whether this card's saved result has been read: {@link #open}. */
 	private static volatile boolean opened;
-	/** This session's first bakes are unproven, and marked so in the record. */
+	/**
+	 * This game's mark is in the record: set at {@link #open} and when a kind's first check tile goes
+	 * to the GPU, cleared once every kind that went to the GPU has had a tile read back.
+	 */
 	private static boolean unproven;
 	/** The player asked for a new try: {@link #open} forgets this card's saved result. */
 	private static boolean retrying;
 	/** The card {@link #open} read the saved result for this session. */
 	private static @Nullable String openedDevice;
 	private static boolean closingHooked;
+	/** The game is closing in good order and the mark is gone: nothing marks again. */
+	private static boolean closing;
 	private static int failuresInARow;
 	/** The views, as {@link #mode} and the rest take them. */
 	public static final int SKY = 0;
@@ -139,6 +144,13 @@ public final class GpuBakeCheck {
 	private static final class Check {
 		final String name;
 		volatile boolean passed;
+		/**
+		 * A check tile of this kind went to the GPU this session. Kept through a retry, which
+		 * doesn't wait for tiles still out.
+		 */
+		boolean sent;
+		/** One of them came back drawn: the driver got through this kind's way of drawing. */
+		boolean readBack;
 		int out;
 		int compared;
 		int failures;
@@ -206,17 +218,8 @@ public final class GpuBakeCheck {
 				return;
 			}
 			GpuBakeRecord record = GpuBakeRecord.load();
-			String crashed = record.starting;
 			String mod = modVersion();
-			// Another game in this folder, still on its first bakes, hasn't crashed: it's running.
-			boolean elsewhere = crashed != null && ProcessHandle.of(record.startingProcess).filter(ProcessHandle::isAlive).isPresent();
-			if (crashed != null && !elsewhere) {
-				record.starting = null;
-				if (!forcedOn()) {
-					Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
-					record.turnedOff(crashed, Off.CRASHED, record.startingMod == null ? "" : record.startingMod);
-				}
-			}
+			boolean elsewhere = readMark(record);
 			if (retrying) {
 				retrying = false;
 				record.off.remove(device);
@@ -234,16 +237,108 @@ public final class GpuBakeCheck {
 			if (elsewhere) {
 				return;
 			}
-			record.starting = device;
-			record.startingProcess = ProcessHandle.current().pid();
-			record.startingMod = mod;
-			record.save();
-			unproven = true;
-			if (!closingHooked) {
-				closingHooked = true;
-				// A game that closes, or crashes with a report, runs this; a dead driver doesn't.
-				Runtime.getRuntime().addShutdownHook(new Thread(GpuBakeCheck::proven, "diorama-gpu-closing"));
+			mark(record, device, mod);
+		}
+	}
+
+	/**
+	 * Reads the mark in the record, if another game left one: a game that's gone went down while it
+	 * was set, and GPU baking goes off on its card. Returns whether that game is still running, so
+	 * the mark is its own. Guarded by {@link #LOCK}.
+	 */
+	private static boolean readMark(GpuBakeRecord record) {
+		String crashed = record.starting;
+		// This game's own: an earlier mark that couldn't be cleared.
+		if (crashed == null || record.startingProcess == ProcessHandle.current().pid()) {
+			return false;
+		}
+		// Another game in this folder, still on its first bakes, hasn't crashed: it's running.
+		if (ProcessHandle.of(record.startingProcess).filter(ProcessHandle::isAlive).isPresent()) {
+			return true;
+		}
+		record.starting = null;
+		if (!forcedOn()) {
+			Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
+			record.turnedOff(crashed, Off.CRASHED, record.startingMod == null ? "" : record.startingMod);
+		}
+		return false;
+	}
+
+	/**
+	 * Marks this game's bakes unproven in the record, before the GPU draws them: a driver that dies
+	 * on them leaves the mark behind for the next {@link #open}. Guarded by {@link #LOCK}.
+	 */
+	private static void mark(GpuBakeRecord record, String device, String mod) {
+		record.starting = device;
+		record.startingProcess = ProcessHandle.current().pid();
+		record.startingMod = mod;
+		record.save();
+		unproven = true;
+		if (!closingHooked) {
+			closingHooked = true;
+			// A game that closes, or crashes with a report, runs this; a dead driver doesn't.
+			Runtime.getRuntime().addShutdownHook(new Thread(GpuBakeCheck::close, "diorama-gpu-closing"));
+		}
+	}
+
+	/**
+	 * A check tile with something to draw is about to go to the GPU. The first of its kind marks the
+	 * record again if an earlier kind's read-back cleared it: each kind lights and records its own
+	 * way, so a driver that drew one fine can still die on the next one's first tile. On the check
+	 * thread, so the render thread doesn't wait on the disk.
+	 */
+	public static void checking(int view, boolean overlays) {
+		synchronized (LOCK) {
+			Check check = check(view, overlays);
+			if (check.sent) {
+				return;
 			}
+			check.sent = true;
+			String device = openedDevice;
+			if (unproven || off != null || device == null || closing) {
+				return;
+			}
+			GpuBakeRecord record = GpuBakeRecord.load();
+			if (readMark(record)) {
+				return;
+			}
+			String mod = modVersion();
+			// Another game in this folder may have gone down on this card since this one opened.
+			Off saved = forcedOn() ? null : record.result(device, mod);
+			if (saved != null) {
+				off = saved;
+				Diorama.LOGGER.warn("GPU baking turned off on {}: {} in another game. Tiles are traced on the CPU instead.", device, saved);
+				record.save();
+				return;
+			}
+			mark(record, device, mod);
+		}
+	}
+
+	/**
+	 * A check tile came back drawn, before it's compared. Once every kind sent to the GPU has had
+	 * one back, none is unproven: the mark goes. A tile handed back undrawn proves nothing, so a
+	 * kind whose first tiles were cancelled or failed keeps the mark until the game closes.
+	 */
+	public static void readBack(int view, boolean overlays) {
+		synchronized (LOCK) {
+			check(view, overlays).readBack = true;
+			if (unproven && allReadBack()) {
+				proven();
+			}
+		}
+	}
+
+	/** Whether every kind sent to the GPU has had a tile back drawn. Guarded by {@link #LOCK}. */
+	private static boolean allReadBack() {
+		return Arrays.stream(CHECKS).allMatch(check -> !check.sent || check.readBack);
+	}
+
+	/** The game is closing in good order: clears the mark, and the check thread can't set it again. */
+	private static void close() {
+		synchronized (LOCK) {
+			closing = true;
+			proven();
 		}
 	}
 
@@ -319,7 +414,9 @@ public final class GpuBakeCheck {
 	/**
 	 * How the next bake of a {@code view} ({@link #SKY}, {@link #CAVE} or {@link #UNDER_ROOF}) runs,
 	 * with fog of war and overlays or not. A {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn},
-	 * exactly once, with the same kind, and its two bakes must read the same chunks.
+	 * exactly once, with the same kind, and its two bakes must read the same chunks. One with
+	 * something to draw goes to the GPU after {@link #checking}, and pixels drawn come back through
+	 * {@link #readBack}.
 	 */
 	public static Mode mode(int view, boolean fogOfWar, boolean overlays) {
 		if (!wanted() || off != null) {
@@ -431,7 +528,6 @@ public final class GpuBakeCheck {
 				Diorama.LOGGER.info("GPU baking matches the tracer on {} ({}): on", GpuTileBaker.device(), String.format(java.util.Locale.ROOT,
 					"%s, %d tiles, %.1f ms a tile, worst: mean difference %.2f/255, %+.2f brighter, one channel off by %.2f, %.2f%% known/unknown mismatch, %.2f%% different alpha, %.2f%% different overlay bits",
 					check.name, check.compared, cost / 1e6, check.worstMean, check.worstBias, check.worstChannel, check.worstMismatch * 100, check.worstAlpha * 100, check.worstOverlay * 100));
-				proven();
 			}
 		}
 	}
@@ -477,7 +573,8 @@ public final class GpuBakeCheck {
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
 		record.turnedOff(device, why, modVersion());
-		if (unproven) {
+		// A kind's first tile can still be on the GPU: the mark stays until it's back, or the game closes.
+		if (unproven && allReadBack()) {
 			clearMark(record);
 		}
 		record.save();
