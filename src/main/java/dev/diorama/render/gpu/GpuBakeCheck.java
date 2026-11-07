@@ -84,6 +84,11 @@ public final class GpuBakeCheck {
 	 * explored area the two sample patterns split pixels differently: matching drivers measured
 	 * up to 0.12% and 3.1% there. Alpha decides which pixels a merge keeps from the saved tile, so
 	 * it can't be loose: 8%, as the comparison test allows.
+	 *
+	 * <p>Those split pixels lie in a row along each edge of the unknown, so there are about as many
+	 * as the edge is long, however little of the tile is known. The alpha share is therefore taken
+	 * of at least {@link #PASS_PIXELS}: a tile with only a thin strip known, as the first tiles at
+	 * the edge of what has loaded often are, had one straight edge's row come to 8% of it.
 	 */
 	private static final double MAX_MISMATCH = 0.02;
 	private static final double MAX_ALPHA = 0.08;
@@ -377,7 +382,7 @@ public final class GpuBakeCheck {
 			double mean = judged ? sum / both : 0;
 			double brighter = judged ? bias / both : 0;
 			double channel = judged ? Math.max(Math.abs(redBias), Math.max(Math.abs(greenBias), Math.abs(blueBias))) / both : 0;
-			double alpha = judged ? alphaDiffers / (double) both : 0;
+			double alpha = judged ? alphaDiffers / (double) Math.max(both, PASS_PIXELS) : 0;
 			double overlay = judged && overlays ? overlayDiffers / (double) both : 0;
 			// Every tile must match on its own: the two read the same chunks, so nothing but the
 			// GPU makes them differ, and matching tiles mustn't hide one that doesn't.
