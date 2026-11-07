@@ -1049,7 +1049,7 @@ public final class MapLevel implements ChunkSource {
 				long start = System.nanoTime();
 				TileStore.Saved saved = store == null ? null : store.readSaved(key);
 				ChunkSource source = this.sourceFor(store);
-				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, pixelsOf(saved), lightOf(saved), overlays);
+				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays);
 				long spots = System.nanoTime();
 				this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
@@ -1081,13 +1081,13 @@ public final class MapLevel implements ChunkSource {
 				ChunkSource source = this.sourceFor(store);
 				dev.diorama.bake.GpuMesher.Mesh mesh;
 				try {
-					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved));
 				} catch (BlockLooks.StatesRenumbered e) {
 					throw e;
 				} catch (Throwable t) {
 					Diorama.LOGGER.error("Failed to mesh tile {}; tracing it", key, t);
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
-					TileImage image = TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), overlays);
+					TileImage image = TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays);
 					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					return;
 				}
@@ -1097,7 +1097,7 @@ public final class MapLevel implements ChunkSource {
 							dev.diorama.render.gpu.GpuBakeCheck.drawn(result.pixels() != null);
 						}
 						TileImage image = result.pixels() == null
-							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), overlays)
+							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
 							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
 						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					} catch (Throwable t) {
@@ -1664,7 +1664,7 @@ public final class MapLevel implements ChunkSource {
 				dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
 			}
 		}
-		return TileBaker.bake(key, source, looks, null, false, pixelsOf(saved), lightOf(saved), null);
+		return TileBaker.bake(key, source, looks, null, false, pixelsOf(saved), lightOf(saved), null, null);
 	}
 
 	private static int @Nullable [] pixelsOf(TileStore.@Nullable Saved saved) {
@@ -1673,6 +1673,10 @@ public final class MapLevel implements ChunkSource {
 
 	private static byte @Nullable [] lightOf(TileStore.@Nullable Saved saved) {
 		return saved == null ? null : saved.blockLight();
+	}
+
+	private static int @Nullable [] spotsOf(TileStore.@Nullable Saved saved) {
+		return saved == null ? null : saved.spots();
 	}
 
 	/**

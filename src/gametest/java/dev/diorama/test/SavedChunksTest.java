@@ -32,6 +32,9 @@ final class SavedChunksTest {
 
 	/** Returns the ground's height over the far chunks, for {@link #reopened}. */
 	static int run(ClientGameTestContext context, TestSingleplayerContext world) {
+		// A section before this one may have turned the setting back on, or moved the player to
+		// another level, and the fill only starts on the session's next tick.
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().savedChunks() != null, 200);
 		int ground = farChunksShowUp(context, world);
 		placesPlayedInAreNotDrawnAgain(context, world);
 		settingStopsIt(context);

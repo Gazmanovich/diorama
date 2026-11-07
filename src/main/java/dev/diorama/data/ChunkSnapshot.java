@@ -438,6 +438,45 @@ public final class ChunkSnapshot {
 		return this.uniform[index];
 	}
 
+	/**
+	 * A {@link #section}'s blocks as its container packs them, for readers that look each palette
+	 * entry up once instead of every block: one palette index per block in the chunk's own layout,
+	 * indexed {@code (y << 8) | (z << 4) | x}, so a turned view's blocks are at {@link #columns}
+	 * and its states need {@link #turned(BlockState)}. Null for a section without a container, or
+	 * where the container can't be read that way. Read only.
+	 */
+	public @Nullable Packed packed(int index) {
+		PalettedContainer<BlockState> states = this.states[index];
+		return states == null ? null : Sections.packed(states);
+	}
+
+	/** See {@link #packed}. */
+	public record Packed(net.minecraft.util.BitStorage storage, net.minecraft.world.level.chunk.Palette<BlockState> palette) {
+	}
+
+	/** {@link #columns} per facing, by turns. */
+	private static final int[][] COLUMNS = new int[4][];
+
+	static {
+		for (Facing facing : Facing.values()) {
+			int[] columns = new int[256];
+			for (int x = 0; x < 16; x++) {
+				for (int z = 0; z < 16; z++) {
+					columns[(z << 4) | x] = ((facing.worldBlockZ(x, z) & 15) << 4) | (facing.worldBlockX(x, z) & 15);
+				}
+			}
+			COLUMNS[facing.turns] = columns;
+		}
+	}
+
+	/**
+	 * Where each column of this view is in the chunk's own layout: entry {@code (z << 4) | x} of the
+	 * view holds the chunk's {@code (z << 4) | x}. Null for the chunk itself, which needs none.
+	 */
+	public int @Nullable [] columns() {
+		return this.facing == Facing.NORTH ? null : COLUMNS[this.facing.turns];
+	}
+
 	public int blockLight(int sectionIndex, int x, int y, int z) {
 		DataLayer layer = this.blockLight[sectionIndex];
 		return layer == null ? 0 : layer.get(this.localX(x, z), y, this.localZ(x, z));
@@ -470,19 +509,28 @@ public final class ChunkSnapshot {
 	 * lookup, and the game's fallback biome where it had no chunk.
 	 */
 	public Holder<Biome> noiseBiome(int quartX, int quartY, int quartZ) {
+		Holder<Biome> biome = this.knownNoiseBiome(quartX, quartY, quartZ);
+		return biome == null ? this.fallbackBiome : biome;
+	}
+
+	/**
+	 * Like {@link #noiseBiome}, but null where the game had no chunk, rather than the biome it
+	 * assumes there.
+	 */
+	public @Nullable Holder<Biome> knownNoiseBiome(int quartX, int quartY, int quartZ) {
 		if (this.base != null) {
-			return this.base.noiseBiome(this.facing.worldBlockX(quartX, quartZ), quartY, this.facing.worldBlockZ(quartX, quartZ));
+			return this.base.knownNoiseBiome(this.facing.worldBlockX(quartX, quartZ), quartY, this.facing.worldBlockZ(quartX, quartZ));
 		}
 		int dx = (quartX >> 2) - this.chunkX;
 		int dz = (quartZ >> 2) - this.chunkZ;
 		PalettedContainerRO<Holder<Biome>>[] sections = dx < -1 || dx > 1 || dz < -1 || dz > 1 ? null : this.biomes[(dx + 1) * 3 + dz + 1];
 		if (sections == null) {
-			return this.fallbackBiome;
+			return null;
 		}
 		int minQuart = this.minSectionY << 2;
 		int y = Mth.clamp(quartY, minQuart, minQuart + (sections.length << 2) - 1);
 		PalettedContainerRO<Holder<Biome>> section = sections[(y >> 2) - this.minSectionY];
-		return section == null ? this.fallbackBiome : section.get(quartX & 3, y & 3, quartZ & 3);
+		return section == null ? null : section.get(quartX & 3, y & 3, quartZ & 3);
 	}
 
 	/** Whether the game had the neighbouring chunk at this offset when the snapshot was taken. */

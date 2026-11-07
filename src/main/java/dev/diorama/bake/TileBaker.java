@@ -208,6 +208,12 @@ public final class TileBaker {
 	/** Four samples per pixel even when the Quality setting asks for one: see {@link #reference}. */
 	private boolean fourSamples;
 
+	/**
+	 * The saved tile's {@link TileSpots}, in the sky view only: where a ray meets a chunk the map
+	 * has no data for above where its saved ray stood, the cell was open then and counts as open.
+	 */
+	private int @Nullable [] savedSpots;
+
 	/** Finds where rays land without lighting them, for {@link #surface}. */
 	private boolean surfaceOnly;
 	// Where the last surface-only trace landed, NaN for nowhere, and whether on a top face.
@@ -357,8 +363,19 @@ public final class TileBaker {
 	}
 
 	/** A baker that only answers colour and occlusion questions, for {@link GpuMesher}. */
-	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar) {
-		return new TileBaker(key, source, looks, fogOfWar, null);
+	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, int @Nullable [] savedSpots) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
+		baker.useSavedSpots(savedSpots);
+		return baker;
+	}
+
+	private void useSavedSpots(int @Nullable [] spots) {
+		this.savedSpots = this.lit || this.key.lod() != 0 ? null : spots;
+	}
+
+	/** Whether every saved ray crossing block {@code (x, y, z)} passed through it; see {@link TileSpots#passedWhenSaved}. */
+	boolean passedWhenSaved(int x, int y, int z) {
+		return TileSpots.passedWhenSaved(this.key, this.savedSpots, x, y, z);
 	}
 
 	/**
@@ -600,25 +617,29 @@ public final class TileBaker {
 	 * keeps a bake at the edge of loaded chunks from erasing what was saved.
 	 */
 	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
-		return bake(key, source, looks, blocks, fogOfWar, saved, null, null);
+		return bake(key, source, looks, blocks, fogOfWar, saved, null, null, null);
 	}
 
 	/** Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null. */
 	public static TileImage bake(
 		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
 	) {
-		return bake(key, source, looks, blocks, fogOfWar, saved, null, overlays);
+		return bake(key, source, looks, blocks, fogOfWar, saved, null, null, overlays);
 	}
 
 	/**
 	 * Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null.
-	 * {@code savedLight} is the saved tile's {@link BlockLight}, kept with the saved pixels it goes with.
+	 * {@code savedLight} is the saved tile's {@link BlockLight}, kept with the saved pixels it goes with,
+	 * and {@code savedSpots} its {@link TileSpots}: rays reaching chunks the map has no data for pass
+	 * through them above where the saved rays stood (see {@link TileSpots#passedWhenSaved}).
 	 */
 	public static TileImage bake(
 		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, byte @Nullable [] savedLight,
+		int @Nullable [] savedSpots,
 		@Nullable Overlays overlays
 	) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
+		baker.useSavedSpots(savedSpots);
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
@@ -932,7 +953,7 @@ public final class TileBaker {
 			}
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				if (!this.passesMissing(by)) {
+				if (!this.passesMissing(by) && !TileSpots.passedWhenSaved(this.key, this.savedSpots, x, by, bz)) {
 					return false;
 				}
 				id = VoxelReader.AIR_ID;

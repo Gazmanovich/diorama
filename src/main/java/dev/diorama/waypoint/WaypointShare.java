@@ -164,11 +164,14 @@ public final class WaypointShare {
 
 	/**
 	 * {@code /diorama waypoint add <x> <y> <z> <colour> "<dimension>" "<initials>" <name>}, which the
-	 * "Add" link runs. Built with Brigadier alone, so it goes in either loader's client commands.
+	 * "Add" link runs, and {@code /diorama waypoint list}, which the Xaero's import line's link runs.
+	 * Built with Brigadier alone, so they go in either loader's client commands.
 	 */
 	public static <S> void register(CommandDispatcher<S> dispatcher) {
 		dispatcher.register(LiteralArgumentBuilder.<S>literal("diorama")
 			.then(LiteralArgumentBuilder.<S>literal("waypoint")
+				.then(LiteralArgumentBuilder.<S>literal("list")
+					.executes(WaypointShare::list))
 				.then(LiteralArgumentBuilder.<S>literal("add")
 					.then(RequiredArgumentBuilder.<S, Integer>argument("x", IntegerArgumentType.integer())
 						.then(RequiredArgumentBuilder.<S, Integer>argument("y", IntegerArgumentType.integer())
@@ -178,6 +181,13 @@ public final class WaypointShare {
 										.then(RequiredArgumentBuilder.<S, String>argument("initials", StringArgumentType.string())
 											.then(RequiredArgumentBuilder.<S, String>argument("name", StringArgumentType.greedyString())
 												.executes(WaypointShare::add)))))))))));
+	}
+
+	private static <S> int list(CommandContext<S> context) {
+		Minecraft mc = Minecraft.getInstance();
+		// Queued for later: a chat click puts the chat screen back right after running this.
+		mc.schedule(() -> mc.gui.setScreen(new WaypointListScreen(null)));
+		return 1;
 	}
 
 	private static <S> int add(CommandContext<S> context) {

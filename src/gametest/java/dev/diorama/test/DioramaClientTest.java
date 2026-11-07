@@ -88,6 +88,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
 		}
+		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
+			XaeroRealTest.clearXaero(context);
+		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
 		int savedChunksGround = 0;
@@ -182,6 +185,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
+			if (tests.contains("xaero-real")) {
+				XaeroRealTest.singleplayer(context, world);
+			}
 			if (tests.contains("unnumbered-states")) {
 				UnnumberedStatesTest.run(context, world);
 			}
@@ -223,6 +229,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("day-night")) {
 				DayNightTest.run(context, world);
+			}
+			if (tests.contains("light-flicker")) {
+				LightFlickerTest.run(context, world);
 			}
 			if (tests.contains("tile-filter")) {
 				TileFilterTest.run(context);
@@ -267,9 +276,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				// Go far from spawn, so its chunks are long gone once the world is reopened.
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
+				waitUntilGenerated(context, world);
 			}
 		}
-		if ((spawnCell != null || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
@@ -284,6 +294,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("waypoints")) {
 					temporaryGone(context);
 				}
+				if (tests.contains("xaero-real")) {
+					XaeroRealTest.reopened(context);
+				}
 				if (tests.contains("waystones")) {
 					waystonesAfterRejoin(context, reopened);
 				}
@@ -295,6 +308,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
 		}
+		if (tests.contains("leave-during-fill")) {
+			LeaveDuringFillTest.run(context);
+		}
 		if (tests.contains("tall-world")) {
 			TallWorldTest.run(context);
 		}
@@ -305,6 +321,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			mapDimensions(context);
 			moddedDimension(context);
 		}
+		if (tests.contains("biome-edge")) {
+			BiomeEdgeTest.run(context);
+		}
 		if (tests.contains("languages")) {
 			languages(context);
 		}
@@ -312,6 +331,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			multiplayer(context);
 		}
 		//? if >=1.21.4 && fabric {
+		if (tests.contains("xaero-real-server")) {
+			XaeroRealTest.server(context);
+		}
+		if (tests.contains("unsent-chunks")) {
+			UnsentChunksTest.run(context);
+		}
 		if (tests.contains("game-time-server")) {
 			GameTimeTest.onServer(context);
 		}
@@ -5062,7 +5087,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * type, not name, so it works where the game's names are obfuscated (1.21.11 in production).
 	 */
 	@SuppressWarnings("unchecked")
-	private static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
+	static java.util.List<net.minecraft.client.multiplayer.chat.GuiMessage> chatMessages(Minecraft mc) {
 		try {
 			for (java.lang.reflect.Field field : net.minecraft.client.gui.components.ChatComponent.class.getDeclaredFields()) {
 				if (field.getGenericType() instanceof java.lang.reflect.ParameterizedType type && type.getRawType() == java.util.List.class
@@ -5078,7 +5103,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** The command a line's click-to-run link carries, or null. */
-	private static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
+	static @Nullable String linkIn(net.minecraft.network.chat.Component line) {
 		String[] command = new String[1];
 		line.visit((style, text) -> {
 			//? if >=1.21.5 {
@@ -6136,6 +6161,68 @@ public class DioramaClientTest implements FabricClientGameTest {
 		return waypoint;
 	}
 
+	/**
+	 * Waits until the server has finished generating: the ground in view around the player is on the
+	 * client, and no chunk is held by a generation step. Leave a world while one is and Minecraft
+	 * 1.21.1 can stop for good on "Saving world": the shutdown keeps putting back a chunk it's
+	 * unloading for as long as a generation step holds it (ChunkMap.scheduleUnload asks
+	 * ChunkHolder.isReadyForSaving), and the step needs the server thread that loop keeps busy.
+	 * The game does this without the map too, and 1.21.4 has it fixed, so the tests that make new
+	 * ground and then leave wait for it to be generated first.
+	 */
+	static void waitUntilGenerated(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.waitFor(mc -> {
+			if (mc.level == null || mc.player == null) {
+				return false;
+			}
+			// One less than the view: the server's edge is round, and the corners of a square aren't sent.
+			int radius = mc.options.renderDistance().get() - 1;
+			int centerX = mc.player.blockPosition().getX() >> 4;
+			int centerZ = mc.player.blockPosition().getZ() >> 4;
+			for (int dx = -radius; dx <= radius; dx++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					if (dx * dx + dz * dz <= radius * radius && mc.level.getChunkSource().getChunk(centerX + dx, centerZ + dz, false) == null) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}, 2400);
+		int ticks = 0;
+		for (; world.getServer().computeOnServer(DioramaClientTest::generating); ticks++) {
+			if (ticks > 2400) {
+				throw new AssertionError("The server never finished generating");
+			}
+			context.waitTick();
+		}
+		Diorama.LOGGER.info("Waited {} ticks for the server to finish generating", ticks);
+	}
+
+	/**
+	 * Whether a generation step holds any chunk, loaded or on its way out. Read by name, which only
+	 * the development runs have: elsewhere, and before 1.21, it says no.
+	 */
+	private static boolean generating(net.minecraft.server.MinecraftServer server) {
+		try {
+			java.lang.reflect.Method refCount = net.minecraft.server.level.ChunkHolder.class.getMethod("getGenerationRefCount");
+			for (net.minecraft.server.level.ServerLevel level : server.getAllLevels()) {
+				net.minecraft.server.level.ChunkMap chunkMap = level.getChunkSource().chunkMap;
+				for (String name : new String[] {"updatingChunkMap", "pendingUnloads"}) {
+					java.lang.reflect.Field field = net.minecraft.server.level.ChunkMap.class.getDeclaredField(name);
+					field.setAccessible(true);
+					for (Object holder : ((java.util.Map<?, ?>) field.get(chunkMap)).values()) {
+						if ((int) refCount.invoke(holder) != 0) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return false;
+		}
+	}
+
 	/** Which scenarios to run: DIORAMA_TESTS=tour,radar,... (default: all but styles). */
 	private static Set<String> selectedTests() {
 		String env = System.getenv("DIORAMA_TESTS");
@@ -6144,10 +6231,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
