@@ -61,6 +61,7 @@ public final class GroundSnap {
 	void clicked(MapViewport.View view, double[] point) {
 		this.forgetOtherLayers(view);
 		this.anchor = this.ask(point[0], point[1]);
+		this.under = null;
 		this.landing = null;
 	}
 
