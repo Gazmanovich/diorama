@@ -104,20 +104,6 @@ public final class VanillaClouds {
 		return code;
 	}
 
-	/**
-	 * How far into explored land the clouds drawn with cells of {@code size} map units can reach, in
-	 * map units: the see-through band, the cell over its edge and the cover's blend across a cell.
-	 */
-	public static double reachInto(double size) {
-		double r = size / CELL;
-		return RAMP * Math.min(1, 1 / Math.sqrt(r)) + 0.6 * size * Math.min(1, 2 / r) + size;
-	}
-
-	/** The biggest cells a view draws, in map units, with {@code unitsPerPixel} map units to a screen pixel (fog.fsh: about 40 pixels, a power of two). */
-	public static double drawnCell(double unitsPerPixel) {
-		return CELL * Math.pow(2, Math.max(0, Math.ceil(Math.log(40 * unitsPerPixel / CELL) / Math.log(2))));
-	}
-
 	/** Forgets the texture, so the next code reads the current resource packs' clouds.png; maps then build their cells again. */
 	public static synchronized void reload() {
 		texture = null;

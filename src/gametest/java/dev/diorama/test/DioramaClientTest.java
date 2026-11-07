@@ -234,7 +234,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				LightFlickerTest.run(context, world);
 			}
 			if (tests.contains("tile-filter")) {
-				TileFilterTest.run(context, world);
+				TileFilterTest.run(context);
 			}
 			if (tests.contains("image-export")) {
 				ImageExportTest.run(context, world);

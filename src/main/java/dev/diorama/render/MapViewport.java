@@ -464,6 +464,13 @@ public final class MapViewport {
 		}
 	}
 
+	private static volatile boolean fogHiddenForTests;
+
+	/** For tests that check the tiles under the fog (TileFilterTest): the map drawn without it. */
+	public static void hideFogForTests(boolean hide) {
+		fogHiddenForTests = hide;
+	}
+
 	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, float night) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
@@ -486,6 +493,9 @@ public final class MapViewport {
 		double originV = Math.floor((view.minV() - MASK_MARGIN) / snap) * snap;
 		boolean fast = TileBaker.fast();
 		this.buildMask(level, view, originU, originV, texel, steps, fraction, fast);
+		if (fogHiddenForTests) {
+			return;
+		}
 
 		double span = MASK * texel;
 		float mu0 = (float) ((view.minU() - originU) / span);

@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
-import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 
 /**
  * A map shown smaller than its tiles: each screen pixel is the average of the area of the tile
@@ -54,8 +53,7 @@ final class TileFilterTest {
 	private TileFilterTest() {
 	}
 
-	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
-		explore(context, world);
+	static void run(ClientGameTestContext context) {
 		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
 		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
 		context.runOnClient(mc -> Settings.get().radarOnMap = false);
@@ -66,29 +64,13 @@ final class TileFilterTest {
 		} catch (InterruptedException e) {
 			throw new AssertionError(e);
 		}
+		// The clouds lie over the edge of explored land, see-through, as far in as a chunk or more:
+		// what's checked here is the tiles, so the map is drawn without them.
+		context.runOnClient(mc -> MapViewport.hideFogForTests(true));
 		for (Case check : CASES) {
 			DioramaClientTest.setGuiScale(context, check.guiScale);
 			context.setScreen(MapScreen::new);
-			// The clouds reach into explored land as far as they're see-through (Mapped). Where the
-			// player stands depends on the sections before, near the edge of what's explored or not:
-			// look at the player or that far off it each way, whichever has the most ground to compare.
-			double reach = dev.diorama.render.VanillaClouds.reachInto(dev.diorama.render.VanillaClouds.drawnCell(1 / (check.zoom * check.guiScale)));
-			double[][] offsets = {{0, 0}, {-reach, 0}, {reach, 0}, {0, -reach}, {0, reach}};
-			double[] best = offsets[0];
-			int most = -1;
-			for (double[] offset : offsets) {
-				lookNear(context, offset, check.zoom);
-				DioramaClientTest.settle(context, 40);
-				MapViewport.View candidate = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view());
-				Mapped around = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), candidate, check.lod, check.guiScale));
-				int[] screen = context.computeOnClient(mc -> new int[] {mc.getWindow().getWidth(), mc.getWindow().getHeight()});
-				int count = comparable(candidate, check, around, screen[0], screen[1]);
-				if (count > most) {
-					most = count;
-					best = offset;
-				}
-			}
-			lookNear(context, best, check.zoom);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), check.zoom, TileKey.SURFACE));
 			DioramaClientTest.settle(context, 40);
 			MapViewport.View view = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view());
 			int lod = context.computeOnClient(mc -> MapViewport.lodFor(MapSession.get().map(), view));
@@ -96,13 +78,12 @@ final class TileFilterTest {
 				throw new AssertionError(check.name + " draws overview level " + lod + ", not " + check.lod);
 			}
 			BufferedImage shot = read(context.takeScreenshot("tile-filter-" + check.name));
-			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod, check.guiScale));
+			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod));
 			double[] result = compare(shot, view, store, check, mapped);
 			System.out.printf("TILE-FILTER %s: median error %.3f over %.0f pixels, colour scale %.3f%n", check.name, result[0], result[1], result[2]);
 			// The shrunk-eightfold case compares a strip of about 8,000 screen pixels, of which only
-			// those with mapped ground all round, past the see-through clouds, count: some 2,500 near
-			// the spawn's edge. Enough for a median either way.
-			if (result[1] < 2_000) {
+			// those with mapped ground all round count: some 4,000 to 5,000 near the spawn's edge.
+			if (result[1] < 3_000) {
 				throw new AssertionError(check.name + ": only " + result[1] + " pixels of known ground to compare");
 			}
 			if (result[2] < 0.9 || result[2] > 1.15) {
@@ -113,7 +94,10 @@ final class TileFilterTest {
 			}
 			context.setScreen(() -> null);
 		}
-		context.runOnClient(mc -> Settings.get().radarOnMap = radar);
+		context.runOnClient(mc -> {
+			Settings.get().radarOnMap = radar;
+			MapViewport.hideFogForTests(false);
+		});
 		DioramaClientTest.setGuiScale(context, scale);
 	}
 
@@ -123,56 +107,6 @@ final class TileFilterTest {
 	 * lighter than the tiles under the fog's veil, so each channel of the average is first scaled and
 	 * offset to fit the frame as well as it can.
 	 */
-	/**
-	 * Explores the ground round the player a few hundred blocks each way, as the sections before
-	 * may not have: the see-through clouds lie over the edge of what's explored (Mapped), and the
-	 * zoomed-out cases need mapped ground well inside it. Back where it started after.
-	 */
-	private static void explore(ClientGameTestContext context, TestSingleplayerContext world) {
-		double[] start = context.computeOnClient(mc -> new double[] {mc.player.getX(), mc.player.getY(), mc.player.getZ()});
-		for (int[] step : new int[][] {{-200, 0}, {200, 0}, {0, -200}, {0, 200}, {0, 0}}) {
-			world.getServer().runCommand(String.format(java.util.Locale.ROOT, "tp @a %.1f %.1f %.1f", start[0] + step[0], Math.max(start[1], 100), start[2] + step[1]));
-			int last = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
-			int still = 0;
-			for (int i = 0; i < 600 && still < 60; i++) {
-				context.waitTick();
-				int now = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
-				still = now > last ? 0 : still + 1;
-				last = now;
-			}
-		}
-		world.getServer().runCommand(String.format(java.util.Locale.ROOT, "tp @a %.1f %.1f %.1f", start[0], start[1], start[2]));
-		DioramaClientTest.settle(context, 60);
-	}
-
-	private static void lookNear(ClientGameTestContext context, double[] offset, double zoom) {
-		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + offset[0], Projection.v(mc.player.getY(), mc.player.getZ() + offset[1]), zoom, TileKey.SURFACE));
-	}
-
-	/** How many pixels of the strip {@link #compare} reads have mapped ground all around, every fourth each way. */
-	private static int comparable(MapViewport.View view, Case check, Mapped mapped, int screenWidth, int screenHeight) {
-		double perUnit = (double) Projection.TILE_PIXELS / (Projection.TILE_UNITS << check.lod) / (1 << check.mip);
-		double perScreenPixel = perUnit / (view.zoom() * check.guiScale);
-		int[] strip = strip(view, check, screenWidth, screenHeight);
-		int count = 0;
-		for (int y = strip[2]; y < strip[3]; y += 4) {
-			for (int x = strip[0]; x < strip[1]; x += 4) {
-				if (mapped.allAround(view.minU() + x * perScreenPixel / perUnit, view.minV() + y * perScreenPixel / perUnit)) {
-					count++;
-				}
-			}
-		}
-		return count;
-	}
-
-	/** The screen pixels compared: {first x, last x + 1, first y, last y + 1}. */
-	private static int[] strip(MapViewport.View view, Case check, int screenWidth, int screenHeight) {
-		int middleX = screenWidth / 2;
-		int middleY = screenHeight / 2;
-		int reach = (int) Math.min(280, 170 * view.zoom() * check.guiScale);
-		return new int[] {middleX - reach, middleX - 12, middleY - reach * 2 / 3, middleY + reach * 2 / 3};
-	}
-
 	private static double[] compare(BufferedImage shot, MapViewport.View view, TileStore store, Case check, Mapped mapped) {
 		// Pixels of the mip level read, per map unit.
 		double perUnit = (double) Projection.TILE_PIXELS / (Projection.TILE_UNITS << check.lod) / (1 << check.mip);
@@ -181,10 +115,12 @@ final class TileFilterTest {
 		double originY = view.minV() * perUnit;
 		Map<Long, int[]> tiles = new HashMap<>();
 		List<double[]> pairs = new ArrayList<>();
-		// Within about 170 blocks of the middle, left of it.
-		int[] strip = strip(view, check, shot.getWidth(), shot.getHeight());
-		for (int y = strip[2]; y < strip[3]; y++) {
-			for (int x = strip[0]; x < strip[1]; x++) {
+		int middleX = shot.getWidth() / 2;
+		int middleY = shot.getHeight() / 2;
+		// Within about 170 blocks, which the game has loaded around the player.
+		int reach = (int) Math.min(280, 170 * view.zoom() * check.guiScale);
+		for (int y = middleY - reach * 2 / 3; y < middleY + reach * 2 / 3; y++) {
+			for (int x = middleX - reach; x < middleX - 12; x++) {
 				if (!mapped.allAround(view.minU() + x * perScreenPixel / perUnit, view.minV() + y * perScreenPixel / perUnit)) {
 					continue;
 				}
@@ -272,24 +208,23 @@ final class TileFilterTest {
 	}
 
 	/**
-	 * Which coverage cells around the view the live map has fully mapped. The see-through clouds,
-	 * their shadows and their lean reach onto mapped ground near its edge, which is the fog's
-	 * business, not the filter's: a pixel is compared only with mapped ground all around it as far
-	 * as the clouds the view draws can reach (VanillaClouds.reachInto), further to the south, which
-	 * the clouds lean over by up to a cell.
+	 * Which coverage cells around the view the live map has fully mapped. The clouds' haze, their
+	 * shadows and their lean reach onto mapped ground near its edge, which is the fog's business,
+	 * not the filter's: a pixel is compared only with mapped ground all around it, further to the
+	 * south, which the clouds lean over.
 	 */
-	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums, double around, double south) {
+	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums) {
+		private static final double AROUND = 48;
+		private static final double SOUTH = 72;
+
 		/** From the tiles of overview level {@code lod}, the ones the view draws and so the map holds. */
-		static Mapped around(MapLevel map, MapViewport.View view, int lod, int guiScale) {
-			double drawn = dev.diorama.render.VanillaClouds.drawnCell(1 / (view.zoom() * guiScale));
-			double around = dev.diorama.render.VanillaClouds.reachInto(drawn);
-			double south = around + 1.2 * drawn;
+		static Mapped around(MapLevel map, MapViewport.View view, int lod) {
 			double tileUnits = (double) Projection.TILE_UNITS * (1 << lod);
 			double cell = tileUnits / Projection.COVERAGE_CELLS;
-			double u0 = Math.floor((view.minU() - around) / cell) * cell;
-			double v0 = Math.floor((view.minV() - around) / cell) * cell;
-			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * around) / cell) + 1;
-			int height = (int) Math.ceil((view.height() / view.zoom() + around + south) / cell) + 1;
+			double u0 = Math.floor((view.minU() - AROUND) / cell) * cell;
+			double v0 = Math.floor((view.minV() - AROUND) / cell) * cell;
+			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * AROUND) / cell) + 1;
+			int height = (int) Math.ceil((view.height() / view.zoom() + AROUND + SOUTH) / cell) + 1;
 			int[] sums = new int[(width + 1) * (height + 1)];
 			for (int j = 0; j < height; j++) {
 				int line = 0;
@@ -305,14 +240,14 @@ final class TileFilterTest {
 					sums[(j + 1) * (width + 1) + i + 1] = sums[j * (width + 1) + i + 1] + line;
 				}
 			}
-			return new Mapped(u0, v0, cell, width, height, sums, around, south);
+			return new Mapped(u0, v0, cell, width, height, sums);
 		}
 
 		boolean allAround(double u, double v) {
-			int i0 = (int) Math.floor((u - this.around - this.u0) / this.cell);
-			int i1 = (int) Math.floor((u + this.around - this.u0) / this.cell) + 1;
-			int j0 = (int) Math.floor((v - this.around - this.v0) / this.cell);
-			int j1 = (int) Math.floor((v + this.south - this.v0) / this.cell) + 1;
+			int i0 = (int) Math.floor((u - AROUND - this.u0) / this.cell);
+			int i1 = (int) Math.floor((u + AROUND - this.u0) / this.cell) + 1;
+			int j0 = (int) Math.floor((v - AROUND - this.v0) / this.cell);
+			int j1 = (int) Math.floor((v + SOUTH - this.v0) / this.cell) + 1;
 			if (i0 < 0 || j0 < 0 || i1 > this.width || j1 > this.height) {
 				return false;
 			}
