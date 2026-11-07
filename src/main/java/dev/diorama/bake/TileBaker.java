@@ -135,6 +135,12 @@ public final class TileBaker {
 	final @Nullable CaveCut caveCut;
 	/** In a cave slice, how far down rays still in the rock go before they stop on the cut face. */
 	final int rockLimit;
+	/**
+	 * A cave slice drawn in the depth look ({@link ChunkSource#depthCaves}): ground below the
+	 * player's level fades to slate, only rock near the cut is seen through, and the cut rises over
+	 * steps. Off, a cave slice sees through rock all the way down, as Xaero's cave mode does.
+	 */
+	final boolean depthLook;
 	final int limitY;
 	/** One above the tallest block a camera ray of this tile can meet; camera rays start here. */
 	final int topY;
@@ -248,10 +254,11 @@ public final class TileBaker {
 		this.topY = localTop(key, source, 0);
 		this.rayTop = localTop(key, source, SKY_REACH);
 		this.lifted = this.lit && source.roof() != ChunkSource.NO_ROOF;
+		this.depthLook = this.cave && !this.lifted && source.depthCaves();
 		this.base = this.cave ? Math.min(key.layer(), source.maxY()) : Integer.MIN_VALUE;
 		this.limitY = this.cave ? Math.max(source.minY(), this.base - CAVE_DEPTH) : source.minY();
 		// Rays start over the highest the cut can rise; above a column's own cut they pass as if cut away.
-		CaveCut cut = this.cave && !this.lifted && key.lod() == 0 ? new CaveCut(this.reader, this.base, (int) Math.floor(key.minU()) - 1,
+		CaveCut cut = this.depthLook && key.lod() == 0 ? new CaveCut(this.reader, this.base, (int) Math.floor(key.minU()) - 1,
 			(int) Math.floor((key.minV() + this.limitY * this.cos) / this.sin) - 2, (int) Math.ceil(key.minU() + key.units()) + 1,
 			(int) Math.ceil((key.minV() + key.units() + (this.base + CaveCut.LIFT) * this.cos) / this.sin) + 2) : null;
 		this.caveCut = cut != null && cut.raises() ? cut : null;
@@ -259,7 +266,7 @@ public final class TileBaker {
 		this.tall = this.lit ? null : TallChunks.around(key, source, this.startY);
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
-		this.rockLimit = this.cave && !this.lifted ? this.base - CAVE_ROCK : Integer.MIN_VALUE;
+		this.rockLimit = this.depthLook ? this.base - CAVE_ROCK : Integer.MIN_VALUE;
 		this.lidAt.defaultReturnValue(Integer.MIN_VALUE);
 		this.fogAt.defaultReturnValue(-1);
 	}
@@ -545,7 +552,7 @@ public final class TileBaker {
 	 * above it, as {@link #mixWater} lights it; see {@link TileSurface#caveLight}.
 	 */
 	private int waterLight(int x, int by, int bz, double y) {
-		float fade = this.lifted ? 1 : this.caveFade(y);
+		float fade = this.depthLook ? this.caveFade(y) : 1 - Math.min(0.5F, (float) (this.startY - y) / 60.0F);
 		return TileSurface.caveLight(this.reader.blockLight(x, by + 1, bz), this.reader.skyLight(x, by + 1, bz), 1, fade, 0) | TileSurface.WATER;
 	}
 
@@ -734,7 +741,7 @@ public final class TileBaker {
 		}
 		// Outlines compare each pixel with its neighbours, so bake a one-pixel border around the area.
 		int border = this.style.outline() > 0 ? 1 : 0;
-		float edge = outlineDepth(this.cave, this.lifted);
+		float edge = outlineDepth(this.depthLook);
 		int w = width + 2 * border;
 		int h = height + 2 * border;
 		int[] pixels = border == 0 ? out : new int[w * h];
@@ -879,9 +886,9 @@ public final class TileBaker {
 		return here - neighbour > edge;
 	}
 
-	/** How much nearer a neighbour has to be for an outline: further in a cave slice, so rough rock doesn't ring every bump. */
-	public static float outlineDepth(boolean cave, boolean lifted) {
-		return cave && !lifted ? CAVE_OUTLINE_DEPTH : OUTLINE_DEPTH;
+	/** How much nearer a neighbour has to be for an outline: further in the depth look's cave slices, so rough rock doesn't ring every bump. */
+	public static float outlineDepth(boolean depthLook) {
+		return depthLook ? CAVE_OUTLINE_DEPTH : OUTLINE_DEPTH;
 	}
 
 	static int darken(int abgr, float keep) {
@@ -985,7 +992,7 @@ public final class TileBaker {
 
 			switch (kind) {
 				case BlockLooks.SOLID, BlockLooks.LAVA -> {
-					if (this.lit && kind == BlockLooks.SOLID && this.reader.ceilingUnderside(x, by, bz, this.lid(x, bz), this.limitY)) {
+					if ((this.lifted || this.depthLook) && kind == BlockLooks.SOLID && this.reader.ceilingUnderside(x, by, bz, this.lid(x, bz), this.limitY)) {
 						// A ray that left the rock near a step in a stepped ceiling would clip the
 						// step below it and draw a piece of ceiling floating over the floor.
 						break;
@@ -1079,9 +1086,10 @@ public final class TileBaker {
 		this.outDepth = (float) (-(sin * (y0 - t * sin) + cos * (z0 - t * cos)) - this.depthOrigin);
 		if (skippingRock) {
 			// Solid rock all the way down the slice: draw the cut face.
-			this.outR = Lighting.CAVE_CUT[0];
-			this.outG = Lighting.CAVE_CUT[1];
-			this.outB = Lighting.CAVE_CUT[2];
+			float[] cut = this.depthLook ? Lighting.CAVE_CUT : Lighting.CAVE_CUT_DARK;
+			this.outR = cut[0];
+			this.outG = cut[1];
+			this.outB = cut[2];
 		} else if (waterId >= 0) {
 			this.outR = 0;
 			this.outG = 0;
@@ -1195,13 +1203,16 @@ public final class TileBaker {
 			// A cave slice (under a roof the light is lifted, above). Deeper below the cut reads darker.
 			int blockLight = this.reader.blockLight(x, frontY, frontZ);
 			int skyLight = this.reader.skyLight(x, frontY, frontZ);
-			float fade = this.caveFade(hitY) * (top ? 1 : (float) Math.exp(-this.wallDepth(x, by, bz) / CAVE_WALL_FADE));
+			float fade = !this.depthLook ? 1 - Math.min(0.5F, (float) (this.startY - hitY) / 60.0F)
+				: this.caveFade(hitY) * (top ? 1 : (float) Math.exp(-this.wallDepth(x, by, bz) / CAVE_WALL_FADE));
+			// In the depth look, lower ground fades toward slate rather than black.
+			float slate = this.depthLook ? 1 - fade : 0;
 			Lighting.cave(blockLight, skyLight, ao, fade, emission, top ? 1 : SIDE, this.light);
-			this.outR = this.albedoR * this.light[0] + Lighting.CAVE_FOG[0] * (1 - fade);
-			this.outG = this.albedoG * this.light[1] + Lighting.CAVE_FOG[1] * (1 - fade);
-			this.outB = this.albedoB * this.light[2] + Lighting.CAVE_FOG[2] * (1 - fade);
+			this.outR = this.albedoR * this.light[0] + Lighting.CAVE_FOG[0] * slate;
+			this.outG = this.albedoG * this.light[1] + Lighting.CAVE_FOG[1] * slate;
+			this.outB = this.albedoB * this.light[2] + Lighting.CAVE_FOG[2] * slate;
 			// Kept for moving lights: what lit this surface besides a held torch.
-			this.surfaceLight = TileSurface.caveLight(blockLight, skyLight, ao, fade, this.looks.emission[id]);
+			this.surfaceLight = TileSurface.caveLight(blockLight, skyLight, ao, fade, this.looks.emission[id]) | (this.depthLook ? TileSurface.SLATE : 0);
 			return;
 		} else {
 			double[] j = SUN_JITTER[sample];
@@ -1258,7 +1269,7 @@ public final class TileBaker {
 		float wb = this.albedoB;
 		float light;
 		if (this.lit) {
-			light = Lighting.caveWater(this.reader.blockLight(x, by + 1, bz), this.reader.skyLight(x, by + 1, bz)) * (this.lifted ? 1 : this.caveFade(y0 - tEntry * this.sin));
+			light = Lighting.caveWater(this.reader.blockLight(x, by + 1, bz), this.reader.skyLight(x, by + 1, bz)) * (this.depthLook ? this.caveFade(y0 - tEntry * this.sin) : 1);
 		} else {
 			double sy = this.sunY + SUN_JITTER[sample][1];
 			double ox = u;

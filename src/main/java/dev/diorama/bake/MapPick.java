@@ -31,6 +31,8 @@ public final class MapPick {
 	private final int base;
 	private final int rockLimit;
 	private final boolean raised;
+	/** A cave slice in the depth look; see {@link TileBaker#depthLook}. */
+	private final boolean depthLook;
 	/** Builds above an ordinary world's top, as the baker has them; null when no ray starts up there. */
 	private final @Nullable TallChunks tall;
 	private final TileKey tile;
@@ -66,11 +68,12 @@ public final class MapPick {
 		this.roofless = !this.cave && this.underRoof;
 		// Start where the baker starts for this tile, so whatever the map draws can be picked.
 		this.base = this.cave ? Math.min(tile.layer(), source.maxY()) : Integer.MIN_VALUE;
-		this.raised = this.cave && !this.underRoof && tile.lod() == 0;
+		this.depthLook = this.cave && !this.underRoof && source.depthCaves();
+		this.raised = this.depthLook && tile.lod() == 0;
 		this.startY = this.cave ? Math.min(this.base + (this.raised ? CaveCut.LIFT : 0), source.maxY())
 			: this.roofless ? Math.min(source.roof(), source.maxY()) : fromWorldTop ? source.maxY() : TileBaker.localTop(tile, source, 0);
 		this.limitY = this.cave ? Math.max(source.minY(), this.base - TileBaker.CAVE_DEPTH) : source.minY();
-		this.rockLimit = this.cave && !this.underRoof ? this.base - TileBaker.CAVE_ROCK : Integer.MIN_VALUE;
+		this.rockLimit = this.depthLook ? this.base - TileBaker.CAVE_ROCK : Integer.MIN_VALUE;
 		this.tall = this.cave || this.roofless || fromWorldTop ? null : TallChunks.around(tile, source, this.startY);
 	}
 
@@ -134,7 +137,7 @@ public final class MapPick {
 			if (skippingRock && kind != BlockLooks.SOLID && !(this.underRoof && by + 1 < this.startY && this.reader.pocket(x, by, bz))) {
 				skippingRock = false;
 			}
-			boolean underside = !skippingRock && (this.cave || this.roofless) && kind == BlockLooks.SOLID
+			boolean underside = !skippingRock && (this.underRoof || this.depthLook) && (this.cave || this.roofless) && kind == BlockLooks.SOLID
 				&& this.reader.ceilingUnderside(x, by, bz, this.reader.lid(x, bz, cut == null ? this.startY : cut.at(x, bz), this.limitY), this.limitY);
 			// The baker passes through the underside of a ceiling once the ray has left the rock.
 			if (!skippingRock && !underside && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {

@@ -15,6 +15,8 @@ final class Lighting {
 	static final float[] CAVE_FOG = {0.008F, 0.010F, 0.015F};
 	/** The rock a cave slice cuts through, linear: a muted grey, so walls read as solid ground beside the player. */
 	static final float[] CAVE_CUT = {0.022F, 0.023F, 0.027F};
+	/** The rock a cave slice cuts through when it sees through rock: near-black, so open ground stands out. */
+	static final float[] CAVE_CUT_DARK = {0.0065F, 0.0068F, 0.0085F};
 	private static final float CAVE_CEILING = 0.8F;
 
 	private final MapStyle style;

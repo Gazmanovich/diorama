@@ -576,6 +576,7 @@ public final class MapSession {
 		}
 		this.map.setFogOfWar(fog);
 		Settings settings = Settings.get();
+		this.map.setDepthCaves(settings.legibleCaves);
 		boolean spawnSpots = settings.spawnSpots != Settings.SpawnSpots.OFF;
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
 		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);

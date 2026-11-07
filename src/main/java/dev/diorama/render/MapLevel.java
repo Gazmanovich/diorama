@@ -118,6 +118,8 @@ public final class MapLevel implements ChunkSource {
 	/** The tiles this map had under another label, until it's redrawn; null if there are none. */
 	private volatile @Nullable MapMemory memory;
 	private volatile boolean fogOfWar;
+	/** See {@link ChunkSource#depthCaves}. */
+	private volatile boolean depthCaves;
 	/** What bakes record for the map overlays, or null when no overlay is on. */
 	private volatile @Nullable Overlays overlays;
 	/**
@@ -281,6 +283,11 @@ public final class MapLevel implements ChunkSource {
 		}
 
 		@Override
+		public boolean depthCaves() {
+			return MapLevel.this.depthCaves;
+		}
+
+		@Override
 		public boolean isSeen(int x, int y, int z) {
 			return MapLevel.this.seen.isSeen(x, y, z);
 		}
@@ -313,6 +320,25 @@ public final class MapLevel implements ChunkSource {
 
 	public boolean fogOfWar() {
 		return this.fogOfWar;
+	}
+
+	@Override
+	public boolean depthCaves() {
+		return this.depthCaves;
+	}
+
+	/** Switches cave slices between the depth look and seeing through rock, dropping cave tiles drawn the other way. */
+	public void setDepthCaves(boolean value) {
+		if (this.depthCaves == value) {
+			return;
+		}
+		this.depthCaves = value;
+		if (this.roofless()) {
+			// Under a roof every view is lifted, which the depth look leaves alone.
+			return;
+		}
+		this.caveGeneration++;
+		this.dropTiles(true);
 	}
 
 	@Override
@@ -549,7 +575,7 @@ public final class MapLevel implements ChunkSource {
 			double top = (cave ? caveY1 : y1) + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {
-				top = Math.min(top, layer + CaveCut.LIFT);
+				top = Math.min(top, layer + (this.depthCaves ? CaveCut.LIFT : 0));
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
 				if (top < bottom) {
 					continue;

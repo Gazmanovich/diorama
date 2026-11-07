@@ -75,11 +75,17 @@ public final class CaveCut {
 		}
 	}
 
-	/** Whether the cut rises anywhere over the columns this was made for. */
+	/**
+	 * Whether the cut rises anywhere over the columns this was made for. The border around them,
+	 * there only so the climb can be followed in from outside, doesn't count: a step out there
+	 * changes nothing these columns draw.
+	 */
 	boolean raises() {
-		for (int c : this.cut) {
-			if (c != this.base) {
-				return true;
+		for (int j = REACH; j < this.depth - REACH; j++) {
+			for (int i = REACH; i < this.width - REACH; i++) {
+				if (this.cut[j * this.width + i] != this.base) {
+					return true;
+				}
 			}
 		}
 		return false;

@@ -46,6 +46,11 @@ public final class TurnedSource implements ChunkSource {
 	}
 
 	@Override
+	public boolean depthCaves() {
+		return this.world.depthCaves();
+	}
+
+	@Override
 	public boolean isSeen(int x, int y, int z) {
 		return this.world.isSeen(this.facing.worldBlockX(x, z), y, this.facing.worldBlockZ(x, z));
 	}

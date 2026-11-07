@@ -80,6 +80,12 @@ public final class Settings {
 	public boolean autoCaves = true;
 	/** Keep the surface view while only a roof is overhead; see {@link MapSession#autoLayer}. */
 	public boolean preferSurface = true;
+	/**
+	 * Cave slices shaded by depth (Xaero's "Legible Cave Maps"): lower ground fades to slate and
+	 * only the rock near the cut is seen through; see {@link dev.diorama.bake.ChunkSource#depthCaves}.
+	 * Off, a slice sees through rock to every cave below it.
+	 */
+	public boolean legibleCaves = false;
 	public Frame minimapFrame = Frame.CLASSIC;
 	public Shape minimapShape = Shape.SQUARE;
 

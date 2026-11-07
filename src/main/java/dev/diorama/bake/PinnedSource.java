@@ -63,6 +63,11 @@ public final class PinnedSource implements ChunkSource {
 	}
 
 	@Override
+	public boolean depthCaves() {
+		return this.live.depthCaves();
+	}
+
+	@Override
 	public boolean isSeen(int x, int y, int z) {
 		return this.live.isSeen(x, y, z);
 	}

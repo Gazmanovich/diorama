@@ -196,6 +196,8 @@ public final class GpuMesher {
 		 * were lifted off, with shadows and sky occlusion, and fading into the biome's fog.
 		 */
 		public boolean lifted;
+		/** A cave slice in the depth look; see {@link TileBaker#depthLook}. */
+		public boolean depthLook;
 		/** The roof's y, where the fog under it is measured from; see {@link ChunkSource#roof}. */
 		public int roof;
 		public final boolean cave;
@@ -306,6 +308,7 @@ public final class GpuMesher {
 		mesh.overlays = overlays;
 		boolean lifted = helper.lifted;
 		mesh.lifted = lifted;
+		mesh.depthLook = helper.depthLook;
 		if (helper.caveCut != null) {
 			// Ground raised over the cut is traced: the mesh has rays start at one height.
 			mesh.traceInstead = true;
@@ -455,7 +458,7 @@ public final class GpuMesher {
 								any = true;
 							}
 							reached = openAbove || openSouth;
-							if (reached && lit && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+							if (reached && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
 								// The bottom of a ceiling: rays that have left the rock pass
 								// through it, as the tracer's do, so it doesn't float over the floor.
 								passes = true;
@@ -548,7 +551,7 @@ public final class GpuMesher {
 							keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
 							any = true;
 						}
-						if ((openAbove || openSouth) && lit && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+						if ((openAbove || openSouth) && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
 							// The bottom of a ceiling: rays that have left the rock pass
 							// through it, as the tracer's do, so it doesn't float over the floor.
 							hereOpen[i] = true;
@@ -827,7 +830,7 @@ public final class GpuMesher {
 		// The sky view keeps only the block light, which lights the map at night (TileBaker.outBlockLight).
 		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1))
 			: (top ? helper.reader.blockLight(x, y + 1, z) : helper.reader.blockLight(x, y, z + 1)) << 16;
-		if (helper.cave && !mesh.lifted && !top) {
+		if (mesh.depthLook && !top) {
 			light |= helper.wallDepth(x, y, z) << 8;
 		}
 		int flags = kind == BlockLooks.LAVA ? LAVA : 0;
