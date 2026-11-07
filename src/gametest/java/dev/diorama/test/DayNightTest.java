@@ -170,6 +170,8 @@ final class DayNightTest {
 		// Nothing else to read for: with filling off it stops.
 		context.waitFor(mc -> MapSession.get().savedChunks() == null, 2400);
 		context.runOnClient(mc -> Settings.get().mapSavedChunks = true);
+		// The next client tick starts the fill again: a section after this one may ask it at once.
+		context.waitFor(mc -> MapSession.get().savedChunks() != null, 200);
 
 		context.runOnClient(mc -> Settings.get().dayNight = Settings.DayNight.DAY);
 		world.getServer().runCommand("time set noon");

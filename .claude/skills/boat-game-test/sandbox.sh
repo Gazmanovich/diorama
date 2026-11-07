@@ -55,8 +55,40 @@ for pair in "$@"; do
 done
 
 run=versions/$node/build/run/clientGameTest
-rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz
+rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps
 start=$(date +%s)
+# A game that stops writing its log for HANG_DUMP_SECONDS (default 180) is probably stuck: its
+# threads are dumped then, and twice more at the same spacing while it stays quiet, into
+# thread-dumps/ in the results. A hang that ends in a test timeout minutes later would otherwise
+# leave nothing to tell where it stuck.
+watch_hang() {
+	# Not holding the run's lock: a sleep left over after the run would keep the next run out.
+	exec 9>&-
+	local quiet=${HANG_DUMP_SECONDS:-180} dumps=0 log="$run/logs/latest.log" last=0
+	while [ $dumps -lt 3 ]; do
+		sleep 15
+		[ -e "$log" ] || continue
+		local changed now
+		changed=$(stat -c %Y "$log")
+		now=$(date +%s)
+		if [ $((now - changed)) -ge "$quiet" ] && [ $((now - last)) -ge "$quiet" ]; then
+			mkdir -p ~/thread-dumps
+			for pid in $(pgrep -u "$(id -u)" java); do
+				# The game, not Gradle.
+				if tr '\0' ' ' < /proc/$pid/cmdline | grep -q -E 'GradleDaemon|GradleMain|GradleWorkerMain|GradleWrapperMain'; then
+					continue
+				fi
+				local out=~/thread-dumps/$(date +%H%M%S)-$pid.txt
+				timeout 60 ~/jdk25/bin/jcmd "$pid" Thread.print -l > "$out" 2>&1 || kill -QUIT "$pid"
+			done
+			mark "game log quiet for $((now - changed)) s: threads dumped"
+			dumps=$((dumps + 1))
+			last=$now
+		fi
+	done
+}
+watch_hang &
+watcher=$!
 mark "running :$node:runClientGameTest (tests: $tests)"
 # 90 min at most; boat_run.py passes TEST_SECONDS, what its own deadline leaves after setup. The
 # configuration cache skips configuring the build when a VM runs the same node again (about 15 s);
@@ -65,12 +97,16 @@ timeout --kill-after=60 "${TEST_SECONDS:-5400}" xvfb-run -a -s '-screen 0 1920x1
 	bash ./gradlew --no-daemon --console=plain --configuration-cache --configuration-cache-problems=warn \
 	":$node:runClientGameTest" 2>&1 | stamp > ~/gradle.log
 code=${PIPESTATUS[0]}
+kill $watcher 2>/dev/null
 mark "gradle finished"
 minutes=$(( ($(date +%s) - start) / 60 ))
 
 # Any failure packing the results fails the script, so the run isn't reported without its evidence.
 mkdir -p ~/result || exit 1
 cp ~/gradle.log ~/sandbox.log ~/result/ || exit 1
+if [ -d ~/thread-dumps ]; then
+	cp -r ~/thread-dumps ~/result/ || exit 1
+fi
 for part in screenshots crash-reports logs/latest.log; do
 	if [ -e "$run/$part" ]; then
 		cp -r "$run/$part" ~/result/ || exit 1

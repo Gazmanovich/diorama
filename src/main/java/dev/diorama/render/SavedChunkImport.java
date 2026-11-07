@@ -35,6 +35,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -91,6 +92,11 @@ public final class SavedChunkImport {
 	 */
 	private static final boolean PACED = MapLevel.BAKER_COUNT == 1;
 
+	/** Held by the fill keeping its progress in each folder; see {@link #takeFolder}. */
+	private static final Map<Path, ReentrantLock> FOLDER_LOCKS = new ConcurrentHashMap<>();
+	/** How long a fill waits for an earlier one in its folder before the log says so. */
+	private static final long FOLDER_WAIT_WARN_MS = 30_000;
+
 	private final MapLevel map;
 	private final SavedChunks save;
 	private final SavedChunkSource source;
@@ -111,6 +117,8 @@ public final class SavedChunkImport {
 	// The import thread's own from here on.
 	/** The folder progress is kept for; a different one means a different kind of view. */
 	private @Nullable Path folder;
+	/** The lock on {@link #folder} this thread holds while it may save progress there. */
+	private @Nullable ReentrantLock folderLock;
 	private volatile @Nullable Progress progress;
 	/** The save's chunks by {@link SavedChunks#regionKey}, as of the last listing; see {@link SavedChunks#scan}. */
 	private Map<Long, int[]> regions = Map.of();
@@ -264,6 +272,11 @@ public final class SavedChunkImport {
 		return progress != null && progress.time(chunkX >> 5, chunkZ >> 5, index(chunkX, chunkZ)) > 0;
 	}
 
+	/** For tests: whether the fill's thread and its workers have all ended since it was stopped. */
+	public boolean finished() {
+		return !this.thread.isAlive() && this.workers.isTerminated();
+	}
+
 	private boolean stopped() {
 		return this.stop.getCount() == 0;
 	}
@@ -293,9 +306,47 @@ public final class SavedChunkImport {
 			}
 			stopped = this.stopped();
 		}
-		this.workers.shutdown();
-		if (this.progress != null) {
-			this.progress.saveIfChanged();
+		try {
+			this.workers.shutdown();
+			if (this.progress != null) {
+				this.progress.saveIfChanged();
+			}
+		} finally {
+			this.leaveFolder();
+		}
+	}
+
+	/**
+	 * Takes the folder's lock, which this fill's thread holds for as long as it may save progress
+	 * there, once the fill before it there has let go. A fill stops without waiting for its tile in
+	 * progress, so leaving never waits on a bake, and saves its progress once that tile is done.
+	 * Back in the same world or dimension seconds later, the new fill would otherwise read the
+	 * progress from before that save, and the old fill's save would land on top of the new one's.
+	 * The wait is on this fill's own thread, with no time limit: going ahead early is what it's there
+	 * to stop. Says false if this fill was stopped meanwhile.
+	 */
+	private boolean takeFolder(Path folder) {
+		ReentrantLock lock = FOLDER_LOCKS.computeIfAbsent(folder, key -> new ReentrantLock());
+		long warnAt = System.currentTimeMillis() + FOLDER_WAIT_WARN_MS;
+		while (!lock.tryLock()) {
+			if (this.pause(100)) {
+				return false;
+			}
+			if (warnAt != 0 && System.currentTimeMillis() > warnAt) {
+				Diorama.LOGGER.warn("Drawing saved chunks into {} waits for an earlier fill there to finish", folder);
+				warnAt = 0;
+			}
+		}
+		this.folderLock = lock;
+		return true;
+	}
+
+	/** Lets go of the folder's lock: this fill won't save progress there again. */
+	private void leaveFolder() {
+		ReentrantLock lock = this.folderLock;
+		this.folderLock = null;
+		if (lock != null && lock.isHeldByCurrentThread()) {
+			lock.unlock();
 		}
 	}
 
@@ -309,6 +360,13 @@ public final class SavedChunkImport {
 		if (!folder.equals(this.folder)) {
 			if (this.progress != null) {
 				this.progress.saveIfChanged();
+			}
+			// Nothing saves there again once the lock is let go, not even a save that just failed.
+			this.progress = null;
+			this.folder = null;
+			this.leaveFolder();
+			if (!this.takeFolder(folder)) {
+				return;
 			}
 			this.folder = folder;
 			// A sky view with a night draws block light, which tiles drawn before it was kept lack.
