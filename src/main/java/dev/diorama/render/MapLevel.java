@@ -1159,7 +1159,14 @@ public final class MapLevel implements ChunkSource {
 				meshed = true;
 				byte[] info = overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
 				int[] traced = TileBaker.reference(key, source, looks, fog, overlays, info);
+				// An empty mesh never reaches the GPU: its blank pixels prove nothing about the driver.
+				if (!mesh.empty) {
+					dev.diorama.render.gpu.GpuBakeCheck.checking(view, overlays != null);
+				}
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> CHECKER.execute(() -> {
+					if (result.pixels() != null && !mesh.empty) {
+						dev.diorama.render.gpu.GpuBakeCheck.readBack(view, overlays != null);
+					}
 					if (result.pixels() == null) {
 						dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, !result.declined());
 					} else if (this.generation(key) == generation && look.equals(result.look())) {
