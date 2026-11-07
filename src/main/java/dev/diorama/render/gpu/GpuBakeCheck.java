@@ -22,7 +22,8 @@ import net.fabricmc.loader.api.FabricLoader;
  * turns GPU baking off, so it can't spoil a map. So does a card too slow to bake without the
  * player feeling it, and any failure of the GPU code, down to a driver crash taking the game with
  * it. Each is saved per card ({@link GpuBakeRecord}), so the next session goes straight to the
- * tracer; turning the setting off and on again asks for a new try.
+ * tracer, except after a first mismatch, which the next session checks again; turning the setting
+ * off and on again asks for a new try.
  *
  * <p>Both bakes of a check tile read the same chunks (a {@code PinnedSource}), so any difference
  * past what the two sample patterns explain is the GPU's. Six kinds of bake are checked apart:
@@ -210,7 +211,7 @@ public final class GpuBakeCheck {
 				record.starting = null;
 				if (!forcedOn()) {
 					Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
-					record.off.put(crashed, new GpuBakeRecord.Entry(Off.CRASHED, record.startingMod));
+					record.turnedOff(crashed, Off.CRASHED, record.startingMod == null ? "" : record.startingMod);
 				}
 			}
 			if (retrying) {
@@ -218,6 +219,9 @@ public final class GpuBakeCheck {
 				record.off.remove(device);
 			}
 			Off saved = forcedOn() ? null : record.result(device, mod);
+			if (saved == null && record.off.containsKey(device) && mod.equals(record.off.get(device).mod)) {
+				Diorama.LOGGER.info("GPU baking turned off once before on {} ({}); checking it again.", device, record.off.get(device).result);
+			}
 			if (saved != null) {
 				off = saved;
 				Diorama.LOGGER.info("GPU baking stays off on {}: {} here before. Tiles are traced on the CPU.", device, saved);
@@ -460,7 +464,7 @@ public final class GpuBakeCheck {
 		String device = GpuTileBaker.device();
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
-		record.off.put(device, new GpuBakeRecord.Entry(why, modVersion()));
+		record.turnedOff(device, why, modVersion());
 		if (unproven) {
 			clearMark(record);
 		}
