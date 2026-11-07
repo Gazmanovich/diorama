@@ -72,6 +72,8 @@ public final class MapSession {
 	private final Lights lights;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
+	/** The slice {@link #autoLayer} shows underground, or {@link TileKey#SURFACE} before one is picked. */
+	private int caveLayer = TileKey.SURFACE;
 	private MapStyle style = MapStyle.get();
 
 	private MapSession(ClientLevel level, @Nullable String key) {
@@ -574,6 +576,7 @@ public final class MapSession {
 		}
 		this.map.setFogOfWar(fog);
 		Settings settings = Settings.get();
+		this.map.setDepthCaves(settings.legibleCaves);
 		boolean spawnSpots = settings.spawnSpots != Settings.SpawnSpots.OFF;
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
 		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
@@ -581,7 +584,10 @@ public final class MapSession {
 		this.crafts.tick(viewer, this.ticks);
 		if (viewer != null) {
 			this.updateUnderground(viewer);
-			if (this.underground) {
+			if (!this.underground) {
+				this.caveLayer = TileKey.SURFACE;
+			} else {
+				this.updateCaveLayer(viewer);
 				this.updateSight(viewer);
 			}
 		}
@@ -646,9 +652,9 @@ public final class MapSession {
 		return this.underground;
 	}
 
-	/** The cave slice for a player standing at {@code feetY}: a few blocks above their head. */
+	/** The cave slice for a player standing at {@code feetY}: 2 to 5 blocks above their head, so ground a step or two up still shows. */
 	public static int caveLayerFor(double feetY) {
-		return Math.floorDiv(Mth.floor(feetY) + 5, 4) * 4;
+		return Math.floorDiv(Mth.floor(feetY) + 7, 4) * 4;
 	}
 
 	/** The layer the minimap should show right now. */
@@ -661,7 +667,20 @@ public final class MapSession {
 		if (Settings.get().preferSurface && this.depthToSky(BlockPos.containing(viewer.getEyePosition())) < MIN_CAVE_DEPTH) {
 			return TileKey.SURFACE;
 		}
-		return caveLayerFor(viewer.getY());
+		return this.caveLayer(viewer);
+	}
+
+	/** The cave slice for where the viewer is, as the minimap shows it underground. */
+	public int caveLayer(Entity viewer) {
+		return this.caveLayer == TileKey.SURFACE ? caveLayerFor(viewer.getY()) : this.caveLayer;
+	}
+
+	/** Follows the player down at once, but up only once the cut comes within a block of their head, so a jump doesn't swap the slice. */
+	private void updateCaveLayer(Entity viewer) {
+		int wanted = caveLayerFor(viewer.getY());
+		if (this.caveLayer == TileKey.SURFACE || wanted < this.caveLayer || this.caveLayer <= Mth.floor(viewer.getY()) + 2) {
+			this.caveLayer = wanted;
+		}
 	}
 
 	/** Blocks between the eye and the first place open to the sky, or more than {@link #MAX_SKY_DEPTH}. */

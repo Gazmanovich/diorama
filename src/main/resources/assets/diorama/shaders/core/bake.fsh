@@ -213,7 +213,7 @@ vec3 hazed(vec3 c, float y) {
 }
 
 // Caves and under a roof: the game's block and sky light in the cell the face looks into.
-vec3 lit_light(vec3 p, float ao) {
+vec3 lit_light(vec3 p, bool top, float ao) {
     float bl = faceLight.y * 255.0 / 15.0;
     float sl = faceLight.x * 255.0 / 15.0 * 0.8;
     float warm = pow(bl, 1.5);
@@ -221,7 +221,13 @@ vec3 lit_light(vec3 p, float ao) {
     // Unlit caves stay readable; torches, lava and daylight make them glow.
     float base = 0.42;
     vec3 l = (base * vec3(0.92, 0.96, 1.08) + warm * vec3(0.9, 0.75, 0.5) + cool * vec3(0.6, 0.65, 0.75)) * ao;
-    if (Mode.y > 0.5) {
+    if (Mode.y > 0.5 && Shadow.w > 0.5) {
+        // The depth look: deeper below the player's level reads darker, and walls with the rock above them, as TileBaker.CAVE_FADE.
+        l *= exp(min(0.0, p.y - Mode.z + 6.0) / 12.0);
+        if (!top) {
+            l *= exp(-faceLight.z * 255.0 / 4.0);
+        }
+    } else if (Mode.y > 0.5) {
         // Deeper below the cut reads darker.
         l *= 1.0 - min(0.5, (Mode.z - p.y) / 60.0);
     }
@@ -252,6 +258,9 @@ void main() {
     if (Mode.x > 0.5) {
         float levels = max(faceLight.y * 255.0, faceLight.x * 255.0 * 0.8);
         lit = 0.42 + pow(levels / 15.0, 1.5) * 0.8;
+        if (Mode.y > 0.5 && Mode.w < 0.5 && Shadow.w > 0.5) {
+            lit *= exp(min(0.0, localPos.y - Mode.z + 6.0) / 12.0);
+        }
     } else {
         vec3 normal = top ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
         float ambient = Light.x;
@@ -305,14 +314,16 @@ void main() {
     }
     if (faceInfo.x == FACE_FLOOR) {
         // Rays that reached the view's limit: the cut face if still in rock, else the void.
-        fragColor = vec4((flags & FLAG_CUT) != 0 ? vec3(0.0065, 0.0068, 0.0085) : vec3(0.01, 0.01, 0.015), 1.0);
+        // The depth look's cut rock is a muted grey (Lighting.CAVE_CUT), else near-black (CAVE_CUT_DARK).
+        vec3 cut = Shadow.w > 0.5 ? vec3(0.022, 0.023, 0.027) : vec3(0.0065, 0.0068, 0.0085);
+        fragColor = vec4((flags & FLAG_CUT) != 0 ? cut : vec3(0.01, 0.01, 0.015), 1.0);
         fragAux = vec4(0.0, 0.0, 1.0, 0.0);
         return;
     }
     float ao = bilinear(faceOcclusion, faceUv);
     bool lid = Mode.w > 0.5;
     vec3 l = lid ? lid_light(localPos, top, ao, bilinear(faceSky, faceUv))
-        : Mode.x > 0.5 ? lit_light(localPos, ao) : sun_light(localPos, top, ao, bilinear(faceSky, faceUv));
+        : Mode.x > 0.5 ? lit_light(localPos, top, ao) : sun_light(localPos, top, ao, bilinear(faceSky, faceUv));
     float emission = faceColor.a;
     if (emission > 0.0) {
         // In the fog, small lights like shroomlights and glowstone glow softer, so they don't
@@ -324,6 +335,11 @@ void main() {
         l *= 0.82;
     }
     vec3 shaded = albedo * l;
+    if (Mode.y > 0.5 && !lid && Shadow.w > 0.5) {
+        // The depth look: lower ground fades toward a cool dark, as Lighting.CAVE_FOG.
+        float fade = exp(min(0.0, localPos.y - Mode.z + 6.0) / 12.0) * (top ? 1.0 : exp(-faceLight.z * 255.0 / 4.0));
+        shaded += vec3(0.008, 0.010, 0.015) * (1.0 - fade);
+    }
     fragColor = vec4(lid ? hazed(shaded, localPos.y) : shaded, 1.0);
     // In the sky view, the block light in front of the face, or a lamp's own if brighter (TileBaker.outBlockLight).
     float blockLight = Mode.x > 0.5 ? 0.0 : max(faceLight.y * 255.0, floor(emission * 15.0 + 0.5)) / 15.0;

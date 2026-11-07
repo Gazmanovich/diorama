@@ -196,6 +196,8 @@ public final class GpuMesher {
 		 * were lifted off, with shadows and sky occlusion, and fading into the biome's fog.
 		 */
 		public boolean lifted;
+		/** A cave slice in the depth look; see {@link TileBaker#depthLook}. */
+		public boolean depthLook;
 		/** The roof's y, where the fog under it is measured from; see {@link ChunkSource#roof}. */
 		public int roof;
 		public final boolean cave;
@@ -306,6 +308,12 @@ public final class GpuMesher {
 		mesh.overlays = overlays;
 		boolean lifted = helper.lifted;
 		mesh.lifted = lifted;
+		mesh.depthLook = helper.depthLook;
+		if (helper.caveCut != null) {
+			// Ground raised over the cut is traced: the mesh has rays start at one height.
+			mesh.traceInstead = true;
+			return mesh;
+		}
 		mesh.roof = source.roof();
 		// Under a lifted lid nothing above the cut is left to block light.
 		mesh.rayTop = lifted ? Math.min(helper.rayTop, startY) : helper.rayTop;
@@ -450,8 +458,8 @@ public final class GpuMesher {
 								any = true;
 							}
 							reached = openAbove || openSouth;
-							if (reached && lifted && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
-								// The bottom of a ceiling under a roof: rays that have left the rock pass
+							if (reached && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+								// The bottom of a ceiling: rays that have left the rock pass
 								// through it, as the tracer's do, so it doesn't float over the floor.
 								passes = true;
 								underside = true;
@@ -543,8 +551,8 @@ public final class GpuMesher {
 							keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
 							any = true;
 						}
-						if ((openAbove || openSouth) && lifted && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
-							// The bottom of a ceiling under a roof: rays that have left the rock pass
+						if ((openAbove || openSouth) && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+							// The bottom of a ceiling: rays that have left the rock pass
 							// through it, as the tracer's do, so it doesn't float over the floor.
 							hereOpen[i] = true;
 							any = true;
@@ -606,6 +614,27 @@ public final class GpuMesher {
 					fx1 = Math.max(fx1, x);
 					fz0 = Math.min(fz0, z);
 					fz1 = Math.max(fz1, z);
+				}
+				if (y == helper.rockLimit && y > limitY) {
+					// Rays still in the rock this far below the cut stop on the cut face, as the tracer's do.
+					for (int z = hi; z >= lo; z--) {
+						int i = z - zBase;
+						if (!hereRock[i]) {
+							continue;
+						}
+						if (hereOpen[i] && hereRockN[i] == RockRays.ALL) {
+							mesh.traceInstead = true;
+						} else if (hereOpen[i]) {
+							int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
+							for (int b = 0; b < n; b += 2) {
+								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
+							}
+						} else {
+							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT);
+						}
+						hereRock[i] = false;
+						hereRockN[i] = 0;
+					}
 				}
 				if (y == limitY) {
 					// Rays still going: they end at the view's limit, on the cut face or the void.
@@ -801,6 +830,9 @@ public final class GpuMesher {
 		// The sky view keeps only the block light, which lights the map at night (TileBaker.outBlockLight).
 		int light = lit ? (top ? light(helper.reader, x, y + 1, z) : light(helper.reader, x, y, z + 1))
 			: (top ? helper.reader.blockLight(x, y + 1, z) : helper.reader.blockLight(x, y, z + 1)) << 16;
+		if (mesh.depthLook && !top) {
+			light |= helper.wallDepth(x, y, z) << 8;
+		}
 		int flags = kind == BlockLooks.LAVA ? LAVA : 0;
 		if (mesh.overlays != null && kind == BlockLooks.SOLID) {
 			flags |= overlayFlags(mesh, helper.reader, looks, id, x, y, z, top);
