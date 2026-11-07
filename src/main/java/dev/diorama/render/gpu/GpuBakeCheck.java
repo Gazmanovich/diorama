@@ -124,6 +124,8 @@ public final class GpuBakeCheck {
 	/** The card {@link #open} read the saved result for this session. */
 	private static @Nullable String openedDevice;
 	private static boolean closingHooked;
+	/** The game is closing in good order and the mark is gone: nothing marks again. */
+	private static boolean closing;
 	private static int failuresInARow;
 	/** The views, as {@link #mode} and the rest take them. */
 	public static final int SKY = 0;
@@ -275,7 +277,7 @@ public final class GpuBakeCheck {
 		if (!closingHooked) {
 			closingHooked = true;
 			// A game that closes, or crashes with a report, runs this; a dead driver doesn't.
-			Runtime.getRuntime().addShutdownHook(new Thread(GpuBakeCheck::proven, "diorama-gpu-closing"));
+			Runtime.getRuntime().addShutdownHook(new Thread(GpuBakeCheck::close, "diorama-gpu-closing"));
 		}
 	}
 
@@ -293,7 +295,7 @@ public final class GpuBakeCheck {
 			}
 			check.sent = true;
 			String device = openedDevice;
-			if (unproven || off != null || device == null) {
+			if (unproven || off != null || device == null || closing) {
 				return;
 			}
 			GpuBakeRecord record = GpuBakeRecord.load();
@@ -330,6 +332,14 @@ public final class GpuBakeCheck {
 	/** Whether every kind sent to the GPU has had a tile back drawn. Guarded by {@link #LOCK}. */
 	private static boolean allReadBack() {
 		return Arrays.stream(CHECKS).allMatch(check -> !check.sent || check.readBack);
+	}
+
+	/** The game is closing in good order: clears the mark, and the check thread can't set it again. */
+	private static void close() {
+		synchronized (LOCK) {
+			closing = true;
+			proven();
+		}
 	}
 
 	/** The first bakes are through, or the game is closing in good order. */
