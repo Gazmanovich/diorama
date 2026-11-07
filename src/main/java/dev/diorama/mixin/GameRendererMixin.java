@@ -22,9 +22,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
-	// The GPU bake experiment draws its tiles before the frame opens any pass.
-	//? if >=26.3 {
-	@Inject(method = "render()V", at = @At("HEAD"))
+	// The GPU bake experiment draws its tiles before the frame opens any pass, and a finished tile
+	// goes up before the GUI is drawn. Taking one can free a texture the tile had, such as its night
+	// light: the GUI keeps what it's handed until the end of the frame, so a frame mustn't take
+	// tiles after it has started drawing it. From 26.1 the GUI is handed its draws in extract,
+	// before render; until then, at the start of render.
+	//? if >=26.1 {
+	@Inject(method = "extract(Lnet/minecraft/client/DeltaTracker;Z)V", at = @At("HEAD"))
 	//?} else if >=1.21 {
 	/*@Inject(method = "render(Lnet/minecraft/client/DeltaTracker;Z)V", at = @At("HEAD"))
 	*///?} else {

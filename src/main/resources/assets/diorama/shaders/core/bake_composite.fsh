@@ -31,7 +31,6 @@ layout(location = 0) out vec4 fragColor;
 // averaged over its known samples, as TileBaker.bakePixels does.
 layout(location = 1) out vec4 fragInfo;
 
-const float OUTLINE_DEPTH = 1.5;
 // TileBaker.OUTLINE_WATER_FADE: outlines under water fade with the water in front of them.
 const float OUTLINE_WATER_FADE = 6.0;
 
@@ -89,7 +88,7 @@ float pixel_water(ivec2 pixel) {
 }
 
 bool nearer(float neighbour, float here) {
-    return neighbour >= 0.0 && here - neighbour > OUTLINE_DEPTH;
+    return neighbour >= 0.0 && here - neighbour > Shadow.z;
 }
 
 vec3 to_srgb(vec3 l) {

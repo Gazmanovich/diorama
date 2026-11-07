@@ -48,11 +48,16 @@ public final class MinimapHud implements HudElement {
 	 * half a second to bake and a new slice can need four at once, so this leaves room for that.
 	 */
 	private static final long LAYER_HOLD_MS = 3000;
+	private static final long LAYER_FADE_MS = 300;
 	private static final int INFO_COLOR = 0xFFFFFFFF;
 	/** The game time once it's dark enough for a bed, which can be earlier than the clock says in a storm. */
 	private static final int BED_TIME_COLOR = 0xFF9CC4FF;
 
 	private final MapViewport viewport = new MapViewport();
+	/** The slice being faded out, under the one fading in. */
+	private final MapViewport fading = new MapViewport();
+	private int fadingLayer;
+	private long fadeStart = -1;
 	private final DrawingOverlay drawings = new DrawingOverlay();
 	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
 	private int shownLayer;
@@ -133,6 +138,7 @@ public final class MinimapHud implements HudElement {
 	/** Frees the GPU texture the minimap's fog uses. For a copy that's done drawing, like the settings preview. */
 	public void close() {
 		this.viewport.close();
+		this.fading.close();
 	}
 
 	/**
@@ -173,11 +179,20 @@ public final class MinimapHud implements HudElement {
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), wantedLayer), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
 		float opacity = settings.opacity();
-		this.viewport.opacity(opacity);
+		float fadeIn = this.fadeStart < 0 ? 1 : (System.currentTimeMillis() - this.fadeStart) / (float) LAYER_FADE_MS;
+		if (fadeIn < 1) {
+			// So the two layers together stay as opaque as the minimap is set.
+			this.fading.opacity(opacity * (1 - fadeIn) / (1 - opacity * fadeIn));
+			this.fading.draw(graphics, session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), this.fadingLayer), this.fadingLayer, round, true), 0, false, null);
+		} else {
+			this.fadeStart = -1;
+		}
+		float shownOpacity = opacity * Math.min(1, fadeIn);
+		this.viewport.opacity(shownOpacity);
 
 		MapViewport.View view = new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), layer), layer, round, true);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
-			() -> session.lights().draw(graphics, view, partialTick, opacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
+			() -> session.lights().draw(graphics, view, partialTick, shownOpacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
 		session.crafts().draw(graphics, view, partialTick, opacity);
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
@@ -219,6 +234,9 @@ public final class MinimapHud implements HudElement {
 	private int layerToShow(MapLevel level, MapViewport.View wanted) {
 		long now = System.currentTimeMillis();
 		if (!this.showing || wanted.layer() == this.shownLayer) {
+			if (!this.showing) {
+				this.fadeStart = -1;
+			}
 			this.showing = true;
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;
@@ -230,7 +248,16 @@ public final class MinimapHud implements HudElement {
 		MapViewport.View shown = new MapViewport.View(wanted.x(), wanted.y(), wanted.width(), wanted.height(),
 			wanted.centerU(), wanted.centerV(), zoom(level, this.shownLayer), this.shownLayer);
 		// The old slice only helps if it has something to show: after a teleport or a new dimension it doesn't.
-		if (MapViewport.ready(level, wanted) || now - this.holdStart > LAYER_HOLD_MS || !MapViewport.showsAnything(level, shown)) {
+		boolean oldShows = MapViewport.showsAnything(level, shown);
+		if (MapViewport.ready(level, wanted) || now - this.holdStart > LAYER_HOLD_MS || !oldShows) {
+			// Between cave slices only: a see-through surface view leaves out its detailed tiles.
+			if (oldShows && this.shownLayer != TileKey.SURFACE && wanted.layer() != TileKey.SURFACE) {
+				this.fadingLayer = this.shownLayer;
+				this.fadeStart = now;
+			} else {
+				// A straight switch: a cave slice still fading out mustn't show over the surface.
+				this.fadeStart = -1;
+			}
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;
 		}

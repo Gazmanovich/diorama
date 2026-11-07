@@ -509,19 +509,28 @@ public final class ChunkSnapshot {
 	 * lookup, and the game's fallback biome where it had no chunk.
 	 */
 	public Holder<Biome> noiseBiome(int quartX, int quartY, int quartZ) {
+		Holder<Biome> biome = this.knownNoiseBiome(quartX, quartY, quartZ);
+		return biome == null ? this.fallbackBiome : biome;
+	}
+
+	/**
+	 * Like {@link #noiseBiome}, but null where the game had no chunk, rather than the biome it
+	 * assumes there.
+	 */
+	public @Nullable Holder<Biome> knownNoiseBiome(int quartX, int quartY, int quartZ) {
 		if (this.base != null) {
-			return this.base.noiseBiome(this.facing.worldBlockX(quartX, quartZ), quartY, this.facing.worldBlockZ(quartX, quartZ));
+			return this.base.knownNoiseBiome(this.facing.worldBlockX(quartX, quartZ), quartY, this.facing.worldBlockZ(quartX, quartZ));
 		}
 		int dx = (quartX >> 2) - this.chunkX;
 		int dz = (quartZ >> 2) - this.chunkZ;
 		PalettedContainerRO<Holder<Biome>>[] sections = dx < -1 || dx > 1 || dz < -1 || dz > 1 ? null : this.biomes[(dx + 1) * 3 + dz + 1];
 		if (sections == null) {
-			return this.fallbackBiome;
+			return null;
 		}
 		int minQuart = this.minSectionY << 2;
 		int y = Mth.clamp(quartY, minQuart, minQuart + (sections.length << 2) - 1);
 		PalettedContainerRO<Holder<Biome>> section = sections[(y >> 2) - this.minSectionY];
-		return section == null ? this.fallbackBiome : section.get(quartX & 3, y & 3, quartZ & 3);
+		return section == null ? null : section.get(quartX & 3, y & 3, quartZ & 3);
 	}
 
 	/** Whether the game had the neighbouring chunk at this offset when the snapshot was taken. */

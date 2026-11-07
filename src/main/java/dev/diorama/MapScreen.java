@@ -450,6 +450,14 @@ public final class MapScreen extends Screen {
 		// Switching to a cave slice while zoomed far out comes back to the closest zoom it can show.
 		this.zoom = Math.max(this.minZoom(), this.zoom);
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
+		this.lastView = view;
+		if (this.draw.holding() && this.pressButton != InputConstants.MOUSE_BUTTON_LEFT) {
+			// The left button is still down for the pen, eraser or measuring tool, but another button was
+			// pressed over it (the middle one, to pan). The game sends drags for the latest press only, and
+			// none once that is let go, so the drawing follows the cursor from here instead. lastView is
+			// already this frame's, which the measuring tool picks its block through.
+			this.draw.follow(view, this.font, this.dimension(), mouseX, mouseY);
+		}
 		// Held lights belong to this dimension's map, not one shown from elsewhere.
 		this.viewport.draw(graphics, shown, view, elsewhere ? 0 : overlayBits(session), !elsewhere && Settings.get().claims != Settings.ClaimsShown.OFF,
 			elsewhere ? null : () -> session.lights().draw(graphics, view, a, 1, ServerRules.radarAllowed() && Settings.get().radarOnMap));
@@ -475,7 +483,6 @@ public final class MapScreen extends Screen {
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Radar.draw(graphics, view, this.blips, true, true);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), Markers.onMap(viewer.getViewYRot(a)), 6);
-		this.lastView = view;
 		if (caves) {
 			this.gauge.layout(this.minecraft.level, viewer.blockPosition(), this.layer, this.width, this.height);
 			this.sliceUp.setPosition(this.gauge.upButtonX(), this.gauge.upButtonY());
@@ -773,6 +780,12 @@ public final class MapScreen extends Screen {
 				this.layer = slice;
 				this.layerPicked = true;
 			}
+		}
+		if (button == InputConstants.MOUSE_BUTTON_LEFT && button != this.pressButton && this.draw.holding() && this.lastView != null) {
+			// Another button was pressed while drawing with the left: letting go of the left still ends the stroke,
+			// erase or measurement.
+			this.draw.release(this.lastView, this.font, this.dimension(), x, y, button, true);
+			return true;
 		}
 		// Only the release of the latest press counts: letting go of a button held since before
 		// the menu opened mustn't close it.
@@ -1169,8 +1182,14 @@ public final class MapScreen extends Screen {
 		}
 		this.gauge.cancel();
 		Entity viewer = MapSession.viewer();
-		this.layer = this.layer == TileKey.SURFACE && viewer != null ? MapSession.caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		this.layer = this.layer == TileKey.SURFACE && viewer != null ? playerSlice(viewer) : TileKey.SURFACE;
 		this.layerPicked = true;
+	}
+
+	/** The slice the minimap shows for the viewer underground, so C and the slice keys start where it is. */
+	private static int playerSlice(Entity viewer) {
+		MapSession session = MapSession.get();
+		return session != null ? session.caveLayer(viewer) : MapSession.caveLayerFor(viewer.getY());
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
@@ -1181,7 +1200,7 @@ public final class MapScreen extends Screen {
 			if (viewer == null) {
 				return;
 			}
-			this.layer = MapSession.caveLayerFor(viewer.getY());
+			this.layer = playerSlice(viewer);
 		}
 		this.layer = Math.max(this.minecraft.level.getMinY() + 4, Math.min(this.minecraft.level.getMaxY() + 1, this.layer + delta));
 		this.layerPicked = true;

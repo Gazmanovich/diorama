@@ -3,6 +3,7 @@ package dev.diorama.bake;
 import dev.diorama.data.ChunkSnapshot;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.util.ARGB;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.biome.Biome;
@@ -62,10 +63,11 @@ public final class BiomeTints {
 
 	/** Blends the snapshot's tints. Any thread. */
 	public static ChunkSnapshot.Tints blend(ChunkSnapshot snapshot) {
-		BiomeManager biomes = new BiomeManager(snapshot::noiseBiome, snapshot.biomeZoomSeed);
+		// Where the game had no chunk, the lookup gives null, and the blend leaves that block out:
+		// counting the biome the game assumes there, Plains, tinted the edge of the loaded area (#290).
+		BiomeManager biomes = new BiomeManager(snapshot::knownNoiseBiome, snapshot.biomeZoomSeed);
 		int[][] colors = new int[RESOLVERS.length][256];
 		int radius = snapshot.blendRadius;
-		int count = (radius * 2 + 1) * (radius * 2 + 1);
 		int[] red = new int[RESOLVERS.length];
 		int[] green = new int[RESOLVERS.length];
 		int[] blue = new int[RESOLVERS.length];
@@ -76,6 +78,7 @@ public final class BiomeTints {
 		int[] heights = new int[size * size];
 		java.util.Arrays.fill(heights, Integer.MIN_VALUE);
 		int[][] sampled = new int[RESOLVERS.length][size * size];
+		boolean[] known = new boolean[size * size];
 		for (int z = 0; z < 16; z++) {
 			for (int x = 0; x < 16; x++) {
 				int bx = (snapshot.chunkX << 4) + x;
@@ -84,22 +87,39 @@ public final class BiomeTints {
 				java.util.Arrays.fill(red, 0);
 				java.util.Arrays.fill(green, 0);
 				java.util.Arrays.fill(blue, 0);
+				int count = 0;
 				for (int dz = -radius; dz <= radius; dz++) {
 					for (int dx = -radius; dx <= radius; dx++) {
 						int cell = (z + dz + radius) * size + x + dx + radius;
 						if (heights[cell] != y) {
 							heights[cell] = y;
-							Biome biome = biomes.getBiome(pos.set(bx + dx, y, bz + dz)).value();
-							for (int r = 0; r < RESOLVERS.length; r++) {
-								sampled[r][cell] = RESOLVERS[r].getColor(biome, bx + dx, bz + dz);
+							Holder<Biome> biome = biomes.getBiome(pos.set(bx + dx, y, bz + dz));
+							known[cell] = biome != null;
+							for (int r = 0; biome != null && r < RESOLVERS.length; r++) {
+								sampled[r][cell] = RESOLVERS[r].getColor(biome.value(), bx + dx, bz + dz);
 							}
 						}
-						for (int r = 0; r < RESOLVERS.length; r++) {
-							int color = sampled[r][cell];
-							red[r] += ARGB.red(color);
-							green[r] += ARGB.green(color);
-							blue[r] += ARGB.blue(color);
+						if (known[cell]) {
+							count++;
+							for (int r = 0; r < RESOLVERS.length; r++) {
+								int color = sampled[r][cell];
+								red[r] += ARGB.red(color);
+								green[r] += ARGB.green(color);
+								blue[r] += ARGB.blue(color);
+							}
 						}
+					}
+				}
+				if (count == 0) {
+					// Every lookup landed in a chunk the game didn't have, which only happens next to
+					// one with the blend off or small: the column's own biome, without the fuzz.
+					Biome own = snapshot.noiseBiome(bx >> 2, y >> 2, bz >> 2).value();
+					count = 1;
+					for (int r = 0; r < RESOLVERS.length; r++) {
+						int color = RESOLVERS[r].getColor(own, bx, bz);
+						red[r] = ARGB.red(color);
+						green[r] = ARGB.green(color);
+						blue[r] = ARGB.blue(color);
 					}
 				}
 				int i = (z << 4) | x;

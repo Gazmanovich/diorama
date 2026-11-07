@@ -6,6 +6,7 @@ import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.Waypoint;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.function.Consumer;
@@ -92,6 +93,8 @@ public final class DrawMode {
 	private final List<double[]> points = new ArrayList<>();
 	private boolean penDown;
 	private boolean erasing;
+	/** Where {@link #follow} last had the cursor on the map. */
+	private double @Nullable [] followed;
 	/** The press was the palette's (a colour picked, or the palette closed), so its release is too. */
 	private boolean paletteRelease;
 	/** Where a note being typed goes, in map space. */
@@ -343,6 +346,7 @@ public final class DrawMode {
 		if (button != InputConstants.MOUSE_BUTTON_LEFT) {
 			return false;
 		}
+		this.followed = null;
 		if (tool == Tool.PEN) {
 			this.points.clear();
 			this.points.add(mapPoint(view, x, y));
@@ -360,6 +364,25 @@ public final class DrawMode {
 			return true;
 		}
 		return false;
+	}
+
+	/** Whether a drag with the left button is under way: the pen, the eraser or the measuring tool. */
+	public boolean holding() {
+		return this.penDown || this.erasing || this.measure.dragging();
+	}
+
+	/**
+	 * The cursor, from the map each frame while the left button's drag has lost the game's drag events
+	 * to another button. Like a drag, but only where the cursor moved on the map: a still cursor
+	 * mustn't erase one more drawing, or look up the measured block again, every frame.
+	 */
+	public void follow(MapViewport.View view, Font font, String dimension, double x, double y) {
+		double[] at = mapPoint(view, x, y);
+		if (Arrays.equals(at, this.followed)) {
+			return;
+		}
+		this.followed = at;
+		this.drag(view, font, dimension, x, y);
 	}
 
 	/** A drag on the map with the left button down. True if draw mode took it. */

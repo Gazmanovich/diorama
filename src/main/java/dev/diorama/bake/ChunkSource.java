@@ -36,5 +36,14 @@ public interface ChunkSource {
 
 	int NO_ROOF = Integer.MIN_VALUE;
 
+	/**
+	 * Whether cave slices are drawn in the depth look (the Legible cave maps setting): lower ground
+	 * fades to slate and only rock near the cut is seen through. Off, as Xaero's cave mode, a slice
+	 * sees through rock to every cave below it.
+	 */
+	default boolean depthCaves() {
+		return false;
+	}
+
 	boolean isSeen(int x, int y, int z);
 }
