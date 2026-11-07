@@ -259,32 +259,24 @@ float signedAt(vec2 p) {
     return (texture(Sampler2, at / vec2(textureSize(Sampler2, 0))).b * 255.0 - 128.0) * 2.0;
 }
 
-// A cell's code at size level (MapViewport.cloudCells), read from the grid cell given.
-int cloudCode(ivec2 cell, int level) {
-    vec4 t = texelFetch(Sampler2, clamp(cell - cellFirst, ivec2(0), textureSize(Sampler2, 0) - 1), 0);
-    int code = int(floor((level < 2 ? t.r : t.g) * 255.0 + 0.5));
-    return level % 2 == 0 ? code % 8 : code / 8 % 8;
-}
-
 // How much of a point is under a layer (its bit) at a cell size: the four nearest cells blended,
 // squeezed into a band at each cell's edge, so runs of cells read as one with slightly rounded
-// corners; 0.5 is the edge. Each cell's code is read from its grid cell nearest the point.
+// corners; 0.5 is the edge. Each size's cells have a block of the detail texture (MapViewport.slotX),
+// a layer a colour, 0 or 1, so one filtered read does the blend.
+bool cloudsLarge = false;
 float cloudRaw(vec2 p, int level, int bit) {
+    float slot = cloudsLarge ? 512.0 : 256.0;
+    float width = slot / exp2(float(level));
+    float x0 = level == 0 ? 0.0 : slot * 2.0 - slot / exp2(float(level - 1));
     float size = cloudBase * exp2(float(level));
-    int per = max(1, (1 << level) / gridMult);
     vec2 g = p / size - 0.5;
     vec2 i = floor(g);
     vec2 f = smoothstep(0.5 - CLOUD_ROUND, 0.5 + CLOUD_ROUND, g - i);
-    ivec2 here = ivec2(floor(p / (cloudBase * float(gridMult))));
-    ivec2 c0 = ivec2(i);
-    float v00 = float(cloudCode(clamp(here, c0 * per, c0 * per + per - 1), level) / bit % 2);
-    ivec2 c1 = c0 + ivec2(1, 0);
-    float v10 = float(cloudCode(clamp(here, c1 * per, c1 * per + per - 1), level) / bit % 2);
-    ivec2 c2 = c0 + ivec2(0, 1);
-    float v01 = float(cloudCode(clamp(here, c2 * per, c2 * per + per - 1), level) / bit % 2);
-    ivec2 c3 = c0 + ivec2(1, 1);
-    float v11 = float(cloudCode(clamp(here, c3 * per, c3 * per + per - 1), level) / bit % 2);
-    return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
+    // The cell holding the grid's first, at this size.
+    vec2 first = floor(vec2(cellFirst * gridMult) / exp2(float(level)));
+    vec2 local = clamp(i - first, vec2(0.0), vec2(width - 2.0));
+    vec4 t = texture(Sampler2, (vec2(x0, slot) + local + 0.5 + f) / vec2(textureSize(Sampler2, 0)));
+    return bit == 1 ? t.r : bit == 2 ? t.g : t.b;
 }
 
 // The same for the two sizes drawn, blended in the cover itself (not in the picture), so blocks
@@ -475,7 +467,9 @@ void main() {
         gridMult = scaleFraction >= 0.58 ? 2 : 1;
         ivec2 originCells = ivec2(floor(offsetBytes / 32.0));
         cellFirst = originCells * (10 / gridMult) - CELL_MARGIN;
-        cellsReady = texelFetch(Sampler2, ivec2(0), 0).a > 0.5;
+        float ready = texelFetch(Sampler2, ivec2(0), 0).a;
+        cellsReady = ready > 0.5;
+        cloudsLarge = ready < 0.8;
         // Cells about CLOUD_PIXELS screen pixels across (a layer texel is two), a power of two of the
         // base, the size growing into the next through the middle of each zoom step.
         float screen = layer ? pixelUnits * 0.5 : pixelUnits;

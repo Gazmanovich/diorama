@@ -67,10 +67,26 @@ final class TileFilterTest {
 		for (Case check : CASES) {
 			DioramaClientTest.setGuiScale(context, check.guiScale);
 			context.setScreen(MapScreen::new);
-			// The clouds reach into explored land as far as they're see-through (Mapped): look that much
-			// further west, into the explored land, so the strip compared still has ground to compare.
+			// The clouds reach into explored land as far as they're see-through (Mapped). Where the
+			// player stands depends on the sections before, near the edge of what's explored or not:
+			// look at the player or that far off it each way, whichever has the most ground to compare.
 			double reach = dev.diorama.render.VanillaClouds.reachInto(dev.diorama.render.VanillaClouds.drawnCell(1 / (check.zoom * check.guiScale)));
-			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() - reach, Projection.v(mc.player.getY(), mc.player.getZ()), check.zoom, TileKey.SURFACE));
+			double[][] offsets = {{0, 0}, {-reach, 0}, {reach, 0}, {0, -reach}, {0, reach}};
+			double[] best = offsets[0];
+			int most = -1;
+			for (double[] offset : offsets) {
+				lookNear(context, offset, check.zoom);
+				DioramaClientTest.settle(context, 40);
+				MapViewport.View candidate = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view());
+				Mapped around = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), candidate, check.lod, check.guiScale));
+				int[] screen = context.computeOnClient(mc -> new int[] {mc.getWindow().getWidth(), mc.getWindow().getHeight()});
+				int count = comparable(candidate, check, around, screen[0], screen[1]);
+				if (count > most) {
+					most = count;
+					best = offset;
+				}
+			}
+			lookNear(context, best, check.zoom);
 			DioramaClientTest.settle(context, 40);
 			MapViewport.View view = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view());
 			int lod = context.computeOnClient(mc -> MapViewport.lodFor(MapSession.get().map(), view));
@@ -105,6 +121,34 @@ final class TileFilterTest {
 	 * lighter than the tiles under the fog's veil, so each channel of the average is first scaled and
 	 * offset to fit the frame as well as it can.
 	 */
+	private static void lookNear(ClientGameTestContext context, double[] offset, double zoom) {
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + offset[0], Projection.v(mc.player.getY(), mc.player.getZ() + offset[1]), zoom, TileKey.SURFACE));
+	}
+
+	/** How many pixels of the strip {@link #compare} reads have mapped ground all around, every fourth each way. */
+	private static int comparable(MapViewport.View view, Case check, Mapped mapped, int screenWidth, int screenHeight) {
+		double perUnit = (double) Projection.TILE_PIXELS / (Projection.TILE_UNITS << check.lod) / (1 << check.mip);
+		double perScreenPixel = perUnit / (view.zoom() * check.guiScale);
+		int[] strip = strip(view, check, screenWidth, screenHeight);
+		int count = 0;
+		for (int y = strip[2]; y < strip[3]; y += 4) {
+			for (int x = strip[0]; x < strip[1]; x += 4) {
+				if (mapped.allAround(view.minU() + x * perScreenPixel / perUnit, view.minV() + y * perScreenPixel / perUnit)) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	/** The screen pixels compared: {first x, last x + 1, first y, last y + 1}. */
+	private static int[] strip(MapViewport.View view, Case check, int screenWidth, int screenHeight) {
+		int middleX = screenWidth / 2;
+		int middleY = screenHeight / 2;
+		int reach = (int) Math.min(280, 170 * view.zoom() * check.guiScale);
+		return new int[] {middleX - reach, middleX - 12, middleY - reach * 2 / 3, middleY + reach * 2 / 3};
+	}
+
 	private static double[] compare(BufferedImage shot, MapViewport.View view, TileStore store, Case check, Mapped mapped) {
 		// Pixels of the mip level read, per map unit.
 		double perUnit = (double) Projection.TILE_PIXELS / (Projection.TILE_UNITS << check.lod) / (1 << check.mip);
@@ -113,12 +157,10 @@ final class TileFilterTest {
 		double originY = view.minV() * perUnit;
 		Map<Long, int[]> tiles = new HashMap<>();
 		List<double[]> pairs = new ArrayList<>();
-		int middleX = shot.getWidth() / 2;
-		int middleY = shot.getHeight() / 2;
-		// Within about 170 blocks, which the game has loaded around the player.
-		int reach = (int) Math.min(280, 170 * view.zoom() * check.guiScale);
-		for (int y = middleY - reach * 2 / 3; y < middleY + reach * 2 / 3; y++) {
-			for (int x = middleX - reach; x < middleX - 12; x++) {
+		// Within about 170 blocks of the middle, left of it.
+		int[] strip = strip(view, check, shot.getWidth(), shot.getHeight());
+		for (int y = strip[2]; y < strip[3]; y++) {
+			for (int x = strip[0]; x < strip[1]; x++) {
 				if (!mapped.allAround(view.minU() + x * perScreenPixel / perUnit, view.minV() + y * perScreenPixel / perUnit)) {
 					continue;
 				}
