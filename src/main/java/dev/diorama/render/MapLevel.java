@@ -575,7 +575,8 @@ public final class MapLevel implements ChunkSource {
 			double top = (cave ? caveY1 : y1) + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {
-				top = Math.min(top, layer + (this.depthCaves ? CaveCut.LIFT : 0));
+				// The depth look raises the cut over steps, except under a roof, where views are lifted.
+				top = Math.min(top, layer + (this.depthCaves && !this.roofless() ? CaveCut.LIFT : 0));
 				bottom = Math.max(bottom, layer - TileBaker.CAVE_DEPTH - 1);
 				if (top < bottom) {
 					continue;

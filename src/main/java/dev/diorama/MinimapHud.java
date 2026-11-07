@@ -187,11 +187,12 @@ public final class MinimapHud implements HudElement {
 		} else {
 			this.fadeStart = -1;
 		}
-		this.viewport.opacity(opacity * Math.min(1, fadeIn));
+		float shownOpacity = opacity * Math.min(1, fadeIn);
+		this.viewport.opacity(shownOpacity);
 
 		MapViewport.View view = new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), layer), layer, round, true);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
-			() -> session.lights().draw(graphics, view, partialTick, opacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
+			() -> session.lights().draw(graphics, view, partialTick, shownOpacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
 		session.crafts().draw(graphics, view, partialTick, opacity);
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
@@ -233,6 +234,9 @@ public final class MinimapHud implements HudElement {
 	private int layerToShow(MapLevel level, MapViewport.View wanted) {
 		long now = System.currentTimeMillis();
 		if (!this.showing || wanted.layer() == this.shownLayer) {
+			if (!this.showing) {
+				this.fadeStart = -1;
+			}
 			this.showing = true;
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;
@@ -250,6 +254,9 @@ public final class MinimapHud implements HudElement {
 			if (oldShows && this.shownLayer != TileKey.SURFACE && wanted.layer() != TileKey.SURFACE) {
 				this.fadingLayer = this.shownLayer;
 				this.fadeStart = now;
+			} else {
+				// A straight switch: a cave slice still fading out mustn't show over the surface.
+				this.fadeStart = -1;
 			}
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;

@@ -28,11 +28,15 @@ final class CaveDepthTest {
 		int z0 = 3200;
 		int f = 0;
 		world.getServer().runCommand("time set noon");
-		// No radar, so pictures of the same spot compare pixel for pixel between builds.
+		// No radar, so pictures of the same spot compare pixel for pixel between builds, and the
+		// default look first. Put back afterwards for the sections that run after this one.
+		boolean radarOnMinimap = context.computeOnClient(mc -> dev.diorama.Settings.get().radarOnMinimap);
+		boolean radarOnMap = context.computeOnClient(mc -> dev.diorama.Settings.get().radarOnMap);
 		context.runOnClient(mc -> {
 			dev.diorama.Settings.get().radarOnMinimap = false;
 			dev.diorama.Settings.get().radarOnMap = false;
 		});
+		setLegible(context, false);
 		world.getServer().runCommand("tp @a " + x0 + " 200 " + z0);
 		context.waitFor(mc -> mc.player.blockPosition().getX() == x0, 200);
 		world.getServer().runCommand("forceload add " + (x0 - 40) + " " + (z0 - 40) + " " + (x0 + 40) + " " + (z0 + 40));
@@ -107,6 +111,10 @@ final class CaveDepthTest {
 			shots(context, "deep");
 		}
 		world.getServer().runCommand("forceload remove all");
+		context.runOnClient(mc -> {
+			dev.diorama.Settings.get().radarOnMinimap = radarOnMinimap;
+			dev.diorama.Settings.get().radarOnMap = radarOnMap;
+		});
 	}
 
 	private static void cmd(TestSingleplayerContext world, String command) {
@@ -164,6 +172,9 @@ final class CaveDepthTest {
 	private static void jumps(ClientGameTestContext context, TestSingleplayerContext world, double x, int y, double z, String where) {
 		stand(context, world, x, y, z, "jumps on " + where);
 		int start = context.computeOnClient(mc -> MapSession.get().autoLayer(mc.player));
+		if (start == TileKey.SURFACE) {
+			throw new AssertionError("On " + where + " the minimap isn't on a cave slice");
+		}
 		int[] last = {start};
 		int changes = 0;
 		StringBuilder seen = new StringBuilder("" + start);
