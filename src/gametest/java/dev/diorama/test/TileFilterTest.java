@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 
 /**
  * A map shown smaller than its tiles: each screen pixel is the average of the area of the tile
@@ -53,7 +54,8 @@ final class TileFilterTest {
 	private TileFilterTest() {
 	}
 
-	static void run(ClientGameTestContext context) {
+	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		explore(context, world);
 		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
 		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
 		context.runOnClient(mc -> Settings.get().radarOnMap = false);
@@ -121,6 +123,28 @@ final class TileFilterTest {
 	 * lighter than the tiles under the fog's veil, so each channel of the average is first scaled and
 	 * offset to fit the frame as well as it can.
 	 */
+	/**
+	 * Explores the ground round the player a few hundred blocks each way, as the sections before
+	 * may not have: the see-through clouds lie over the edge of what's explored (Mapped), and the
+	 * zoomed-out cases need mapped ground well inside it. Back where it started after.
+	 */
+	private static void explore(ClientGameTestContext context, TestSingleplayerContext world) {
+		double[] start = context.computeOnClient(mc -> new double[] {mc.player.getX(), mc.player.getY(), mc.player.getZ()});
+		for (int[] step : new int[][] {{-200, 0}, {200, 0}, {0, -200}, {0, 200}, {0, 0}}) {
+			world.getServer().runCommand(String.format(java.util.Locale.ROOT, "tp @a %.1f %.1f %.1f", start[0] + step[0], Math.max(start[1], 100), start[2] + step[1]));
+			int last = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
+			int still = 0;
+			for (int i = 0; i < 600 && still < 60; i++) {
+				context.waitTick();
+				int now = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
+				still = now > last ? 0 : still + 1;
+				last = now;
+			}
+		}
+		world.getServer().runCommand(String.format(java.util.Locale.ROOT, "tp @a %.1f %.1f %.1f", start[0], start[1], start[2]));
+		DioramaClientTest.settle(context, 60);
+	}
+
 	private static void lookNear(ClientGameTestContext context, double[] offset, double zoom) {
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + offset[0], Projection.v(mc.player.getY(), mc.player.getZ() + offset[1]), zoom, TileKey.SURFACE));
 	}
