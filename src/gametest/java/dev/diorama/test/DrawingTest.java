@@ -324,6 +324,43 @@ final class DrawingTest {
 		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
 		int left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
 		expect(left == count, "Undo takes the Shift line away again");
+
+		// Along the tower's south edge, pointing at its wall: the map shows the wall's blocks in the
+		// same row as the top, so the end has to climb to the top rather than stop on the wall.
+		// Clear south of the tower too, so the map shows the wall there, not trees in front of it.
+		world.getServer().runCommand("fill " + (cx + 10) + " " + (base + 1) + " " + (z0 + 7) + " " + (cx + 30) + " " + (base + 30) + " " + (z0 + 30) + " air");
+		world.getServer().runCommand("kill @e[type=item]");
+		context.waitTicks(40);
+		settle(context, 100);
+		pickTool(context, 1);
+		float[] edgeFrom = gui(context, cx - 36, base + 1, z0 + 4);
+		click(context, edgeFrom[0], edgeFrom[1]);
+		float[] wall = gui(context, cx + 20, base + 7, z0 + 5);
+		context.getInput().holdShift();
+		// Across the ground first, as a hand would go: the search then starts from the ground's height.
+		float[] across = gui(context, cx - 20, base + 1, z0 + 4);
+		moveTo(context, across[0], across[1]);
+		click(context, wall[0], wall[1]);
+		context.getInput().releaseShift();
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
+		frame(context);
+		Drawing edge = last(context, dimension, count + 1);
+		double edgeU = edge.points[2];
+		double edgeV = edge.points[3];
+		double edgeWant = Projection.v(base + 13, z0 + 4.5);
+		float[] wallSpot = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			return new float[] {view.screenX(edgeU), view.screenY(edgeV)};
+		});
+		moveTo(context, wallSpot[0], wallSpot[1]);
+		context.waitTicks(5);
+		context.takeScreenshot("drawing-06b-shift-line-edge");
+		expect(Math.abs(edgeU - (cx + 20.5)) < 0.5 && Math.abs(edgeV - edgeWant) < 0.5,
+			"a Shift line along the tower's south edge, pointing at its wall, ending on its top at map " + (cx + 20.5) + ", " + edgeWant
+				+ ", got " + edgeU + ", " + edgeV + " (" + Math.round((edgeV - edgeWant) / Projection.cos()) + " blocks down the wall)");
+		click(context, widget(context, s -> s.drawMode().otherButtons().get(1)));
+		left = context.computeOnClient(mc -> DrawingStore.get().in(dimension).size());
+		expect(left == count, "Undo takes the edge line away again");
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 	}
 

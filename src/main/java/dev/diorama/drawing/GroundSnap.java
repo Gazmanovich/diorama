@@ -79,8 +79,9 @@ public final class GroundSnap {
 		this.forgetOtherLayers(view);
 		long deadline = click ? System.nanoTime() + CLICK_WAIT_NS : 0;
 		Ground anchor = this.anchor;
-		if (anchor == null || anchor.u != last[0] || anchor.v != last[1]) {
-			// A point from before a resize built this anew, or from another layer: ask again.
+		if (anchor == null || anchor.u != last[0] || anchor.v != last[1] || click && anchor.answered() && anchor.block() == null) {
+			// A point from before a resize built this anew, or from another layer: ask again. So does
+			// a click where the map showed nothing under the last point: it may have loaded since.
 			anchor = this.anchor = this.ask(last[0], last[1]);
 		}
 		anchor.await(deadline);
@@ -209,8 +210,10 @@ public final class GroundSnap {
 	 * How high the ground the map shows at one block is: what the map shows where the block would
 	 * be at a guessed height says which way to guess again. Found north of the block, the ray went
 	 * past it above the ground, so the ground is lower; found south of it, something higher stood
-	 * in front. The height of what it found is the next guess, which on gentle ground is right at
-	 * once; else the guesses halve the gap between the last too high and too low.
+	 * in front. Found in the block itself but at another height, the ray met its south wall or its
+	 * top further along: the top is only where a guess and the answer agree. The height of what it
+	 * found is the next guess, which on gentle ground is right at once; else the guesses halve the
+	 * gap between the last too high and too low.
 	 */
 	private final class Landing {
 		final int blockX;
@@ -220,6 +223,8 @@ public final class GroundSnap {
 		private int low;
 		private int high;
 		private int guesses;
+		/** The highest the map has shown this block at, for when the guesses run out; or MIN_VALUE. */
+		private int inBlock = Integer.MIN_VALUE;
 		boolean found;
 		private boolean done;
 		private @Nullable Ground asked;
@@ -250,12 +255,15 @@ public final class GroundSnap {
 				if (seen == null) {
 					// Nothing shown there: the guess stands.
 					this.done = true;
-				} else if (seen.getZ() == this.blockZ) {
-					this.guess = seen.getY();
+				} else if (seen.getZ() == this.blockZ && seen.getY() == this.guess) {
 					this.found = true;
 					this.done = true;
 				} else {
-					if (seen.getZ() < this.blockZ) {
+					if (seen.getZ() == this.blockZ) {
+						// The block, but up its wall or further along its top: what's highest so far.
+						this.inBlock = Math.max(this.inBlock, seen.getY());
+					}
+					if (seen.getZ() < this.blockZ || seen.getZ() == this.blockZ && seen.getY() < this.guess) {
 						this.high = this.guess;
 					} else {
 						this.low = this.guess;
@@ -263,6 +271,10 @@ public final class GroundSnap {
 					int next = seen.getY() > this.low && seen.getY() < this.high ? seen.getY() : Math.floorDiv(this.low + this.high, 2);
 					if (next <= this.low || next >= this.high || ++this.guesses >= MAX_GUESSES) {
 						this.done = true;
+						if (this.inBlock != Integer.MIN_VALUE) {
+							this.guess = this.inBlock;
+							this.found = true;
+						}
 					} else {
 						this.guess = next;
 					}
