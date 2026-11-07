@@ -79,6 +79,10 @@ public final class MapExport {
 			fontOptions.add("jp");
 		}
 		//?}
+		// The clouds' texture comes from the resource packs: read it here, on the render thread.
+		if (!smoke) {
+			dev.diorama.render.VanillaClouds.prepare();
+		}
 		Thread thread = new Thread(() -> export.run(store, area, smoke, night, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);

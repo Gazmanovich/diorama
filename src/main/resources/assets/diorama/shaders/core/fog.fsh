@@ -342,9 +342,15 @@ vec4 clouds(vec2 p0) {
         float top = float(k) * thick;
         vec2 pt = vec2(p0.x, p0.y + top * COS_PITCH);
         float face = cloudCover(pt, bit);
-        float w1 = cloudCover(vec2(p0.x, p0.y + (top - (tall ? 0.33 : 0.5) * thick) * COS_PITCH), bit);
-        float w2 = tall ? cloudCover(vec2(p0.x, p0.y + (top - 0.66 * thick) * COS_PITCH), bit) : w1;
-        float w3 = cloudCover(vec2(p0.x, p0.y + (top - 0.97 * thick) * COS_PITCH), bit);
+        // Under a whole top the wall can't show: no need to read it.
+        float w1 = face;
+        float w2 = face;
+        float w3 = face;
+        if (face < 0.999) {
+            w1 = cloudCover(vec2(p0.x, p0.y + (top - (tall ? 0.33 : 0.5) * thick) * COS_PITCH), bit);
+            w2 = tall ? cloudCover(vec2(p0.x, p0.y + (top - 0.66 * thick) * COS_PITCH), bit) : w1;
+            w3 = cloudCover(vec2(p0.x, p0.y + (top - 0.97 * thick) * COS_PITCH), bit);
+        }
         float a1 = max(w1 - face, 0.0);
         float a2 = max(w2 - max(face, w1), 0.0);
         float a3 = max(w3 - max(max(face, w1), w2), 0.0);
@@ -354,7 +360,7 @@ vec4 clouds(vec2 p0) {
         }
         // Soft shadows from the layers above, cast away from the sun.
         float shaded = 0.0;
-        if (k < 3 && !fast) {
+        if (k < 3 && !fast && face > 0.001) {
             for (int u = k + 1; u <= 3; u++) {
                 float lift = float(u - k) * thick;
                 shaded = max(shaded, cloudShape(vec2(pt.x, pt.y + lift * COS_PITCH) + sunward * lift * 1.2, u == 3 ? 4 : 2));
@@ -477,6 +483,11 @@ void main() {
         size = clamp(size, log2(float(gridMult)), 3.0);
         cloudSize = min(int(floor(size)), 3);
         cloudGrow = cloudSize >= 3 ? 0.0 : smoothstep(0.2, 0.8, size - float(cloudSize));
+        // Grown all the way: the next size alone.
+        if (cloudGrow >= 1.0) {
+            cloudSize++;
+            cloudGrow = 0.0;
+        }
         // Zoomed out, a slow lit height field groups the clouds into big masses (VanillaClouds gathers
         // the top layer by the same idea).
         float zoomedOut = log2(CLOUD_PIXELS * screen / CLOUD_CELL);

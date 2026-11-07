@@ -67,7 +67,10 @@ final class TileFilterTest {
 		for (Case check : CASES) {
 			DioramaClientTest.setGuiScale(context, check.guiScale);
 			context.setScreen(MapScreen::new);
-			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), check.zoom, TileKey.SURFACE));
+			// The clouds reach into explored land as far as they're see-through (Mapped): look that much
+			// further west, into the explored land, so the strip compared still has ground to compare.
+			double reach = dev.diorama.render.VanillaClouds.reachInto(dev.diorama.render.VanillaClouds.drawnCell(1 / (check.zoom * check.guiScale)));
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() - reach, Projection.v(mc.player.getY(), mc.player.getZ()), check.zoom, TileKey.SURFACE));
 			DioramaClientTest.settle(context, 40);
 			MapViewport.View view = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view());
 			int lod = context.computeOnClient(mc -> MapViewport.lodFor(MapSession.get().map(), view));
@@ -75,7 +78,7 @@ final class TileFilterTest {
 				throw new AssertionError(check.name + " draws overview level " + lod + ", not " + check.lod);
 			}
 			BufferedImage shot = read(context.takeScreenshot("tile-filter-" + check.name));
-			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod));
+			Mapped mapped = context.computeOnClient(mc -> Mapped.around(MapSession.get().map(), view, check.lod, check.guiScale));
 			double[] result = compare(shot, view, store, check, mapped);
 			System.out.printf("TILE-FILTER %s: median error %.3f over %.0f pixels, colour scale %.3f%n", check.name, result[0], result[1], result[2]);
 			// The shrunk-eightfold case compares a strip of about 8,000 screen pixels, of which only
@@ -202,23 +205,24 @@ final class TileFilterTest {
 	}
 
 	/**
-	 * Which coverage cells around the view the live map has fully mapped. The clouds' haze, their
-	 * shadows and their lean reach onto mapped ground near its edge, which is the fog's business,
-	 * not the filter's: a pixel is compared only with mapped ground all around it, further to the
-	 * south, which the clouds lean over.
+	 * Which coverage cells around the view the live map has fully mapped. The see-through clouds,
+	 * their shadows and their lean reach onto mapped ground near its edge, which is the fog's
+	 * business, not the filter's: a pixel is compared only with mapped ground all around it as far
+	 * as the clouds the view draws can reach (VanillaClouds.reachInto), further to the south, which
+	 * the clouds lean over by up to a cell.
 	 */
-	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums) {
-		private static final double AROUND = 48;
-		private static final double SOUTH = 72;
-
+	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums, double around, double south) {
 		/** From the tiles of overview level {@code lod}, the ones the view draws and so the map holds. */
-		static Mapped around(MapLevel map, MapViewport.View view, int lod) {
+		static Mapped around(MapLevel map, MapViewport.View view, int lod, int guiScale) {
+			double drawn = dev.diorama.render.VanillaClouds.drawnCell(1 / (view.zoom() * guiScale));
+			double around = dev.diorama.render.VanillaClouds.reachInto(drawn);
+			double south = around + 1.2 * drawn;
 			double tileUnits = (double) Projection.TILE_UNITS * (1 << lod);
 			double cell = tileUnits / Projection.COVERAGE_CELLS;
-			double u0 = Math.floor((view.minU() - AROUND) / cell) * cell;
-			double v0 = Math.floor((view.minV() - AROUND) / cell) * cell;
-			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * AROUND) / cell) + 1;
-			int height = (int) Math.ceil((view.height() / view.zoom() + AROUND + SOUTH) / cell) + 1;
+			double u0 = Math.floor((view.minU() - around) / cell) * cell;
+			double v0 = Math.floor((view.minV() - around) / cell) * cell;
+			int width = (int) Math.ceil((view.width() / view.zoom() + 2 * around) / cell) + 1;
+			int height = (int) Math.ceil((view.height() / view.zoom() + around + south) / cell) + 1;
 			int[] sums = new int[(width + 1) * (height + 1)];
 			for (int j = 0; j < height; j++) {
 				int line = 0;
@@ -234,14 +238,14 @@ final class TileFilterTest {
 					sums[(j + 1) * (width + 1) + i + 1] = sums[j * (width + 1) + i + 1] + line;
 				}
 			}
-			return new Mapped(u0, v0, cell, width, height, sums);
+			return new Mapped(u0, v0, cell, width, height, sums, around, south);
 		}
 
 		boolean allAround(double u, double v) {
-			int i0 = (int) Math.floor((u - AROUND - this.u0) / this.cell);
-			int i1 = (int) Math.floor((u + AROUND - this.u0) / this.cell) + 1;
-			int j0 = (int) Math.floor((v - AROUND - this.v0) / this.cell);
-			int j1 = (int) Math.floor((v + SOUTH - this.v0) / this.cell) + 1;
+			int i0 = (int) Math.floor((u - this.around - this.u0) / this.cell);
+			int i1 = (int) Math.floor((u + this.around - this.u0) / this.cell) + 1;
+			int j0 = (int) Math.floor((v - this.around - this.v0) / this.cell);
+			int j1 = (int) Math.floor((v + this.south - this.v0) / this.cell) + 1;
 			if (i0 < 0 || j0 < 0 || i1 > this.width || j1 > this.height) {
 				return false;
 			}

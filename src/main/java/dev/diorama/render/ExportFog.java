@@ -465,6 +465,10 @@ public final class ExportFog implements ImageExport.Finish {
 		size = Math.max((float) (Math.log(this.gridMult) / Math.log(2)), Math.min(3, size));
 		this.cloudSize = Math.min((int) Math.floor(size), 3);
 		this.cloudGrow = this.cloudSize >= 3 ? 0 : smoothstep(0.2F, 0.8F, size - this.cloudSize);
+		if (this.cloudGrow >= 1) {
+			this.cloudSize++;
+			this.cloudGrow = 0;
+		}
 		this.bigShare = smoothstep(-0.6F, 1, (float) (Math.log(CLOUD_PIXELS * this.pixelUnits / CLOUD_CELL) / Math.log(2)));
 
 		int w = this.maskW;
@@ -660,9 +664,14 @@ public final class ExportFog implements ImageExport.Finish {
 			float top = k * thick;
 			double pv = v + top * COS_PITCH;
 			float face = this.cloudCover(u, pv, bit);
-			float w1 = this.cloudCover(u, v + (top - (tall ? 0.33F : 0.5F) * thick) * COS_PITCH, bit);
-			float w2 = tall ? this.cloudCover(u, v + (top - 0.66F * thick) * COS_PITCH, bit) : w1;
-			float w3 = this.cloudCover(u, v + (top - 0.97F * thick) * COS_PITCH, bit);
+			float w1 = face;
+			float w2 = face;
+			float w3 = face;
+			if (face < 0.999F) {
+				w1 = this.cloudCover(u, v + (top - (tall ? 0.33F : 0.5F) * thick) * COS_PITCH, bit);
+				w2 = tall ? this.cloudCover(u, v + (top - 0.66F * thick) * COS_PITCH, bit) : w1;
+				w3 = this.cloudCover(u, v + (top - 0.97F * thick) * COS_PITCH, bit);
+			}
 			float a1 = Math.max(w1 - face, 0);
 			float a2 = Math.max(w2 - Math.max(face, w1), 0);
 			float a3 = Math.max(w3 - Math.max(Math.max(face, w1), w2), 0);
@@ -671,7 +680,7 @@ public final class ExportFog implements ImageExport.Finish {
 				continue;
 			}
 			float shaded = 0;
-			if (k < 3) {
+			if (k < 3 && face > 0.001F) {
 				for (int up = k + 1; up <= 3; up++) {
 					float lift = (up - k) * thick;
 					shaded = Math.max(shaded, this.cloudShape(u + SUN_U * lift * 1.2, pv + lift * COS_PITCH + SUN_V * lift * 1.2, up == 3 ? 4 : 2));

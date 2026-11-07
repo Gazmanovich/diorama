@@ -29,11 +29,18 @@ public final class VanillaClouds {
 	public static final int DECK = 1;
 	public static final int MIDDLE = 2;
 	public static final int TOP = 4;
-	/** Every size's pattern repeats over this many map units, a whole number of the fog's noise wrap. */
-	static final double REPEAT = 1024;
+	/**
+	 * Every size's pattern repeats over vanilla's whole texture, 256 of the smallest cells (3277 map
+	 * units; vanilla's own sky repeats every 3072 blocks). Cells are numbered from map 0.
+	 */
+	private static final int REPEAT = 256;
 	/** How far into explored land the see-through clouds reach, in map units, for the smallest cells; matches fog.fsh. */
 	public static final double RAMP = 112;
-	/** The biggest size with a pattern of its own (16 cells of the smallest); bigger ones reuse it. */
+	/**
+	 * The biggest size with a pattern of its own (16 cells of the smallest, 16 a repeat). Bigger
+	 * cells, only seen zoomed far out, take that pattern turned or flipped, a different way for each
+	 * block of 16 cells, so it doesn't repeat across the screen.
+	 */
 	private static final int LARGEST = 4;
 	/** Where in vanilla's texture the middle and top layers take their pattern. */
 	private static final int MIDDLE_U = 37;
@@ -42,21 +49,36 @@ public final class VanillaClouds {
 	private static final int TOP_V = 41;
 
 	private static boolean[] texture;
+	private static long version;
 	private static final Map<Long, float[]> ORDERS = new HashMap<>();
 
 	private VanillaClouds() {
 	}
 
 	/**
-	 * The code of the cell {@code (u, v)} of size {@code 2^k} times {@link #CELL}, whose middle is
-	 * {@code s} map units from explored land (positive over the unexplored).
+	 * The code of the cell {@code (u, v)} of size {@code 2^k} times {@link #CELL}, counted from map 0,
+	 * whose middle is {@code s} map units from explored land (positive over the unexplored).
 	 */
 	public static int code(double s, long u, long v, int k) {
 		double size = CELL * (1 << k);
 		int level = Math.min(k, LARGEST);
-		int period = (int) Math.round(REPEAT / (CELL * (1 << level)));
+		int period = REPEAT >> level;
 		int i = (int) Math.floorMod(u, (long) period);
 		int j = (int) Math.floorMod(v, (long) period);
+		if (k > LARGEST) {
+			int way = (int) (hash(Math.floorDiv(u, period) * 12.9898 + Math.floorDiv(v, period) * 78.233 + k * 37.719) * 8);
+			if ((way & 1) != 0) {
+				i = period - 1 - i;
+			}
+			if ((way & 2) != 0) {
+				j = period - 1 - j;
+			}
+			if ((way & 4) != 0) {
+				int swap = i;
+				i = j;
+				j = swap;
+			}
+		}
 		// Its furthest point from explored land, near enough: the middle plus most of a half
 		// diagonal. Big cells reach less far, so zoomed out they don't eat into explored land; the
 		// part of one over unexplored land they leave is covered by the no-map fill in fog.fsh.
@@ -82,14 +104,47 @@ public final class VanillaClouds {
 		return code;
 	}
 
-	/** Forgets the texture, so the next code reads the current resource packs' clouds.png. */
+	/**
+	 * How far into explored land the clouds drawn with cells of {@code size} map units can reach, in
+	 * map units: the see-through band, the cell over its edge and the cover's blend across a cell.
+	 */
+	public static double reachInto(double size) {
+		double r = size / CELL;
+		return RAMP * Math.min(1, 1 / Math.sqrt(r)) + 0.6 * size * Math.min(1, 2 / r) + size;
+	}
+
+	/** The biggest cells a view draws, in map units, with {@code unitsPerPixel} map units to a screen pixel (fog.fsh: about 40 pixels, a power of two). */
+	public static double drawnCell(double unitsPerPixel) {
+		return CELL * Math.pow(2, Math.max(0, Math.ceil(Math.log(40 * unitsPerPixel / CELL) / Math.log(2))));
+	}
+
+	/** Forgets the texture, so the next code reads the current resource packs' clouds.png; maps then build their cells again. */
 	public static synchronized void reload() {
 		texture = null;
 		ORDERS.clear();
+		version++;
 	}
 
 	/**
-	 * Each cell's place in the order the layer fills in, 0 to 1, over the {@link #REPEAT}: the cells
+	 * Reads clouds.png and works out the fill orders, if not done since the last reload. Called on
+	 * the render thread before a map's cells are built on its worker, so the worker never reads the
+	 * resource packs while they reload.
+	 */
+	public static synchronized void prepare() {
+		texture();
+		for (int k = 0; k <= LARGEST; k++) {
+			order(k, MIDDLE_U, MIDDLE_V);
+			order(k, TOP_U, TOP_V);
+		}
+	}
+
+	/** Changes on each {@link #reload}. */
+	public static synchronized long version() {
+		return version;
+	}
+
+	/**
+	 * Each cell's place in the order the layer fills in, 0 to 1, over a {@link #REPEAT}: the cells
 	 * of a layer at coverage c are those at c or under. At the smallest size vanilla's own clouds
 	 * come first, then the cells next to them; at each bigger size, the four cells inside averaged
 	 * and ranked again, so the same coverage fills the same share of cells at every size.
@@ -101,7 +156,7 @@ public final class VanillaClouds {
 		if (known != null) {
 			return known;
 		}
-		int period = (int) Math.round(REPEAT / (CELL * (1 << level)));
+		int period = REPEAT >> level;
 		double[] score = new double[period * period];
 		if (level == 0) {
 			boolean[] tex = texture();

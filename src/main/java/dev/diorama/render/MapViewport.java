@@ -46,7 +46,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds) {
 		/**
 		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
 		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
@@ -613,7 +613,7 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version());
 		boolean sameLevel = this.maskLevel.get() == level;
 		this.takeFinished();
 		if (sameLevel && inputs.equals(this.maskInputs)) {
@@ -761,8 +761,11 @@ public final class MapViewport {
 		int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 		int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
 		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
-		// Read here, so the worker finds it made.
+		// Read here, so the worker finds them made: the clouds' texture is read from the resource packs, on this thread.
 		FogTextures.noiseBytes();
+		if (clouds) {
+			VanillaClouds.prepare();
+		}
 		this.finish(() -> this.finishBuild(before, sameLevel, inputs, rounded, surface, clouds, cellScale, centerI, centerJ, grid), later);
 	}
 
@@ -1345,7 +1348,11 @@ public final class MapViewport {
 					double cell = grid.base() * times;
 					double x = ((u + 0.5) * cell - mapU) / grid.texel();
 					double y = ((v + 0.5) * cell - mapV) / grid.texel();
-					packed |= VanillaClouds.code(this.signedAt(x, y), u, v, steps + level) << level * 3;
+					// The shader's map units wrap with the noise origin; the cell counted from map 0 is
+					// a whole number of cells on (the origins differ by whole wraps, 80 base cells each).
+					long worldU = u + Math.round((grid.originU() - mapU) / cell);
+					long worldV = v + Math.round((grid.originV() - mapV) / cell);
+					packed |= VanillaClouds.code(this.signedAt(x, y), worldU, worldV, steps + level) << level * 3;
 				}
 				pixels[cj * edge + ci] = pixels[cj * edge + ci] & 0x00FF0000 | (packed >>> 6 & 0x3F) << 8 | packed & 0x3F;
 			}
