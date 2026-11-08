@@ -107,6 +107,11 @@ public final class BlockLooks {
 	private static final VarHandle KINDS = MethodHandles.arrayElementVarHandle(byte[].class);
 	/** Held while a look is worked out: one at a time, across tables, since they share mods' code. */
 	private static final Object MAKING = new Object();
+	/**
+	 * Held only while a texture's pixels are read, and by a texture starting to free them, so a
+	 * reload never waits on mods' model or tint code. Taken inside {@link #MAKING}, never around it.
+	 */
+	private static final Object IMAGES = new Object();
 
 	private static volatile BlockLooks current;
 	private static int builds;
@@ -998,11 +1003,11 @@ public final class BlockLooks {
 
 	/**
 	 * Called by a texture as it starts to free its images (a resource reload frees the last atlas's
-	 * textures). It waits for a look being worked out, which may be reading those images, and marks
-	 * the texture so no look reads it after; looks are only worked out under {@link #MAKING}.
+	 * textures). It waits for a look reading those images to finish, which takes microseconds, and
+	 * marks the texture so no look reads it after.
 	 */
 	public static void closing(ClosingTexture texture) {
-		synchronized (MAKING) {
+		synchronized (IMAGES) {
 			texture.diorama$markClosed();
 		}
 	}
@@ -1043,10 +1048,17 @@ public final class BlockLooks {
 
 	/** {@link #spriteAverage} for one sprite, or null if its image has been freed. */
 	private static float @Nullable [] average(TextureAtlasSprite s) {
-		SpriteContents contents = s.contents();
-		if (contents instanceof ClosingTexture closing && closing.diorama$closed()) {
-			return null;
+		// Held while the pixels are read, so a texture can't free its images meanwhile (see closing).
+		synchronized (IMAGES) {
+			SpriteContents contents = s.contents();
+			if (contents instanceof ClosingTexture closing && closing.diorama$closed()) {
+				return null;
+			}
+			return average(contents);
 		}
+	}
+
+	private static float @Nullable [] average(SpriteContents contents) {
 		NativeImage image = null;
 		try {
 			image = ORIGINAL_IMAGE == null ? null : (NativeImage) ORIGINAL_IMAGE.get(contents);
