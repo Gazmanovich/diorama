@@ -98,8 +98,10 @@ final class GameTimeTest {
 			// The client counts on its own between the server's updates, once a second. A slow
 			// machine's server falls behind after changing dimension, and its next update pulls the
 			// clock back a few ticks, the sky with it. So the clock only has to get a second past
-			// where it was: a stopped or backward clock never does.
-			long after = before;
+			// where it was: a stopped or backward clock never does. Two seconds at least, so the
+			// screenshot comes after the loading screen as before.
+			context.waitTicks(40);
+			long after = clock(context);
 			for (int tick = 0; tick < 400 && after < before + 20; tick++) {
 				context.waitTick();
 				after = clock(context);
