@@ -95,12 +95,17 @@ final class GameTimeTest {
 			world.getServer().runCommand("execute in minecraft:the_" + dimension + " run tp @a 0 70 0");
 			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == ("nether".equals(dimension) ? Level.NETHER : Level.END), 2400);
 			long before = clock(context);
-			context.waitTicks(40);
-			long after = clock(context);
+			// The client counts on its own between the server's updates, once a second. A slow
+			// machine's server falls behind after changing dimension, and its next update pulls the
+			// clock back a few ticks, the sky with it. So the clock only has to get a second past
+			// where it was: a stopped or backward clock never does.
+			long after = before;
+			for (int tick = 0; tick < 400 && after < before + 20; tick++) {
+				context.waitTick();
+				after = clock(context);
+			}
 			long server = world.getServer().computeOnServer(s -> s.overworld().getOverworldClockTime());
-			// The client counts on its own between the server's updates, once a second, and a slow
-			// machine's server falls behind for a moment after changing dimension.
-			if (after <= before || Math.abs(server - after) > 200) {
+			if (after < before + 20 || Math.abs(server - after) > 200) {
 				throw new AssertionError("In the " + dimension + " the clock went from " + before + " to " + after + "; the Overworld's is at " + server);
 			}
 			context.takeScreenshot("game-time-06-" + dimension);
