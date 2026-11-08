@@ -1507,6 +1507,11 @@ public final class MapViewport {
 		int[] sums = this.nearSums;
 		int[] out = this.nearLine;
 		java.util.Arrays.fill(out, 0, w * h, 0);
+		// The first row and column stay 0: the sums before the grid.
+		java.util.Arrays.fill(sums, 0, row, 0);
+		for (int j = 1; j <= h; j++) {
+			sums[j * row] = 0;
+		}
 		for (int bit = 0; bit < 4; bit++) {
 			for (int j = 0; j < h; j++) {
 				int line = 0;
