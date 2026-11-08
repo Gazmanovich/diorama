@@ -4,12 +4,11 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
 import java.io.InputStream;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The fog's clouds, built from Minecraft's own: vanilla's clouds.png (a resource pack's, if it has
@@ -48,9 +47,24 @@ public final class VanillaClouds {
 	private static final int TOP_U = 97;
 	private static final int TOP_V = 41;
 
-	private static boolean[] texture;
+	private static volatile @Nullable Pattern current;
 	private static long version;
-	private static final Map<Long, float[]> ORDERS = new HashMap<>();
+
+	/**
+	 * The fill orders worked out from one read of clouds.png, never changed after: a build takes one
+	 * ({@link #prepare}) and keeps it, so a resource reload during it can't mix two patterns.
+	 */
+	public static final class Pattern {
+		private final float[][] middle = new float[LARGEST + 1][];
+		private final float[][] top = new float[LARGEST + 1][];
+
+		private Pattern(boolean[] texture) {
+			for (int level = 0; level <= LARGEST; level++) {
+				this.middle[level] = order(texture, level, level == 0 ? null : this.middle[level - 1], MIDDLE_U, MIDDLE_V);
+				this.top[level] = order(texture, level, level == 0 ? null : this.top[level - 1], TOP_U, TOP_V);
+			}
+		}
+	}
 
 	private VanillaClouds() {
 	}
@@ -59,7 +73,7 @@ public final class VanillaClouds {
 	 * The code of the cell {@code (u, v)} of size {@code 2^k} times {@link #CELL}, counted from map 0,
 	 * whose middle is {@code s} map units from explored land (positive over the unexplored).
 	 */
-	public static int code(double s, long u, long v, int k) {
+	public static int code(Pattern pattern, double s, long u, long v, int k) {
 		double size = CELL * (1 << k);
 		int level = Math.min(k, LARGEST);
 		int period = REPEAT >> level;
@@ -94,34 +108,34 @@ public final class VanillaClouds {
 		}
 		double toward = Math.max(0, Math.min(1, (far + ramp) / ramp));
 		double middle = far > 2 ? 0.5 * (0.4 + 1.2 * big) : 0.15 + 0.55 * Math.pow(toward, 1.5);
-		if (far > -ramp && order(k, MIDDLE_U, MIDDLE_V)[j * period + i] <= middle) {
+		if (far > -ramp && pattern.middle[level][j * period + i] <= middle) {
 			code |= MIDDLE;
 		}
 		double inner = Math.max(0, Math.min(1, far / (48 * Math.sqrt(r))));
-		if (far > 10 && order(k, TOP_U, TOP_V)[j * period + i] <= 0.4 * inner * (0.25 + 1.5 * big)) {
+		if (far > 10 && pattern.top[level][j * period + i] <= 0.4 * inner * (0.25 + 1.5 * big)) {
 			code |= TOP;
 		}
 		return code;
 	}
 
-	/** Forgets the texture, so the next code reads the current resource packs' clouds.png; maps then build their cells again. */
+	/** Forgets the pattern, so the next {@link #prepare} reads the current resource packs' clouds.png; maps then build their cells again. */
 	public static synchronized void reload() {
-		texture = null;
-		ORDERS.clear();
+		current = null;
 		version++;
 	}
 
 	/**
-	 * Reads clouds.png and works out the fill orders, if not done since the last reload. Called on
-	 * the render thread before a map's cells are built on its worker, so the worker never reads the
-	 * resource packs while they reload.
+	 * The pattern from clouds.png, read if not since the last reload. Called on the render thread
+	 * and the result handed to a build on another thread, so no other thread reads the resource
+	 * packs, and a build keeps one pattern whatever reloads meanwhile.
 	 */
-	public static synchronized void prepare() {
-		texture();
-		for (int k = 0; k <= LARGEST; k++) {
-			order(k, MIDDLE_U, MIDDLE_V);
-			order(k, TOP_U, TOP_V);
+	public static synchronized Pattern prepare() {
+		Pattern pattern = current;
+		if (pattern == null) {
+			pattern = new Pattern(texture());
+			current = pattern;
 		}
+		return pattern;
 	}
 
 	/** Changes on each {@link #reload}. */
@@ -132,20 +146,14 @@ public final class VanillaClouds {
 	/**
 	 * Each cell's place in the order the layer fills in, 0 to 1, over a {@link #REPEAT}: the cells
 	 * of a layer at coverage c are those at c or under. At the smallest size vanilla's own clouds
-	 * come first, then the cells next to them; at each bigger size, the four cells inside averaged
-	 * and ranked again, so the same coverage fills the same share of cells at every size.
+	 * come first, then the cells next to them; at each bigger size, the four cells inside
+	 * ({@code finer}) averaged and ranked again, so the same coverage fills the same share of cells
+	 * at every size.
 	 */
-	private static synchronized float[] order(int k, int ou, int ov) {
-		int level = Math.min(k, LARGEST);
-		long key = (long) level << 40 | (long) ou << 20 | ov;
-		float[] known = ORDERS.get(key);
-		if (known != null) {
-			return known;
-		}
+	private static float[] order(boolean[] tex, int level, float @Nullable [] finer, int ou, int ov) {
 		int period = REPEAT >> level;
 		double[] score = new double[period * period];
-		if (level == 0) {
-			boolean[] tex = texture();
+		if (finer == null) {
 			double sigma = 1.2;
 			int reach = 3;
 			for (int j = 0; j < period; j++) {
@@ -164,7 +172,6 @@ public final class VanillaClouds {
 				}
 			}
 		} else {
-			float[] finer = order(level - 1, ou, ov);
 			int fp = period * 2;
 			for (int j = 0; j < period; j++) {
 				for (int i = 0; i < period; i++) {
@@ -181,7 +188,6 @@ public final class VanillaClouds {
 		for (int n = 0; n < index.length; n++) {
 			ranked[index[n]] = (n + 0.5F) / index.length;
 		}
-		ORDERS.put(key, ranked);
 		return ranked;
 	}
 
@@ -191,9 +197,6 @@ public final class VanillaClouds {
 
 	/** Vanilla's clouds.png as cloud or not, 256 a side (a bigger or smaller one is tiled to that). */
 	private static boolean[] texture() {
-		if (texture != null) {
-			return texture;
-		}
 		boolean[] cells = new boolean[256 * 256];
 		boolean read = false;
 		try {
@@ -217,7 +220,6 @@ public final class VanillaClouds {
 				cells[k] = hash(k * 0.731) < 0.27;
 			}
 		}
-		texture = cells;
 		return cells;
 	}
 

@@ -749,6 +749,7 @@ public final class MapViewport {
 		}
 		boolean surface = view.layer() == TileKey.SURFACE;
 		boolean clouds = surface && !level.roofless();
+		this.readCloudBorder(level, view, lod, originU, originV, texel, clouds);
 		if (surface) {
 			if (memory != null) {
 				// The whole mask, not just the view: the clouds climb toward land the old map never
@@ -770,12 +771,10 @@ public final class MapViewport {
 		}
 		int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 		int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
-		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
-		// Read here, so the worker finds them made: the clouds' texture is read from the resource packs, on this thread.
+		// Read here, so the worker finds them made: the clouds' pattern is read from the resource packs, on this thread.
 		FogTextures.noiseBytes();
-		if (clouds) {
-			VanillaClouds.prepare();
-		}
+		VanillaClouds.Pattern pattern = clouds ? VanillaClouds.prepare() : null;
+		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction, pattern) : null;
 		this.finish(() -> this.finishBuild(before, sameLevel, inputs, rounded, surface, clouds, cellScale, centerI, centerJ, grid), later);
 	}
 
@@ -972,39 +971,44 @@ public final class MapViewport {
 
 	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer: two passes over the grid. */
 	private static void chamfer(int[] d) {
-		for (int j = 0; j < MASK; j++) {
-			for (int i = 0; i < MASK; i++) {
-				int k = j * MASK + i;
+		chamfer(d, MASK);
+	}
+
+	/** The same over a square grid {@code side} texels across. */
+	private static void chamfer(int[] d, int side) {
+		for (int j = 0; j < side; j++) {
+			for (int i = 0; i < side; i++) {
+				int k = j * side + i;
 				int v = d[k];
 				if (i > 0) {
 					v = Math.min(v, d[k - 1] + 3);
 				}
 				if (j > 0) {
-					v = Math.min(v, d[k - MASK] + 3);
+					v = Math.min(v, d[k - side] + 3);
 					if (i > 0) {
-						v = Math.min(v, d[k - MASK - 1] + 4);
+						v = Math.min(v, d[k - side - 1] + 4);
 					}
-					if (i < MASK - 1) {
-						v = Math.min(v, d[k - MASK + 1] + 4);
+					if (i < side - 1) {
+						v = Math.min(v, d[k - side + 1] + 4);
 					}
 				}
 				d[k] = v;
 			}
 		}
-		for (int j = MASK - 1; j >= 0; j--) {
-			for (int i = MASK - 1; i >= 0; i--) {
-				int k = j * MASK + i;
+		for (int j = side - 1; j >= 0; j--) {
+			for (int i = side - 1; i >= 0; i--) {
+				int k = j * side + i;
 				int v = d[k];
-				if (i < MASK - 1) {
+				if (i < side - 1) {
 					v = Math.min(v, d[k + 1] + 3);
 				}
-				if (j < MASK - 1) {
-					v = Math.min(v, d[k + MASK] + 3);
-					if (i < MASK - 1) {
-						v = Math.min(v, d[k + MASK + 1] + 4);
+				if (j < side - 1) {
+					v = Math.min(v, d[k + side] + 3);
+					if (i < side - 1) {
+						v = Math.min(v, d[k + side + 1] + 4);
 					}
 					if (i > 0) {
-						v = Math.min(v, d[k + MASK - 1] + 4);
+						v = Math.min(v, d[k + side - 1] + 4);
 					}
 				}
 				d[k] = v;
@@ -1201,13 +1205,13 @@ public final class MapViewport {
 	 * many after its last. The mask's origin is always a whole number of cells from the noise's: ten
 	 * of the base size to each eighth of the coarser noise period the origin snaps to.
 	 */
-	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult, double screen,
+	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult, double screen, VanillaClouds.Pattern pattern,
 		double viewMinU, double viewMinV, double viewMaxU, double viewMaxV) {
-		static CellGrid of(View view, double originU, double originV, double texel, int scaleSteps, int fraction) {
+		static CellGrid of(View view, double originU, double originV, double texel, int scaleSteps, int fraction, VanillaClouds.Pattern pattern) {
 			double snap = 64.0 * (1 << (scaleSteps + 1));
 			return new CellGrid(originU, originV, texel,
 				Math.floorMod((long) (originU / snap), 8), Math.floorMod((long) (originV / snap), 8), snap,
-				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1, 1 / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale()),
+				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1, 1 / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale()), pattern,
 				view.minU(), view.minV(), view.minU() + view.width() / view.zoom(), view.minV() + view.height() / view.zoom());
 		}
 
@@ -1251,9 +1255,16 @@ public final class MapViewport {
 				}
 			}
 		}
+		// The per-cell texels from (0, 0) need a square as wide as the grid too.
+		if (smallest >= 0 && grid.count(grid.mult()) > DETAIL) {
+			smallest = -1;
+		}
 		this.cloudSmallest = smallest;
 		this.cloudLarge = large;
 		int edge = large ? 4 * MASK : 2 * MASK;
+		while (smallest >= 0 && edge < grid.count(grid.mult())) {
+			edge *= 2;
+		}
 		int[] pixels = this.detailPixels;
 		for (int j = 0; j < edge; j++) {
 			for (int i = 0; i < edge; i++) {
@@ -1305,44 +1316,135 @@ public final class MapViewport {
 
 	/** Map units from land explored or remembered, positive over land never explored: {@link #cloudDistances}. */
 	private final float[] signed = new float[MASK * MASK];
-	private final int[] toKnown = new int[MASK * MASK];
-	private final float[] signedBlur = new float[MASK * MASK];
+	/**
+	 * Explored or not, a texel past each side of the mask as far as {@link #cloudBorder} texels and
+	 * inside it: the clouds' distances reach past the mask's edge, which can be just outside the
+	 * view, and without the land there the clouds at the edge would change as a pan moves the mask.
+	 */
+	private boolean[] borderKnown = new boolean[0];
+	private int cloudBorder;
+	private int[] borderToKnown = new int[0];
+	private int[] borderToUnexplored = new int[0];
+	private float[] borderSigned = new float[0];
+	private float[] borderBlur = new float[0];
+	/** The most texels the border reaches past the mask. */
+	private static final int CLOUD_BORDER_MOST = 64;
 
 	/**
-	 * The signed distance from explored land the clouds are placed by. Land remembered from before a
-	 * turn counts as explored, so turning the map doesn't move the clouds; the soft cover over the
-	 * remembered map while it's redrawn is fog.fsh's, from the eased heights. Blurred a little, so
-	 * its contours don't step with the mask's texels. Needs {@link #liftTargets}'s distances.
+	 * The coverage past the mask's edge, from the tiles of the mask's level or a coarser one, on the
+	 * render thread with the mask's own. Far enough for the see-through band and three of the
+	 * biggest cells drawn.
+	 */
+	private void readCloudBorder(MapLevel level, View view, int lod, double originU, double originV, double texel, boolean clouds) {
+		if (!clouds) {
+			this.cloudBorder = 0;
+			return;
+		}
+		double screen = 1 / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale());
+		int border = (int) Math.min(CLOUD_BORDER_MOST, Math.ceil((VanillaClouds.RAMP + 3 * CLOUD_PIXELS * screen) / texel));
+		int side = MASK + 2 * border;
+		if (this.borderKnown.length < side * side) {
+			this.borderKnown = new boolean[side * side];
+		}
+		double units = (double) Projection.TILE_UNITS * (1 << lod);
+		int lastTu = Integer.MIN_VALUE;
+		int lastTv = Integer.MIN_VALUE;
+		MapTile tile = null;
+		TileKey tileKey = null;
+		for (int j = 0; j < side; j++) {
+			int mj = j - border;
+			double v = originV + (mj + 0.5) * texel;
+			int tv = (int) Math.floor(v / units);
+			for (int i = 0; i < side; i++) {
+				int mi = i - border;
+				if (mi >= 0 && mi < MASK && mj >= 0 && mj < MASK) {
+					this.borderKnown[j * side + i] = (this.maskPixels[mj * MASK + mi] & 0xFF) >= 128;
+					continue;
+				}
+				double u = originU + (mi + 0.5) * texel;
+				int tu = (int) Math.floor(u / units);
+				if (tu != lastTu || tv != lastTv) {
+					tileKey = new TileKey(view.layer(), tu, tv, lod);
+					tile = level.peek(tileKey);
+					for (int l = lod + 1; l <= TileKey.MAX_LOD && (tile == null || !tile.hasCoverage()); l++) {
+						tileKey = new TileKey(view.layer(), tu >> (l - lod), tv >> (l - lod), l);
+						tile = level.peek(tileKey);
+					}
+					lastTu = tu;
+					lastTv = tv;
+				}
+				boolean known = false;
+				if (tile != null && tile.hasCoverage()) {
+					double span = tileKey.units();
+					double cell = span / Projection.COVERAGE_CELLS;
+					int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - tileKey.tileU() * span) / cell)));
+					int cellYT = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - tileKey.tileV() * span) / cell)));
+					known = tile.coverage(cellX, cellYT) >= 0.5F;
+				}
+				this.borderKnown[j * side + i] = known;
+			}
+		}
+		this.cloudBorder = border;
+	}
+
+	/**
+	 * The signed distance from explored land the clouds are placed by, over the mask and its border
+	 * ({@link #readCloudBorder}). Land remembered from before a turn counts as explored, so turning
+	 * the map doesn't move the clouds; the soft cover over the remembered map while it's redrawn is
+	 * fog.fsh's, from the eased heights. Blurred a little, so its contours don't step with the
+	 * mask's texels.
 	 */
 	private void cloudDistances(double texel) {
-		for (int k = 0; k < MASK * MASK; k++) {
-			boolean known = (this.maskPixels[k] & 0xFF) >= 128 || this.remembered[k] >= 0.5F;
-			this.toKnown[k] = known ? 0 : Integer.MAX_VALUE / 2;
+		int border = this.cloudBorder;
+		int side = MASK + 2 * border;
+		int n = side * side;
+		if (this.borderToKnown.length < n) {
+			this.borderToKnown = new int[n];
+			this.borderToUnexplored = new int[n];
+			this.borderSigned = new float[n];
+			this.borderBlur = new float[n];
 		}
-		chamfer(this.toKnown);
-		int far = MASK * 3;
-		for (int k = 0; k < MASK * MASK; k++) {
-			this.signed[k] = (float) ((Math.min(this.toKnown[k], far) - Math.min(this.toUnexplored[k], far)) / 3.0 * texel);
+		for (int j = 0; j < side; j++) {
+			for (int i = 0; i < side; i++) {
+				int k = j * side + i;
+				int mi = i - border;
+				int mj = j - border;
+				boolean inside = mi >= 0 && mi < MASK && mj >= 0 && mj < MASK;
+				boolean known = this.borderKnown[k] || inside && this.remembered[mj * MASK + mi] >= 0.5F;
+				this.borderToKnown[k] = known ? 0 : Integer.MAX_VALUE / 2;
+				this.borderToUnexplored[k] = known ? Integer.MAX_VALUE / 2 : 0;
+			}
+		}
+		chamfer(this.borderToKnown, side);
+		chamfer(this.borderToUnexplored, side);
+		int far = side * 3;
+		float[] sd = this.borderSigned;
+		float[] tmp = this.borderBlur;
+		for (int k = 0; k < n; k++) {
+			sd[k] = (float) ((Math.min(this.borderToKnown[k], far) - Math.min(this.borderToUnexplored[k], far)) / 3.0 * texel);
 		}
 		for (int pass = 0; pass < 3; pass++) {
-			for (int j = 0; j < MASK; j++) {
-				for (int i = 0; i < MASK; i++) {
+			for (int j = 0; j < side; j++) {
+				for (int i = 0; i < side; i++) {
 					float sum = 0;
 					for (int d = -2; d <= 2; d++) {
-						sum += this.signed[j * MASK + Math.max(0, Math.min(MASK - 1, i + d))];
+						sum += sd[j * side + Math.max(0, Math.min(side - 1, i + d))];
 					}
-					this.signedBlur[j * MASK + i] = sum / 5;
+					tmp[j * side + i] = sum / 5;
 				}
 			}
-			for (int j = 0; j < MASK; j++) {
-				for (int i = 0; i < MASK; i++) {
+			for (int j = 0; j < side; j++) {
+				for (int i = 0; i < side; i++) {
 					float sum = 0;
 					for (int d = -2; d <= 2; d++) {
-						sum += this.signedBlur[Math.max(0, Math.min(MASK - 1, j + d)) * MASK + i];
+						sum += tmp[Math.max(0, Math.min(side - 1, j + d)) * side + i];
 					}
-					this.signed[j * MASK + i] = sum / 5;
+					sd[j * side + i] = sum / 5;
 				}
 			}
+		}
+		for (int j = 0; j < MASK; j++) {
+			System.arraycopy(sd, (j + border) * side + border, this.signed, j * MASK, MASK);
 		}
 	}
 
@@ -1407,7 +1509,7 @@ public final class MapViewport {
 					// The shader's map units wrap with the noise origin; the cell counted from map 0 is
 					// a whole number of cells on (the origins differ by whole wraps, 80 base cells each).
 					long worldU = u + Math.round((grid.originU() - mapU) / cell);
-					int code = VanillaClouds.code(this.signedAt(x, y), worldU, worldV, steps + level);
+					int code = VanillaClouds.code(grid.pattern(), this.signedAt(x, y), worldU, worldV, steps + level);
 					int at = (slotY + j) * edge + x0 + i;
 					pixels[at] = ((code & VanillaClouds.DECK) != 0 ? 0xFF : 0) | ((code & VanillaClouds.MIDDLE) != 0 ? 0xFF00 : 0)
 						| ((code & VanillaClouds.TOP) != 0 ? 0xFF0000 : 0);

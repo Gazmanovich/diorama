@@ -80,22 +80,20 @@ public final class MapExport {
 		}
 		//?}
 		// The clouds' texture comes from the resource packs: read it here, on the render thread.
-		if (!smoke) {
-			dev.diorama.render.VanillaClouds.prepare();
-		}
-		Thread thread = new Thread(() -> export.run(store, area, smoke, night, copied, fontOptions), "diorama-export");
+		dev.diorama.render.VanillaClouds.Pattern clouds = smoke ? null : dev.diorama.render.VanillaClouds.prepare();
+		Thread thread = new Thread(() -> export.run(store, area, smoke, night, clouds, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings, Set<String> fontOptions) {
+	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, dev.diorama.render.VanillaClouds.@org.jspecify.annotations.Nullable Pattern clouds, List<Drawing> drawings, Set<String> fontOptions) {
 		Component message;
 		try {
 			store.catchUp();
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
-			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night);
+			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night, clouds);
 			if (!drawings.isEmpty()) {
 				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager(), fontOptions));
 			}

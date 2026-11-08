@@ -5,6 +5,7 @@ import dev.diorama.Projection;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ImageExport;
 import dev.diorama.data.TileStore;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The map's fog painted on the CPU, for exported images: fog.fsh line for line, still (no drift
@@ -70,6 +71,8 @@ public final class ExportFog implements ImageExport.Finish {
 	private final float[] shade;
 	private final int background;
 	private final float[] moonlit;
+	/** The clouds' pattern, read on the render thread (MapExport). */
+	private VanillaClouds.@Nullable Pattern pattern;
 	/** The signed distance from explored land per mask texel, map units, positive over the unexplored. */
 	private float[] signed;
 	/** As fog.fsh: the base cell, the grid's cells in base cells, the two sizes drawn and how far the first has grown into the second. */
@@ -115,11 +118,11 @@ public final class ExportFog implements ImageExport.Finish {
 	 * {@code smoke} for the sky view under a roof, which has smoke instead of clouds.
 	 */
 	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke) {
-		return build(store, area, smoke, 0);
+		return build(store, area, smoke, 0, smoke ? null : VanillaClouds.prepare());
 	}
 
 	/** The same, dimmed {@code night} into the night as the map draws it ({@link NightLook}). */
-	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke, float night) {
+	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke, float night, VanillaClouds.@Nullable Pattern clouds) {
 		loadNoise();
 		int lod = area.lod();
 		double pixelsPerUnit = Projection.PIXELS_PER_UNIT / (double) (1 << lod);
@@ -190,6 +193,7 @@ public final class ExportFog implements ImageExport.Finish {
 			fog.roundOff(Math.max(1, Math.round(10 / texel)));
 		}
 		if (fog.clouds) {
+			fog.pattern = clouds != null ? clouds : VanillaClouds.prepare();
 			fog.cloudSetup(pixelsPerUnit);
 		} else {
 			java.util.Arrays.fill(fog.lift, 1);
@@ -529,7 +533,7 @@ public final class ExportFog implements ImageExport.Finish {
 				for (int i = 0; i < cw; i++) {
 					long cu = u0 + i;
 					long cv = v0 + j;
-					c[j * cw + i] = VanillaClouds.code(this.signedAt((cu + 0.5) * cell, (cv + 0.5) * cell), cu, cv, this.scaleSteps + level);
+					c[j * cw + i] = VanillaClouds.code(this.pattern, this.signedAt((cu + 0.5) * cell, (cv + 0.5) * cell), cu, cv, this.scaleSteps + level);
 				}
 			}
 			this.codes[n] = c;
