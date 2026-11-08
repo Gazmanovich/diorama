@@ -379,7 +379,7 @@ public final class BlockLooks {
 				looks.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
 				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
 					&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
-			} catch (RuntimeException | LinkageError e) {
+			} catch (RuntimeException | Error e) {
 				looks.spawnOn[id] = false;
 				looks.spawnIn[id] = false;
 			}
@@ -392,7 +392,7 @@ public final class BlockLooks {
 				if (kind == SOLID) {
 					looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
 				}
-			} catch (RuntimeException | LinkageError e) {
+			} catch (RuntimeException | Error e) {
 				if (failedShapes++ == 0) {
 					Diorama.LOGGER.warn("The shape of {} failed when asked for ({}); such blocks draw as full blocks", state, e.toString());
 				}
@@ -412,8 +412,9 @@ public final class BlockLooks {
 			FaceColor topFace = new FaceColor();
 			FaceColor sideFace = new FaceColor();
 			// A mod's model can fail when asked for its faces without its block entity's data, as
-			// Immersive Engineering's mirrored multiblock parts do. Such a block falls back below like
-			// one with no faces, instead of the failure stopping the table and crashing the game.
+			// Immersive Engineering's mirrored multiblock parts do, or throw an Error rather than an
+			// exception. Such a block falls back below like one with no faces, instead of the failure
+			// stopping the table and crashing the game.
 			try {
 				//? if >=1.21.5 {
 				parts.clear();
@@ -440,7 +441,7 @@ public final class BlockLooks {
 						accumulateLoose(topFace, sideFace, loose, spriteCache);
 					}
 				}
-			} catch (RuntimeException | LinkageError e) {
+			} catch (RuntimeException | Error e) {
 				topFace = new FaceColor();
 				sideFace = new FaceColor();
 				if (failedModels++ == 0) {
@@ -453,10 +454,13 @@ public final class BlockLooks {
 				try {
 					//? if >=26.1 {
 					particle = model.particleMaterial().sprite();
-					//?} else {
+					//?} else if >=1.21.5 || fabric {
 					/*particle = model.particleIcon();
+					*///?} else {
+					/*// Asked the loader's way, as the faces are (legacyQuads).
+					particle = model.getParticleIcon(net.neoforged.neoforge.client.model.data.ModelData.EMPTY);
 					*///?}
-				} catch (RuntimeException | LinkageError e) {
+				} catch (RuntimeException | Error e) {
 					particle = null;
 				}
 				if (particle != null && !isMissing(particle)) {
@@ -564,8 +568,22 @@ public final class BlockLooks {
 	private record LegacyPart(BakedModel model, BlockState state, RandomSource random) {
 		List<BakedQuad> getQuads(@Nullable Direction direction) {
 			this.random.setSeed(42L);
-			return this.model.getQuads(this.state, direction, this.random);
+			return legacyQuads(this.model, this.state, direction, this.random);
 		}
+	}
+
+	*///?}
+	//? if <1.21.5 && fabric {
+	/*private static List<BakedQuad> legacyQuads(BakedModel model, BlockState state, @Nullable Direction direction, RandomSource random) {
+		return model.getQuads(state, direction, random);
+	}
+
+	*///?} else if <1.21.5 {
+	/*// NeoForge and Forge draw a block's faces through their own form of the call, given the block
+	// entity's model data and a render layer, and a mod's model may throw when asked the vanilla way
+	// (Immortalers Delight's spike trap does). Asked as Xaero's maps ask: no data, every layer.
+	private static List<BakedQuad> legacyQuads(BakedModel model, BlockState state, @Nullable Direction direction, RandomSource random) {
+		return model.getQuads(state, direction, random, net.neoforged.neoforge.client.model.data.ModelData.EMPTY, null);
 	}
 
 	*///?}
@@ -577,7 +595,7 @@ public final class BlockLooks {
 		VoxelShape outline;
 		try {
 			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-		} catch (RuntimeException | LinkageError e) {
+		} catch (RuntimeException | Error e) {
 			return 0;
 		}
 		Integer known = byVoxels.get(outline);
@@ -655,7 +673,7 @@ public final class BlockLooks {
 			/*sprite = Minecraft.getInstance().getTextureAtlas(TextureAtlas.LOCATION_BLOCKS)
 				.apply(IClientFluidTypeExtensions.of(fluid).getStillTexture());
 			*///?}
-		} catch (RuntimeException | LinkageError e) {
+		} catch (RuntimeException | Error e) {
 			sprite = null;
 		}
 		if (sprite != null && isMissing(sprite)) {
@@ -679,11 +697,12 @@ public final class BlockLooks {
 		static Tint ask(TintProbe probe, IntSupplier inWorld, IntSupplier outOfWorld) {
 			probe.reset();
 			int color;
-			// Here and below, a LinkageError too: a mod's code can name a class from a mod that isn't
-			// installed, which fails only when it runs, and the map runs every block's code at once.
+			// Here and below, an Error too: a mod's code can name a class from a mod that isn't
+			// installed, which fails only when it runs, or fail an assertion of its own, and the map
+			// runs every block's code at once.
 			try {
 				color = inWorld.getAsInt();
-			} catch (RuntimeException | LinkageError e) {
+			} catch (RuntimeException | Error e) {
 				color = -1;
 			}
 			byte kind = probe.kind();
@@ -693,7 +712,7 @@ public final class BlockLooks {
 			if (probe.askedForBiome() || color == -1) {
 				try {
 					color = outOfWorld.getAsInt();
-				} catch (RuntimeException | LinkageError e) {
+				} catch (RuntimeException | Error e) {
 					return NONE;
 				}
 			}
@@ -735,7 +754,7 @@ public final class BlockLooks {
 			/*IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid);
 			return Tint.ask(probe, () -> extensions.getTintColor(fluid, probe, BlockPos.ZERO), extensions::getTintColor);
 			*///?}
-		} catch (RuntimeException | LinkageError e) {
+		} catch (RuntimeException | Error e) {
 			return Tint.NONE;
 		}
 	}
@@ -786,7 +805,7 @@ public final class BlockLooks {
 	private static int mapColor(BlockState state) {
 		try {
 			return state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col;
-		} catch (RuntimeException | LinkageError e) {
+		} catch (RuntimeException | Error e) {
 			return 0;
 		}
 	}
@@ -850,7 +869,7 @@ public final class BlockLooks {
 				TextureAtlasSprite sprite = atlas.getSprite(old.contents().name());
 				return sprite == old || sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation()) ? null : sprite;
 			}
-		} catch (RuntimeException | LinkageError e) {
+		} catch (RuntimeException | Error e) {
 			// The atlas isn't filled, or a mod's atlas isn't a TextureAtlas.
 		}
 		return null;
