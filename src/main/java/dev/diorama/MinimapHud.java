@@ -52,6 +52,8 @@ public final class MinimapHud implements HudElement {
 	private static final int INFO_COLOR = 0xFFFFFFFF;
 	/** The game time once it's dark enough for a bed, which can be earlier than the clock says in a storm. */
 	private static final int BED_TIME_COLOR = 0xFF9CC4FF;
+	/** Whether the game's effect icon drawing ran to the end since the minimap last looked (see EffectIconsMixin). */
+	private static boolean effectIconsDrawn;
 
 	private final MapViewport viewport = new MapViewport();
 	/** The slice being faded out, under the one fading in. */
@@ -75,6 +77,10 @@ public final class MinimapHud implements HudElement {
 		Minecraft mc = Minecraft.getInstance();
 		Settings settings = Settings.get();
 		Screen screen = mc.gui.screen();
+		// The minimap comes after the vanilla HUD on every loader, so this is this frame's icons.
+		// Taken whether or not the minimap draws, so a frame with no icons can't reuse an old answer.
+		boolean effectIcons = effectIconsDrawn;
+		effectIconsDrawn = false;
 		//? if >=26.2 {
 		if (!settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
@@ -97,7 +103,7 @@ public final class MinimapHud implements HudElement {
 		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
 		// Held, the enlarge key shows it bigger, in the same corner.
 		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
-		this.draw(graphics, partialTick, right, top, top ? this.effectRows(mc.player, right) : 0, size);
+		this.draw(graphics, partialTick, right, top, top && effectIcons ? this.effectRows(mc.player, right) : 0, size);
 	}
 
 	/**
@@ -353,7 +359,15 @@ public final class MinimapHud implements HudElement {
 	private record InfoLine(String text, int color) {
 	}
 
-	/** Vanilla draws status effect icons in the top-right corner; move the minimap below them. */
+	/** Called when the game's own drawing of the status effect icons runs to the end, icons or not. */
+	public static void effectIconsDrawn() {
+		effectIconsDrawn = true;
+	}
+
+	/**
+	 * Vanilla draws status effect icons in the top-right corner; move the minimap below them. Only
+	 * asked when the game did draw them: a mod that moves or hides them leaves the corner free.
+	 */
 	private int effectRows(LocalPlayer player, boolean right) {
 		if (!right) {
 			return 0;

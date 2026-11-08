@@ -11,6 +11,7 @@
 		"CustomPayloadMixin",
 		"CustomPayloadPacketMixin",
 		"DeathPacketMixin",
+		"EffectIconsMixin",
 		"FtbChunksUpdateMixin",
 		"GameRendererMixin",
 		"LevelChunkMixin",

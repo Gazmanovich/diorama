@@ -203,6 +203,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("settings")) {
 				settings(context, world);
 			}
+			if (tests.contains("inventory-hud")) {
+				InventoryHudTest.run(context, world);
+			}
 			if (tests.contains("overlays")) {
 				overlays(context, world);
 			}

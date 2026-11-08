@@ -2,26 +2,30 @@ package dev.diorama.test;
 
 import dev.diorama.bake.BlockLooks;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Proxy;
 import java.lang.reflect.Type;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Predicate;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * A block model that throws when asked for its faces, as Immersive Engineering's mirrored
- * multiblock parts do without their block entity's data: the map's block colours still build,
- * where the throw used to crash the game as a world loaded (Forge 1.20.1, Diorama 0.6.0). Gold
- * block's model is swapped for one that throws on every call given a random source (the faces on
- * every version) and answers the rest as gold block, so gold takes its particle texture's colour,
- * which for gold is its face's.
+ * Block models that throw when asked for their faces, which used to crash the game as a world
+ * loaded: the map's block colours still build. Immersive Engineering's mirrored multiblock parts
+ * throw without their block entity's data (Forge 1.20.1, Diorama 0.6.0), and Immortalers
+ * Delight's spike trap throws an AssertionError when asked the vanilla way rather than NeoForge's
+ * (NeoForge 1.21.1, Diorama 0.8.0).
  */
 final class FailingModelTest {
 	private FailingModelTest() {
@@ -29,53 +33,80 @@ final class FailingModelTest {
 
 	static void run(ClientGameTestContext context) {
 		context.runOnClient(mc -> {
-			BlockState gold = Blocks.GOLD_BLOCK.defaultBlockState();
-			int id = Block.BLOCK_STATE_REGISTRY.getId(gold);
-			BlockLooks real = BlockLooks.build();
-			real.ensure(id);
-			Object models = models(mc);
-			Field field = modelMap(models);
-			BlockLooks looks;
-			int[] thrown = {0};
-			try {
-				@SuppressWarnings("unchecked")
-				Map<BlockState, Object> byState = (Map<BlockState, Object>) field.get(models);
-				Object goldModel = byState.get(gold);
-				Map<BlockState, Object> swapped = new HashMap<>(byState);
-				swapped.put(gold, Proxy.newProxyInstance(modelType(field).getClassLoader(), new Class<?>[] {modelType(field)}, (proxy, method, args) -> {
-					for (Class<?> parameter : method.getParameterTypes()) {
-						if (parameter == RandomSource.class) {
-							thrown[0]++;
-							throw new NullPointerException("A stand-in for a mod's model that needs its block entity's data");
-						}
-					}
-					try {
-						return method.invoke(goldModel, args);
-					} catch (InvocationTargetException e) {
-						throw e.getCause();
-					}
-				}));
-				field.set(models, swapped);
-				try {
-					looks = BlockLooks.build();
-					// Looks are worked out when first asked for: ask while the model still fails.
-					looks.ensure(id);
-				} finally {
-					field.set(models, byState);
-				}
-			} catch (IllegalAccessException e) {
-				throw new AssertionError(e);
-			} finally {
-				BlockLooks.build();
-			}
-			if (thrown[0] == 0) {
-				throw new AssertionError("The table never asked the stand-in model for its faces");
-			}
-			if (looks.kind[id] != real.kind[id] || looks.top[id] != real.top[id] || looks.side[id] != real.side[id]) {
-				throw new AssertionError(String.format("Gold with a failing model looks %d #%06x/#%06x, not %d #%06x/#%06x",
-					looks.kind[id], looks.top[id], looks.side[id], real.kind[id], real.top[id], real.side[id]));
-			}
+			// Gold block's model throws on every call given a random source (the faces on every
+			// version) and answers the rest as gold block, so gold takes its particle texture's
+			// colour, which for gold is its face's. An Error, not an exception, as the spike trap's.
+			assertLooksUnchanged(mc, Blocks.GOLD_BLOCK.defaultBlockState(), method -> Arrays.asList(method.getParameterTypes()).contains(RandomSource.class));
+			//? if <1.21.5 && !fabric {
+			/*// Models that throw only when asked the vanilla way, as the spike trap's does, for faces
+			// or for the particle texture, and answer NeoForge's and Forge's forms of the calls. Asked
+			// those forms, grass keeps its own faces' colours, where the vanilla way it would fall
+			// back to its particle, dirt; and a chest, which has no faces, keeps its particle's colour
+			// rather than falling back to its map colour.
+			Predicate<Method> vanillaOnly = method -> Arrays.equals(method.getParameterTypes(), new Class<?>[] {BlockState.class, Direction.class, RandomSource.class})
+				|| method.getParameterCount() == 0 && method.getReturnType() == net.minecraft.client.renderer.texture.TextureAtlasSprite.class;
+			assertLooksUnchanged(mc, Blocks.GRASS_BLOCK.defaultBlockState(), vanillaOnly);
+			assertLooksUnchanged(mc, Blocks.CHEST.defaultBlockState(), vanillaOnly);
+			*///?}
 		});
+	}
+
+	/**
+	 * Builds the table with the state's model swapped for one that throws on the methods
+	 * {@code throwsOn} picks and answers the rest as the real model; the state must look as it does
+	 * with the real model.
+	 */
+	private static void assertLooksUnchanged(Minecraft mc, BlockState state, Predicate<Method> throwsOn) {
+		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		BlockLooks real = BlockLooks.build();
+		real.ensure(id);
+		Object models = models(mc);
+		Field field = modelMap(models);
+		BlockLooks looks;
+		// Calls given a random source: asked for faces at all, the vanilla way or the loader's.
+		int[] asked = {0};
+		try {
+			@SuppressWarnings("unchecked")
+			Map<BlockState, Object> byState = (Map<BlockState, Object>) field.get(models);
+			Object realModel = byState.get(state);
+			InvocationHandler failing = (proxy, method, args) -> {
+				if (Arrays.asList(method.getParameterTypes()).contains(RandomSource.class)) {
+					asked[0]++;
+				}
+				if (throwsOn.test(method)) {
+					throw new AssertionError("A stand-in for a mod's model that can't be asked this way");
+				}
+				try {
+					return method.invoke(realModel, args);
+				} catch (InvocationTargetException e) {
+					throw e.getCause();
+				}
+			};
+			Map<BlockState, Object> swapped = new HashMap<>(byState);
+			swapped.put(state, Proxy.newProxyInstance(modelType(field).getClassLoader(), new Class<?>[] {modelType(field)}, failing));
+			field.set(models, swapped);
+			try {
+				looks = BlockLooks.build();
+				// Looks are worked out when first asked for: ask while the model still fails.
+				looks.ensure(id);
+			} finally {
+				field.set(models, byState);
+			}
+		} catch (IllegalAccessException e) {
+			throw new AssertionError(e);
+		} finally {
+			BlockLooks.build();
+		}
+		if (asked[0] == 0) {
+			throw new AssertionError("The table never asked the stand-in model for " + state + "'s faces");
+		}
+		if (looks.kind[id] != real.kind[id] || looks.top[id] != real.top[id] || looks.side[id] != real.side[id] || looks.tint[id] != real.tint[id]
+			|| looks.topTinted[id] != real.topTinted[id] || looks.sideTinted[id] != real.sideTinted[id] || looks.constantTint[id] != real.constantTint[id]
+			|| looks.topTintWeight[id] != real.topTintWeight[id] || looks.sideTintWeight[id] != real.sideTintWeight[id]) {
+			throw new AssertionError(String.format("%s with a failing model looks %d #%06x/#%06x tinted #%06x/#%06x tint %d, not %d #%06x/#%06x tinted #%06x/#%06x tint %d", state,
+				looks.kind[id], looks.top[id], looks.side[id], looks.topTinted[id], looks.sideTinted[id], looks.tint[id],
+				real.kind[id], real.top[id], real.side[id], real.topTinted[id], real.sideTinted[id], real.tint[id]));
+		}
 	}
 
 	/** What the game's block models are kept in, which BlockLooks reads them from. */
