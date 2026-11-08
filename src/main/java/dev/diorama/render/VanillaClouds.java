@@ -55,14 +55,27 @@ public final class VanillaClouds {
 	 * ({@link #prepare}) and keeps it, so a resource reload during it can't mix two patterns.
 	 */
 	public static final class Pattern {
-		private final float[][] middle = new float[LARGEST + 1][];
-		private final float[][] top = new float[LARGEST + 1][];
+		private final boolean[] texture;
+		private float[][] middle;
+		private float[][] top;
 
 		private Pattern(boolean[] texture) {
-			for (int level = 0; level <= LARGEST; level++) {
-				this.middle[level] = order(texture, level, level == 0 ? null : this.middle[level - 1], MIDDLE_U, MIDDLE_V);
-				this.top[level] = order(texture, level, level == 0 ? null : this.top[level - 1], TOP_U, TOP_V);
+			this.texture = texture;
+		}
+
+		/** The orders, worked out the first time a build asks, on its own thread. */
+		private synchronized void orders() {
+			if (this.middle != null) {
+				return;
 			}
+			float[][] middle = new float[LARGEST + 1][];
+			float[][] top = new float[LARGEST + 1][];
+			for (int level = 0; level <= LARGEST; level++) {
+				middle[level] = order(this.texture, level, level == 0 ? null : middle[level - 1], MIDDLE_U, MIDDLE_V);
+				top[level] = order(this.texture, level, level == 0 ? null : top[level - 1], TOP_U, TOP_V);
+			}
+			this.top = top;
+			this.middle = middle;
 		}
 	}
 
@@ -74,6 +87,7 @@ public final class VanillaClouds {
 	 * whose middle is {@code s} map units from explored land (positive over the unexplored).
 	 */
 	public static int code(Pattern pattern, double s, long u, long v, int k) {
+		pattern.orders();
 		double size = CELL * (1 << k);
 		int level = Math.min(k, LARGEST);
 		int period = REPEAT >> level;
@@ -127,7 +141,8 @@ public final class VanillaClouds {
 	/**
 	 * The pattern from clouds.png, read if not since the last reload. Called on the render thread
 	 * and the result handed to a build on another thread, so no other thread reads the resource
-	 * packs, and a build keeps one pattern whatever reloads meanwhile.
+	 * packs, and a build keeps one pattern whatever reloads meanwhile. Only the read is here: the
+	 * build works out the orders.
 	 */
 	public static synchronized Pattern prepare() {
 		Pattern pattern = current;
@@ -154,19 +169,17 @@ public final class VanillaClouds {
 		int period = REPEAT >> level;
 		double[] score = new double[period * period];
 		if (finer == null) {
-			double sigma = 1.2;
-			int reach = 3;
 			for (int j = 0; j < period; j++) {
 				for (int i = 0; i < period; i++) {
 					double near = 0;
-					double total = 0;
-					for (int dj = -reach; dj <= reach; dj++) {
-						for (int di = -reach; di <= reach; di++) {
-							double w = Math.exp(-(di * di + dj * dj) / (2 * sigma * sigma));
-							near += tex[texel(Math.floorMod(i + di, period) + ou, Math.floorMod(j + dj, period) + ov)] ? w : 0;
-							total += w;
+					for (int dj = -NEAR_REACH; dj <= NEAR_REACH; dj++) {
+						for (int di = -NEAR_REACH; di <= NEAR_REACH; di++) {
+							if (tex[texel(Math.floorMod(i + di, period) + ou, Math.floorMod(j + dj, period) + ov)]) {
+								near += NEAR_WEIGHTS[(dj + NEAR_REACH) * (2 * NEAR_REACH + 1) + di + NEAR_REACH];
+							}
 						}
 					}
+					double total = 1;
 					double h = hash(i * 127.1 + j * 311.7 + ou * 74.7);
 					score[j * period + i] = tex[texel(i + ou, j + ov)] ? -1 + 0.01 * h : -near / total + 0.25 * (h - 0.5);
 				}
@@ -189,6 +202,27 @@ public final class VanillaClouds {
 			ranked[index[n]] = (n + 0.5F) / index.length;
 		}
 		return ranked;
+	}
+
+	/** How much each cell around a cell counts toward its being next to vanilla's clouds: a Gaussian, summing to 1. */
+	private static final int NEAR_REACH = 3;
+	private static final double[] NEAR_WEIGHTS = nearWeights();
+
+	private static double[] nearWeights() {
+		int side = 2 * NEAR_REACH + 1;
+		double[] weights = new double[side * side];
+		double total = 0;
+		for (int dj = -NEAR_REACH; dj <= NEAR_REACH; dj++) {
+			for (int di = -NEAR_REACH; di <= NEAR_REACH; di++) {
+				double w = Math.exp(-(di * di + dj * dj) / (2 * 1.2 * 1.2));
+				weights[(dj + NEAR_REACH) * side + di + NEAR_REACH] = w;
+				total += w;
+			}
+		}
+		for (int k = 0; k < weights.length; k++) {
+			weights[k] /= total;
+		}
+		return weights;
 	}
 
 	private static int texel(int u, int v) {
