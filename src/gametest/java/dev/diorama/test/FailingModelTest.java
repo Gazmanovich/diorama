@@ -38,11 +38,15 @@ final class FailingModelTest {
 			// colour, which for gold is its face's. An Error, not an exception, as the spike trap's.
 			assertLooksUnchanged(mc, Blocks.GOLD_BLOCK.defaultBlockState(), method -> Arrays.asList(method.getParameterTypes()).contains(RandomSource.class));
 			//? if <1.21.5 && !fabric {
-			/*// Grass block's model throws only when asked the vanilla way, as the spike trap's does,
-			// and answers NeoForge's and Forge's form of the call. Asked that form, grass keeps its
-			// own faces' colours; asked the vanilla way it would fall back to its particle, dirt.
-			assertLooksUnchanged(mc, Blocks.GRASS_BLOCK.defaultBlockState(), method -> Arrays.equals(method.getParameterTypes(),
-				new Class<?>[] {BlockState.class, Direction.class, RandomSource.class}));
+			/*// Models that throw only when asked the vanilla way, as the spike trap's does, for faces
+			// or for the particle texture, and answer NeoForge's and Forge's forms of the calls. Asked
+			// those forms, grass keeps its own faces' colours, where the vanilla way it would fall
+			// back to its particle, dirt; and a chest, which has no faces, keeps its particle's colour
+			// rather than falling back to its map colour.
+			Predicate<Method> vanillaOnly = method -> Arrays.equals(method.getParameterTypes(), new Class<?>[] {BlockState.class, Direction.class, RandomSource.class})
+				|| method.getParameterCount() == 0 && method.getReturnType() == net.minecraft.client.renderer.texture.TextureAtlasSprite.class;
+			assertLooksUnchanged(mc, Blocks.GRASS_BLOCK.defaultBlockState(), vanillaOnly);
+			assertLooksUnchanged(mc, Blocks.CHEST.defaultBlockState(), vanillaOnly);
 			*///?}
 		});
 	}
@@ -93,9 +97,12 @@ final class FailingModelTest {
 		if (asked[0] == 0) {
 			throw new AssertionError("The table never asked the stand-in model for " + state + "'s faces");
 		}
-		if (looks.kind[id] != real.kind[id] || looks.top[id] != real.top[id] || looks.side[id] != real.side[id] || looks.tint[id] != real.tint[id]) {
-			throw new AssertionError(String.format("%s with a failing model looks %d #%06x/#%06x tint %d, not %d #%06x/#%06x tint %d", state,
-				looks.kind[id], looks.top[id], looks.side[id], looks.tint[id], real.kind[id], real.top[id], real.side[id], real.tint[id]));
+		if (looks.kind[id] != real.kind[id] || looks.top[id] != real.top[id] || looks.side[id] != real.side[id] || looks.tint[id] != real.tint[id]
+			|| looks.topTinted[id] != real.topTinted[id] || looks.sideTinted[id] != real.sideTinted[id] || looks.constantTint[id] != real.constantTint[id]
+			|| looks.topTintWeight[id] != real.topTintWeight[id] || looks.sideTintWeight[id] != real.sideTintWeight[id]) {
+			throw new AssertionError(String.format("%s with a failing model looks %d #%06x/#%06x tinted #%06x/#%06x tint %d, not %d #%06x/#%06x tinted #%06x/#%06x tint %d", state,
+				looks.kind[id], looks.top[id], looks.side[id], looks.topTinted[id], looks.sideTinted[id], looks.tint[id],
+				real.kind[id], real.top[id], real.side[id], real.topTinted[id], real.sideTinted[id], real.tint[id]));
 		}
 	}
 
