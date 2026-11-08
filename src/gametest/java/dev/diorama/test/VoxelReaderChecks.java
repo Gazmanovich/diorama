@@ -61,7 +61,7 @@ public final class VoxelReaderChecks {
 				}
 				// Filled copycats are numbered per table: the reader's id must name the same look.
 				int read = reader.state(wx, wy, wz);
-				if (read < 0 || material == null && read != stateId || readerLooks.kind[read] != looks.kind[expected]
+				if (read < 0 || material == null && read != stateId || !sameLook(readerLooks, read, looks, expected)
 					|| reader.solid(wx, wy, wz) != (isSolid ? 1 : 0)) {
 					throw new AssertionError("Decoded block state " + expected + " incorrectly at " + wx + "," + wy + "," + wz);
 				}
@@ -116,6 +116,18 @@ public final class VoxelReaderChecks {
 		}
 	}
 
+	/**
+	 * Whether a look in one table is the same as one in another: every field, outlines by their
+	 * boxes, since tables number filled copycats and outlines each their own way.
+	 */
+	private static boolean sameLook(BlockLooks a, int i, BlockLooks b, int j) {
+		return a.kind[i] == b.kind[j] && a.top[i] == b.top[j] && a.topTinted[i] == b.topTinted[j]
+			&& a.topTintWeight[i] == b.topTintWeight[j] && a.side[i] == b.side[j] && a.sideTinted[i] == b.sideTinted[j]
+			&& a.sideTintWeight[i] == b.sideTintWeight[j] && a.tint[i] == b.tint[j] && a.constantTint[i] == b.constantTint[j]
+			&& a.emission[i] == b.emission[j] && a.spawnOn[i] == b.spawnOn[j] && a.spawnIn[i] == b.spawnIn[j]
+			&& a.wetShape[i] == b.wetShape[j] && java.util.Arrays.equals(a.shapes[a.shape[i]], b.shapes[b.shape[j]]);
+	}
+
 	/** The same chunk in a turned view: each block where the facing puts it, turned with it. */
 	private static void checkTurned(ChunkSource source, ChunkSnapshot snapshot, BlockLooks looks, Facing facing) {
 		TurnedSource turned = new TurnedSource(source, facing);
@@ -145,7 +157,7 @@ public final class VoxelReaderChecks {
 				}
 				int solid = looks.kind[looks.ensure(expected)] == BlockLooks.SOLID ? looks.shape[expected] != 0 ? 2 : 1 : 0;
 				int read = reader.state(wx, wy, wz);
-				if (read < 0 || material == null && read != stateId || readerLooks.kind[read] != looks.kind[expected] || solidOnly.solid(wx, wy, wz) != solid) {
+				if (read < 0 || material == null && read != stateId || !sameLook(readerLooks, read, looks, expected) || solidOnly.solid(wx, wy, wz) != solid) {
 					throw new AssertionError(facing + " view read block state " + reader.state(wx, wy, wz) + " for " + expected + " at " + wx + "," + wy + "," + wz);
 				}
 			}
