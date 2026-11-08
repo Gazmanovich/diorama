@@ -64,6 +64,9 @@ final class TileFilterTest {
 		} catch (InterruptedException e) {
 			throw new AssertionError(e);
 		}
+		// The clouds lie over the edge of explored land, see-through, as far in as a chunk or more:
+		// what's checked here is the tiles, so the map is drawn without them.
+		context.runOnClient(mc -> MapViewport.hideFogForTests(true));
 		for (Case check : CASES) {
 			DioramaClientTest.setGuiScale(context, check.guiScale);
 			context.setScreen(MapScreen::new);
@@ -91,7 +94,10 @@ final class TileFilterTest {
 			}
 			context.setScreen(() -> null);
 		}
-		context.runOnClient(mc -> Settings.get().radarOnMap = radar);
+		context.runOnClient(mc -> {
+			Settings.get().radarOnMap = radar;
+			MapViewport.hideFogForTests(false);
+		});
 		DioramaClientTest.setGuiScale(context, scale);
 	}
 

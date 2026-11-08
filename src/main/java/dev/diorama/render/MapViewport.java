@@ -46,7 +46,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, double guiScale, int viewWidth, int viewHeight) {
 		/**
 		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
 		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
@@ -464,6 +464,13 @@ public final class MapViewport {
 		}
 	}
 
+	private static volatile boolean fogHiddenForTests;
+
+	/** For tests that check the tiles under the fog (TileFilterTest): the map drawn without it. */
+	public static void hideFogForTests(boolean hide) {
+		fogHiddenForTests = hide;
+	}
+
 	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, float night) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
@@ -486,6 +493,9 @@ public final class MapViewport {
 		double originV = Math.floor((view.minV() - MASK_MARGIN) / snap) * snap;
 		boolean fast = TileBaker.fast();
 		this.buildMask(level, view, originU, originV, texel, steps, fraction, fast);
+		if (fogHiddenForTests) {
+			return;
+		}
 
 		double span = MASK * texel;
 		float mu0 = (float) ((view.minU() - originU) / span);
@@ -613,7 +623,7 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version(), Minecraft.getInstance().getWindow().getGuiScale(), view.width(), view.height());
 		boolean sameLevel = this.maskLevel.get() == level;
 		this.takeFinished();
 		if (sameLevel && inputs.equals(this.maskInputs)) {
@@ -760,9 +770,10 @@ public final class MapViewport {
 		}
 		int centerI = (int) Math.floor((view.centerU() - originU) / texel);
 		int centerJ = (int) Math.floor((view.centerV() - originV) / texel);
-		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction) : null;
-		// Read here, so the worker finds it made.
+		// Read here, so the worker finds them made: the clouds' pattern is read from the resource packs, on this thread.
 		FogTextures.noiseBytes();
+		VanillaClouds.Pattern pattern = clouds ? VanillaClouds.prepare() : null;
+		CellGrid grid = clouds ? CellGrid.of(view, originU, originV, texel, scaleSteps, fraction, pattern) : null;
 		this.finish(() -> this.finishBuild(before, sameLevel, inputs, rounded, surface, clouds, cellScale, centerI, centerJ, grid), later);
 	}
 
@@ -796,6 +807,7 @@ public final class MapViewport {
 			}
 		} else {
 			this.liftTargets(centerI, centerJ, texel, scaleSteps);
+			this.cloudDistances(texel);
 			// The heights ease to new ones, as tiles land (as often as every frame in a redraw) or the
 			// view pans; a pan moves them with the ground. The mask can't see explored land past its
 			// edge, so heights near the edge are only a guess, corrected as a pan brings that land in:
@@ -807,6 +819,7 @@ public final class MapViewport {
 			int dj = fresh ? 0 : (int) Math.round((originV - before.originV()) / texel);
 			if (fresh || Math.abs(di) >= MASK || Math.abs(dj) >= MASK) {
 				System.arraycopy(this.liftTarget, 0, this.liftShown, 0, this.liftShown.length);
+				System.arraycopy(this.remembered, 0, this.rememberedShown, 0, this.rememberedShown.length);
 				this.liftMs = System.currentTimeMillis();
 			} else {
 				if (di != 0 || dj != 0) {
@@ -816,9 +829,11 @@ public final class MapViewport {
 							int fromJ = j + dj;
 							boolean inside = fromI >= 0 && fromI < MASK && fromJ >= 0 && fromJ < MASK;
 							this.liftMoved[j * MASK + i] = inside ? this.liftShown[fromJ * MASK + fromI] : this.liftTarget[j * MASK + i];
+							this.rememberedMoved[j * MASK + i] = inside ? this.rememberedShown[fromJ * MASK + fromI] : this.remembered[j * MASK + i];
 						}
 					}
 					System.arraycopy(this.liftMoved, 0, this.liftShown, 0, this.liftShown.length);
+					System.arraycopy(this.rememberedMoved, 0, this.rememberedShown, 0, this.rememberedShown.length);
 				}
 				this.lifting = !this.stepLift();
 			}
@@ -827,7 +842,7 @@ public final class MapViewport {
 			this.writeLift();
 		}
 		this.cellGrid = grid;
-		this.writeCells(true);
+		this.writeCells();
 	}
 
 	/**
@@ -882,14 +897,15 @@ public final class MapViewport {
 	}
 
 	/**
-	 * The remembered share into green, at 0.4 for all of it, where green isn't the clear flag: the
-	 * shader lets that much of the old map show through the clouds.
+	 * The remembered share drawn, eased like the heights, into green, at 0.4 for all of it, where
+	 * green isn't the clear flag: the shader covers the old map softly by it, so a remembered tile
+	 * read a moment late fades in or out instead of switching.
 	 */
 	private void writeRemembered() {
 		for (int k = 0; k < MASK * MASK; k++) {
 			int pixel = this.maskPixels[k];
-			if ((pixel & 0xFF00) == 0) {
-				this.maskPixels[k] = pixel | Math.round(this.remembered[k] * 0.4F * 255) << 8;
+			if ((pixel & 0xFF00) != 0xFF00) {
+				this.maskPixels[k] = pixel & ~0xFF00 | Math.round(this.rememberedShown[k] * 0.4F * 255) << 8;
 			}
 		}
 	}
@@ -899,8 +915,10 @@ public final class MapViewport {
 	private static final double CLOUD_CELL = 12.8;
 	private static final double CELLS_PER_LEVEL = 5;
 
-	/** How much of a remembered map is under each mask texel, 0 to 1. */
+	/** How much of a remembered map is under each mask texel, 0 to 1, and that drawn, easing toward it. */
 	private final float[] remembered = new float[MASK * MASK];
+	private final float[] rememberedShown = new float[MASK * MASK];
+	private final float[] rememberedMoved = new float[MASK * MASK];
 	/** How tall the fog stands over each texel, as a share of its full height: {@link #liftTargets}. */
 	private final float[] liftTarget = new float[MASK * MASK];
 	/** The heights drawn, easing toward the targets. */
@@ -1007,6 +1025,13 @@ public final class MapViewport {
 				this.liftShown[k] += Math.signum(diff) * step;
 				done = false;
 			}
+			float rememberedDiff = this.remembered[k] - this.rememberedShown[k];
+			if (Math.abs(rememberedDiff) <= step * 2) {
+				this.rememberedShown[k] = this.remembered[k];
+			} else {
+				this.rememberedShown[k] += Math.signum(rememberedDiff) * step * 2;
+				done = false;
+			}
 		}
 		return done;
 	}
@@ -1020,10 +1045,9 @@ public final class MapViewport {
 				this.maskPixels[k] &= 0xFF0000FF;
 			}
 			this.markReach(this.reach, true);
-			this.writeRemembered();
 		}
+		this.writeRemembered();
 		this.writeLift();
-		this.writeCells(false);
 	}
 
 	/** The drawn heights into the mask's alpha. */
@@ -1104,7 +1128,7 @@ public final class MapViewport {
 				lineNotKnown += known == 0xFF ? 0 : 1;
 				// On the surface "fully unknown" is plain too: the clouds at full height, now and as
 				// they ease, and no old map under them. The shader draws a flat cloud top there.
-				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0;
+				boolean plain = !surface || this.liftTarget[k] >= 1 && this.liftShown[k] >= 1 && this.remembered[k] <= 0 && this.rememberedShown[k] <= 0;
 				lineNotUnknown += known == 0 && plain ? 0 : 1;
 				notKnown[(j + 1) * row + i + 1] = notKnown[j * row + i + 1] + lineNotKnown;
 				notUnknown[(j + 1) * row + i + 1] = notUnknown[j * row + i + 1] + lineNotUnknown;
@@ -1175,13 +1199,13 @@ public final class MapViewport {
 	 * many after its last. The mask's origin is always a whole number of cells from the noise's: ten
 	 * of the base size to each eighth of the coarser noise period the origin snaps to.
 	 */
-	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult, boolean handover,
+	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult, double screen, VanillaClouds.Pattern pattern,
 		double viewMinU, double viewMinV, double viewMaxU, double viewMaxV) {
-		static CellGrid of(View view, double originU, double originV, double texel, int scaleSteps, int fraction) {
+		static CellGrid of(View view, double originU, double originV, double texel, int scaleSteps, int fraction, VanillaClouds.Pattern pattern) {
 			double snap = 64.0 * (1 << (scaleSteps + 1));
 			return new CellGrid(originU, originV, texel,
 				Math.floorMod((long) (originU / snap), 8), Math.floorMod((long) (originV / snap), 8), snap,
-				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1, fraction >= 7 && fraction < 10,
+				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1, 1 / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale()), pattern,
 				view.minU(), view.minV(), view.minU() + view.width() / view.zoom(), view.minV() + view.height() / view.zoom());
 		}
 
@@ -1198,222 +1222,317 @@ public final class MapViewport {
 	private @Nullable CellGrid cellGrid;
 
 	/**
-	 * Each cloud cell's level, as fog.fsh's cellLevel works it out, into the detail texture: red for
-	 * cells of the size drawn, green for twice that while the zoom hands over, a level in fifths,
-	 * and in alpha the levels around each cell (levelSpans). Blue holds the soft known share
-	 * (writeSoft), alpha at (0, 0) says the cells are there. After a rebuild all of it is written and
-	 * uploaded; while the heights ease only the cells around the view change, and only they go up.
+	 * Into the detail texture: blue holds the soft known share (writeSoft) for the mask's texels
+	 * and, beside it, the signed distance from explored land ({@link #cloudDistances}); alpha, a
+	 * texel a cell of the grid drawn, what clouds are within reach ({@link #cloudNear}); and further
+	 * down, red, green and blue a texel a cloud cell of each size, its layers ({@link #cloudCells}).
+	 * Alpha at (0, 0) says the cells are there: 255, or 170 with the bigger layout. Written and
+	 * uploaded whole after each rebuild: the cells don't change while the heights ease.
 	 */
-	private void writeCells(boolean rebuilt) {
+	private void writeCells() {
 		CellGrid grid = this.cellGrid;
-		boolean cells = grid != null && grid.count(grid.mult()) <= DETAIL;
-		int edge = MASK;
-		while (cells && edge < grid.count(grid.mult())) {
-			edge *= 2;
-		}
-		int[] pixels = this.detailPixels;
-		boolean all = rebuilt || edge != this.detailEdge;
-		this.detailEdge = edge;
-		if (all) {
-			for (int j = 0; j < edge; j++) {
-				for (int i = 0; i < edge; i++) {
-					int soft = i < MASK && j < MASK ? this.softBytes[j * MASK + i] & 0xFF : 0;
-					pixels[j * edge + i] = soft << 16;
+		// The smallest size the view draws (fog.fsh: cells about CLOUD_PIXELS screen pixels across), a
+		// little under in case the zoom goes in before the next build, and the blocks laid out from it:
+		// the small layout if they fit, else the large, else from a bigger size.
+		int smallest = -1;
+		boolean large = false;
+		if (grid != null) {
+			int span = grid.count(grid.mult()) * grid.mult();
+			int drawn = (int) Math.max(0, Math.floor(Math.log(CLOUD_PIXELS * grid.screen() / grid.base()) / Math.log(2) - 0.1));
+			for (int level = Math.min(drawn, CLOUD_SIZES - 1); level < CLOUD_SIZES && smallest < 0; level++) {
+				int cells = (span + (1 << level) - 1 >> level) + 2;
+				if (cells <= CLOUD_SLOT) {
+					smallest = level;
+				} else if (cells <= 2 * CLOUD_SLOT) {
+					smallest = level;
+					large = true;
 				}
 			}
 		}
-		int[] changed = null;
-		if (cells) {
-			int[] noise = FogTextures.noiseBytes();
-			this.cellStamp++;
-			changed = this.cellLevels(grid, 1, 0, pixels, edge, noise);
-			if (grid.handover()) {
-				int[] doubled = this.cellLevels(grid, 2, 8, pixels, edge, noise);
-				changed = new int[] {Math.min(changed[0], doubled[0]), Math.max(changed[1], doubled[1]), Math.min(changed[2], doubled[2]), Math.max(changed[3], doubled[3])};
-			}
-			this.levelSpans(grid.count(grid.mult()), pixels, edge, changed);
-			// Alpha at the first cell, never read as one (it's CELL_MARGIN before the mask's first, the
-			// mask's edge a margin before the view's): the cells are there.
-			pixels[0] |= 0xFF000000;
-		}
-		if (all || changed == null) {
-			this.detailWrite(0, 0, edge, pixels);
-			return;
-		}
-		// The square from the changed cells' first corner that holds them all, if it fits in the texture.
-		int x0 = changed[0];
-		int y0 = changed[2];
-		int side = Math.max(changed[1] - x0, changed[3] - y0) + 1;
-		if (x0 + side > DETAIL || y0 + side > DETAIL) {
-			this.detailWrite(0, 0, edge, pixels);
-			return;
-		}
-		int[] part = this.detailPart.length >= side * side ? this.detailPart : (this.detailPart = new int[side * side]);
-		for (int j = 0; j < side; j++) {
-			for (int i = 0; i < side; i++) {
-				int x = x0 + i;
-				int y = y0 + j;
-				part[j * side + i] = x < edge && y < edge ? pixels[y * edge + x] : 0;
+		this.cloudSmallest = smallest;
+		this.cloudLarge = large;
+		int edge = large ? 4 * MASK : 2 * MASK;
+		int[] pixels = this.detailPixels;
+		for (int j = 0; j < edge; j++) {
+			for (int i = 0; i < edge; i++) {
+				int blue = 0;
+				if (j < MASK && i < MASK) {
+					blue = this.softBytes[j * MASK + i] & 0xFF;
+				} else if (j < MASK && i < 2 * MASK) {
+					// Two map units a step, 128 at explored land's edge.
+					blue = Math.max(0, Math.min(255, Math.round(this.signed[j * MASK + i - MASK] / 2) + 128));
+				}
+				pixels[j * edge + i] = blue << 16;
 			}
 		}
-		this.detailWrite(x0, y0, side, part);
-	}
-
-	/** Which part of the detail texture {@link #uploadMask} sends. */
-	private void detailWrite(int x, int y, int edge, int[] pixels) {
-		this.detailArea[0] = x;
-		this.detailArea[1] = y;
+		if (smallest >= 0) {
+			this.cloudCells(grid, pixels, edge);
+			// At (0, 0): the cells are there (over a half), from which size, and which layout.
+			pixels[0] = pixels[0] & 0xFFFFFF | 255 - smallest * 16 - (large ? 8 : 0) << 24;
+		}
+		this.detailArea[0] = 0;
+		this.detailArea[1] = 0;
 		this.detailArea[2] = edge;
 		this.detailUpload = pixels;
 	}
 
-	private int detailEdge;
-	private int[] detailPart = new int[0];
+	/**
+	 * Each size drawn has a block of the detail texture, from row {@link #CLOUD_SLOT}: the smallest
+	 * size drawn ({@link #cloudSmallest}) first, CLOUD_SLOT wide (twice that in the large layout),
+	 * each next one half as wide: a cell a texel, the deck, middle and top layers in red, green and
+	 * blue, 0 or 255. Read filtered, the shader's four cells round a point blend in one read. Match
+	 * fog.fsh's cloudRaw.
+	 */
+	private static final int CLOUD_SLOT = 256;
+	/** Cells about this many screen pixels across; match fog.fsh. */
+	private static final double CLOUD_PIXELS = 40;
+	private int cloudSmallest = -1;
+	private boolean cloudLarge;
+	/** Cell sizes, 1, 2, 4, 8 and 16 times the base cell; match fog.fsh. */
+	private static final int CLOUD_SIZES = 5;
+
+	private int slotX(int level) {
+		int width = this.cloudLarge ? 2 * CLOUD_SLOT : CLOUD_SLOT;
+		int at = level - this.cloudSmallest;
+		return at == 0 ? 0 : width * 2 - (width >> (at - 1));
+	}
+
+	private int slotWidth(int level) {
+		return level < this.cloudSmallest ? 0 : (this.cloudLarge ? 2 * CLOUD_SLOT : CLOUD_SLOT) >> (level - this.cloudSmallest);
+	}
+
+	/** Map units from land explored or remembered, positive over land never explored: {@link #cloudDistances}. */
+	private final float[] signed = new float[MASK * MASK];
+	private final int[] toKnown = new int[MASK * MASK];
+	private final float[] signedBlur = new float[MASK * MASK];
 
 	/**
-	 * Cells each side of a cell that a point in it can read: a point curled up to 1.45 cells away
-	 * reads the cell under it, two before at most, and the one after that, three after at most.
+	 * The signed distance from explored land the clouds are placed by. Land remembered from before a
+	 * turn counts as explored, so turning the map doesn't move the clouds; the soft cover over the
+	 * remembered map while it's redrawn is fog.fsh's, from the eased heights. Blurred a little, so
+	 * its contours don't step with the mask's texels. Needs {@link #liftTargets}'s distances.
 	 */
-	private static final int SPAN_BEFORE = 2;
-	private static final int SPAN_AFTER = 3;
-	/** The cells of the size drawn: their levels, and which were worked out this time (this stamp). */
-	private final byte[] cellLevel = new byte[DETAIL * DETAIL];
-	private final int[] cellDone = new int[DETAIL * DETAIL];
-	private int cellStamp;
-	private final byte[] spanLow = new byte[DETAIL * DETAIL];
-	private final byte[] spanHigh = new byte[DETAIL * DETAIL];
-
-	/**
-	 * Into alpha, for each cell of the size drawn: the lowest and highest level of the cells from
-	 * {@link #SPAN_BEFORE} before it to {@link #SPAN_AFTER} after it each way, as (low * 6 + high) * 7.
-	 * Where a level is no higher than the lowest there, or above the highest, its cover is 1 or 0
-	 * all round however the edges curl, and the shader needn't read it. A cell not worked out could
-	 * be any level, so near one there is no shortcut.
-	 */
-	private void levelSpans(int count, int[] pixels, int edge, int[] range) {
-		// Along each row, then down each column of those, for the cells worked out.
-		for (int j = range[2]; j <= range[3]; j++) {
-			for (int i = range[0]; i <= range[1]; i++) {
-				int low = 5;
-				int high = 0;
-				for (int d = -SPAN_BEFORE; d <= SPAN_AFTER; d++) {
-					int at = j * count + i + d;
-					if (i + d < range[0] || i + d > range[1] || this.cellDone[at] != this.cellStamp) {
-						low = 0;
-						high = 5;
-						break;
-					}
-					low = Math.min(low, this.cellLevel[at]);
-					high = Math.max(high, this.cellLevel[at]);
+	private void cloudDistances(double texel) {
+		for (int k = 0; k < MASK * MASK; k++) {
+			boolean known = (this.maskPixels[k] & 0xFF) >= 128 || this.remembered[k] >= 0.5F;
+			this.toKnown[k] = known ? 0 : Integer.MAX_VALUE / 2;
+		}
+		chamfer(this.toKnown);
+		int far = MASK * 3;
+		for (int k = 0; k < MASK * MASK; k++) {
+			this.signed[k] = (float) ((Math.min(this.toKnown[k], far) - Math.min(this.toUnexplored[k], far)) / 3.0 * texel);
+		}
+		// A texel either way: wider, and zoomed out a narrow explored trail would blur into cloud.
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += this.signed[j * MASK + Math.max(0, Math.min(MASK - 1, i + d))];
 				}
-				this.spanLow[j * count + i] = (byte) low;
-				this.spanHigh[j * count + i] = (byte) high;
+				this.signedBlur[j * MASK + i] = sum / 3;
 			}
 		}
-		for (int j = range[2]; j <= range[3]; j++) {
-			for (int i = range[0]; i <= range[1]; i++) {
-				int low = 5;
-				int high = 0;
-				for (int d = -SPAN_BEFORE; d <= SPAN_AFTER; d++) {
-					if (j + d < range[2] || j + d > range[3]) {
-						low = 0;
-						high = 5;
-						break;
-					}
-					low = Math.min(low, this.spanLow[(j + d) * count + i]);
-					high = Math.max(high, this.spanHigh[(j + d) * count + i]);
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += this.signedBlur[Math.max(0, Math.min(MASK - 1, j + d)) * MASK + i];
 				}
-				pixels[j * edge + i] = pixels[j * edge + i] & 0xFFFFFF | (low * 6 + high) * 7 << 24;
+				this.signed[j * MASK + i] = sum / 3;
 			}
 		}
 	}
 
+	/** The signed distance at a point in mask texels, read between texels as the shader reads it. */
+	private double signedAt(double x, double y) {
+		double fx = x - 0.5;
+		double fy = y - 0.5;
+		int i0 = (int) Math.floor(fx);
+		int j0 = (int) Math.floor(fy);
+		double tx = Math.max(0, Math.min(1, fx - i0));
+		double ty = Math.max(0, Math.min(1, fy - j0));
+		int i1 = Math.min(MASK - 1, Math.max(0, i0 + 1));
+		int j1 = Math.min(MASK - 1, Math.max(0, j0 + 1));
+		i0 = Math.min(MASK - 1, Math.max(0, i0));
+		j0 = Math.min(MASK - 1, Math.max(0, j0));
+		return lerp2(this.signed[j0 * MASK + i0], this.signed[j0 * MASK + i1], this.signed[j1 * MASK + i0], this.signed[j1 * MASK + i1], tx, ty);
+	}
+
 	/**
-	 * The levels of the grid's cells at {@code times} their size, into the byte at {@code shift}:
-	 * only those the view can read. Which those are, as {first u, last u, first v, last v}.
+	 * The cloud cells around the view, for the grid drawn: each cell's {@link VanillaClouds} code at
+	 * {@link #CLOUD_SIZES} sizes, 1 to 16 times the base cell, into each size's block. Then
+	 * {@link #cloudNear}.
 	 */
-	private int[] cellLevels(CellGrid grid, int times, int shift, int[] pixels, int edge, int[] noise) {
-		int mult = grid.mult() * times;
+	private void cloudCells(CellGrid grid, int[] pixels, int edge) {
+		int mult = grid.mult();
 		double size = grid.base() * mult;
 		int count = grid.count(mult);
+		int steps = (int) Math.round(Math.log(grid.base() / VanillaClouds.CELL) / Math.log(2));
 		// The shader's map units start at the noise origin, a whole number of cells from map 0:
 		// ten of the base size to each step of it.
 		double mapU = grid.noiseU() * grid.snap();
 		double mapV = grid.noiseV() * grid.snap();
 		int firstU = grid.noiseU() * 10 / mult - CELL_MARGIN;
 		int firstV = grid.noiseV() * 10 / mult - CELL_MARGIN;
-		// The cells around the view, in the shader's map units: theirs is the view's place less the mask's origin, plus the noise origin.
-		int fromU = Math.max(0, (int) Math.floor((mapU + grid.viewMinU() - grid.originU()) / size) - CELL_MARGIN - firstU);
-		int toU = Math.min(count - 1, (int) Math.floor((mapU + grid.viewMaxU() - grid.originU()) / size) + CELL_MARGIN - firstU);
-		int fromV = Math.max(0, (int) Math.floor((mapV + grid.viewMinV() - grid.originV()) / size) - CELL_MARGIN - firstV);
-		int toV = Math.min(count - 1, (int) Math.floor((mapV + grid.viewMaxV() - grid.originV()) / size) + CELL_MARGIN - firstV);
-		for (int cj = fromV; cj <= toV; cj++) {
-			double posV = (firstV + cj + 0.5) * size;
-			double y = (posV - mapV) / grid.texel();
-			for (int ci = fromU; ci <= toU; ci++) {
-				double posU = (firstU + ci + 0.5) * size;
-				double x = (posU - mapU) / grid.texel();
-				int level = this.cellLevel(x, y, posU, posV, size, noise);
-				pixels[cj * edge + ci] = pixels[cj * edge + ci] & ~(0xFF << shift) | level * 51 << shift;
-				if (times == 1) {
-					this.cellLevel[cj * count + ci] = (byte) level;
-					this.cellDone[cj * count + ci] = this.cellStamp;
+		// The cells around the view, in the shader's map units, and the reach of the biggest cells'
+		// walls and shadows past it.
+		int margin = CELL_MARGIN + 24;
+		int fromU = Math.max(0, (int) Math.floor((mapU + grid.viewMinU() - grid.originU()) / size) - margin - firstU);
+		int toU = Math.min(count - 1, (int) Math.floor((mapU + grid.viewMaxU() - grid.originU()) / size) + margin - firstU);
+		int fromV = Math.max(0, (int) Math.floor((mapV + grid.viewMinV() - grid.originV()) / size) - margin - firstV);
+		int toV = Math.min(count - 1, (int) Math.floor((mapV + grid.viewMaxV() - grid.originV()) / size) + margin - firstV);
+		int slotY = CLOUD_SLOT;
+		int[] near = null;
+		for (int level = this.cloudSmallest; level < CLOUD_SIZES; level++) {
+			int times = 1 << level;
+			// Cells of this size, numbered in the shader's map units, from the one holding the grid's first.
+			long first0U = Math.floorDiv((long) firstU * mult, times);
+			long first0V = Math.floorDiv((long) firstV * mult, times);
+			int width = this.slotWidth(level);
+			int x0 = this.slotX(level);
+			int from0U = (int) (Math.floorDiv((long) (firstU + fromU) * mult, times) - first0U);
+			int to0U = Math.min(width - 1, (int) (Math.floorDiv((long) (firstU + toU) * mult + mult - 1, times) - first0U) + 1);
+			int from0V = (int) (Math.floorDiv((long) (firstV + fromV) * mult, times) - first0V);
+			int to0V = Math.min(width - 1, (int) (Math.floorDiv((long) (firstV + toV) * mult + mult - 1, times) - first0V) + 1);
+			if (level == this.cloudSmallest) {
+				near = new int[] {from0U, to0U, from0V, to0V, (int) first0U, (int) first0V};
+			}
+			double cell = grid.base() * times;
+			for (int j = from0V; j <= to0V; j++) {
+				long v = first0V + j;
+				double y = ((v + 0.5) * cell - mapV) / grid.texel();
+				long worldV = v + Math.round((grid.originV() - mapV) / cell);
+				for (int i = from0U; i <= to0U; i++) {
+					long u = first0U + i;
+					double x = ((u + 0.5) * cell - mapU) / grid.texel();
+					// The shader's map units wrap with the noise origin; the cell counted from map 0 is
+					// a whole number of cells on (the origins differ by whole wraps, 80 base cells each).
+					long worldU = u + Math.round((grid.originU() - mapU) / cell);
+					int code = VanillaClouds.code(grid.pattern(), this.signedAt(x, y), worldU, worldV, steps + level);
+					int at = (slotY + j) * edge + x0 + i;
+					pixels[at] = ((code & VanillaClouds.DECK) != 0 ? 0xFF : 0) | ((code & VanillaClouds.MIDDLE) != 0 ? 0xFF00 : 0)
+						| ((code & VanillaClouds.TOP) != 0 ? 0xFF0000 : 0);
 				}
 			}
 		}
-		return new int[] {fromU, toU, fromV, toV};
+		if (near != null) {
+			this.cloudNear(pixels, edge, near);
+		}
 	}
 
 	/**
-	 * fog.fsh's cellLevel for a cell whose middle is at (x, y) in mask texels and (posU, posV) in
-	 * map units: 0 if half known, else the climb in levels with a little noise, 1 to 5.
+	 * The layers of the cell of size {@code level} holding the cell {@code (u, v)} of the smallest
+	 * size drawn (numbered in the shader's map units), and 8 if it's more than the deck alone; 0 for
+	 * a size not drawn.
 	 */
-	private int cellLevel(double x, double y, double posU, double posV, double size, int[] noise) {
-		double fx = x - 0.5;
-		double fy = y - 0.5;
-		int i0 = (int) Math.floor(fx);
-		int j0 = (int) Math.floor(fy);
-		double tx = fx - i0;
-		double ty = fy - j0;
-		int i1 = Math.min(MASK - 1, Math.max(0, i0 + 1));
-		int j1 = Math.min(MASK - 1, Math.max(0, j0 + 1));
-		i0 = Math.min(MASK - 1, Math.max(0, i0));
-		j0 = Math.min(MASK - 1, Math.max(0, j0));
-		int p00 = this.maskPixels[j0 * MASK + i0];
-		int p10 = this.maskPixels[j0 * MASK + i1];
-		int p01 = this.maskPixels[j1 * MASK + i0];
-		int p11 = this.maskPixels[j1 * MASK + i1];
-		double red = lerp2(p00 & 0xFF, p10 & 0xFF, p01 & 0xFF, p11 & 0xFF, tx, ty) / 255;
-		if (red >= 0.5) {
+	private int levelCode(int[] pixels, int edge, int level, long u, long v, long first0U, long first0V) {
+		int width = this.slotWidth(level);
+		if (width == 0) {
 			return 0;
 		}
-		double climb = lerp2(p00 >>> 24, p10 >>> 24, p01 >>> 24, p11 >>> 24, tx, ty) / 255 * CLOUD_LEVELS;
-		double within = climb - Math.floor(climb);
-		// The noise moves the climb by under 0.3 either way: past 4.7 it's the top level whatever the
-		// noise, under 0.7 the lowest, and well inside a level that level.
-		if (climb >= CLOUD_LEVELS - 0.3) {
-			return (int) CLOUD_LEVELS;
+		int up = level - this.cloudSmallest;
+		int i = (int) (Math.floorDiv(u, 1L << up) - Math.floorDiv(first0U, 1L << up));
+		int j = (int) (Math.floorDiv(v, 1L << up) - Math.floorDiv(first0V, 1L << up));
+		int code = 0;
+		if (i >= 0 && j >= 0 && i < width && j < width) {
+			int pixel = pixels[(CLOUD_SLOT + j) * edge + this.slotX(level) + i];
+			code = ((pixel & 0xFF) != 0 ? VanillaClouds.DECK : 0) | ((pixel & 0xFF00) != 0 ? VanillaClouds.MIDDLE : 0)
+				| ((pixel & 0xFF0000) != 0 ? VanillaClouds.TOP : 0);
 		}
-		if (climb <= 0.7) {
-			return 1;
+		return code | (code == VanillaClouds.DECK ? 0 : 8);
+	}
+
+	private int[] nearSmall = new int[0];
+	private int[] nearBig = new int[0];
+	private int[] nearLine = new int[0];
+
+	/**
+	 * Into alpha, a texel a cell of the smallest size drawn from (0, 0): which layers any cell within
+	 * reach has, so the shader skips the rest, and whether every cell within reach is the deck alone,
+	 * so it draws the deck's plain top with no reads. The low nibble for the two smallest sizes, the
+	 * high one for the three bigger: the three layer bits, then the deck-alone bit. Within reach: a
+	 * wall, shadow or ground-shadow read lands under 3.5 cells of the biggest size away. {@code range}
+	 * is {first u, last u, first v, last v} of the smallest size's cells written, from its first, and
+	 * that first.
+	 */
+	private void cloudNear(int[] pixels, int edge, int[] range) {
+		int fromU = range[0];
+		int fromV = range[2];
+		int w = range[1] - fromU + 1;
+		int h = range[3] - fromV + 1;
+		if (w <= 0 || h <= 0) {
+			return;
 		}
-		if (within > 0.31 && within < 0.69) {
-			return (int) Math.max(1, Math.min(CLOUD_LEVELS, Math.ceil(climb)));
+		int n = w * h;
+		if (this.nearSmall.length < n) {
+			this.nearSmall = new int[n];
+			this.nearBig = new int[n];
+			this.nearLine = new int[n];
 		}
-		// The noise texture, repeating and filtered, at the cell's middle over twenty cells, plus 0.21.
-		int n = FogTextures.NOISE_SIZE;
-		double nx = (posU / (size * 20) + 0.21) * n - 0.5;
-		double ny = (posV / (size * 20) + 0.21) * n - 0.5;
-		int a0 = (int) Math.floor(nx);
-		int b0 = (int) Math.floor(ny);
-		double sx = nx - a0;
-		double sy = ny - b0;
-		int a1 = Math.floorMod(a0 + 1, n);
-		int b1 = Math.floorMod(b0 + 1, n);
-		a0 = Math.floorMod(a0, n);
-		b0 = Math.floorMod(b0, n);
-		double value = lerp2(noise[b0 * n + a0] & 0xFF, noise[b0 * n + a1] & 0xFF, noise[b1 * n + a0] & 0xFF, noise[b1 * n + a1] & 0xFF, sx, sy) / 255;
-		return (int) Math.max(1, Math.min(CLOUD_LEVELS, Math.ceil(climb + (value - 0.5) * STAIR_NOISE)));
+		long first0U = range[4];
+		long first0V = range[5];
+		for (int j = 0; j < h; j++) {
+			for (int i = 0; i < w; i++) {
+				long u = first0U + fromU + i;
+				long v = first0V + fromV + j;
+				// Bit 3 set where a cell is NOT the deck alone, so ORing finds any such cell within reach.
+				this.nearSmall[j * w + i] = this.levelCode(pixels, edge, 0, u, v, first0U, first0V) | this.levelCode(pixels, edge, 1, u, v, first0U, first0V);
+				this.nearBig[j * w + i] = this.levelCode(pixels, edge, 2, u, v, first0U, first0V) | this.levelCode(pixels, edge, 3, u, v, first0U, first0V)
+					| this.levelCode(pixels, edge, 4, u, v, first0U, first0V);
+			}
+		}
+		this.orAround(this.nearSmall, w, h, (int) Math.ceil(3.5 * 2 / (1 << this.cloudSmallest)) + 1);
+		this.orAround(this.nearBig, w, h, (int) Math.ceil(3.5 * 16 / (1 << this.cloudSmallest)) + 1);
+		for (int j = 0; j < h; j++) {
+			for (int i = 0; i < w; i++) {
+				int small = this.nearSmall[j * w + i] ^ 8;
+				int big = this.nearBig[j * w + i] ^ 8;
+				int at = (fromV + j) * edge + fromU + i;
+				pixels[at] = pixels[at] & 0x00FFFFFF | (small | big << 4) << 24;
+			}
+		}
+	}
+
+	private int[] nearSums = new int[0];
+
+	/**
+	 * Each value ORed with every value up to {@code r} cells away each way (a square), its four low
+	 * bits each from a count of where it's set over the square, read off running sums.
+	 */
+	private void orAround(int[] values, int w, int h, int r) {
+		int row = w + 1;
+		if (this.nearSums.length < row * (h + 1)) {
+			this.nearSums = new int[row * (h + 1)];
+		}
+		int[] sums = this.nearSums;
+		int[] out = this.nearLine;
+		java.util.Arrays.fill(out, 0, w * h, 0);
+		// The first row and column stay 0: the sums before the grid.
+		java.util.Arrays.fill(sums, 0, row, 0);
+		for (int j = 1; j <= h; j++) {
+			sums[j * row] = 0;
+		}
+		for (int bit = 0; bit < 4; bit++) {
+			for (int j = 0; j < h; j++) {
+				int line = 0;
+				for (int i = 0; i < w; i++) {
+					line += values[j * w + i] >> bit & 1;
+					sums[(j + 1) * row + i + 1] = sums[j * row + i + 1] + line;
+				}
+			}
+			for (int j = 0; j < h; j++) {
+				int top = Math.max(0, j - r);
+				int bottom = Math.min(h - 1, j + r) + 1;
+				for (int i = 0; i < w; i++) {
+					int left = Math.max(0, i - r);
+					int right = Math.min(w - 1, i + r) + 1;
+					if (sums[bottom * row + right] - sums[top * row + right] - sums[bottom * row + left] + sums[top * row + left] > 0) {
+						out[j * w + i] |= 1 << bit;
+					}
+				}
+			}
+		}
+		System.arraycopy(out, 0, values, 0, w * h);
 	}
 
 	private static double lerp2(double a, double b, double c, double d, double tx, double ty) {
@@ -1421,8 +1540,6 @@ public final class MapViewport {
 		return top + (c + (d - c) * tx - top) * ty;
 	}
 
-	/** How much noise breaks up the stairs; match fog.fsh. */
-	private static final double STAIR_NOISE = 0.6;
 
 	private final float[] knownShare = new float[MASK * MASK];
 	private final int[] notFullCounts = new int[(MASK + 1) * (MASK + 1)];
