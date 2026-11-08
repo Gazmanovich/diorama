@@ -5,6 +5,8 @@ import net.minecraft.world.level.NaturalSpawner;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
 import dev.diorama.data.Copycats;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -70,8 +72,14 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What each block state looks like on the map: how rays treat it, and its average top and
- * front colors taken from the game's own textures. Built once on the client thread; after that
- * the registry's looks never change, so bake threads can read them freely.
+ * front colors taken from the game's own textures. A state's look is worked out the first time
+ * anything asks for its id through {@link #ensure} (or {@link #lookId}, {@link #bakeLookId},
+ * {@link #copycat}, {@link #sameLook}), on whichever thread asks, as Xaero's World Map works a
+ * block's colour out when its map writer first meets the block. A big modpack has hundreds of
+ * thousands of states and a world uses a few thousand of them; asking every state's model up
+ * front cost players minutes on each world load and resource reload, most of all under
+ * ModernFix's dynamic resources, which bakes a model only when it's asked for. Once worked out,
+ * a look never changes, so bake threads read it freely.
  *
  * <p>When a mod with copycats is installed, ids past the block state registry are looks for
  * filled copycats ({@link #copycat}), added by bake threads as they first meet them. Each is
@@ -93,11 +101,24 @@ public final class BlockLooks {
 	public static final byte TINT_DRY_FOLIAGE = 3;
 	public static final byte TINT_WATER = 4;
 
+	/** {@link #kind} of a state whose look nobody has asked for yet. */
+	private static final byte NOT_YET = -1;
+	/** Reads and writes {@link #kind}: a look's other fields are written before its kind is released. */
+	private static final VarHandle KINDS = MethodHandles.arrayElementVarHandle(byte[].class);
+	/** Held while a look is worked out: one at a time, across tables, since they share mods' code. */
+	private static final Object MAKING = new Object();
+	/**
+	 * Held only while a texture's pixels are read, and by a texture starting to free them, so a
+	 * reload never waits on mods' model or tint code. Taken inside {@link #MAKING}, never around it.
+	 */
+	private static final Object IMAGES = new Object();
+
 	private static volatile BlockLooks current;
 	private static int builds;
 	/** The models the current table was built from; a resource reload replaces them. */
 	private static Object builtFrom;
 
+	/** Kind per state; {@link #NOT_YET} until {@link #ensure} works the look out. */
 	public final byte[] kind;
 	public final byte[] tint;
 	public final byte[] emission;
@@ -125,9 +146,11 @@ public final class BlockLooks {
 	public final int[] shape;
 	/**
 	 * Outlines of solid blocks smaller than a cube, such as slabs, stairs, fences and carpets: each
-	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused.
+	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused. Grows
+	 * as looks are worked out, published before the look that uses it; entries past the last
+	 * outline are null.
 	 */
-	public float[][] shapes;
+	public volatile float[][] shapes = {new float[0]};
 	/** {@link #faces} so far, by shape; made on first use. */
 	private volatile @Nullable ShapeFaces @Nullable [] faces;
 	/**
@@ -148,7 +171,47 @@ public final class BlockLooks {
 	private final AtomicInteger copycatCount = new AtomicInteger();
 	private volatile boolean warnedCopycats;
 
-	private BlockLooks(int registrySize, int size) {
+	// What working a look out reads, all of it taken on the client thread as the table is made and
+	// used under MAKING only.
+	//? if >=26.1 {
+	private final BlockStateModelSet models;
+	//?} else {
+	/*private final BlockModelShaper models;
+	*///?}
+	private final BlockColors colors;
+	/** The block atlas as the table was made, for textures a reload freed (see {@link #currentSprite}). */
+	private final @Nullable TextureAtlas atlas;
+	private final Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
+	private final RandomSource random = RandomSource.create(42L);
+	private final TintProbe probe = new TintProbe();
+	private final Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
+	private final Map<String, Integer> shapeByBoxes = new HashMap<>();
+	private final List<float[]> shapeList = new ArrayList<>(List.of(new float[0]));
+	private final Map<Fluid, FluidLook> fluidLooks = new IdentityHashMap<>();
+	//? if >=26.1 {
+	private final List<BlockStateModelPart> parts = new ArrayList<>();
+	//?} else if >=1.21.5 {
+	/*private final List<BlockModelPart> parts = new ArrayList<>();
+	*///?}
+	private boolean warnedModel;
+	private boolean warnedShape;
+	/**
+	 * Set when a look was worked out while resources were reloading, without the models and
+	 * textures the reload is replacing: {@link #isStale} then has the table made again.
+	 */
+	private volatile boolean provisional;
+	/** How many looks have been worked out, and the time it took, for the log. */
+	private int made;
+	private long makingNanos;
+
+	//? if >=26.1 {
+	private BlockLooks(int registrySize, int size, BlockStateModelSet models, BlockColors colors, @Nullable TextureAtlas atlas) {
+	//?} else {
+	/*private BlockLooks(int registrySize, int size, BlockModelShaper models, BlockColors colors, @Nullable TextureAtlas atlas) {
+	*///?}
+		this.models = models;
+		this.colors = colors;
+		this.atlas = atlas;
 		this.registrySize = registrySize;
 		this.kind = new byte[size];
 		this.tint = new byte[size];
@@ -165,6 +228,7 @@ public final class BlockLooks {
 		this.shape = new int[size];
 		this.wetShape = new int[size];
 		java.util.Arrays.fill(this.wetShape, -1);
+		java.util.Arrays.fill(this.kind, 0, registrySize, NOT_YET);
 	}
 
 	public static BlockLooks get() {
@@ -178,8 +242,10 @@ public final class BlockLooks {
 	 */
 	ShapeFaces faces(int shape) {
 		ShapeFaces[] faces = this.faces;
-		if (faces == null) {
-			faces = new ShapeFaces[this.shapes.length];
+		if (faces == null || shape >= faces.length) {
+			// More outlines since: a longer copy. Two threads may both grow it, and one's entries are
+			// lost; they're made again when next asked.
+			faces = java.util.Arrays.copyOf(faces == null ? new ShapeFaces[0] : faces, this.shapes.length);
 			this.faces = faces;
 		}
 		ShapeFaces made = faces[shape];
@@ -194,7 +260,7 @@ public final class BlockLooks {
 	/**
 	 * The state's id in the tables here. A state the game hasn't numbered, which some mods make
 	 * on the fly (Epic Fight's cracked ground, #180), takes its block's default state's id, or
-	 * air's.
+	 * air's. Only numbers it: {@link #lookId} also works its look out.
 	 */
 	public static int id(BlockState state) {
 		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
@@ -225,6 +291,35 @@ public final class BlockLooks {
 		return id(state);
 	}
 
+	/**
+	 * Works the state's look out if nothing has asked for it yet, and returns the id. Any thread:
+	 * the first to ask does the work, others asking meanwhile wait for it. Every id whose look is
+	 * read here comes through this first, or through a method that calls it.
+	 */
+	public int ensure(int id) {
+		if (id >= 0 && id < this.registrySize && (byte) KINDS.getAcquire(this.kind, id) == NOT_YET) {
+			this.make(id);
+		}
+		return id;
+	}
+
+	/** {@link #id}, with the state's look worked out. */
+	public int lookId(BlockState state) {
+		return this.ensure(id(state));
+	}
+
+	/**
+	 * {@link #bakeId}, with the state's look worked out. A look left unworked because states are
+	 * being numbered again stops the bake ({@link StatesRenumbered}), as {@link #bakeId} does.
+	 */
+	public int bakeLookId(BlockState state) {
+		int id = this.ensure(bakeId(state));
+		if (id < this.registrySize && (byte) KINDS.getAcquire(this.kind, id) == NOT_YET) {
+			throw StatesRenumbered.INSTANCE;
+		}
+		return id;
+	}
+
 	/** See {@link #bakeId}. */
 	public static final class StatesRenumbered extends RuntimeException {
 		private static final StatesRenumbered INSTANCE = new StatesRenumbered();
@@ -239,6 +334,8 @@ public final class BlockLooks {
 	 * for example, is a block update nobody can see.
 	 */
 	public boolean sameLook(int a, int b) {
+		this.ensure(a);
+		this.ensure(b);
 		return this.kind[a] == this.kind[b]
 			&& this.top[a] == this.top[b]
 			&& this.topTinted[a] == this.topTinted[b]
@@ -269,10 +366,13 @@ public final class BlockLooks {
 	 */
 	public int copycat(int copycat, int material) {
 		if (copycat < 0 || copycat >= this.registrySize || material < 0 || material >= this.registrySize || this.kind.length == this.registrySize) {
-			return copycat;
+			return this.ensure(copycat);
 		}
+		this.ensure(copycat);
+		this.ensure(material);
 		byte frame = this.kind[copycat];
-		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR) {
+		// A material left unworked (states being numbered again) counts as none.
+		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR || this.kind[material] == NOT_YET) {
 			return copycat;
 		}
 		Long key = (long) copycat << 32 | material;
@@ -328,238 +428,311 @@ public final class BlockLooks {
 		current = null;
 	}
 
-	/** True when resource packs were reloaded since the table was built. */
+	/**
+	 * True when resource packs were reloaded since the table was built, or a look in it was worked
+	 * out while they were reloading.
+	 */
 	public static boolean isStale() {
+		BlockLooks looks = current;
+		if (looks == null) {
+			return false;
+		}
+		if (looks.provisional) {
+			return true;
+		}
 		//? if >=26.1 {
-		return current != null && builtFrom != Minecraft.getInstance().getModelManager().getBlockStateModelSet();
+		return builtFrom != Minecraft.getInstance().getModelManager().getBlockStateModelSet();
 		//?} else {
-		/*return current != null && builtFrom != Minecraft.getInstance().getModelManager().getMissingBlockStateModel();
+		/*return builtFrom != Minecraft.getInstance().getModelManager().getMissingBlockStateModel();
 		*///?}
 	}
 
-	/** Builds the table. Must run on the client thread, after models are loaded. */
+	/**
+	 * Makes a new, empty table; looks are worked out as they're asked for. Must run on the client
+	 * thread, after models are loaded.
+	 */
 	public static BlockLooks build() {
 		long start = System.nanoTime();
+		BlockLooks last = current;
+		if (last != null) {
+			Diorama.LOGGER.info("The last block color table worked out {}", last.madeSoFar());
+		}
+		BlockLooks looks = detached();
+		current = looks;
+		builds++;
+		//? if >=26.1 {
+		builtFrom = looks.models;
+		//?} else {
+		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
+		builtFrom = Minecraft.getInstance().getModelManager().getMissingBlockStateModel();
+		*///?}
+		Diorama.LOGGER.info("Block color table for {} states set up in {} ms; each state's colors are worked out when the map first meets it",
+			looks.registrySize, (System.nanoTime() - start) / 1_000_000);
+		return looks;
+	}
+
+	/** A new, empty table that isn't the map's: {@link #build} without making it current. Client thread. */
+	public static BlockLooks detached() {
 		Minecraft mc = Minecraft.getInstance();
 		//? if >=26.1 {
 		BlockStateModelSet models = mc.getModelManager().getBlockStateModelSet();
 		//?} else {
 		/*BlockModelShaper models = mc.getModelManager().getBlockModelShaper();
 		*///?}
-		BlockColors colors = mc.getBlockColors();
 		int size = Block.BLOCK_STATE_REGISTRY.size();
-		BlockLooks looks = new BlockLooks(size, Copycats.INSTALLED ? size + COPYCAT_LOOKS : size);
-		Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
-		warnedFreed = false;
-		RandomSource random = RandomSource.create(42L);
-		TintProbe probe = new TintProbe();
-		// Before any block: those tinted like water ask for the same colour as water does.
-		BiomeTints.setWater(waterResolver(probe));
-		Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
-		Map<String, Integer> shapeByBoxes = new HashMap<>();
-		List<float[]> shapes = new ArrayList<>();
-		shapes.add(new float[0]);
-		int failedModels = 0;
-		int failedShapes = 0;
-		//? if >=26.1 {
-		List<BlockStateModelPart> parts = new ArrayList<>();
-		//?} else if >=1.21.5 {
-		/*List<BlockModelPart> parts = new ArrayList<>();
-		*///?}
-
-		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
-			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
-			if (id < 0 || id >= size) {
-				continue;
-			}
-			looks.emission[id] = (byte) state.getLightEmission();
-			looks.constantTint[id] = -1;
-			// Minecraft's own spawn rules, asked of the block alone: none of them look around it.
-			try {
-				looks.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
-				looks.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
-					&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
-			} catch (RuntimeException | Error e) {
-				looks.spawnOn[id] = false;
-				looks.spawnIn[id] = false;
-			}
-			// A mod's block can give a null shape or throw when asked, and under ModernFix, which builds
-			// each state's cache on first use, so can anything that reads the cache. The table covers every
-			// block, placed or not, so one that fails counts as a full block and keeps its model's colours.
-			byte kind = SOLID;
-			try {
-				kind = classify(state);
-				if (kind == SOLID) {
-					looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
-				}
-			} catch (RuntimeException | Error e) {
-				if (failedShapes++ == 0) {
-					Diorama.LOGGER.warn("The shape of {} failed when asked for ({}); such blocks draw as full blocks", state, e.toString());
-				}
-			}
-			looks.kind[id] = kind;
-			if (kind == AIR) {
-				continue;
-			}
-
+		TextureAtlas atlas = null;
+		try {
+			// Found from a texture of a block every version has, so no version's atlas id is needed.
 			//? if >=26.1 {
-			BlockStateModel model = models.get(state);
-			//?} else if >=1.21.5 {
-			/*BlockStateModel model = models.getBlockModel(state);
-			*///?} else {
-			/*BakedModel model = models.getBlockModel(state);
+			TextureAtlasSprite stone = particle(models.get(net.minecraft.world.level.block.Blocks.STONE.defaultBlockState()));
+			//?} else {
+			/*TextureAtlasSprite stone = particle(models.getBlockModel(net.minecraft.world.level.block.Blocks.STONE.defaultBlockState()));
 			*///?}
-			FaceColor topFace = new FaceColor();
-			FaceColor sideFace = new FaceColor();
-			// A mod's model can fail when asked for its faces without its block entity's data, as
-			// Immersive Engineering's mirrored multiblock parts do, or throw an Error rather than an
-			// exception. Such a block falls back below like one with no faces, instead of the failure
-			// stopping the table and crashing the game.
-			try {
-				//? if >=1.21.5 {
-				parts.clear();
-				random.setSeed(42L);
-				model.collectParts(random, parts);
-				//?} else {
-				/*List<LegacyPart> parts = List.of(new LegacyPart(model, state, random));
-				*///?}
-				//? if >=26.1 {
-				for (BlockStateModelPart part : parts) {
-				//?} else if >=1.21.5 {
-				/*for (BlockModelPart part : parts) {
-				*///?} else {
-				/*for (LegacyPart part : parts) {
-				*///?}
-					accumulate(topFace, part.getQuads(Direction.UP), spriteCache);
-					accumulate(sideFace, part.getQuads(Direction.SOUTH), spriteCache);
-					if (sideFace.isEmpty()) {
-						accumulate(sideFace, part.getQuads(Direction.NORTH), spriteCache);
-					}
-					// Cross-shaped plants and other unculled geometry.
-					List<BakedQuad> loose = part.getQuads(null);
-					if (!loose.isEmpty()) {
-						accumulateLoose(topFace, sideFace, loose, spriteCache);
-					}
-				}
-			} catch (RuntimeException | Error e) {
-				topFace = new FaceColor();
-				sideFace = new FaceColor();
-				if (failedModels++ == 0) {
-					Diorama.LOGGER.warn("The model of {} failed when asked for its faces ({}); such blocks take their particle texture or map colour", state, e.toString());
-				}
+			if (stone != null && mc.getTextureManager().getTexture(stone.atlasLocation()) instanceof TextureAtlas blocks) {
+				atlas = blocks;
 			}
-			if (topFace.isEmpty() && sideFace.isEmpty()) {
-				// Block entities (chests, signs, beds) have no block model; use the particle texture.
-				TextureAtlasSprite particle;
-				try {
-					//? if >=26.1 {
-					particle = model.particleMaterial().sprite();
-					//?} else if >=1.21.5 || fabric {
-					/*particle = model.particleIcon();
-					*///?} else {
-					/*// Asked the loader's way, as the faces are (legacyQuads).
-					particle = model.getParticleIcon(net.neoforged.neoforge.client.model.data.ModelData.EMPTY);
-					*///?}
-				} catch (RuntimeException | Error e) {
-					particle = null;
-				}
-				if (particle != null && !isMissing(particle)) {
-					float[] avg = spriteAverage(particle, spriteCache);
-					topFace.add(avg, -1);
-					sideFace.add(avg, -1);
-				}
-			}
-			if (topFace.isEmpty() && sideFace.isEmpty()) {
-				// No texture to go by: a model that draws only from its block entity's data, which this
-				// table can't see (Copycats+ copycats take the look of the block they're filled with), a
-				// texture the game can't find, or one a reload freed with nothing in its place. Use the
-				// block's colour on Minecraft's own maps instead of the missing texture's purple, and see
-				// through it where those maps do.
-				int mapColor = mapColor(state);
-				if (mapColor == 0) {
-					looks.kind[id] = AIR;
-					looks.shape[id] = 0;
-					continue;
-				}
-				float[] flat = {(mapColor >> 16 & 0xFF) / 255.0F, (mapColor >> 8 & 0xFF) / 255.0F, (mapColor & 0xFF) / 255.0F, 1.0F};
-				topFace.add(flat, -1);
-				sideFace.add(flat, -1);
-			}
-			if (topFace.isEmpty()) {
-				topFace = sideFace;
-			}
-			if (sideFace.isEmpty()) {
-				sideFace = topFace;
-			}
-			looks.top[id] = topFace.untinted();
-			looks.topTinted[id] = topFace.tinted();
-			looks.topTintWeight[id] = topFace.tintWeight();
-			looks.side[id] = sideFace.untinted();
-			looks.sideTinted[id] = sideFace.tinted();
-			looks.sideTintWeight[id] = sideFace.tintWeight();
+		} catch (RuntimeException | Error e) {
+			// Without it, a texture a reload freed adds no colour.
+		}
+		BlockLooks looks = new BlockLooks(size, Copycats.INSTALLED ? size + COPYCAT_LOOKS : size, models, mc.getBlockColors(), atlas);
+		warnedFreed = false;
+		synchronized (MAKING) {
+			// Before any block: those tinted like water ask for the same colour as water does.
+			looks.probe.reset();
+			BiomeTints.setWater(waterResolver(looks.probe));
+		}
+		// What a bake reads where a section's palette has no entry.
+		looks.ensure(VoxelReader.AIR_ID);
+		return looks;
+	}
 
-			if (kind == SOLID && !state.is(BlockTags.LEAVES) && topFace.coverage() < 0.55F) {
-				looks.kind[id] = GLASS;
-			}
+	/** For the log: how many looks this table has worked out, and the milliseconds they took. */
+	public String madeSoFar() {
+		synchronized (MAKING) {
+			return (this.made == 1 ? "1 look" : this.made + " looks") + " in " + this.makingNanos / 1_000_000 + " ms";
+		}
+	}
 
-			// The tint layer the model's quads use, asked of the block's own tint code.
-			int tintIndex = topFace.tintIndex() >= 0 ? topFace.tintIndex() : sideFace.tintIndex();
-			if (tintIndex >= 0) {
-				Tint tint = blockTint(colors, state, tintIndex, probe);
-				looks.tint[id] = tint.kind();
-				looks.constantTint[id] = tint.constant();
+	/** Works out one state's look, unless another thread just did. */
+	private void make(int id) {
+		synchronized (MAKING) {
+			if (this.kind[id] != NOT_YET) {
+				return;
 			}
+			if (Block.BLOCK_STATE_REGISTRY.size() != this.registrySize) {
+				// NeoForge or Forge are numbering states again (see bakeId), and this id may name
+				// another state now: leave the look to be worked out by the table made after.
+				return;
+			}
+			long start = System.nanoTime();
+			BlockState state = Block.BLOCK_STATE_REGISTRY.byId(id);
+			// While a reload is swapping the models and textures, a look takes neither, and the table
+			// is made again once the reload is over. (Textures it frees are kept from a look being
+			// made by closing, which see.)
+			boolean reloading = Minecraft.getInstance().gui.overlay() != null;
+			byte kind = state == null ? AIR : this.work(id, state, !reloading);
+			if (reloading) {
+				this.provisional = true;
+			}
+			KINDS.setRelease(this.kind, id, kind);
+			this.made++;
+			this.makingNanos += System.nanoTime() - start;
+		}
+	}
+
+	/** Fills in the state's look but its kind, which it returns. Under {@link #MAKING}. */
+	private byte work(int id, BlockState state, boolean withModels) {
+		this.emission[id] = (byte) state.getLightEmission();
+		this.constantTint[id] = -1;
+		// Minecraft's own spawn rules, asked of the block alone: none of them look around it.
+		try {
+			this.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
+			this.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
+				&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+		} catch (RuntimeException | Error e) {
+			this.spawnOn[id] = false;
+			this.spawnIn[id] = false;
+		}
+		// A mod's block can give a null shape or throw when asked, and under ModernFix, which builds
+		// each state's cache on first use, so can anything that reads the cache. One that fails
+		// counts as a full block and keeps its model's colours.
+		byte kind = SOLID;
+		try {
+			kind = classify(state);
+			if (kind == SOLID) {
+				this.shape[id] = this.shapeIndex(state);
+			}
+		} catch (RuntimeException | Error e) {
+			if (!this.warnedShape) {
+				this.warnedShape = true;
+				Diorama.LOGGER.warn("The shape of {} failed when asked for ({}); such blocks draw as full blocks", state, e.toString());
+			}
+		}
+		if (kind == AIR) {
+			return AIR;
+		}
+		kind = withModels ? this.colours(id, state, kind) : this.flatColours(id, state, kind);
+		if (kind == AIR) {
+			this.shape[id] = 0;
+			return AIR;
 		}
 		// A fluid's block has no model of its own, so every cell holding a fluid and nothing solid
 		// (kelp and seagrass stand in water) draws as the fluid's still texture, tinted the way the
 		// fluid's own tint code asks: water by the biome.
-		Map<Fluid, FluidLook> fluidLooks = new IdentityHashMap<>();
-		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
-			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
-			if (id < 0 || id >= size || looks.kind[id] != WATER) {
-				continue;
+		if (kind == WATER && withModels) {
+			FluidState fluid = state.getFluidState().getType().defaultFluidState();
+			FluidLook look = this.fluidLooks.computeIfAbsent(fluid.getType(), type -> this.fluidLook(fluid));
+			// With no texture to be found, the block's particle texture's colour stays.
+			if (look.color() >= 0) {
+				this.top[id] = look.color();
+				this.topTinted[id] = look.color();
+				this.topTintWeight[id] = 1;
+				this.side[id] = look.color();
+				this.sideTinted[id] = look.color();
+				this.sideTintWeight[id] = 1;
+				this.tint[id] = look.tint().kind();
+				this.constantTint[id] = look.tint().constant();
 			}
-			FluidState fluid = state.getFluidState();
-			FluidLook look = fluidLooks.computeIfAbsent(fluid.getType(), type -> fluidLook(fluid, spriteCache, probe));
-			if (look.color() < 0) {
-				// No texture to be found: keep the colour of the block's particle texture.
-				continue;
-			}
-			looks.top[id] = look.color();
-			looks.topTinted[id] = look.color();
-			looks.topTintWeight[id] = 1;
-			looks.side[id] = look.color();
-			looks.sideTinted[id] = look.color();
-			looks.sideTintWeight[id] = 1;
-			looks.tint[id] = look.tint().kind();
-			looks.constantTint[id] = look.tint().constant();
 		}
-		looks.shapes = shapes.toArray(new float[0][]);
-		for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
-			int id = Block.BLOCK_STATE_REGISTRY.getId(state);
-			if (id >= 0 && id < size && looks.shape[id] != 0 && !state.getFluidState().isEmpty()) {
-				int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
-				if (fluid >= 0 && fluid < size && looks.kind[fluid] == WATER) {
-					looks.wetShape[id] = fluid;
+		if (this.shape[id] != 0 && !state.getFluidState().isEmpty()) {
+			int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
+			if (fluid >= 0 && fluid < this.registrySize && fluid != id && this.kind[this.ensure(fluid)] == WATER) {
+				this.wetShape[id] = fluid;
+			}
+		}
+		return kind;
+	}
+
+	/** The state's colours from its model's textures; returns its kind, which they can change. */
+	private byte colours(int id, BlockState state, byte kind) {
+		//? if >=26.1 {
+		BlockStateModel model = this.models.get(state);
+		//?} else if >=1.21.5 {
+		/*BlockStateModel model = this.models.getBlockModel(state);
+		*///?} else {
+		/*BakedModel model = this.models.getBlockModel(state);
+		*///?}
+		FaceColor topFace = new FaceColor();
+		FaceColor sideFace = new FaceColor();
+		// A mod's model can fail when asked for its faces without its block entity's data, as
+		// Immersive Engineering's mirrored multiblock parts do, or throw an Error rather than an
+		// exception. Such a block falls back below like one with no faces, instead of the failure
+		// crashing the game.
+		try {
+			//? if >=1.21.5 {
+			this.parts.clear();
+			this.random.setSeed(42L);
+			model.collectParts(this.random, this.parts);
+			//?} else {
+			/*List<LegacyPart> parts = List.of(new LegacyPart(model, state, this.random));
+			*///?}
+			//? if >=26.1 {
+			for (BlockStateModelPart part : this.parts) {
+			//?} else if >=1.21.5 {
+			/*for (BlockModelPart part : this.parts) {
+			*///?} else {
+			/*for (LegacyPart part : parts) {
+			*///?}
+				this.accumulate(topFace, part.getQuads(Direction.UP));
+				this.accumulate(sideFace, part.getQuads(Direction.SOUTH));
+				if (sideFace.isEmpty()) {
+					this.accumulate(sideFace, part.getQuads(Direction.NORTH));
+				}
+				// Cross-shaped plants and other unculled geometry.
+				List<BakedQuad> loose = part.getQuads(null);
+				if (!loose.isEmpty()) {
+					this.accumulateLoose(topFace, sideFace, loose);
 				}
 			}
+		} catch (RuntimeException | Error e) {
+			topFace = new FaceColor();
+			sideFace = new FaceColor();
+			if (!this.warnedModel) {
+				this.warnedModel = true;
+				Diorama.LOGGER.warn("The model of {} failed when asked for its faces ({}); such blocks take their particle texture or map colour", state, e.toString());
+			}
 		}
-		current = looks;
-		builds++;
-		//? if >=26.1 {
-		builtFrom = models;
-		//?} else {
-		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
-		builtFrom = mc.getModelManager().getMissingBlockStateModel();
-		*///?}
-		if (failedShapes > 1) {
-			Diorama.LOGGER.warn("{} block shapes in all failed when asked for", failedShapes);
+		if (topFace.isEmpty() && sideFace.isEmpty()) {
+			// Block entities (chests, signs, beds) have no block model; use the particle texture.
+			TextureAtlasSprite particle = particle(model);
+			if (particle != null && !isMissing(particle)) {
+				float[] avg = this.spriteAverage(particle);
+				topFace.add(avg, -1);
+				sideFace.add(avg, -1);
+			}
 		}
-		if (failedModels > 1) {
-			Diorama.LOGGER.warn("{} block models in all failed when asked for their faces", failedModels);
+		if (topFace.isEmpty() && sideFace.isEmpty()) {
+			// No texture to go by: a model that draws only from its block entity's data, which this
+			// table can't see (Copycats+ copycats take the look of the block they're filled with), a
+			// texture the game can't find, or one a reload freed with nothing in its place.
+			return this.flatColours(id, state, kind);
 		}
-		Diorama.LOGGER.info("Built block colors for {} states in {} ms", size, (System.nanoTime() - start) / 1_000_000);
-		return looks;
+		if (topFace.isEmpty()) {
+			topFace = sideFace;
+		}
+		if (sideFace.isEmpty()) {
+			sideFace = topFace;
+		}
+		this.top[id] = topFace.untinted();
+		this.topTinted[id] = topFace.tinted();
+		this.topTintWeight[id] = topFace.tintWeight();
+		this.side[id] = sideFace.untinted();
+		this.sideTinted[id] = sideFace.tinted();
+		this.sideTintWeight[id] = sideFace.tintWeight();
+
+		if (kind == SOLID && !state.is(BlockTags.LEAVES) && topFace.coverage() < 0.55F) {
+			kind = GLASS;
+		}
+
+		// The tint layer the model's quads use, asked of the block's own tint code.
+		int tintIndex = topFace.tintIndex() >= 0 ? topFace.tintIndex() : sideFace.tintIndex();
+		if (tintIndex >= 0) {
+			Tint tint = blockTint(this.colors, state, tintIndex, this.probe);
+			this.tint[id] = tint.kind();
+			this.constantTint[id] = tint.constant();
+		}
+		return kind;
+	}
+
+	/**
+	 * The block's colour on Minecraft's own maps instead of the missing texture's purple, seen
+	 * through where those maps see through it ({@link #AIR}). Returns its kind.
+	 */
+	private byte flatColours(int id, BlockState state, byte kind) {
+		int mapColor = mapColor(state);
+		if (mapColor == 0) {
+			return AIR;
+		}
+		FaceColor face = new FaceColor();
+		face.add(new float[] {(mapColor >> 16 & 0xFF) / 255.0F, (mapColor >> 8 & 0xFF) / 255.0F, (mapColor & 0xFF) / 255.0F, 1.0F}, -1);
+		this.top[id] = face.untinted();
+		this.topTinted[id] = face.tinted();
+		this.topTintWeight[id] = face.tintWeight();
+		this.side[id] = face.untinted();
+		this.sideTinted[id] = face.tinted();
+		this.sideTintWeight[id] = face.tintWeight();
+		return kind;
+	}
+
+	//? if >=26.1 {
+	private static @Nullable TextureAtlasSprite particle(BlockStateModel model) {
+	//?} else if >=1.21.5 {
+	/*private static @Nullable TextureAtlasSprite particle(BlockStateModel model) {
+	*///?} else {
+	/*private static @Nullable TextureAtlasSprite particle(BakedModel model) {
+	*///?}
+		try {
+			//? if >=26.1 {
+			return model.particleMaterial().sprite();
+			//?} else if >=1.21.5 || fabric {
+			/*return model.particleIcon();
+			*///?} else {
+			/*// Asked the loader's way, as the faces are (legacyQuads).
+			return model.getParticleIcon(net.neoforged.neoforge.client.model.data.ModelData.EMPTY);
+			*///?}
+		} catch (RuntimeException | Error e) {
+			return null;
+		}
 	}
 
 	//? if <1.21.5 {
@@ -590,8 +763,10 @@ public final class BlockLooks {
 	/** A shape with more boxes than this counts as its bounding box. */
 	private static final int MAX_BOXES = 16;
 
-	/** Finds or adds the state's outline in {@code shapes}; 0 for a full cube. */
-	private static int shapeIndex(BlockState state, Map<VoxelShape, Integer> byVoxels, Map<String, Integer> byBoxes, List<float[]> shapes) {
+	/** Finds or adds the state's outline in {@link #shapes}; 0 for a full cube. Under {@link #MAKING}. */
+	private int shapeIndex(BlockState state) {
+		Map<VoxelShape, Integer> byVoxels = this.shapeByVoxels;
+		List<float[]> shapes = this.shapeList;
 		VoxelShape outline;
 		try {
 			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
@@ -624,8 +799,15 @@ public final class BlockLooks {
 			}
 			float[] kept = java.util.Arrays.copyOf(flat, n);
 			if (!full && n > 0) {
-				index = byBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
+				index = this.shapeByBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
 					shapes.add(kept);
+					// Room for more by doubling; the entry is published before the look that uses it.
+					float[][] published = this.shapes;
+					if (published.length < shapes.size()) {
+						published = java.util.Arrays.copyOf(published, Math.max(16, published.length * 2));
+					}
+					published[shapes.size() - 1] = kept;
+					this.shapes = published;
 					return shapes.size() - 1;
 				});
 			}
@@ -658,7 +840,7 @@ public final class BlockLooks {
 	}
 
 	/** Looks up the still texture and the tint the game draws a fluid with. */
-	private static FluidLook fluidLook(FluidState fluid, Map<TextureAtlasSprite, float[]> cache, TintProbe probe) {
+	private FluidLook fluidLook(FluidState fluid) {
 		TextureAtlasSprite sprite;
 		try {
 			//? if >=26.1 {
@@ -680,9 +862,9 @@ public final class BlockLooks {
 			// An unregistered fluid or a missing texture: better the block's particle colour than purple.
 			sprite = null;
 		}
-		float[] avg = sprite == null ? null : spriteAverage(sprite, cache);
+		float[] avg = sprite == null ? null : this.spriteAverage(sprite);
 		int color = avg == null || avg[3] <= 0 ? -1 : FaceColor.pack(avg[0], avg[1], avg[2]);
-		return new FluidLook(color, fluidTint(fluid, probe));
+		return new FluidLook(color, fluidTint(fluid, this.probe));
 	}
 
 	/** How a block or fluid is tinted: by a biome colour ({@code TINT_*}) or a fixed colour, -1 for none. */
@@ -759,7 +941,7 @@ public final class BlockLooks {
 		}
 	}
 
-	private static void accumulate(FaceColor face, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
+	private void accumulate(FaceColor face, List<BakedQuad> quads) {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
 			TextureAtlasSprite sprite = quad.materialInfo().sprite();
@@ -769,12 +951,12 @@ public final class BlockLooks {
 			int tintIndex = quad.tintIndex();
 			*///?}
 			if (!isMissing(sprite)) {
-				face.add(spriteAverage(sprite, cache), tintIndex);
+				face.add(this.spriteAverage(sprite), tintIndex);
 			}
 		}
 	}
 
-	private static void accumulateLoose(FaceColor top, FaceColor side, List<BakedQuad> quads, Map<TextureAtlasSprite, float[]> cache) {
+	private void accumulateLoose(FaceColor top, FaceColor side, List<BakedQuad> quads) {
 		for (BakedQuad quad : quads) {
 			//? if >=26.1 {
 			TextureAtlasSprite sprite = quad.materialInfo().sprite();
@@ -786,7 +968,7 @@ public final class BlockLooks {
 			if (isMissing(sprite)) {
 				continue;
 			}
-			float[] avg = spriteAverage(sprite, cache);
+			float[] avg = this.spriteAverage(sprite);
 			if (quad.direction() == Direction.UP || quad.direction() == Direction.DOWN) {
 				top.add(avg, tintIndex);
 			} else {
@@ -837,8 +1019,8 @@ public final class BlockLooks {
 	}
 
 	/** Returns {r, g, b, coverage} averaged over the sprite's visible pixels, colors in 0..1. */
-	private static float[] spriteAverage(TextureAtlasSprite sprite, Map<TextureAtlasSprite, float[]> cache) {
-		return cache.computeIfAbsent(sprite, s -> {
+	private float[] spriteAverage(TextureAtlasSprite sprite) {
+		return this.spriteCache.computeIfAbsent(sprite, s -> {
 			float[] avg = average(s);
 			if (avg != null) {
 				return avg;
@@ -846,7 +1028,7 @@ public final class BlockLooks {
 			// The sprite is from the atlas before the last resource reload, which freed its image: a
 			// model that outlived the reload still points at it (issue 94, a big NeoForge pack). Read
 			// the texture of that name in the atlas now; if the atlas has none, it adds no colour.
-			TextureAtlasSprite current = currentSprite(s);
+			TextureAtlasSprite current = this.currentSprite(s);
 			avg = current == null ? null : average(current);
 			if (!warnedFreed) {
 				warnedFreed = true;
@@ -857,18 +1039,45 @@ public final class BlockLooks {
 		});
 	}
 
+	/**
+	 * Called by a texture as it starts to free its images (a resource reload frees the last atlas's
+	 * textures). It waits for a look reading those images to finish, which takes microseconds, and
+	 * marks the texture so no look reads it after.
+	 */
+	public static void closing(ClosingTexture texture) {
+		synchronized (IMAGES) {
+			texture.diorama$markClosed();
+		}
+	}
+
+	/** A texture's contents, told when they free their images. */
+	public interface ClosingTexture {
+		void diorama$markClosed();
+
+		boolean diorama$closed();
+	}
+
 	/** Set once per build, so a mod that keeps many old models is named once in the log. */
 	private static boolean warnedFreed;
 
 	/** The sprite with the same name in its atlas as the atlas is now, or null if there's none. */
-	private static @Nullable TextureAtlasSprite currentSprite(TextureAtlasSprite old) {
+	private @Nullable TextureAtlasSprite currentSprite(TextureAtlasSprite old) {
 		try {
-			// Atlases are registered once at startup and filled again by each reload, so this finds
-			// the existing atlas rather than adding a texture.
-			if (Minecraft.getInstance().getTextureManager().getTexture(old.atlasLocation()) instanceof TextureAtlas atlas) {
-				TextureAtlasSprite sprite = atlas.getSprite(old.contents().name());
-				return sprite == old || sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation()) ? null : sprite;
+			// The block atlas, as found on the client thread when the table was made: the texture
+			// manager's own map is only safe to read there. Atlases are registered once at startup and
+			// filled again by each reload, so this is the atlas as it is now.
+			TextureAtlas atlas = this.atlas;
+			if (atlas == null || !old.atlasLocation().equals(atlas.location())) {
+				if (!Minecraft.getInstance().isSameThread()) {
+					return null;
+				}
+				atlas = Minecraft.getInstance().getTextureManager().getTexture(old.atlasLocation()) instanceof TextureAtlas found ? found : null;
+				if (atlas == null) {
+					return null;
+				}
 			}
+			TextureAtlasSprite sprite = atlas.getSprite(old.contents().name());
+			return sprite == old || sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation()) ? null : sprite;
 		} catch (RuntimeException | Error e) {
 			// The atlas isn't filled, or a mod's atlas isn't a TextureAtlas.
 		}
@@ -877,7 +1086,17 @@ public final class BlockLooks {
 
 	/** {@link #spriteAverage} for one sprite, or null if its image has been freed. */
 	private static float @Nullable [] average(TextureAtlasSprite s) {
-		SpriteContents contents = s.contents();
+		// Held while the pixels are read, so a texture can't free its images meanwhile (see closing).
+		synchronized (IMAGES) {
+			SpriteContents contents = s.contents();
+			if (contents instanceof ClosingTexture closing && closing.diorama$closed()) {
+				return null;
+			}
+			return average(contents);
+		}
+	}
+
+	private static float @Nullable [] average(SpriteContents contents) {
 		NativeImage image = null;
 		try {
 			image = ORIGINAL_IMAGE == null ? null : (NativeImage) ORIGINAL_IMAGE.get(contents);
