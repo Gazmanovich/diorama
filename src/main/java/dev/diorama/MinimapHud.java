@@ -52,7 +52,7 @@ public final class MinimapHud implements HudElement {
 	private static final int INFO_COLOR = 0xFFFFFFFF;
 	/** The game time once it's dark enough for a bed, which can be earlier than the clock says in a storm. */
 	private static final int BED_TIME_COLOR = 0xFF9CC4FF;
-	/** Whether the game drew its effect icons since the minimap last looked (see EffectIconsMixin). */
+	/** Whether the game's effect icon drawing ran to the end since the minimap last looked (see EffectIconsMixin). */
 	private static boolean effectIconsDrawn;
 
 	private final MapViewport viewport = new MapViewport();
@@ -359,7 +359,7 @@ public final class MinimapHud implements HudElement {
 	private record InfoLine(String text, int color) {
 	}
 
-	/** Called at the end of the game's own drawing of the status effect icons. */
+	/** Called when the game's own drawing of the status effect icons runs to the end, icons or not. */
 	public static void effectIconsDrawn() {
 		effectIconsDrawn = true;
 	}

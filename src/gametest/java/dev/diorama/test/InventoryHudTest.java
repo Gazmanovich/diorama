@@ -21,6 +21,7 @@ final class InventoryHudTest {
 			s.minimapPixelsPerBlock = 2;
 			s.save();
 		});
+		context.runOnClient(mc -> potionHud(false));
 		world.getServer().runCommand("effect give @a speed 60 0");
 		world.getServer().runCommand("effect give @a weakness 60 0");
 		context.waitTicks(20);
