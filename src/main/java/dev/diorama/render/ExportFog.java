@@ -493,24 +493,23 @@ public final class ExportFog implements ImageExport.Finish {
 			s[k] = (Math.min(toKnown[k], far) - Math.min(toUnknown[k], far)) / 3F * this.texel;
 		}
 		float[] t = new float[w * h];
-		for (int pass = 0; pass < 3; pass++) {
-			for (int j = 0; j < h; j++) {
-				for (int i = 0; i < w; i++) {
-					float sum = 0;
-					for (int d = -2; d <= 2; d++) {
-						sum += s[j * w + Math.max(0, Math.min(w - 1, i + d))];
-					}
-					t[j * w + i] = sum / 5;
+		// A texel either way, as MapViewport.cloudDistances.
+		for (int j = 0; j < h; j++) {
+			for (int i = 0; i < w; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += s[j * w + Math.max(0, Math.min(w - 1, i + d))];
 				}
+				t[j * w + i] = sum / 3;
 			}
-			for (int j = 0; j < h; j++) {
-				for (int i = 0; i < w; i++) {
-					float sum = 0;
-					for (int d = -2; d <= 2; d++) {
-						sum += t[Math.max(0, Math.min(h - 1, j + d)) * w + i];
-					}
-					s[j * w + i] = sum / 5;
+		}
+		for (int j = 0; j < h; j++) {
+			for (int i = 0; i < w; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += t[Math.max(0, Math.min(h - 1, j + d)) * w + i];
 				}
+				s[j * w + i] = sum / 3;
 			}
 		}
 		// The cells are worked out from the distance as it is (MapViewport.cloudCells); the shader

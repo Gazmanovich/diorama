@@ -314,7 +314,9 @@ vec4 clouds(vec2 p0) {
     float ramp = CLOUD_RAMP * min(1.0, inversesqrt(size / CLOUD_CELL));
     float big = mix(1.0, mix(0.92, 1.03, bigLight), bigShare);
     // Which layers any cell within reach has, and whether all of them are the deck alone.
-    ivec2 cell = clamp(ivec2(floor(p0 / (cloudBase * float(gridMult)))) - cellFirst, ivec2(0), textureSize(Sampler2, 0) - 1);
+    // A texel a cell of the smallest size drawn (MapViewport.cloudNear).
+    vec2 firstSmallest = floor(vec2(cellFirst * gridMult) / exp2(float(cloudSmallest)));
+    ivec2 cell = clamp(ivec2(floor(p0 / (cloudBase * exp2(float(cloudSmallest)))) - firstSmallest), ivec2(0), textureSize(Sampler2, 0) - 1);
     int near = int(floor(texelFetch(Sampler2, cell, 0).a * 255.0 + 0.5));
     int small = near % 16;
     int large = near / 16;

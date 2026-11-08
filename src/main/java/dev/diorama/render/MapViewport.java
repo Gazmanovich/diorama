@@ -46,7 +46,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, int guiScale) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, int guiScale, int viewWidth, int viewHeight) {
 		/**
 		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
 		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
@@ -623,7 +623,7 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version(), Minecraft.getInstance().getWindow().getGuiScale());
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version(), Minecraft.getInstance().getWindow().getGuiScale(), view.width(), view.height());
 		boolean sameLevel = this.maskLevel.get() == level;
 		this.takeFinished();
 		if (sameLevel && inputs.equals(this.maskInputs)) {
@@ -1249,16 +1249,9 @@ public final class MapViewport {
 				}
 			}
 		}
-		// The per-cell texels from (0, 0) need a square as wide as the grid too.
-		if (smallest >= 0 && grid.count(grid.mult()) > DETAIL) {
-			smallest = -1;
-		}
 		this.cloudSmallest = smallest;
 		this.cloudLarge = large;
 		int edge = large ? 4 * MASK : 2 * MASK;
-		while (smallest >= 0 && edge < grid.count(grid.mult())) {
-			edge *= 2;
-		}
 		int[] pixels = this.detailPixels;
 		for (int j = 0; j < edge; j++) {
 			for (int i = 0; i < edge; i++) {
@@ -1329,24 +1322,23 @@ public final class MapViewport {
 		for (int k = 0; k < MASK * MASK; k++) {
 			this.signed[k] = (float) ((Math.min(this.toKnown[k], far) - Math.min(this.toUnexplored[k], far)) / 3.0 * texel);
 		}
-		for (int pass = 0; pass < 3; pass++) {
-			for (int j = 0; j < MASK; j++) {
-				for (int i = 0; i < MASK; i++) {
-					float sum = 0;
-					for (int d = -2; d <= 2; d++) {
-						sum += this.signed[j * MASK + Math.max(0, Math.min(MASK - 1, i + d))];
-					}
-					this.signedBlur[j * MASK + i] = sum / 5;
+		// A texel either way: wider, and zoomed out a narrow explored trail would blur into cloud.
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += this.signed[j * MASK + Math.max(0, Math.min(MASK - 1, i + d))];
 				}
+				this.signedBlur[j * MASK + i] = sum / 3;
 			}
-			for (int j = 0; j < MASK; j++) {
-				for (int i = 0; i < MASK; i++) {
-					float sum = 0;
-					for (int d = -2; d <= 2; d++) {
-						sum += this.signedBlur[Math.max(0, Math.min(MASK - 1, j + d)) * MASK + i];
-					}
-					this.signed[j * MASK + i] = sum / 5;
+		}
+		for (int j = 0; j < MASK; j++) {
+			for (int i = 0; i < MASK; i++) {
+				float sum = 0;
+				for (int d = -1; d <= 1; d++) {
+					sum += this.signedBlur[Math.max(0, Math.min(MASK - 1, j + d)) * MASK + i];
 				}
+				this.signed[j * MASK + i] = sum / 3;
 			}
 		}
 	}
@@ -1390,6 +1382,7 @@ public final class MapViewport {
 		int fromV = Math.max(0, (int) Math.floor((mapV + grid.viewMinV() - grid.originV()) / size) - margin - firstV);
 		int toV = Math.min(count - 1, (int) Math.floor((mapV + grid.viewMaxV() - grid.originV()) / size) + margin - firstV);
 		int slotY = CLOUD_SLOT;
+		int[] near = null;
 		for (int level = this.cloudSmallest; level < CLOUD_SIZES; level++) {
 			int times = 1 << level;
 			// Cells of this size, numbered in the shader's map units, from the one holding the grid's first.
@@ -1401,6 +1394,9 @@ public final class MapViewport {
 			int to0U = Math.min(width - 1, (int) (Math.floorDiv((long) (firstU + toU) * mult + mult - 1, times) - first0U) + 1);
 			int from0V = (int) (Math.floorDiv((long) (firstV + fromV) * mult, times) - first0V);
 			int to0V = Math.min(width - 1, (int) (Math.floorDiv((long) (firstV + toV) * mult + mult - 1, times) - first0V) + 1);
+			if (level == this.cloudSmallest) {
+				near = new int[] {from0U, to0U, from0V, to0V, (int) first0U, (int) first0V};
+			}
 			double cell = grid.base() * times;
 			for (int j = from0V; j <= to0V; j++) {
 				long v = first0V + j;
@@ -1419,38 +1415,31 @@ public final class MapViewport {
 				}
 			}
 		}
-		this.cloudNear(pixels, edge, fromU, toU, fromV, toV, firstU, firstV, mult);
+		if (near != null) {
+			this.cloudNear(pixels, edge, near);
+		}
 	}
 
 	/**
-	 * The layers of the cells of size {@code level} in the grid cell {@code (gu, gv)}, from their
-	 * block (one cell, or several where they're smaller than the grid's), and 8 if any of them is
-	 * more than the deck alone.
+	 * The layers of the cell of size {@code level} holding the cell {@code (u, v)} of the smallest
+	 * size drawn (numbered in the shader's map units), and 8 if it's more than the deck alone; 0 for
+	 * a size not drawn.
 	 */
-	private int cellCodes(int[] pixels, int edge, int level, int gu, int gv, int firstU, int firstV, int mult) {
-		int times = 1 << level;
-		int each = Math.max(1, mult / times);
-		int i0 = (int) (Math.floorDiv((long) gu * mult, times) - Math.floorDiv((long) firstU * mult, times));
-		int j0 = (int) (Math.floorDiv((long) gv * mult, times) - Math.floorDiv((long) firstV * mult, times));
+	private int levelCode(int[] pixels, int edge, int level, long u, long v, long first0U, long first0V) {
 		int width = this.slotWidth(level);
 		if (width == 0) {
 			return 0;
 		}
-		int row = CLOUD_SLOT;
-		int x0 = this.slotX(level);
-		int codes = 0;
-		for (int j = j0; j < j0 + each; j++) {
-			for (int i = i0; i < i0 + each; i++) {
-				int code = 0;
-				if (i >= 0 && j >= 0 && i < width && j < width) {
-					int pixel = pixels[(row + j) * edge + x0 + i];
-					code = ((pixel & 0xFF) != 0 ? VanillaClouds.DECK : 0) | ((pixel & 0xFF00) != 0 ? VanillaClouds.MIDDLE : 0)
-						| ((pixel & 0xFF0000) != 0 ? VanillaClouds.TOP : 0);
-				}
-				codes |= code | (code == VanillaClouds.DECK ? 0 : 8);
-			}
+		int up = level - this.cloudSmallest;
+		int i = (int) (Math.floorDiv(u, 1L << up) - Math.floorDiv(first0U, 1L << up));
+		int j = (int) (Math.floorDiv(v, 1L << up) - Math.floorDiv(first0V, 1L << up));
+		int code = 0;
+		if (i >= 0 && j >= 0 && i < width && j < width) {
+			int pixel = pixels[(CLOUD_SLOT + j) * edge + this.slotX(level) + i];
+			code = ((pixel & 0xFF) != 0 ? VanillaClouds.DECK : 0) | ((pixel & 0xFF00) != 0 ? VanillaClouds.MIDDLE : 0)
+				| ((pixel & 0xFF0000) != 0 ? VanillaClouds.TOP : 0);
 		}
-		return codes;
+		return code | (code == VanillaClouds.DECK ? 0 : 8);
 	}
 
 	private int[] nearSmall = new int[0];
@@ -1458,15 +1447,19 @@ public final class MapViewport {
 	private int[] nearLine = new int[0];
 
 	/**
-	 * Into alpha, for each cell: which layers any cell within reach has, so the shader skips the
-	 * rest, and whether every cell within reach is the deck alone, so it draws the deck's plain top
-	 * with no reads. The low nibble for the two smallest sizes, the high one for the three bigger:
-	 * the three layer bits, then the deck-alone bit. Within reach: a wall, shadow or ground-shadow
-	 * read lands under 3.5 cells of the biggest size away.
+	 * Into alpha, a texel a cell of the smallest size drawn from (0, 0): which layers any cell within
+	 * reach has, so the shader skips the rest, and whether every cell within reach is the deck alone,
+	 * so it draws the deck's plain top with no reads. The low nibble for the two smallest sizes, the
+	 * high one for the three bigger: the three layer bits, then the deck-alone bit. Within reach: a
+	 * wall, shadow or ground-shadow read lands under 3.5 cells of the biggest size away. {@code range}
+	 * is {first u, last u, first v, last v} of the smallest size's cells written, from its first, and
+	 * that first.
 	 */
-	private void cloudNear(int[] pixels, int edge, int fromU, int toU, int fromV, int toV, int firstU, int firstV, int mult) {
-		int w = toU - fromU + 1;
-		int h = toV - fromV + 1;
+	private void cloudNear(int[] pixels, int edge, int[] range) {
+		int fromU = range[0];
+		int fromV = range[2];
+		int w = range[1] - fromU + 1;
+		int h = range[3] - fromV + 1;
 		if (w <= 0 || h <= 0) {
 			return;
 		}
@@ -1476,18 +1469,20 @@ public final class MapViewport {
 			this.nearBig = new int[n];
 			this.nearLine = new int[n];
 		}
+		long first0U = range[4];
+		long first0V = range[5];
 		for (int j = 0; j < h; j++) {
 			for (int i = 0; i < w; i++) {
-				int gu = firstU + fromU + i;
-				int gv = firstV + fromV + j;
+				long u = first0U + fromU + i;
+				long v = first0V + fromV + j;
 				// Bit 3 set where a cell is NOT the deck alone, so ORing finds any such cell within reach.
-				this.nearSmall[j * w + i] = this.cellCodes(pixels, edge, 0, gu, gv, firstU, firstV, mult) | this.cellCodes(pixels, edge, 1, gu, gv, firstU, firstV, mult);
-				this.nearBig[j * w + i] = this.cellCodes(pixels, edge, 2, gu, gv, firstU, firstV, mult) | this.cellCodes(pixels, edge, 3, gu, gv, firstU, firstV, mult)
-					| this.cellCodes(pixels, edge, 4, gu, gv, firstU, firstV, mult);
+				this.nearSmall[j * w + i] = this.levelCode(pixels, edge, 0, u, v, first0U, first0V) | this.levelCode(pixels, edge, 1, u, v, first0U, first0V);
+				this.nearBig[j * w + i] = this.levelCode(pixels, edge, 2, u, v, first0U, first0V) | this.levelCode(pixels, edge, 3, u, v, first0U, first0V)
+					| this.levelCode(pixels, edge, 4, u, v, first0U, first0V);
 			}
 		}
-		this.orAround(this.nearSmall, w, h, (int) Math.ceil(3.5 * 2 / mult) + 1);
-		this.orAround(this.nearBig, w, h, (int) Math.ceil(3.5 * 16 / mult) + 1);
+		this.orAround(this.nearSmall, w, h, (int) Math.ceil(3.5 * 2 / (1 << this.cloudSmallest)) + 1);
+		this.orAround(this.nearBig, w, h, (int) Math.ceil(3.5 * 16 / (1 << this.cloudSmallest)) + 1);
 		for (int j = 0; j < h; j++) {
 			for (int i = 0; i < w; i++) {
 				int small = this.nearSmall[j * w + i] ^ 8;

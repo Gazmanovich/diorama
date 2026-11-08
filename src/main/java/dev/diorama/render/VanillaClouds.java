@@ -229,7 +229,12 @@ public final class VanillaClouds {
 		return Math.floorMod(v, 256) * 256 + Math.floorMod(u, 256);
 	}
 
-	/** Vanilla's clouds.png as cloud or not, 256 a side (a bigger or smaller one is tiled to that). */
+	/** The texel of an image {@code size} across under texel {@code k} of 256: a bigger one shrunk, a smaller one tiled. */
+	private static int sample(int k, int size) {
+		return size >= 256 ? k * size / 256 + size / 512 : k % size;
+	}
+
+	/** Vanilla's clouds.png as cloud or not, 256 a side (a bigger one is shrunk to that, a smaller one tiled). */
 	private static boolean[] texture() {
 		boolean[] cells = new boolean[256 * 256];
 		boolean read = false;
@@ -239,7 +244,7 @@ public final class VanillaClouds {
 				try (InputStream in = resource.get().open(); NativeImage image = NativeImage.read(in)) {
 					for (int y = 0; y < 256; y++) {
 						for (int x = 0; x < 256; x++) {
-							cells[y * 256 + x] = WaypointIcons.argb(image, x % image.getWidth(), y % image.getHeight()) >>> 24 > 0;
+							cells[y * 256 + x] = WaypointIcons.argb(image, sample(x, image.getWidth()), sample(y, image.getHeight())) >>> 24 > 0;
 						}
 					}
 					read = true;
