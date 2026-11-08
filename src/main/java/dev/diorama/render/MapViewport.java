@@ -46,7 +46,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, int guiScale, int viewWidth, int viewHeight) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, double guiScale, int viewWidth, int viewHeight) {
 		/**
 		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
 		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
