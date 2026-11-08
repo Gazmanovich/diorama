@@ -1201,13 +1201,13 @@ public final class MapViewport {
 	 * many after its last. The mask's origin is always a whole number of cells from the noise's: ten
 	 * of the base size to each eighth of the coarser noise period the origin snaps to.
 	 */
-	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult,
+	private record CellGrid(double originU, double originV, double texel, int noiseU, int noiseV, double snap, double base, int mult, double screen,
 		double viewMinU, double viewMinV, double viewMaxU, double viewMaxV) {
 		static CellGrid of(View view, double originU, double originV, double texel, int scaleSteps, int fraction) {
 			double snap = 64.0 * (1 << (scaleSteps + 1));
 			return new CellGrid(originU, originV, texel,
 				Math.floorMod((long) (originU / snap), 8), Math.floorMod((long) (originV / snap), 8), snap,
-				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1,
+				CLOUD_CELL * (1 << scaleSteps), fraction >= 10 ? 2 : 1, 1 / (view.zoom() * Minecraft.getInstance().getWindow().getGuiScale()),
 				view.minU(), view.minV(), view.minU() + view.width() / view.zoom(), view.minV() + view.height() / view.zoom());
 		}
 
@@ -1233,9 +1233,26 @@ public final class MapViewport {
 	 */
 	private void writeCells() {
 		CellGrid grid = this.cellGrid;
-		int span = grid == null ? 0 : grid.count(grid.mult()) * grid.mult();
-		boolean cells = grid != null && span <= 2 * CLOUD_SLOT;
-		boolean large = cells && span > CLOUD_SLOT;
+		// The smallest size the view draws (fog.fsh: cells about CLOUD_PIXELS screen pixels across), a
+		// little under in case the zoom goes in before the next build, and the blocks laid out from it:
+		// the small layout if they fit, else the large, else from a bigger size.
+		int smallest = -1;
+		boolean large = false;
+		if (grid != null) {
+			int span = grid.count(grid.mult()) * grid.mult();
+			int drawn = (int) Math.max(0, Math.floor(Math.log(CLOUD_PIXELS * grid.screen() / grid.base()) / Math.log(2) - 0.1));
+			for (int level = Math.min(drawn, CLOUD_SIZES - 1); level < CLOUD_SIZES && smallest < 0; level++) {
+				int cells = (span + (1 << level) - 1 >> level) + 2;
+				if (cells <= CLOUD_SLOT) {
+					smallest = level;
+				} else if (cells <= 2 * CLOUD_SLOT) {
+					smallest = level;
+					large = true;
+				}
+			}
+		}
+		this.cloudSmallest = smallest;
+		this.cloudLarge = large;
 		int edge = large ? 4 * MASK : 2 * MASK;
 		int[] pixels = this.detailPixels;
 		for (int j = 0; j < edge; j++) {
@@ -1250,9 +1267,10 @@ public final class MapViewport {
 				pixels[j * edge + i] = blue << 16;
 			}
 		}
-		if (cells) {
-			this.cloudCells(grid, pixels, edge, large);
-			pixels[0] = pixels[0] & 0xFFFFFF | (large ? 170 : 255) << 24;
+		if (smallest >= 0) {
+			this.cloudCells(grid, pixels, edge);
+			// At (0, 0): the cells are there (over a half), from which size, and which layout.
+			pixels[0] = pixels[0] & 0xFFFFFF | 255 - smallest * 16 - (large ? 8 : 0) << 24;
 		}
 		this.detailArea[0] = 0;
 		this.detailArea[1] = 0;
@@ -1261,22 +1279,28 @@ public final class MapViewport {
 	}
 
 	/**
-	 * Each size's cells have a block of the detail texture, from row {@link #CLOUD_SLOT} (twice that
-	 * with the bigger layout), the smallest size first, each half as wide as the one before: a cell a
-	 * texel, the deck, middle and top layers in red, green and blue, 0 or 255. Read filtered, the
-	 * shader's four cells round a point blend in one read. Match fog.fsh's cloudRaw.
+	 * Each size drawn has a block of the detail texture, from row {@link #CLOUD_SLOT}: the smallest
+	 * size drawn ({@link #cloudSmallest}) first, CLOUD_SLOT wide (twice that in the large layout),
+	 * each next one half as wide: a cell a texel, the deck, middle and top layers in red, green and
+	 * blue, 0 or 255. Read filtered, the shader's four cells round a point blend in one read. Match
+	 * fog.fsh's cloudRaw.
 	 */
 	private static final int CLOUD_SLOT = 256;
+	/** Cells about this many screen pixels across; match fog.fsh. */
+	private static final double CLOUD_PIXELS = 40;
+	private int cloudSmallest = -1;
+	private boolean cloudLarge;
 	/** Cell sizes, 1, 2, 4, 8 and 16 times the base cell; match fog.fsh. */
 	private static final int CLOUD_SIZES = 5;
 
-	private static int slotX(int level, boolean large) {
-		int width = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
-		return level == 0 ? 0 : width * 2 - (width >> (level - 1));
+	private int slotX(int level) {
+		int width = this.cloudLarge ? 2 * CLOUD_SLOT : CLOUD_SLOT;
+		int at = level - this.cloudSmallest;
+		return at == 0 ? 0 : width * 2 - (width >> (at - 1));
 	}
 
-	private static int slotWidth(int level, boolean large) {
-		return (large ? 2 * CLOUD_SLOT : CLOUD_SLOT) >> level;
+	private int slotWidth(int level) {
+		return level < this.cloudSmallest ? 0 : (this.cloudLarge ? 2 * CLOUD_SLOT : CLOUD_SLOT) >> (level - this.cloudSmallest);
 	}
 
 	/** Map units from land explored or remembered, positive over land never explored: {@link #cloudDistances}. */
@@ -1342,7 +1366,7 @@ public final class MapViewport {
 	 * {@link #CLOUD_SIZES} sizes, 1 to 16 times the base cell, into each size's block. Then
 	 * {@link #cloudNear}.
 	 */
-	private void cloudCells(CellGrid grid, int[] pixels, int edge, boolean large) {
+	private void cloudCells(CellGrid grid, int[] pixels, int edge) {
 		int mult = grid.mult();
 		double size = grid.base() * mult;
 		int count = grid.count(mult);
@@ -1360,14 +1384,14 @@ public final class MapViewport {
 		int toU = Math.min(count - 1, (int) Math.floor((mapU + grid.viewMaxU() - grid.originU()) / size) + margin - firstU);
 		int fromV = Math.max(0, (int) Math.floor((mapV + grid.viewMinV() - grid.originV()) / size) - margin - firstV);
 		int toV = Math.min(count - 1, (int) Math.floor((mapV + grid.viewMaxV() - grid.originV()) / size) + margin - firstV);
-		int slotY = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
-		for (int level = 0; level < CLOUD_SIZES; level++) {
+		int slotY = CLOUD_SLOT;
+		for (int level = this.cloudSmallest; level < CLOUD_SIZES; level++) {
 			int times = 1 << level;
 			// Cells of this size, numbered in the shader's map units, from the one holding the grid's first.
 			long first0U = Math.floorDiv((long) firstU * mult, times);
 			long first0V = Math.floorDiv((long) firstV * mult, times);
-			int width = slotWidth(level, large);
-			int x0 = slotX(level, large);
+			int width = this.slotWidth(level);
+			int x0 = this.slotX(level);
 			int from0U = (int) (Math.floorDiv((long) (firstU + fromU) * mult, times) - first0U);
 			int to0U = Math.min(width - 1, (int) (Math.floorDiv((long) (firstU + toU) * mult + mult - 1, times) - first0U) + 1);
 			int from0V = (int) (Math.floorDiv((long) (firstV + fromV) * mult, times) - first0V);
@@ -1390,7 +1414,7 @@ public final class MapViewport {
 				}
 			}
 		}
-		this.cloudNear(pixels, edge, large, fromU, toU, fromV, toV, firstU, firstV, mult);
+		this.cloudNear(pixels, edge, fromU, toU, fromV, toV, firstU, firstV, mult);
 	}
 
 	/**
@@ -1398,14 +1422,17 @@ public final class MapViewport {
 	 * block (one cell, or several where they're smaller than the grid's), and 8 if any of them is
 	 * more than the deck alone.
 	 */
-	private static int cellCodes(int[] pixels, int edge, boolean large, int level, int gu, int gv, int firstU, int firstV, int mult) {
+	private int cellCodes(int[] pixels, int edge, int level, int gu, int gv, int firstU, int firstV, int mult) {
 		int times = 1 << level;
 		int each = Math.max(1, mult / times);
 		int i0 = (int) (Math.floorDiv((long) gu * mult, times) - Math.floorDiv((long) firstU * mult, times));
 		int j0 = (int) (Math.floorDiv((long) gv * mult, times) - Math.floorDiv((long) firstV * mult, times));
-		int width = slotWidth(level, large);
-		int row = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
-		int x0 = slotX(level, large);
+		int width = this.slotWidth(level);
+		if (width == 0) {
+			return 0;
+		}
+		int row = CLOUD_SLOT;
+		int x0 = this.slotX(level);
 		int codes = 0;
 		for (int j = j0; j < j0 + each; j++) {
 			for (int i = i0; i < i0 + each; i++) {
@@ -1432,7 +1459,7 @@ public final class MapViewport {
 	 * the three layer bits, then the deck-alone bit. Within reach: a wall, shadow or ground-shadow
 	 * read lands under 3.5 cells of the biggest size away.
 	 */
-	private void cloudNear(int[] pixels, int edge, boolean large, int fromU, int toU, int fromV, int toV, int firstU, int firstV, int mult) {
+	private void cloudNear(int[] pixels, int edge, int fromU, int toU, int fromV, int toV, int firstU, int firstV, int mult) {
 		int w = toU - fromU + 1;
 		int h = toV - fromV + 1;
 		if (w <= 0 || h <= 0) {
@@ -1449,9 +1476,9 @@ public final class MapViewport {
 				int gu = firstU + fromU + i;
 				int gv = firstV + fromV + j;
 				// Bit 3 set where a cell is NOT the deck alone, so ORing finds any such cell within reach.
-				this.nearSmall[j * w + i] = cellCodes(pixels, edge, large, 0, gu, gv, firstU, firstV, mult) | cellCodes(pixels, edge, large, 1, gu, gv, firstU, firstV, mult);
-				this.nearBig[j * w + i] = cellCodes(pixels, edge, large, 2, gu, gv, firstU, firstV, mult) | cellCodes(pixels, edge, large, 3, gu, gv, firstU, firstV, mult)
-					| cellCodes(pixels, edge, large, 4, gu, gv, firstU, firstV, mult);
+				this.nearSmall[j * w + i] = this.cellCodes(pixels, edge, 0, gu, gv, firstU, firstV, mult) | this.cellCodes(pixels, edge, 1, gu, gv, firstU, firstV, mult);
+				this.nearBig[j * w + i] = this.cellCodes(pixels, edge, 2, gu, gv, firstU, firstV, mult) | this.cellCodes(pixels, edge, 3, gu, gv, firstU, firstV, mult)
+					| this.cellCodes(pixels, edge, 4, gu, gv, firstU, firstV, mult);
 			}
 		}
 		this.orAround(this.nearSmall, w, h, (int) Math.ceil(3.5 * 2 / mult) + 1);

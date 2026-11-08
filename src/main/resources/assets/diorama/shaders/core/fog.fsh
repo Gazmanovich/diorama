@@ -266,10 +266,12 @@ float signedAt(vec2 p) {
 // corners; 0.5 is the edge. Each size's cells have a block of the detail texture (MapViewport.slotX),
 // a layer a colour, 0 or 1, so one filtered read does the blend.
 bool cloudsLarge = false;
+int cloudSmallest = 0;
 float cloudRaw(vec2 p, int level, int bit) {
     float slot = cloudsLarge ? 512.0 : 256.0;
-    float width = slot / exp2(float(level));
-    float x0 = level == 0 ? 0.0 : slot * 2.0 - slot / exp2(float(level - 1));
+    int at = level - cloudSmallest;
+    float width = slot / exp2(float(at));
+    float x0 = at == 0 ? 0.0 : slot * 2.0 - slot / exp2(float(at - 1));
     float size = cloudBase * exp2(float(level));
     vec2 g = p / size - 0.5;
     vec2 i = floor(g);
@@ -277,7 +279,7 @@ float cloudRaw(vec2 p, int level, int bit) {
     // The cell holding the grid's first, at this size.
     vec2 first = floor(vec2(cellFirst * gridMult) / exp2(float(level)));
     vec2 local = clamp(i - first, vec2(0.0), vec2(width - 2.0));
-    vec4 t = texture(Sampler2, (vec2(x0, slot) + local + 0.5 + f) / vec2(textureSize(Sampler2, 0)));
+    vec4 t = texture(Sampler2, (vec2(x0, 256.0) + local + 0.5 + f) / vec2(textureSize(Sampler2, 0)));
     return bit == 1 ? t.r : bit == 2 ? t.g : t.b;
 }
 
@@ -469,14 +471,17 @@ void main() {
         gridMult = scaleFraction >= 0.58 ? 2 : 1;
         ivec2 originCells = ivec2(floor(offsetBytes / 32.0));
         cellFirst = originCells * (10 / gridMult) - CELL_MARGIN;
+        // At (0, 0): 255 less 16 for each size under the smallest drawn, and 8 for the large layout.
         float ready = texelFetch(Sampler2, ivec2(0), 0).a;
         cellsReady = ready > 0.5;
-        cloudsLarge = ready < 0.8;
+        int cloudLayout = int(floor((1.0 - ready) * 255.0 + 0.5));
+        cloudSmallest = cloudLayout / 16;
+        cloudsLarge = cloudLayout % 16 >= 8;
         // Cells about CLOUD_PIXELS screen pixels across (a layer texel is two), a power of two of the
         // base, the size growing into the next through the middle of each zoom step.
         float screen = layer ? pixelUnits * 0.5 : pixelUnits;
         float size = log2(CLOUD_PIXELS * screen / cloudBase);
-        size = clamp(size, 0.0, float(CLOUD_SIZES - 1));
+        size = clamp(size, float(cloudSmallest), float(CLOUD_SIZES - 1));
         cloudSize = min(int(floor(size)), CLOUD_SIZES - 1);
         cloudGrow = cloudSize >= CLOUD_SIZES - 1 ? 0.0 : smoothstep(0.2, 0.8, size - float(cloudSize));
         // Grown all the way: the next size alone.
