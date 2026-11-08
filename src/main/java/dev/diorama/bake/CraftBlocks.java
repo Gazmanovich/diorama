@@ -48,10 +48,10 @@ public final class CraftBlocks {
 	int look(BlockLooks looks, int index) {
 		int id = this.states[index];
 		if (id == 0 || this.copycats.isEmpty()) {
-			return id;
+			return looks.ensure(id);
 		}
 		int material = this.copycats.getOrDefault(index, 0);
-		return material == 0 ? id : looks.copycat(id, material);
+		return material == 0 ? looks.ensure(id) : looks.copycat(id, material);
 	}
 
 	/**

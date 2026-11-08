@@ -249,7 +249,7 @@ final class MapPiece {
 
 	/** One texel of the face, as ABGR. */
 	private int texel(ClientLevel level, BlockLooks looks, MapStyle style, BlockState state, BlockPos pos, int row, int t) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		int id = looks.ensure(Block.BLOCK_STATE_REGISTRY.getId(state));
 		if (id < 0 || id >= looks.kind.length || looks.kind[id] == BlockLooks.AIR || looks.kind[id] == BlockLooks.PLANT) {
 			return abgr(CAVE);
 		}
@@ -321,7 +321,7 @@ final class MapPiece {
 	}
 
 	private static boolean ground(BlockLooks looks, BlockState state) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
+		int id = looks.ensure(Block.BLOCK_STATE_REGISTRY.getId(state));
 		if (id < 0 || id >= looks.kind.length) {
 			return false;
 		}
@@ -369,7 +369,7 @@ final class MapPiece {
 
 	/** Grass in the open, lit as the map lights a top face in the sun: the top where there's no map yet. */
 	private static int grassTop(BlockLooks looks, ClientLevel level, BlockPos pos, MapStyle style) {
-		int id = BlockLooks.id(Blocks.GRASS_BLOCK.defaultBlockState());
+		int id = looks.lookId(Blocks.GRASS_BLOCK.defaultBlockState());
 		float[] rgb = albedo(looks, level, id, pos, true, false);
 		float ambient = style.ambient();
 		float shade = 1 + style.heightShade() * (float) Math.max(-1, Math.min(1, (pos.getY() - 64) / 64.0));

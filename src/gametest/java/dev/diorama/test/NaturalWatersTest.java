@@ -63,8 +63,8 @@ final class NaturalWatersTest {
 		context.takeScreenshot("natural-waters-02-map");
 		String wrong = context.computeOnClient(mc -> {
 			BlockLooks looks = BlockLooks.get();
-			int water = BlockLooks.id(Blocks.WATER.defaultBlockState());
-			int cauldron = BlockLooks.id(Blocks.WATER_CAULDRON.defaultBlockState().setValue(LayeredCauldronBlock.LEVEL, 3));
+			int water = looks.lookId(Blocks.WATER.defaultBlockState());
+			int cauldron = looks.lookId(Blocks.WATER_CAULDRON.defaultBlockState().setValue(LayeredCauldronBlock.LEVEL, 3));
 			StringBuilder out = new StringBuilder();
 			if (looks.tint[water] != BlockLooks.TINT_WATER || looks.tint[cauldron] != BlockLooks.TINT_WATER) {
 				out.append(String.format(" water's tint is kind %d, a cauldron's %d;", looks.tint[water], looks.tint[cauldron]));
