@@ -44,7 +44,8 @@ public final class VoxelReaderChecks {
 				int y = i >> 8;
 				int z = (i >> 4) & 15;
 				var state = uniform != null ? uniform : palette != null ? palette.get(x, y, z) : Blocks.AIR.defaultBlockState();
-				int stateId = Block.BLOCK_STATE_REGISTRY.getId(state);
+				// Numbered as the readers number it, an unnumbered state as its block's default.
+				int stateId = BlockLooks.id(state);
 				int expected = stateId;
 				int wx = (chunkX << 4) + x;
 				int wy = ((snapshot.minSectionY + section) << 4) + y;
@@ -149,7 +150,7 @@ public final class VoxelReaderChecks {
 					throw new AssertionError(facing + " view of " + wx + "," + wz + " is outside the chunk");
 				}
 				var state = uniform != null ? uniform : palette != null ? palette.get(worldX & 15, i >> 8, worldZ & 15) : Blocks.AIR.defaultBlockState();
-				int stateId = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(state));
+				int stateId = BlockLooks.id(facing.turned(state));
 				int expected = stateId;
 				var material = snapshot.copycatMaterial(worldX, wy, worldZ);
 				if (material != null) {

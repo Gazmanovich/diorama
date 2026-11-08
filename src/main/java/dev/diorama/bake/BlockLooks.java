@@ -147,7 +147,8 @@ public final class BlockLooks {
 	/**
 	 * Outlines of solid blocks smaller than a cube, such as slabs, stairs, fences and carpets: each
 	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused. Grows
-	 * as looks are worked out: a new array each time, published before the look that uses it.
+	 * as looks are worked out, published before the look that uses it; entries past the last
+	 * outline are null.
 	 */
 	public volatile float[][] shapes = {new float[0]};
 	/** {@link #faces} so far, by shape; made on first use. */
@@ -510,6 +511,11 @@ public final class BlockLooks {
 			if (this.kind[id] != NOT_YET) {
 				return;
 			}
+			if (Block.BLOCK_STATE_REGISTRY.size() != this.registrySize) {
+				// NeoForge or Forge are numbering states again (see bakeId), and this id may name
+				// another state now: leave the look to be worked out by the table made after.
+				return;
+			}
 			long start = System.nanoTime();
 			BlockState state = Block.BLOCK_STATE_REGISTRY.byId(id);
 			// While a reload is swapping the models and textures, a look takes neither, and the table
@@ -787,8 +793,13 @@ public final class BlockLooks {
 			if (!full && n > 0) {
 				index = this.shapeByBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
 					shapes.add(kept);
-					// Published before the look that uses it.
-					this.shapes = shapes.toArray(new float[0][]);
+					// Room for more by doubling; the entry is published before the look that uses it.
+					float[][] published = this.shapes;
+					if (published.length < shapes.size()) {
+						published = java.util.Arrays.copyOf(published, Math.max(16, published.length * 2));
+					}
+					published[shapes.size() - 1] = kept;
+					this.shapes = published;
 					return shapes.size() - 1;
 				});
 			}
