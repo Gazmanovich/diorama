@@ -59,5 +59,5 @@ if [ -n "$failed" ]; then
 	exit 1
 fi
 
-rm -rf ~/src ~/result ~/result.tgz ~/gradle.log ~/sandbox.log ~/skip-run.gradle versions/*/build/run/clientGameTest/{saves,screenshots,logs,crash-reports}
+rm -rf ~/src ~/run-pristine ~/result ~/result.tgz ~/gradle.log ~/sandbox.log ~/skip-run.gradle versions/*/build/run/clientGameTest/{saves,screenshots,logs,crash-reports}
 echo "Warmed on master $commit, $(date -u +%Y-%m-%dT%H:%MZ), all $(echo $nodes | wc -w) nodes." > ~/diorama-snapshot.txt
