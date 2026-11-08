@@ -495,7 +495,7 @@ public final class BlockLooks {
 	/** For the log: how many looks this table has worked out, and the milliseconds they took. */
 	public String madeSoFar() {
 		synchronized (MAKING) {
-			return this.made + " looks in " + this.makingNanos / 1_000_000 + " ms";
+			return (this.made == 1 ? "1 look" : this.made + " looks") + " in " + this.makingNanos / 1_000_000 + " ms";
 		}
 	}
 
