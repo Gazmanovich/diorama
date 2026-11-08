@@ -439,11 +439,27 @@ public final class BlockLooks {
 	 */
 	public static BlockLooks build() {
 		long start = System.nanoTime();
-		Minecraft mc = Minecraft.getInstance();
 		BlockLooks last = current;
 		if (last != null) {
 			Diorama.LOGGER.info("The last block color table worked out {}", last.madeSoFar());
 		}
+		BlockLooks looks = detached();
+		current = looks;
+		builds++;
+		//? if >=26.1 {
+		builtFrom = looks.models;
+		//?} else {
+		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
+		builtFrom = Minecraft.getInstance().getModelManager().getMissingBlockStateModel();
+		*///?}
+		Diorama.LOGGER.info("Block color table for {} states set up in {} ms; each state's colors are worked out when the map first meets it",
+			looks.registrySize, (System.nanoTime() - start) / 1_000_000);
+		return looks;
+	}
+
+	/** A new, empty table that isn't the map's: {@link #build} without making it current. Client thread. */
+	public static BlockLooks detached() {
+		Minecraft mc = Minecraft.getInstance();
 		//? if >=26.1 {
 		BlockStateModelSet models = mc.getModelManager().getBlockStateModelSet();
 		//?} else {
@@ -473,16 +489,6 @@ public final class BlockLooks {
 		}
 		// What a bake reads where a section's palette has no entry.
 		looks.ensure(VoxelReader.AIR_ID);
-		current = looks;
-		builds++;
-		//? if >=26.1 {
-		builtFrom = models;
-		//?} else {
-		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
-		builtFrom = mc.getModelManager().getMissingBlockStateModel();
-		*///?}
-		Diorama.LOGGER.info("Block color table for {} states set up in {} ms; each state's colors are worked out when the map first meets it",
-			size, (System.nanoTime() - start) / 1_000_000);
 		return looks;
 	}
 
@@ -501,9 +507,9 @@ public final class BlockLooks {
 			}
 			long start = System.nanoTime();
 			BlockState state = Block.BLOCK_STATE_REGISTRY.byId(id);
-			// A reload frees the atlas's images in its last step, long after it puts up its overlay,
-			// and swaps the models meanwhile: while it's up, a look takes no model or texture, and the
-			// table is made again once the reload is over.
+			// While a reload is swapping the models and textures, a look takes neither, and the table
+			// is made again once the reload is over. (Textures it frees are kept from a look being
+			// made by closing, which see.)
 			boolean reloading = Minecraft.getInstance().gui.overlay() != null;
 			byte kind = state == null ? AIR : this.work(id, state, !reloading);
 			if (reloading) {
@@ -990,6 +996,24 @@ public final class BlockLooks {
 		});
 	}
 
+	/**
+	 * Called by a texture as it starts to free its images (a resource reload frees the last atlas's
+	 * textures). It waits for a look being worked out, which may be reading those images, and marks
+	 * the texture so no look reads it after; looks are only worked out under {@link #MAKING}.
+	 */
+	public static void closing(ClosingTexture texture) {
+		synchronized (MAKING) {
+			texture.diorama$markClosed();
+		}
+	}
+
+	/** A texture's contents, told when they free their images. */
+	public interface ClosingTexture {
+		void diorama$markClosed();
+
+		boolean diorama$closed();
+	}
+
 	/** Set once per build, so a mod that keeps many old models is named once in the log. */
 	private static boolean warnedFreed;
 
@@ -1020,6 +1044,9 @@ public final class BlockLooks {
 	/** {@link #spriteAverage} for one sprite, or null if its image has been freed. */
 	private static float @Nullable [] average(TextureAtlasSprite s) {
 		SpriteContents contents = s.contents();
+		if (contents instanceof ClosingTexture closing && closing.diorama$closed()) {
+			return null;
+		}
 		NativeImage image = null;
 		try {
 			image = ORIGINAL_IMAGE == null ? null : (NativeImage) ORIGINAL_IMAGE.get(contents);

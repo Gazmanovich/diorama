@@ -14,7 +14,8 @@
 		"FtbChunksUpdateMixin",
 		"GameRendererMixin",
 		"LevelChunkMixin",
-		"RealmsServerMixin"
+		"RealmsServerMixin",
+		"SpriteContentsMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
