@@ -56,6 +56,17 @@ done
 
 run=versions/$node/build/run/clientGameTest
 rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps
+# The game starts from the folder the snapshot left (its settings, options and map folders), on a
+# warm VM an earlier run left too: otherwise a test that stopped partway leaves the settings it
+# changed, and the next run's tests start from them. The first run on a VM keeps a copy to go back to.
+pristine=~/run-pristine/$node
+if [ -d "$pristine" ]; then
+	rsync -a --delete "$pristine/" "$run/" || exit 1
+	mark "game folder reset to this VM's first run ($(du -sh "$run" | cut -f1))"
+else
+	mkdir -p "$run" "$pristine" && rsync -a "$run/" "$pristine/" || exit 1
+	mark "game folder kept to reset to on the next run ($(du -sh "$pristine" | cut -f1))"
+fi
 start=$(date +%s)
 # A game that stops writing its log for HANG_DUMP_SECONDS (default 180) is probably stuck: its
 # threads are dumped then, and twice more at the same spacing while it stays quiet, into
