@@ -197,8 +197,9 @@ def rename(vm, name):
 
 def take_warm(node, snapshot, size):
     """This checkout's warm VM for the node, renamed to this run's PREFIX + node, if one is running
-    idle and was made from `snapshot` at this size; deletes this checkout's others for the node
-    (stopped, from an older snapshot). Call it holding warm_lock."""
+    idle, was made from `snapshot` at this size and kept its first run's game folder; deletes this
+    checkout's others for the node (stopped, from an older snapshot, left by a script from before
+    that folder was kept). Call it holding warm_lock."""
     found = our_vms(f'{WARM_PREFIX}{CHECKOUT}-') or []
     want = warm_name(node, snapshot)
     reuse = None
@@ -209,9 +210,11 @@ def take_warm(node, snapshot, size):
         if reuse is None and name == want and state in ('ready', 'idle', 'running'):
             sandbox = next(events(boat('info', vm, '--json', timeout=30).stdout), {}).get('sandbox', {})
             # Not while a run is on it: a script killed outright leaves its tests running there.
-            idle = next(events(boat('exec', vm, '--timeout', '30', '--json', '--', 'flock', '-n',
-                                    '/home/user/sandbox.lock', 'true').stdout), {}).get('exitCode') == 0
-            if idle and sandbox.get('type') == size:
+            # And only with the game folder its first run found (sandbox.sh), to go back to.
+            reusable = next(events(boat('exec', vm, '--timeout', '30', '--json', '--', 'flock', '-n',
+                                        '/home/user/sandbox.lock', 'test', '-d', f'/home/user/run-pristine/{node}'
+                                        ).stdout), {}).get('exitCode') == 0
+            if reusable and sandbox.get('type') == size:
                 taken = rename(vm, PREFIX + node)
                 if taken is None:
                     # Maybe ours, maybe still warm: either way cleanup or its lifetime ends it.
