@@ -308,9 +308,16 @@ public final class BlockLooks {
 		return this.ensure(id(state));
 	}
 
-	/** {@link #bakeId}, with the state's look worked out. */
+	/**
+	 * {@link #bakeId}, with the state's look worked out. A look left unworked because states are
+	 * being numbered again stops the bake ({@link StatesRenumbered}), as {@link #bakeId} does.
+	 */
 	public int bakeLookId(BlockState state) {
-		return this.ensure(bakeId(state));
+		int id = this.ensure(bakeId(state));
+		if (id < this.registrySize && (byte) KINDS.getAcquire(this.kind, id) == NOT_YET) {
+			throw StatesRenumbered.INSTANCE;
+		}
+		return id;
 	}
 
 	/** See {@link #bakeId}. */
@@ -364,7 +371,8 @@ public final class BlockLooks {
 		this.ensure(copycat);
 		this.ensure(material);
 		byte frame = this.kind[copycat];
-		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR) {
+		// A material left unworked (states being numbered again) counts as none.
+		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR || this.kind[material] == NOT_YET) {
 			return copycat;
 		}
 		Long key = (long) copycat << 32 | material;
