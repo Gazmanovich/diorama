@@ -1267,6 +1267,8 @@ public final class MapViewport {
 	 * shader's four cells round a point blend in one read. Match fog.fsh's cloudRaw.
 	 */
 	private static final int CLOUD_SLOT = 256;
+	/** Cell sizes, 1, 2, 4, 8 and 16 times the base cell; match fog.fsh. */
+	private static final int CLOUD_SIZES = 5;
 
 	private static int slotX(int level, boolean large) {
 		int width = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
@@ -1337,8 +1339,8 @@ public final class MapViewport {
 
 	/**
 	 * The cloud cells around the view, for the grid drawn: each cell's {@link VanillaClouds} code at
-	 * four sizes, 1, 2, 4 and 8 times the base cell, into each size's block. A size smaller than the
-	 * grid's cell is left out. Then {@link #cloudNear}.
+	 * {@link #CLOUD_SIZES} sizes, 1 to 16 times the base cell, into each size's block. Then
+	 * {@link #cloudNear}.
 	 */
 	private void cloudCells(CellGrid grid, int[] pixels, int edge, boolean large) {
 		int mult = grid.mult();
@@ -1359,11 +1361,8 @@ public final class MapViewport {
 		int fromV = Math.max(0, (int) Math.floor((mapV + grid.viewMinV() - grid.originV()) / size) - margin - firstV);
 		int toV = Math.min(count - 1, (int) Math.floor((mapV + grid.viewMaxV() - grid.originV()) / size) + margin - firstV);
 		int slotY = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
-		for (int level = 0; level < 4; level++) {
+		for (int level = 0; level < CLOUD_SIZES; level++) {
 			int times = 1 << level;
-			if (times < mult) {
-				continue;
-			}
 			// Cells of this size, numbered in the shader's map units, from the one holding the grid's first.
 			long first0U = Math.floorDiv((long) firstU * mult, times);
 			long first0V = Math.floorDiv((long) firstV * mult, times);
@@ -1394,17 +1393,32 @@ public final class MapViewport {
 		this.cloudNear(pixels, edge, large, fromU, toU, fromV, toV, firstU, firstV, mult);
 	}
 
-	/** The code of the cell of size {@code level} holding the grid cell {@code (gu, gv)}, from its block. */
-	private static int cellCode(int[] pixels, int edge, boolean large, int level, int gu, int gv, int firstU, int firstV, int mult) {
+	/**
+	 * The layers of the cells of size {@code level} in the grid cell {@code (gu, gv)}, from their
+	 * block (one cell, or several where they're smaller than the grid's), and 8 if any of them is
+	 * more than the deck alone.
+	 */
+	private static int cellCodes(int[] pixels, int edge, boolean large, int level, int gu, int gv, int firstU, int firstV, int mult) {
 		int times = 1 << level;
-		int i = (int) (Math.floorDiv((long) gu * mult, times) - Math.floorDiv((long) firstU * mult, times));
-		int j = (int) (Math.floorDiv((long) gv * mult, times) - Math.floorDiv((long) firstV * mult, times));
+		int each = Math.max(1, mult / times);
+		int i0 = (int) (Math.floorDiv((long) gu * mult, times) - Math.floorDiv((long) firstU * mult, times));
+		int j0 = (int) (Math.floorDiv((long) gv * mult, times) - Math.floorDiv((long) firstV * mult, times));
 		int width = slotWidth(level, large);
-		if (i < 0 || j < 0 || i >= width || j >= width) {
-			return 0;
+		int row = large ? 2 * CLOUD_SLOT : CLOUD_SLOT;
+		int x0 = slotX(level, large);
+		int codes = 0;
+		for (int j = j0; j < j0 + each; j++) {
+			for (int i = i0; i < i0 + each; i++) {
+				int code = 0;
+				if (i >= 0 && j >= 0 && i < width && j < width) {
+					int pixel = pixels[(row + j) * edge + x0 + i];
+					code = ((pixel & 0xFF) != 0 ? VanillaClouds.DECK : 0) | ((pixel & 0xFF00) != 0 ? VanillaClouds.MIDDLE : 0)
+						| ((pixel & 0xFF0000) != 0 ? VanillaClouds.TOP : 0);
+				}
+				codes |= code | (code == VanillaClouds.DECK ? 0 : 8);
+			}
 		}
-		int pixel = pixels[((large ? 2 * CLOUD_SLOT : CLOUD_SLOT) + j) * edge + slotX(level, large) + i];
-		return ((pixel & 0xFF) != 0 ? VanillaClouds.DECK : 0) | ((pixel & 0xFF00) != 0 ? VanillaClouds.MIDDLE : 0) | ((pixel & 0xFF0000) != 0 ? VanillaClouds.TOP : 0);
+		return codes;
 	}
 
 	private int[] nearSmall = new int[0];
@@ -1414,9 +1428,9 @@ public final class MapViewport {
 	/**
 	 * Into alpha, for each cell: which layers any cell within reach has, so the shader skips the
 	 * rest, and whether every cell within reach is the deck alone, so it draws the deck's plain top
-	 * with no reads. The low nibble for the two smaller sizes, the high one for the two bigger: the
-	 * three layer bits, then the deck-alone bit. Within reach: a wall, shadow or ground-shadow read
-	 * lands under 3.5 cells of the bigger size away.
+	 * with no reads. The low nibble for the two smallest sizes, the high one for the three bigger:
+	 * the three layer bits, then the deck-alone bit. Within reach: a wall, shadow or ground-shadow
+	 * read lands under 3.5 cells of the biggest size away.
 	 */
 	private void cloudNear(int[] pixels, int edge, boolean large, int fromU, int toU, int fromV, int toV, int firstU, int firstV, int mult) {
 		int w = toU - fromU + 1;
@@ -1434,18 +1448,14 @@ public final class MapViewport {
 			for (int i = 0; i < w; i++) {
 				int gu = firstU + fromU + i;
 				int gv = firstV + fromV + j;
-				int c1 = cellCode(pixels, edge, large, 1, gu, gv, firstU, firstV, mult);
-				// With the grid's cells twice the base, the base size isn't drawn.
-				int c0 = mult <= 1 ? cellCode(pixels, edge, large, 0, gu, gv, firstU, firstV, mult) : c1;
-				int c2 = cellCode(pixels, edge, large, 2, gu, gv, firstU, firstV, mult);
-				int c3 = cellCode(pixels, edge, large, 3, gu, gv, firstU, firstV, mult);
 				// Bit 3 set where a cell is NOT the deck alone, so ORing finds any such cell within reach.
-				this.nearSmall[j * w + i] = c0 | c1 | (c0 == VanillaClouds.DECK && c1 == VanillaClouds.DECK ? 0 : 8);
-				this.nearBig[j * w + i] = c2 | c3 | (c2 == VanillaClouds.DECK && c3 == VanillaClouds.DECK ? 0 : 8);
+				this.nearSmall[j * w + i] = cellCodes(pixels, edge, large, 0, gu, gv, firstU, firstV, mult) | cellCodes(pixels, edge, large, 1, gu, gv, firstU, firstV, mult);
+				this.nearBig[j * w + i] = cellCodes(pixels, edge, large, 2, gu, gv, firstU, firstV, mult) | cellCodes(pixels, edge, large, 3, gu, gv, firstU, firstV, mult)
+					| cellCodes(pixels, edge, large, 4, gu, gv, firstU, firstV, mult);
 			}
 		}
 		this.orAround(this.nearSmall, w, h, (int) Math.ceil(3.5 * 2 / mult) + 1);
-		this.orAround(this.nearBig, w, h, (int) Math.ceil(3.5 * 8 / mult) + 1);
+		this.orAround(this.nearBig, w, h, (int) Math.ceil(3.5 * 16 / mult) + 1);
 		for (int j = 0; j < h; j++) {
 			for (int i = 0; i < w; i++) {
 				int small = this.nearSmall[j * w + i] ^ 8;
@@ -1456,27 +1466,41 @@ public final class MapViewport {
 		}
 	}
 
-	/** Each value ORed with every value up to {@code r} cells away each way (a square), a row then a column at a time. */
+	private int[] nearSums = new int[0];
+
+	/**
+	 * Each value ORed with every value up to {@code r} cells away each way (a square), its four low
+	 * bits each from a count of where it's set over the square, read off running sums.
+	 */
 	private void orAround(int[] values, int w, int h, int r) {
-		int[] line = this.nearLine;
-		for (int j = 0; j < h; j++) {
-			for (int i = 0; i < w; i++) {
-				int v = 0;
-				for (int d = Math.max(0, i - r); d <= Math.min(w - 1, i + r); d++) {
-					v |= values[j * w + d];
+		int row = w + 1;
+		if (this.nearSums.length < row * (h + 1)) {
+			this.nearSums = new int[row * (h + 1)];
+		}
+		int[] sums = this.nearSums;
+		int[] out = this.nearLine;
+		java.util.Arrays.fill(out, 0, w * h, 0);
+		for (int bit = 0; bit < 4; bit++) {
+			for (int j = 0; j < h; j++) {
+				int line = 0;
+				for (int i = 0; i < w; i++) {
+					line += values[j * w + i] >> bit & 1;
+					sums[(j + 1) * row + i + 1] = sums[j * row + i + 1] + line;
 				}
-				line[j * w + i] = v;
+			}
+			for (int j = 0; j < h; j++) {
+				int top = Math.max(0, j - r);
+				int bottom = Math.min(h - 1, j + r) + 1;
+				for (int i = 0; i < w; i++) {
+					int left = Math.max(0, i - r);
+					int right = Math.min(w - 1, i + r) + 1;
+					if (sums[bottom * row + right] - sums[top * row + right] - sums[bottom * row + left] + sums[top * row + left] > 0) {
+						out[j * w + i] |= 1 << bit;
+					}
+				}
 			}
 		}
-		for (int j = 0; j < h; j++) {
-			for (int i = 0; i < w; i++) {
-				int v = 0;
-				for (int d = Math.max(0, j - r); d <= Math.min(h - 1, j + r); d++) {
-					v |= line[d * w + i];
-				}
-				values[j * w + i] = v;
-			}
-		}
+		System.arraycopy(out, 0, values, 0, w * h);
 	}
 
 	private static double lerp2(double a, double b, double c, double d, double tx, double ty) {

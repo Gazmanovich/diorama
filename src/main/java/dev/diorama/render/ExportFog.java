@@ -26,6 +26,7 @@ public final class ExportFog implements ImageExport.Finish {
 	// fog.fsh's clouds; change both together.
 	private static final float CLOUD_CELL = (float) VanillaClouds.CELL;
 	private static final float CLOUD_PIXELS = 40;
+	private static final int CLOUD_SIZES = 5;
 	private static final float CLOUD_RAMP = (float) VanillaClouds.RAMP;
 	private static final float CLOUD_ROUND = 0.2F;
 	private static final float CLOUD_THICK = 0.55F;
@@ -462,9 +463,9 @@ public final class ExportFog implements ImageExport.Finish {
 		this.cloudBase = CLOUD_CELL * (1 << this.scaleSteps);
 		this.gridMult = this.scaleFraction >= 0.58F ? 2 : 1;
 		float size = (float) (Math.log(CLOUD_PIXELS * this.pixelUnits / this.cloudBase) / Math.log(2));
-		size = Math.max((float) (Math.log(this.gridMult) / Math.log(2)), Math.min(3, size));
-		this.cloudSize = Math.min((int) Math.floor(size), 3);
-		this.cloudGrow = this.cloudSize >= 3 ? 0 : smoothstep(0.2F, 0.8F, size - this.cloudSize);
+		size = Math.max(0, Math.min(CLOUD_SIZES - 1, size));
+		this.cloudSize = Math.min((int) Math.floor(size), CLOUD_SIZES - 1);
+		this.cloudGrow = this.cloudSize >= CLOUD_SIZES - 1 ? 0 : smoothstep(0.2F, 0.8F, size - this.cloudSize);
 		if (this.cloudGrow >= 1) {
 			this.cloudSize++;
 			this.cloudGrow = 0;
@@ -508,14 +509,16 @@ public final class ExportFog implements ImageExport.Finish {
 				}
 			}
 		}
-		// The shader reads it from a byte, two map units a step, 128 at the edge.
+		// The cells are worked out from the distance as it is (MapViewport.cloudCells); the shader
+		// reads it from a byte, two map units a step, 128 at the edge, for how see-through they are.
+		float[] exact = s.clone();
 		for (int k = 0; k < s.length; k++) {
 			s[k] = (Math.max(0, Math.min(255, Math.round(s[k] / 2) + 128)) - 128) * 2;
 		}
-		this.signed = s;
+		this.signed = exact;
 
 		for (int n = 0; n < 2; n++) {
-			int level = Math.min(this.cloudSize + n, 3);
+			int level = Math.min(this.cloudSize + n, CLOUD_SIZES - 1);
 			double cell = this.cloudBase * (1 << level);
 			long u0 = (long) Math.floor(this.originU / cell) - 1;
 			long v0 = (long) Math.floor(this.originV / cell) - 1;
@@ -535,6 +538,7 @@ public final class ExportFog implements ImageExport.Finish {
 			this.codeW[n] = cw;
 			this.codeH[n] = ch;
 		}
+		this.signed = s;
 	}
 
 	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer, over a w by h grid. */
@@ -598,7 +602,7 @@ public final class ExportFog implements ImageExport.Finish {
 
 	/** fog.fsh's cloudRaw: how much of a point is under a layer at one of the two sizes drawn, 0.5 the edge. */
 	private float cloudRaw(double u, double v, int n, int bit) {
-		int level = Math.min(this.cloudSize + n, 3);
+		int level = Math.min(this.cloudSize + n, CLOUD_SIZES - 1);
 		double size = this.cloudBase * (1 << level);
 		double gu = u / size - 0.5;
 		double gv = v / size - 0.5;

@@ -139,6 +139,8 @@ const float FOG_SHADOW = 0.7;
 // CLOUD_PIXELS across, each size growing into the next through the zoom step.
 const float CLOUD_CELL = 12.8;
 const float CLOUD_PIXELS = 40.0;
+// Cell sizes drawn: 1, 2, 4, 8 and 16 times the base cell (MapViewport.CLOUD_SIZES).
+const int CLOUD_SIZES = 5;
 // How far into explored land the see-through clouds reach for the smallest cells (VanillaClouds.RAMP).
 const float CLOUD_RAMP = 112.0;
 // How sharply cells meet (smaller is boxier), and a slab's thickness as a share of its cell.
@@ -474,9 +476,9 @@ void main() {
         // base, the size growing into the next through the middle of each zoom step.
         float screen = layer ? pixelUnits * 0.5 : pixelUnits;
         float size = log2(CLOUD_PIXELS * screen / cloudBase);
-        size = clamp(size, log2(float(gridMult)), 3.0);
-        cloudSize = min(int(floor(size)), 3);
-        cloudGrow = cloudSize >= 3 ? 0.0 : smoothstep(0.2, 0.8, size - float(cloudSize));
+        size = clamp(size, 0.0, float(CLOUD_SIZES - 1));
+        cloudSize = min(int(floor(size)), CLOUD_SIZES - 1);
+        cloudGrow = cloudSize >= CLOUD_SIZES - 1 ? 0.0 : smoothstep(0.2, 0.8, size - float(cloudSize));
         // Grown all the way: the next size alone.
         if (cloudGrow >= 1.0) {
             cloudSize++;
