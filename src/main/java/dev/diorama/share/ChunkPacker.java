@@ -149,27 +149,29 @@ final class ChunkPacker {
 		out.putInt("zPos", chunkZ);
 		// No height maps: the client works them out from the blocks, which saves about half a kilobyte.
 		ListTag sections = new ListTag();
-		for (int y = lo; y <= hi; y++) {
-			CompoundTag section = byY.get(y);
-			if (section == null) {
-				continue;
-			}
+		for (Map.Entry<Integer, CompoundTag> found : new java.util.TreeMap<>(byY).entrySet()) {
+			int y = found.getKey();
+			CompoundTag section = found.getValue();
 			CompoundTag kept = new CompoundTag();
 			kept.putByte("Y", (byte) y);
-			PalettedContainer<BlockState> blocks = states.get(y);
-			if (blocks != null) {
-				Tag encoded = this.tags.blockStates().encodeStart(NbtOps.INSTANCE, blocks).result().orElse(null);
-				if (encoded != null) {
-					kept.put("block_states", encoded);
-				}
-			}
+			// Biomes for every section: a neighbour's tint blends with them at its own height, which
+			// can be above or below this chunk's blocks. Blocks and light only where the view reaches.
 			CompoundTag biomes = Nbt.compound(section, "biomes");
 			if (!biomes.isEmpty()) {
 				kept.put("biomes", biomes);
 			}
-			byte[] light = Nbt.bytes(section, "BlockLight");
-			if (light != null) {
-				kept.putByteArray("BlockLight", light);
+			if (y >= lo && y <= hi) {
+				PalettedContainer<BlockState> blocks = states.get(y);
+				if (blocks != null) {
+					Tag encoded = this.tags.blockStates().encodeStart(NbtOps.INSTANCE, blocks).result().orElse(null);
+					if (encoded != null) {
+						kept.put("block_states", encoded);
+					}
+				}
+				byte[] light = Nbt.bytes(section, "BlockLight");
+				if (light != null) {
+					kept.putByteArray("BlockLight", light);
+				}
 			}
 			sections.add(kept);
 		}

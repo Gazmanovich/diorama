@@ -55,6 +55,8 @@ public final class SharedChunks implements ChunkSave {
 	/** An ask not answered in this long is asked again: the server drops asks past its queue's length. */
 	private static final long ASK_AGAIN_MS = 60_000;
 	private static final int TABLES_PER_ASK = 256;
+	/** The most NBT one shared chunk may unpack to; a whole chunk's sections with light are about 100 KB. */
+	private static final long NBT_QUOTA = 8L << 20;
 	private static final int KEPT_CHUNKS = 8192;
 	private static final int PARSED_CHUNKS = Runtime.getRuntime().maxMemory() > 3L << 30 ? 2048 : 768;
 
@@ -75,12 +77,7 @@ public final class SharedChunks implements ChunkSave {
 	/** When each region's table was asked for: one that hasn't come in {@link #ASK_AGAIN_MS} is asked for again. */
 	private final Map<Long, Long> tablesAsked = new HashMap<>();
 	/** Chunks asked for or come, by {@link ChunkSnapshot#key}. */
-	private final Map<Long, Asked> chunks = new LinkedHashMap<>(KEPT_CHUNKS, 0.75F, true) {
-		@Override
-		protected boolean removeEldestEntry(Map.Entry<Long, Asked> eldest) {
-			return this.size() > KEPT_CHUNKS && eldest.getValue().answer.isDone();
-		}
-	};
+	private final Map<Long, Asked> chunks = new LinkedHashMap<>(KEPT_CHUNKS, 0.75F, true);
 
 	/** The fill's own: chunks read, as the fill reads the same ones for neighbouring tiles. */
 	private final Map<Long, @Nullable SavedChunk> parsed = new LinkedHashMap<>(PARSED_CHUNKS, 0.75F, true) {
@@ -299,8 +296,17 @@ public final class SharedChunks implements ChunkSave {
 		synchronized (this.lock) {
 			long now = System.currentTimeMillis();
 			for (long key : wanted) {
-				if (this.time((int) (key >> 32), (int) key) != 0 && this.needsAsking(key, now)) {
+				if (this.time((int) (key >> 32), (int) key) == 0) {
+					continue;
+				}
+				if (this.needsAsking(key, now)) {
 					ask.add(key);
+				} else if (urgent) {
+					// Already asked for in the background: asked again as urgent, it moves up the server's queue.
+					Asked asked = this.chunks.get(key);
+					if (asked != null && !asked.answer.isDone()) {
+						ask.add(key);
+					}
 				}
 			}
 		}
@@ -342,6 +348,9 @@ public final class SharedChunks implements ChunkSave {
 
 	@Override
 	public @Nullable SavedChunk read(int chunkX, int chunkZ) {
+		if (this.closed) {
+			throw new Late("left the server");
+		}
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		this.knownOrLate(chunkX, chunkZ);
 		int time = this.time(chunkX, chunkZ);
@@ -377,7 +386,12 @@ public final class SharedChunks implements ChunkSave {
 
 	private @Nullable SavedChunk unpack(int chunkX, int chunkZ, byte[] packed) {
 		try (DataInputStream in = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(packed)))) {
-			CompoundTag tag = NbtIo.read(in);
+			// A server's message, so the NBT it holds is held to what a chunk could be.
+			//? if >=1.21 {
+			CompoundTag tag = NbtIo.read(in, net.minecraft.nbt.NbtAccounter.create(NBT_QUOTA));
+			//?} else {
+			/*CompoundTag tag = NbtIo.read(in, new net.minecraft.nbt.NbtAccounter(NBT_QUOTA));
+			*///?}
 			return this.tags.read(chunkX, chunkZ, tag);
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't read shared chunk {}, {}", chunkX, chunkZ, e);
@@ -438,13 +452,18 @@ public final class SharedChunks implements ChunkSave {
 		int[] times = new int[1024];
 		short[] top = new short[1024];
 		short[] floor = new short[1024];
-		DataInputStream packed = new DataInputStream(new InflaterInputStream(in));
-		for (int i = 0; i < 1024; i++) {
-			times[i] = packed.readInt();
-			if (times[i] != 0) {
-				top[i] = packed.readShort();
-				floor[i] = packed.readShort();
+		java.util.zip.Inflater inflater = new java.util.zip.Inflater();
+		try {
+			DataInputStream packed = new DataInputStream(new InflaterInputStream(in, inflater));
+			for (int i = 0; i < 1024; i++) {
+				times[i] = packed.readInt();
+				if (times[i] != 0) {
+					top[i] = packed.readShort();
+					floor[i] = packed.readShort();
+				}
 			}
+		} finally {
+			inflater.end();
 		}
 		synchronized (this.lock) {
 			this.tables.put(SavedChunks.regionKey(regionX, regionZ), new Table(times, top, floor));
@@ -471,6 +490,23 @@ public final class SharedChunks implements ChunkSave {
 				this.chunks.put(key, asked);
 			}
 			asked.answer.complete(new Answer(length == 0 ? null : packed, time));
+			this.trim();
+		}
+	}
+
+	/**
+	 * Keeps at most {@link #KEPT_CHUNKS} answers, the ones read longest ago going first. Asks still
+	 * waiting stay, however old: a read is waiting on them.
+	 */
+	private void trim() {
+		if (this.chunks.size() <= KEPT_CHUNKS) {
+			return;
+		}
+		var it = this.chunks.values().iterator();
+		while (it.hasNext() && this.chunks.size() > KEPT_CHUNKS) {
+			if (it.next().answer.isDone()) {
+				it.remove();
+			}
 		}
 	}
 

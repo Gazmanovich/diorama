@@ -174,6 +174,10 @@ cmd() {
 }
 
 stop() {
+	# A test that failed before its vanilla player left leaves the helper waiting: it goes too.
+	for helper in "$root"/vanilla-*.pid; do
+		[ -e "$helper" ] && kill "$(cat "$helper")" 2>/dev/null
+	done
 	running || return 0
 	cmd stop
 	for _ in $(seq 1 120); do
