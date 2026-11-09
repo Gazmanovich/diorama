@@ -163,7 +163,8 @@ public final class MapViewport {
 		// edge of known ground blends into it: the clouds' top (fog.fsh's CLOUD_TOP), smoke under a
 		// roof, or the dark of caves. The clouds stop at explored land's edge, so where a mask texel
 		// is partly explored a sliver of this can show beside the land: it reads as cloud.
-		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : CLOUD_BACKDROP;
+		// The soft fog keeps the blue-grey it always had.
+		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : softFog() ? 0xFF8C99AB : CLOUD_BACKDROP;
 		float night = this.night < 0 || cave || level.roofless() ? NightLook.forView(level, view.layer()) : this.night;
 		if (night > 0) {
 			background = NightLook.darken(background, night);
