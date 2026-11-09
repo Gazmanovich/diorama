@@ -12,6 +12,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.Locale;
 import javax.imageio.ImageIO;
+import org.jspecify.annotations.Nullable;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 
@@ -33,7 +34,8 @@ final class FogLookTest {
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		Settings.FogLook look = context.computeOnClient(mc -> Settings.get().fogLook);
 		world.getServer().runCommand("time set noon");
-		world.getServer().runCommand("tick freeze");
+		Settings.Quality quality = context.computeOnClient(mc -> Settings.get().quality);
+		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMinimap);
 		// Nothing new on the map between the shots: a section before this one may have changed the
 		// render distance, and the chunks it brings keep landing for a while.
 		int last = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
@@ -49,30 +51,68 @@ final class FogLookTest {
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()),
 			mc.getWindow().getGuiScaledWidth() / 900.0, TileKey.SURFACE));
 		StringBuilder failures = new StringBuilder();
-		check(context, failures, "map");
+		// Both qualities: Fast draws the soft fog at full resolution, Fancy through the half-size layer.
+		for (Settings.Quality q : Settings.Quality.values()) {
+			context.runOnClient(mc -> {
+				Settings.get().quality = q;
+				Settings.get().apply();
+			});
+			check(context, failures, "map-" + q.name().toLowerCase(Locale.ROOT), null);
+		}
+		context.runOnClient(mc -> {
+			Settings.get().quality = quality;
+			Settings.get().apply();
+		});
 		context.setScreen(() -> null);
-		// The minimap zoomed all the way out, so it reaches past the explored land.
+		// The minimap zoomed all the way out, so it reaches past the explored land, with no mobs on
+		// it: without the map screen open, 1.20.1's world keeps running. Only the minimap is compared.
 		double zoom = context.computeOnClient(mc -> Settings.get().minimapPixelsPerBlock);
-		context.runOnClient(mc -> Settings.get().zoomStep(0));
-		check(context, failures, "minimap");
+		context.runOnClient(mc -> {
+			Settings.get().zoomStep(0);
+			Settings.get().radarOnMinimap = false;
+		});
+		check(context, failures, "minimap", minimapBox(context));
 		context.runOnClient(mc -> {
 			Settings.get().minimapPixelsPerBlock = zoom;
+			Settings.get().radarOnMinimap = radar;
 			Settings.get().fogLook = look;
 		});
-		world.getServer().runCommand("tick unfreeze");
 		if (failures.length() > 0) {
 			throw new AssertionError("Fog look:" + failures);
 		}
 	}
 
-	private static void check(ClientGameTestContext context, StringBuilder failures, String where) {
+	/** Where the minimap is: what changes when it's switched off. */
+	private static int[] minimapBox(ClientGameTestContext context) {
+		DioramaClientTest.settle(context, 10);
+		BufferedImage on = read(context.takeScreenshot("fog-look-minimap-on"));
+		context.runOnClient(mc -> Settings.get().minimap = false);
+		context.waitTicks(3);
+		BufferedImage off = read(context.takeScreenshot("fog-look-minimap-off"));
+		context.runOnClient(mc -> Settings.get().minimap = true);
+		int[] box = {on.getWidth(), on.getHeight(), 0, 0};
+		for (int y = 0; y < on.getHeight(); y++) {
+			for (int x = 0; x < on.getWidth(); x++) {
+				if (pixelDifference(on.getRGB(x, y), off.getRGB(x, y)) > 24) {
+					box[0] = Math.min(box[0], x);
+					box[1] = Math.min(box[1], y);
+					box[2] = Math.max(box[2], x + 1);
+					box[3] = Math.max(box[3], y + 1);
+				}
+			}
+		}
+		return box[2] == 0 ? null : box;
+	}
+
+	/** {@code box} is {x0, y0, x1, y1} to compare, or null for the whole frame. */
+	private static void check(ClientGameTestContext context, StringBuilder failures, String where, int @Nullable [] box) {
 		// The clouds once the view has stopped changing: tiles at its edge can still be loading in
 		// after the chunk count settles.
 		BufferedImage clouds = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds");
 		for (int i = 0; i < 10; i++) {
 			context.waitTicks(20);
 			BufferedImage next = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds");
-			boolean same = difference(clouds, next, new int[] {0, 0, clouds.getWidth(), clouds.getHeight()}) <= STILL;
+			boolean same = difference(clouds, next, box == null ? new int[] {0, 0, clouds.getWidth(), clouds.getHeight()} : box) <= STILL;
 			clouds = next;
 			if (same) {
 				break;
@@ -80,8 +120,8 @@ final class FogLookTest {
 		}
 		BufferedImage soft = shot(context, Settings.FogLook.SOFT, "fog-look-" + where + "-soft");
 		BufferedImage back = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds-again");
-		int changed = changedPixels(clouds, soft);
-		int left = changedPixels(clouds, back);
+		int changed = changedPixels(clouds, soft, box);
+		int left = changedPixels(clouds, back, box);
 		Diorama.LOGGER.info("FOG-LOOK {}: soft fog changed {} pixels, {} still differ once the clouds are back", where, changed, left);
 		if (changed < LEAST_CHANGED) {
 			failures.append("\n  ").append(where).append(": the soft fog looks like the clouds (").append(changed).append(" pixels changed)");
@@ -94,14 +134,19 @@ final class FogLookTest {
 	private static BufferedImage shot(ClientGameTestContext context, Settings.FogLook look, String name) {
 		context.runOnClient(mc -> Settings.get().fogLook = look);
 		DioramaClientTest.settle(context, 10);
-		return read(context.takeScreenshot(name));
+		// The world stands still for the shot, as far as it can (WorldPause).
+		try (WorldPause paused = WorldPause.pause(context)) {
+			context.waitTicks(2);
+			return read(context.takeScreenshot(name));
+		}
 	}
 
-	/** Pixels that differ by more than a little. */
-	private static int changedPixels(BufferedImage a, BufferedImage b) {
+	/** Pixels in the box (or the frame, for null) that differ by more than a little. */
+	private static int changedPixels(BufferedImage a, BufferedImage b, int @Nullable [] box) {
+		int[] area = box == null ? new int[] {0, 0, a.getWidth(), a.getHeight()} : box;
 		int n = 0;
-		for (int y = 0; y < a.getHeight(); y++) {
-			for (int x = 0; x < a.getWidth(); x++) {
+		for (int y = area[1]; y < area[3]; y++) {
+			for (int x = area[0]; x < area[2]; x++) {
 				if (pixelDifference(a.getRGB(x, y), b.getRGB(x, y)) > 24) {
 					n++;
 				}
