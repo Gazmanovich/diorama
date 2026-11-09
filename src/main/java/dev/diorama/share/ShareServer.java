@@ -168,6 +168,8 @@ public final class ShareServer {
 		 * ({@link #mark}) to say the round is done once everything before it is sent.
 		 */
 		private final LinkedHashMap<Long, Integer> tables = new LinkedHashMap<>();
+		/** The round mark waiting in {@link #tables}, if any: a client has one round open at a time. */
+		private long waitingMark = mark(0);
 		private String tablesDimension = "";
 		private long listedAt = System.nanoTime() - 10_000_000_000L;
 		/** Chunks asked for, in the order they go out, for {@link #dimension}. */
@@ -220,7 +222,10 @@ public final class ShareServer {
 				this.tables.put(region.getKey(), region.getValue());
 			}
 			if (round != 0) {
-				this.tables.put(mark(round), round);
+				// Only the newest round's mark waits: the client has given up on any before it.
+				this.tables.remove(this.waitingMark);
+				this.waitingMark = mark(round);
+				this.tables.put(this.waitingMark, round);
 			}
 		}
 

@@ -91,6 +91,13 @@ public final class SharedChunks implements ChunkSave {
 	/** The refresh round under way, numbered so a late answer to an earlier one isn't taken for it. */
 	private int roundId;
 	private long roundStartedAt;
+	/**
+	 * The server's time, in seconds, that every table in use is at least as recent as: when it
+	 * listed the regions before they were asked for. 0 before the first listing.
+	 */
+	private volatile int tablesAsOf;
+	/** The same for the round under way, taken on once it's done. */
+	private int roundAsOf;
 	private final Map<Long, Table> tables = new HashMap<>();
 	/** When each region's table was asked for: one that hasn't come in {@link #ASK_AGAIN_MS} is asked for again. */
 	private final Map<Long, Long> tablesAsked = new HashMap<>();
@@ -233,7 +240,9 @@ public final class SharedChunks implements ChunkSave {
 
 	@Override
 	public int now() {
-		return (int) ((System.currentTimeMillis() + this.serverClock) / 1000);
+		// Not the clock: a tile drawn while a round's tables wait is drawn from the older ones.
+		int asOf = this.tablesAsOf;
+		return asOf != 0 ? asOf : (int) ((System.currentTimeMillis() + this.serverClock) / 1000);
 	}
 
 	/**
@@ -499,7 +508,9 @@ public final class SharedChunks implements ChunkSave {
 	}
 
 	private void regions(DataInputStream in) throws IOException {
-		this.serverClock = in.readLong() - System.currentTimeMillis();
+		long serverTime = in.readLong();
+		this.serverClock = serverTime - System.currentTimeMillis();
+		int listedAt = (int) (serverTime / 1000);
 		int count = in.readInt();
 		// Never more than the message holds, whatever it says.
 		if (count < 0 || count > in.available() / 8) {
@@ -514,6 +525,12 @@ public final class SharedChunks implements ChunkSave {
 			this.regions = regions;
 			again = this.refreshing;
 			this.refreshing = false;
+			if (again) {
+				this.roundAsOf = listedAt;
+			} else if (this.tablesAsOf == 0) {
+				// The first listing: every table is asked for after it.
+				this.tablesAsOf = listedAt;
+			}
 			if (again) {
 				long now = System.currentTimeMillis();
 				for (long region : regions) {
@@ -581,6 +598,7 @@ public final class SharedChunks implements ChunkSave {
 			}
 			this.tables.putAll(this.round);
 			this.round = null;
+			this.tablesAsOf = this.roundAsOf;
 			this.lock.notifyAll();
 		}
 		this.changed();

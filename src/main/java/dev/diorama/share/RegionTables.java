@@ -153,6 +153,8 @@ final class RegionTables {
 		table.modifiedAt = modified;
 		table.failed = false;
 		int[] times = readHeader(file);
+		// Read again next time, even if the file isn't written again before then.
+		table.failed = times == null;
 		List<Integer> changed = new ArrayList<>();
 		for (int i = 0; i < 1024; i++) {
 			int time = times == null ? 0 : times[i];
