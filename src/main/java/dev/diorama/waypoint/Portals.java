@@ -26,7 +26,8 @@ public final class Portals {
 	/**
 	 * Portals of a kind this close, in blocks across the map, share a pin. It takes in the widest
 	 * Nether portal, 21 blocks plus its frame, from any block of it, and a pile of portals side by
-	 * side, which would be a pile of pins.
+	 * side, which would be a pile of pins. Not through a roof: on the Nether roof and under it are
+	 * different places (see {@link #add}).
 	 */
 	private static final int SAME_PORTAL = 24;
 	private static final int NETHER_COLOR = 0xFF8E4EC6;
@@ -95,7 +96,7 @@ public final class Portals {
 	 * moved is theirs, and stays.
 	 */
 	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store, ChunkSource around) {
-		add(find(chunk), dimension, store);
+		add(find(chunk), dimension, store, around.roof());
 		for (Waypoint pin : store.withHidden(dimension)) {
 			if (pin.kind.isPortal() && !pin.edited && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ && !onPortal(pin, chunk)) {
 				store.forget(pin);
@@ -104,7 +105,7 @@ public final class Portals {
 					for (int dz = -reach; dz <= reach; dz++) {
 						ChunkSnapshot near = around.chunk(chunk.chunkX + dx, chunk.chunkZ + dz);
 						if (near != null) {
-							add(find(near), dimension, store);
+							add(find(near), dimension, store, around.roof());
 						}
 					}
 				}
@@ -119,8 +120,13 @@ public final class Portals {
 		return section != null && kind(section.get(pin.x & 15, pin.y & 15, pin.z & 15).getBlock()) == pin.kind;
 	}
 
-	/** Pins the spots no pin covers yet, with one save. A waypoint the player gave the portal icon counts. Client thread. */
-	public static void add(List<Spot> spots, String dimension, WaypointStore store) {
+	/**
+	 * Pins the spots no pin covers yet, with one save. A waypoint the player gave the portal icon
+	 * counts. In a dimension with a {@code roof} ({@link ChunkSource#roof}), a pin only covers its own
+	 * side of it: a portal on the Nether roof is often built a few blocks from one under it, and no
+	 * portal reaches through the bedrock. Client thread.
+	 */
+	public static void add(List<Spot> spots, String dimension, WaypointStore store, int roof) {
 		if (spots.isEmpty()) {
 			return;
 		}
@@ -130,7 +136,8 @@ public final class Portals {
 			boolean pinned = false;
 			for (Waypoint waypoint : known) {
 				boolean marksPortals = waypoint.kind == spot.kind() || !waypoint.kind.isPortal() && waypoint.icon.equals(WaypointIcons.PORTAL);
-				pinned |= marksPortals && Math.abs(waypoint.x - spot.x()) <= SAME_PORTAL && Math.abs(waypoint.z - spot.z()) <= SAME_PORTAL;
+				boolean sameSide = roof == ChunkSource.NO_ROOF || waypoint.y >= roof == spot.y() >= roof;
+				pinned |= marksPortals && sameSide && Math.abs(waypoint.x - spot.x()) <= SAME_PORTAL && Math.abs(waypoint.z - spot.z()) <= SAME_PORTAL;
 			}
 			if (!pinned) {
 				int color = spot.kind() == Waypoint.Kind.NETHER_PORTAL ? NETHER_COLOR : END_COLOR;

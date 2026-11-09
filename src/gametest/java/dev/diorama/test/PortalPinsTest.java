@@ -34,6 +34,8 @@ final class PortalPinsTest {
 	private static final int SAVED_Z = -3200;
 	/** How long the map may take: a change waits a moment, then a chunk comes up in its queue. */
 	private static final int PIN_TICKS = 200;
+	/** Server commands run in the Overworld; this runs one in the Nether. */
+	private static final String NETHER = "execute in minecraft:the_nether run ";
 
 	private PortalPinsTest() {
 	}
@@ -165,6 +167,73 @@ final class PortalPinsTest {
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
 	}
 
+	/**
+	 * Issue #315: a portal on the Nether roof gets a pin of its own, though one under the roof stands
+	 * a few blocks away on the map, and breaking it takes only its own pin.
+	 */
+	static void netherRoof(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.runOnClient(mc -> Settings.get().portalMarkers = true);
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
+			&& MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = at.getX() + 4;
+		int z = at.getZ() + 4;
+		// A roof portal alone is found, so what follows is about the two sharing a pin.
+		netherPortal(world, NETHER, x + 60, 128, z, 2, 3);
+		expectNetherPins(context, 1, "a portal alone on the roof");
+		frameBroken(world, NETHER, x + 60, 128, z);
+		expectNetherPins(context, 0, "breaking the lone roof portal");
+		// Under the roof, as high as a portal goes: a pocket just under the bedrock.
+		world.getServer().runCommand(NETHER + "fill " + (x - 1) + " 116 " + (z - 2) + " " + (x + 4) + " 122 " + (z + 2) + " air");
+		netherPortal(world, NETHER, x, 117, z, 2, 3);
+		expectNetherPins(context, 1, "a portal under the roof");
+		// On the roof, ten blocks along, standing on the bedrock: the player in the issue.
+		int roofX = x + 10;
+		netherPortal(world, NETHER, roofX, 128, z, 2, 3);
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + (roofX + 2) + " 128 " + (z + 6));
+		context.waitTicks(40);
+		DioramaClientTest.settle(context, 40);
+		context.setScreen(MapScreen::new);
+		DioramaClientTest.settle(context, 40);
+		context.takeScreenshot("portal-roof-map");
+		context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("portal-roof-list");
+		context.setScreen(() -> null);
+		expectNetherPins(context, 2, "a portal on the roof beside it");
+		if (context.computeOnClient(mc -> netherPins().stream().noneMatch(w -> w.y >= 128 && Math.abs(w.x - roofX - 1) <= 2))) {
+			throw new AssertionError("No pin on the roof portal");
+		}
+		// Breaking the roof portal takes its pin; the one under the roof stays.
+		frameBroken(world, NETHER, roofX, 128, z);
+		expectNetherPins(context, 1, "breaking the roof portal");
+		if (context.computeOnClient(mc -> netherPins().get(0).y >= 128)) {
+			throw new AssertionError("The pin left is the roof portal's");
+		}
+		frameBroken(world, NETHER, x, 117, z);
+		expectNetherPins(context, 0, "breaking the portal under the roof");
+		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+	}
+
+	private static java.util.List<Waypoint> netherPins() {
+		return WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && w.dimension.equals("minecraft:the_nether")).toList();
+	}
+
+	private static void expectNetherPins(ClientGameTestContext context, int count, String after) {
+		for (int i = 0; ; i++) {
+			int pins = context.computeOnClient(mc -> netherPins().size());
+			if (pins == count) {
+				return;
+			}
+			if (i > PIN_TICKS) {
+				throw new AssertionError(count + " Nether portal pins in the Nether expected after " + after + ", got " + pins);
+			}
+			context.waitTick();
+		}
+	}
+
 	/** A portal in a chunk the client never had, read from the save behind the map. */
 	private static void fromTheSave(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("forceload add " + SAVED_X + " " + SAVED_Z);
@@ -219,12 +288,21 @@ final class PortalPinsTest {
 
 	/** A frame of obsidian and the lit portal in it, with its inside {@code width} by {@code height}, along X. */
 	private static void netherPortal(TestSingleplayerContext world, int x, int y, int z, int width, int height) {
-		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + width + 1) + " " + (y + height + 1) + " " + z + " obsidian");
-		world.getServer().runCommand("fill " + (x + 1) + " " + (y + 1) + " " + z + " " + (x + width) + " " + (y + height) + " " + z + " nether_portal[axis=x]");
+		netherPortal(world, "", x, y, z, width, height);
+	}
+
+	/** The same in a dimension: {@code in} is an {@code execute in} prefix, as {@link #NETHER}. */
+	private static void netherPortal(TestSingleplayerContext world, String in, int x, int y, int z, int width, int height) {
+		world.getServer().runCommand(in + "fill " + x + " " + y + " " + z + " " + (x + width + 1) + " " + (y + height + 1) + " " + z + " obsidian");
+		world.getServer().runCommand(in + "fill " + (x + 1) + " " + (y + 1) + " " + z + " " + (x + width) + " " + (y + height) + " " + z + " nether_portal[axis=x]");
 	}
 
 	private static void frameBroken(TestSingleplayerContext world, int x, int y, int z) {
-		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
+		frameBroken(world, "", x, y, z);
+	}
+
+	private static void frameBroken(TestSingleplayerContext world, String in, int x, int y, int z) {
+		world.getServer().runCommand(in + "fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
 	}
 
 	private static void expectPins(ClientGameTestContext context, Waypoint.Kind kind, int count, String after) {
