@@ -12,6 +12,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -55,7 +56,9 @@ def main():
     if not any(v['id'] == version for v in manifest['versions']):
         cached.unlink()
         manifest = json.loads(fetch(MANIFEST, cached).read_text())
-    entry = next(v for v in manifest['versions'] if v['id'] == version)
+    entry = next((v for v in manifest['versions'] if v['id'] == version), None)
+    if entry is None:
+        sys.exit(f'Mojang lists no Minecraft {version}')
     info = json.loads(fetch(entry['url'], root / f'{version}.json', entry.get('sha1')).read_text())
     client = info['downloads']['client']
     classpath = []
@@ -96,9 +99,10 @@ def main():
         joined = None
         while time.time() - started < 600:
             text = Path(console).read_text(errors='replace')
-            at = text.find(f'{name} joined the game', before)
-            if at >= 0:
-                joined = at
+            # The whole name: another player's may end with it.
+            found = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(name)} joined the game').search(text, before)
+            if found:
+                joined = found.start()
                 break
             if process.poll() is not None:
                 break
@@ -110,7 +114,8 @@ def main():
         print(f'{name} joined after {time.time() - started:.0f} s')
         time.sleep(float(seconds))
         after = Path(console).read_text(errors='replace')[joined:]
-        if f'{name} lost connection' in after or f'{name} left the game' in after or process.poll() is not None:
+        gone = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(name)} (lost connection|left the game)')
+        if gone.search(after) or process.poll() is not None:
             print(f'{name} was disconnected:')
             print(after[-3000:])
             print(log.read_text(errors='replace')[-3000:])

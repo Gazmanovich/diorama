@@ -66,6 +66,8 @@ installed_as() {
 
 install() {
 	[ "$(cat "$root/installed" 2>/dev/null)" = "$(installed_as)" ] && return 0
+	# Not trusted again until this install finishes.
+	rm -f "$root/installed"
 	rm -rf "$root/libraries" "$root/libs" "$root/server.jar" "$root/installer.jar" "$root/run.sh" "$root/user_jvm_args.txt"
 	local java
 	java=$(java_home)/bin/java
@@ -110,8 +112,8 @@ start() {
 	fi
 	if [ "$with" = with ]; then
 		local jar
-		# The newest: a warm VM can still have an older version's jar there.
-		jar=$(ls -t "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
+		# The only one: sandbox.sh clears the folder before it builds.
+		jar=$(ls "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
 		[ -n "$jar" ] || { echo "no release jar in versions/$node/build/libs: build it with :$node:assemble" >&2; exit 1; }
 		cp "$jar" "$root/mods/"
 	fi
