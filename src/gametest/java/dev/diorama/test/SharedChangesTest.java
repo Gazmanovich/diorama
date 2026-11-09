@@ -40,11 +40,11 @@ final class SharedChangesTest {
 			context.waitTicks(20 * 30);
 			server.command("tp Alice " + X + " 200 " + Z);
 			context.waitTicks(20 * 30);
-			// Then she goes far away, and her land is saved as it unloads. Nobody is near the platform
-			// from here on, so the server saves only the chunks it's built in: a player close by would
-			// have the chunks around saved again too, and their tiles drawn again with them.
-			server.command("tp Alice " + X + " 200 " + (Z + 3000));
-			context.waitTicks(20 * 20);
+			// Then she leaves, and her land is saved as it unloads. Nobody is near the platform from
+			// here on, so the server saves only the chunks it's built in: a player close by would have
+			// the chunks around saved again too, and their tiles drawn again with them.
+			server.vanillaPlayerLeaves("Alice");
+			context.waitTicks(20 * 10);
 			// Not "save-all flush": that waits on every chunk still generating around Alice, and on a
 			// slow VM held the server so long her client timed out, which unloaded her land.
 			server.commandAndWait("save-all", "Saved the game", 600);
@@ -114,7 +114,6 @@ final class SharedChangesTest {
 			context.takeScreenshot("shared-changes-removed");
 			context.setScreen(() -> null);
 			server.command("forceload remove all");
-			server.vanillaPlayerLeaves("Alice");
 			RealServer.leave(context);
 		}
 	}
