@@ -20,9 +20,12 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
  * replaces the clouds over unexplored land, and switching back brings the clouds back as they were.
  */
 final class FogLookTest {
-	/** Mean difference per channel, out of 255, over what changes: the two looks differ by 4.9 to 24 on boat, a redraw of one look by under 1. */
-	private static final double DIFFERENT = 3;
-	private static final double SAME = 1;
+	/** Pixels the soft fog must change: tens of thousands on boat, even where only a strip of the minimap is unexplored. */
+	private static final int LEAST_CHANGED = 1000;
+	/** Of those, the most that may still differ once the clouds are back. */
+	private static final double MOST_LEFT = 0.01;
+	/** Mean difference per channel, out of 255, between two shots of a view that has stopped changing. */
+	private static final double STILL = 0.1;
 
 	private FogLookTest() {
 	}
@@ -69,7 +72,7 @@ final class FogLookTest {
 		for (int i = 0; i < 10; i++) {
 			context.waitTicks(20);
 			BufferedImage next = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds");
-			boolean same = difference(clouds, next, new int[] {0, 0, clouds.getWidth(), clouds.getHeight()}) <= SAME / 10;
+			boolean same = difference(clouds, next, new int[] {0, 0, clouds.getWidth(), clouds.getHeight()}) <= STILL;
 			clouds = next;
 			if (same) {
 				break;
@@ -77,16 +80,14 @@ final class FogLookTest {
 		}
 		BufferedImage soft = shot(context, Settings.FogLook.SOFT, "fog-look-" + where + "-soft");
 		BufferedImage back = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds-again");
-		// Over what the look changes: the map's unexplored land, or the minimap.
-		int[] box = changedBox(clouds, soft);
-		double changed = difference(clouds, soft, box);
-		double again = difference(clouds, back, box);
-		Diorama.LOGGER.info("FOG-LOOK {}: clouds to soft fog {}, back to clouds {}", where, String.format(Locale.ROOT, "%.2f", changed), String.format(Locale.ROOT, "%.2f", again));
-		if (changed < DIFFERENT) {
-			failures.append("\n  ").append(where).append(": the soft fog looks like the clouds (").append(String.format(Locale.ROOT, "%.2f", changed)).append(")");
+		int changed = changedPixels(clouds, soft);
+		int left = changedPixels(clouds, back);
+		Diorama.LOGGER.info("FOG-LOOK {}: soft fog changed {} pixels, {} still differ once the clouds are back", where, changed, left);
+		if (changed < LEAST_CHANGED) {
+			failures.append("\n  ").append(where).append(": the soft fog looks like the clouds (").append(changed).append(" pixels changed)");
 		}
-		if (again > SAME) {
-			failures.append("\n  ").append(where).append(": switched back, the clouds aren't as they were (").append(String.format(Locale.ROOT, "%.2f", again)).append(")");
+		if (left > MOST_LEFT * changed) {
+			failures.append("\n  ").append(where).append(": switched back, the clouds aren't as they were (").append(left).append(" pixels differ)");
 		}
 	}
 
@@ -96,20 +97,17 @@ final class FogLookTest {
 		return read(context.takeScreenshot(name));
 	}
 
-	/** The box round every pixel that differs by more than a little, or the whole frame if none does. */
-	private static int[] changedBox(BufferedImage a, BufferedImage b) {
-		int[] box = {a.getWidth(), a.getHeight(), 0, 0};
+	/** Pixels that differ by more than a little. */
+	private static int changedPixels(BufferedImage a, BufferedImage b) {
+		int n = 0;
 		for (int y = 0; y < a.getHeight(); y++) {
 			for (int x = 0; x < a.getWidth(); x++) {
 				if (pixelDifference(a.getRGB(x, y), b.getRGB(x, y)) > 24) {
-					box[0] = Math.min(box[0], x);
-					box[1] = Math.min(box[1], y);
-					box[2] = Math.max(box[2], x + 1);
-					box[3] = Math.max(box[3], y + 1);
+					n++;
 				}
 			}
 		}
-		return box[2] == 0 ? new int[] {0, 0, a.getWidth(), a.getHeight()} : box;
+		return n;
 	}
 
 	/** Mean absolute difference per channel over the box, out of 255. */
