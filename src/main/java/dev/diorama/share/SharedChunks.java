@@ -100,7 +100,7 @@ public final class SharedChunks implements ChunkSave {
 	private final Map<Long, Integer> parsedTimes = new HashMap<>();
 
 	/** One region's table, indexed {@code (z << 5) | x}. */
-	private record Table(int[] times, short[] top, short[] floor) {
+	private record Table(int[] times, short[] top, short[] floor, int newest) {
 	}
 
 	/** A chunk asked for, when, and its answer: the packed chunk and when it was saved, or null if it isn't shared. */
@@ -256,13 +256,22 @@ public final class SharedChunks implements ChunkSave {
 		}));
 		for (int from = 0; from < regions.size(); from += TABLES_PER_ASK) {
 			List<Long> part = regions.subList(from, Math.min(regions.size(), from + TABLES_PER_ASK));
+			int[] newest = new int[part.size()];
+			synchronized (this.lock) {
+				for (int i = 0; i < part.size(); i++) {
+					Table known = this.tables.get(part.get(i));
+					newest[i] = known == null ? 0 : known.newest();
+				}
+			}
 			this.send(out -> {
 				out.writeByte(ShareProtocol.TABLES);
 				out.writeUTF(this.dimension);
 				out.writeShort(part.size());
-				for (long region : part) {
-					out.writeInt((int) (region >> 32));
-					out.writeInt((int) region);
+				for (int i = 0; i < part.size(); i++) {
+					out.writeInt((int) (part.get(i) >> 32));
+					out.writeInt((int) (long) part.get(i));
+					// The server answers only if something there was saved since.
+					out.writeInt(newest[i]);
 				}
 			});
 		}
@@ -447,6 +456,7 @@ public final class SharedChunks implements ChunkSave {
 	private void table(DataInputStream in) throws IOException {
 		int regionX = in.readInt();
 		int regionZ = in.readInt();
+		int newest = in.readInt();
 		int[] times = new int[1024];
 		short[] top = new short[1024];
 		short[] floor = new short[1024];
@@ -459,7 +469,7 @@ public final class SharedChunks implements ChunkSave {
 			}
 		}
 		synchronized (this.lock) {
-			this.tables.put(SavedChunks.regionKey(regionX, regionZ), new Table(times, top, floor));
+			this.tables.put(SavedChunks.regionKey(regionX, regionZ), new Table(times, top, floor, newest));
 			this.lock.notifyAll();
 		}
 		this.changed();

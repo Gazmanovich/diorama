@@ -125,9 +125,9 @@ public final class ShareServer {
 				case ShareProtocol.REGIONS -> session.ask(new Ask.Regions(dimension));
 				case ShareProtocol.TABLES -> {
 					int count = in.readUnsignedShort();
-					List<Long> regions = new ArrayList<>(count);
+					Map<Long, Integer> regions = new LinkedHashMap<>();
 					for (int i = 0; i < count; i++) {
-						regions.add(RegionTables.key(in.readInt(), in.readInt()));
+						regions.put(RegionTables.key(in.readInt(), in.readInt()), in.readInt());
 					}
 					session.ask(new Ask.Tables(dimension, regions));
 				}
@@ -158,7 +158,8 @@ public final class ShareServer {
 		record Regions(String dimension) implements Ask {
 		}
 
-		record Tables(String dimension, List<Long> regions) implements Ask {
+		/** Each region with the newest save time the client has for it, 0 if it has no table. */
+		record Tables(String dimension, Map<Long, Integer> regions) implements Ask {
 		}
 	}
 
@@ -341,24 +342,34 @@ public final class ShareServer {
 	}
 
 	/** Sends each region's table: for each chunk the share rule allows, when it was saved, how high it reaches and how deep it shows. */
-	private void tables(Session session, String dimension, List<Long> regions) {
+	private void tables(Session session, String dimension, Map<Long, Integer> regions) {
 		ServerLevel level = this.levelOf(session, dimension);
 		if (level == null) {
 			return;
 		}
 		boolean generated = this.settings.land() == ShareSettings.Land.GENERATED;
-		for (long region : regions) {
+		for (Map.Entry<Long, Integer> asked : regions.entrySet()) {
 			if (this.stopped || session.player.hasDisconnected()) {
 				return;
 			}
-			int regionX = (int) (region >> 32);
-			int regionZ = (int) region;
+			int regionX = (int) (asked.getKey() >> 32);
+			int regionZ = (int) (long) asked.getKey();
 			RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated);
+			int newest = 0;
+			for (int saved : table.saved) {
+				newest = Math.max(newest, saved);
+			}
+			if (newest == asked.getValue()) {
+				// Nothing in it saved since the client's table.
+				continue;
+			}
+			int sentNewest = newest;
 			int sent = this.send(session, out -> {
 				out.writeByte(ShareProtocol.TABLES);
 				out.writeUTF(dimension);
 				out.writeInt(regionX);
 				out.writeInt(regionZ);
+				out.writeInt(sentNewest);
 				DeflaterOutputStream deflated = new DeflaterOutputStream(out);
 				DataOutputStream packed = new DataOutputStream(deflated);
 				for (int i = 0; i < 1024; i++) {

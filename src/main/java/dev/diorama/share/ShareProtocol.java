@@ -35,8 +35,9 @@ public final class ShareProtocol {
 	 */
 	public static final int REGIONS = 1;
 	/**
-	 * Client to server: these regions' tables. The dimension, a count, each region's x and z. Server
-	 * to client, one message a region: the dimension, its x and z, then deflated, for each of its
+	 * Client to server: these regions' tables. The dimension, a count, each region's x and z and the
+	 * newest save time in the table the client has of it, 0 for none. Server to client, one message
+	 * a region saved since: the dimension, its x and z, its newest save time, then deflated, for each of its
 	 * 1,024 chunks ({@code (z << 5) | x}) when the save wrote it if it's shared, else 0, and for a
 	 * shared one how high it reaches and how deep its sky view goes, as shorts.
 	 */
