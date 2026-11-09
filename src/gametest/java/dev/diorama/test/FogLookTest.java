@@ -2,6 +2,7 @@ package dev.diorama.test;
 
 import dev.diorama.Diorama;
 import dev.diorama.MapScreen;
+import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
@@ -30,6 +31,16 @@ final class FogLookTest {
 		Settings.FogLook look = context.computeOnClient(mc -> Settings.get().fogLook);
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("tick freeze");
+		// Nothing new on the map between the shots: a section before this one may have changed the
+		// render distance, and the chunks it brings keep landing for a while.
+		int last = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
+		for (int i = 0, still = 0; i < 2400 && still < 100; i++) {
+			context.waitTick();
+			int now = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
+			still = now == last ? still + 1 : 0;
+			last = now;
+		}
+		DioramaClientTest.settle(context, 20);
 		// The explored square around the player with unexplored land all round it.
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()),
