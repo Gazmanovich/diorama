@@ -133,7 +133,8 @@ final class FogLookTest {
 		BufferedImage soft = shot(context, Settings.FogLook.SOFT, "fog-look-" + where + "-soft");
 		BufferedImage back = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds-again");
 		int changed = changedPixels(clouds, soft, box);
-		int left = changedPixels(clouds, back, box);
+		// Only where the soft fog changed something: the world behind the minimap's text keeps moving.
+		int left = changedPixels(clouds, back, box, soft);
 		Diorama.LOGGER.info("FOG-LOOK {}: soft fog changed {} pixels, {} still differ once the clouds are back", where, changed, left);
 		if (changed < LEAST_CHANGED) {
 			failures.append("\n  ").append(where).append(": the soft fog looks like the clouds (").append(changed).append(" pixels changed)");
@@ -155,11 +156,16 @@ final class FogLookTest {
 
 	/** Pixels in the box (or the frame, for null) that differ by more than a little. */
 	private static int changedPixels(BufferedImage a, BufferedImage b, int @Nullable [] box) {
+		return changedPixels(a, b, box, null);
+	}
+
+	/** The same, counting only pixels where {@code a} and {@code only} differ too, if {@code only} isn't null. */
+	private static int changedPixels(BufferedImage a, BufferedImage b, int @Nullable [] box, @Nullable BufferedImage only) {
 		int[] area = box == null ? new int[] {0, 0, a.getWidth(), a.getHeight()} : box;
 		int n = 0;
 		for (int y = area[1]; y < area[3]; y++) {
 			for (int x = area[0]; x < area[2]; x++) {
-				if (pixelDifference(a.getRGB(x, y), b.getRGB(x, y)) > 24) {
+				if (pixelDifference(a.getRGB(x, y), b.getRGB(x, y)) > 24 && (only == null || pixelDifference(a.getRGB(x, y), only.getRGB(x, y)) > 24)) {
 					n++;
 				}
 			}
