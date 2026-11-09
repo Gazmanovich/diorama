@@ -85,26 +85,7 @@ import org.jspecify.annotations.Nullable;
  * filled copycats ({@link #copycat}), added by bake threads as they first meet them. Each is
  * written before its id is handed out, and never changes after.
  */
-public final class BlockLooks {
-	public static final byte AIR = 0;
-	public static final byte SOLID = 1;
-	public static final byte WATER = 2;
-	public static final byte LAVA = 3;
-	/** See-through blocks such as glass: rays pass and pick up a tint. */
-	public static final byte GLASS = 4;
-	/** Plants without collision: rays pass and pick up partial color. */
-	public static final byte PLANT = 5;
-
-	public static final byte TINT_NONE = 0;
-	public static final byte TINT_GRASS = 1;
-	public static final byte TINT_FOLIAGE = 2;
-	public static final byte TINT_DRY_FOLIAGE = 3;
-	public static final byte TINT_WATER = 4;
-
-	/** {@link #kind} of a state whose look nobody has asked for yet. */
-	private static final byte NOT_YET = -1;
-	/** Reads and writes {@link #kind}: a look's other fields are written before its kind is released. */
-	private static final VarHandle KINDS = MethodHandles.arrayElementVarHandle(byte[].class);
+public final class BlockLooks extends Looks {
 	/** Held while a look is worked out: one at a time, across tables, since they share mods' code. */
 	private static final Object MAKING = new Object();
 	/**
@@ -117,59 +98,6 @@ public final class BlockLooks {
 	private static int builds;
 	/** The models the current table was built from; a resource reload replaces them. */
 	private static Object builtFrom;
-
-	/** Kind per state; {@link #NOT_YET} until {@link #ensure} works the look out. */
-	public final byte[] kind;
-	public final byte[] tint;
-	public final byte[] emission;
-	/** Untinted part of the top color, as 0xRRGGBB. */
-	public final int[] top;
-	/** Part of the top color that gets multiplied by the biome tint. */
-	public final int[] topTinted;
-	public final float[] topTintWeight;
-	public final int[] side;
-	public final int[] sideTinted;
-	public final float[] sideTintWeight;
-	/** Fixed tint for blocks whose tint doesn't depend on the biome, or -1. */
-	public final int[] constantTint;
-	/** Whether a monster can spawn standing on this block (not on leaves or glass, say). */
-	public final boolean[] spawnOn;
-	/**
-	 * Whether a monster's body fits in this block's space: Minecraft's empty-spawn-block rule, and
-	 * no collision at all, since a slab at head height blocks a zombie too.
-	 */
-	public final boolean[] spawnIn;
-	/**
-	 * Index into {@link #shapes} of a solid block's outline, or 0 for a full cube: everything else,
-	 * and any block whose outline is empty, rays treat as a whole cube.
-	 */
-	public final int[] shape;
-	/**
-	 * Outlines of solid blocks smaller than a cube, such as slabs, stairs, fences and carpets: each
-	 * box as six floats (min x, y, z, then max x, y, z) in block units. Entry 0 is unused. Grows
-	 * as looks are worked out, published before the look that uses it; entries past the last
-	 * outline are null.
-	 */
-	public volatile float[][] shapes = {new float[0]};
-	/** {@link #faces} so far, by shape; made on first use. */
-	private volatile @Nullable ShapeFaces @Nullable [] faces;
-	/**
-	 * For a waterlogged block smaller than a cube, the state id of the fluid around it: rays that
-	 * pass beside the block, or reach it from above, go through that fluid. -1 for every other block.
-	 */
-	public final int[] wetShape;
-
-	/**
-	 * How many filled-copycat looks fit past the registry. Each pairing of a copycat state with a
-	 * material takes one; past this many, more copycats draw as they do empty.
-	 */
-	private static final int COPYCAT_LOOKS = 1 << 14;
-	/** The block state registry's size: ids from here on are filled copycats. */
-	private final int registrySize;
-	/** Filled-copycat look ids, by copycat state id in the high half and material state id in the low half. */
-	private final Map<Long, Integer> copycatIds = new ConcurrentHashMap<>();
-	private final AtomicInteger copycatCount = new AtomicInteger();
-	private volatile boolean warnedCopycats;
 
 	// What working a look out reads, all of it taken on the client thread as the table is made and
 	// used under MAKING only.
@@ -184,9 +112,6 @@ public final class BlockLooks {
 	private final Map<TextureAtlasSprite, float[]> spriteCache = new IdentityHashMap<>();
 	private final RandomSource random = RandomSource.create(42L);
 	private final TintProbe probe = new TintProbe();
-	private final Map<VoxelShape, Integer> shapeByVoxels = new IdentityHashMap<>();
-	private final Map<String, Integer> shapeByBoxes = new HashMap<>();
-	private final List<float[]> shapeList = new ArrayList<>(List.of(new float[0]));
 	private final Map<Fluid, FluidLook> fluidLooks = new IdentityHashMap<>();
 	//? if >=26.1 {
 	private final List<BlockStateModelPart> parts = new ArrayList<>();
@@ -194,7 +119,8 @@ public final class BlockLooks {
 	/*private final List<BlockModelPart> parts = new ArrayList<>();
 	*///?}
 	private boolean warnedModel;
-	private boolean warnedShape;
+	/** Whether the look being made may read models and textures (not while they're reloading). */
+	private boolean withModels;
 	/**
 	 * Set when a look was worked out while resources were reloading, without the models and
 	 * textures the reload is replacing: {@link #isStale} then has the table made again.
@@ -209,26 +135,10 @@ public final class BlockLooks {
 	//?} else {
 	/*private BlockLooks(int registrySize, int size, BlockModelShaper models, BlockColors colors, @Nullable TextureAtlas atlas) {
 	*///?}
+		super(registrySize, size);
 		this.models = models;
 		this.colors = colors;
 		this.atlas = atlas;
-		this.registrySize = registrySize;
-		this.kind = new byte[size];
-		this.tint = new byte[size];
-		this.emission = new byte[size];
-		this.top = new int[size];
-		this.topTinted = new int[size];
-		this.topTintWeight = new float[size];
-		this.side = new int[size];
-		this.sideTinted = new int[size];
-		this.sideTintWeight = new float[size];
-		this.constantTint = new int[size];
-		this.spawnOn = new boolean[size];
-		this.spawnIn = new boolean[size];
-		this.shape = new int[size];
-		this.wetShape = new int[size];
-		java.util.Arrays.fill(this.wetShape, -1);
-		java.util.Arrays.fill(this.kind, 0, registrySize, NOT_YET);
 	}
 
 	public static BlockLooks get() {
@@ -236,187 +146,10 @@ public final class BlockLooks {
 	}
 
 	/**
-	 * What the GPU baker draws of {@link #shapes}{@code [shape]}. The mesher asks for every smaller
-	 * block it meets, so this keeps them by index rather than going through ShapeFaces' shared,
-	 * locked table each time. Any thread.
-	 */
-	ShapeFaces faces(int shape) {
-		ShapeFaces[] faces = this.faces;
-		if (faces == null || shape >= faces.length) {
-			// More outlines since: a longer copy. Two threads may both grow it, and one's entries are
-			// lost; they're made again when next asked.
-			faces = java.util.Arrays.copyOf(faces == null ? new ShapeFaces[0] : faces, this.shapes.length);
-			this.faces = faces;
-		}
-		ShapeFaces made = faces[shape];
-		if (made == null) {
-			// Two threads may both look it up; they get the same one.
-			made = ShapeFaces.of(this.shapes[shape]);
-			faces[shape] = made;
-		}
-		return made;
-	}
-
-	/**
-	 * The state's id in the tables here. A state the game hasn't numbered, which some mods make
-	 * on the fly (Epic Fight's cracked ground, #180), takes its block's default state's id, or
-	 * air's. Only numbers it: {@link #lookId} also works its look out.
-	 */
-	public static int id(BlockState state) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
-		if (id < 0) {
-			id = Block.BLOCK_STATE_REGISTRY.getId(state.getBlock().defaultBlockState());
-		}
-		if (id < 0) {
-			id = Block.BLOCK_STATE_REGISTRY.getId(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
-		}
-		return Math.max(id, 0);
-	}
-
-	/**
-	 * {@link #id} for a bake. While NeoForge or Forge number every state again, as they do when a
-	 * world is left, states have no id for a moment and the table is short: the bake stops
-	 * ({@link StatesRenumbered}) rather than read those blocks as something else, since the map
-	 * still saves its last bakes as it closes.
+	 * {@link Looks#bakeId} against the map's current table, for a reader without one of its own.
 	 */
 	public static int bakeId(BlockState state) {
-		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
-		if (id >= 0) {
-			return id;
-		}
-		BlockLooks looks = current;
-		if (looks != null && Block.BLOCK_STATE_REGISTRY.size() != looks.registrySize) {
-			throw StatesRenumbered.INSTANCE;
-		}
-		return id(state);
-	}
-
-	/**
-	 * Works the state's look out if nothing has asked for it yet, and returns the id. Any thread:
-	 * the first to ask does the work, others asking meanwhile wait for it. Every id whose look is
-	 * read here comes through this first, or through a method that calls it.
-	 */
-	public int ensure(int id) {
-		if (id >= 0 && id < this.registrySize && (byte) KINDS.getAcquire(this.kind, id) == NOT_YET) {
-			this.make(id);
-		}
-		return id;
-	}
-
-	/** {@link #id}, with the state's look worked out. */
-	public int lookId(BlockState state) {
-		return this.ensure(id(state));
-	}
-
-	/**
-	 * {@link #bakeId}, with the state's look worked out. A look left unworked because states are
-	 * being numbered again stops the bake ({@link StatesRenumbered}), as {@link #bakeId} does.
-	 */
-	public int bakeLookId(BlockState state) {
-		int id = this.ensure(bakeId(state));
-		if (id < this.registrySize && (byte) KINDS.getAcquire(this.kind, id) == NOT_YET) {
-			throw StatesRenumbered.INSTANCE;
-		}
-		return id;
-	}
-
-	/** See {@link #bakeId}. */
-	public static final class StatesRenumbered extends RuntimeException {
-		private static final StatesRenumbered INSTANCE = new StatesRenumbered();
-
-		private StatesRenumbered() {
-			super("Block states are being numbered again", null, false, false);
-		}
-	}
-
-	/**
-	 * True when two states draw the same on the map. Leaves changing their distance property,
-	 * for example, is a block update nobody can see.
-	 */
-	public boolean sameLook(int a, int b) {
-		this.ensure(a);
-		this.ensure(b);
-		return this.kind[a] == this.kind[b]
-			&& this.top[a] == this.top[b]
-			&& this.topTinted[a] == this.topTinted[b]
-			&& this.side[a] == this.side[b]
-			&& this.sideTinted[a] == this.sideTinted[b]
-			&& this.topTintWeight[a] == this.topTintWeight[b]
-			&& this.sideTintWeight[a] == this.sideTintWeight[b]
-			&& this.tint[a] == this.tint[b]
-			&& this.constantTint[a] == this.constantTint[b]
-			&& this.emission[a] == this.emission[b]
-			// Spawn spots show on the map too: a slab becoming a double slab changes them.
-			&& this.spawnOn[a] == this.spawnOn[b]
-			&& this.spawnIn[a] == this.spawnIn[b]
-			// Same index, same boxes: outlines are stored once each.
-			&& this.shape[a] == this.shape[b]
-			// Filling or draining a waterlogged slab changes nothing else.
-			&& this.wetShape[a] == this.wetShape[b];
-	}
-
-	/**
-	 * The look of a copycat filled with a material, both given as state ids: the copycat's outline,
-	 * spawn rules and water, with the material's colours, tint and light. Rays pass through it if
-	 * they pass through the material, as through a copycat filled with glass, and pass through a
-	 * copycat without collision (a button, a pressure plate) as they do empty. Any thread: a bake
-	 * calls this when it reads a snapshot's copycats, and the look is filled in before its id is
-	 * handed out, so a bake only ever reads looks that are done. Returns the copycat's own id when
-	 * there's nothing to copy, or no room left.
-	 */
-	public int copycat(int copycat, int material) {
-		if (copycat < 0 || copycat >= this.registrySize || material < 0 || material >= this.registrySize || this.kind.length == this.registrySize) {
-			return this.ensure(copycat);
-		}
-		this.ensure(copycat);
-		this.ensure(material);
-		byte frame = this.kind[copycat];
-		// A material left unworked (states being numbered again) counts as none.
-		if (frame != SOLID && frame != GLASS && frame != PLANT || this.kind[material] == AIR || this.kind[material] == NOT_YET) {
-			return copycat;
-		}
-		Long key = (long) copycat << 32 | material;
-		Integer id = this.copycatIds.get(key);
-		if (id != null) {
-			return id;
-		}
-		if (this.copycatCount.get() >= this.kind.length - this.registrySize) {
-			// Full: don't grow the table with pairs that would all draw empty anyway.
-			this.warnFull();
-			return copycat;
-		}
-		return this.copycatIds.computeIfAbsent(key, unused -> this.addCopycat(copycat, material));
-	}
-
-	private void warnFull() {
-		if (!this.warnedCopycats) {
-			this.warnedCopycats = true;
-			Diorama.LOGGER.warn("More than {} kinds of filled copycat; the rest draw as they do empty", COPYCAT_LOOKS);
-		}
-	}
-
-	private int addCopycat(int copycat, int material) {
-		int id = this.registrySize + this.copycatCount.getAndIncrement();
-		if (id >= this.kind.length) {
-			// Bake threads that passed the check above together.
-			this.warnFull();
-			return copycat;
-		}
-		this.kind[id] = this.kind[copycat] == PLANT ? PLANT : this.kind[material] == GLASS ? GLASS : SOLID;
-		this.shape[id] = this.shape[copycat];
-		this.spawnOn[id] = this.spawnOn[copycat];
-		this.spawnIn[id] = this.spawnIn[copycat];
-		this.wetShape[id] = this.wetShape[copycat];
-		this.top[id] = this.top[material];
-		this.topTinted[id] = this.topTinted[material];
-		this.topTintWeight[id] = this.topTintWeight[material];
-		this.side[id] = this.side[material];
-		this.sideTinted[id] = this.sideTinted[material];
-		this.sideTintWeight[id] = this.sideTintWeight[material];
-		this.tint[id] = this.tint[material];
-		this.constantTint[id] = this.constantTint[material];
-		this.emission[id] = this.emission[material];
-		return id;
+		return bakeId(state, current);
 	}
 
 	/** For tests: how many times the table has been built. */
@@ -514,7 +247,8 @@ public final class BlockLooks {
 	}
 
 	/** Works out one state's look, unless another thread just did. */
-	private void make(int id) {
+	@Override
+	protected void make(int id) {
 		synchronized (MAKING) {
 			if (this.kind[id] != NOT_YET) {
 				return;
@@ -530,7 +264,8 @@ public final class BlockLooks {
 			// is made again once the reload is over. (Textures it frees are kept from a look being
 			// made by closing, which see.)
 			boolean reloading = Minecraft.getInstance().gui.overlay() != null;
-			byte kind = state == null ? AIR : this.work(id, state, !reloading);
+			this.withModels = !reloading;
+			byte kind = state == null ? AIR : this.work(id, state);
 			if (reloading) {
 				this.provisional = true;
 			}
@@ -540,46 +275,20 @@ public final class BlockLooks {
 		}
 	}
 
-	/** Fills in the state's look but its kind, which it returns. Under {@link #MAKING}. */
-	private byte work(int id, BlockState state, boolean withModels) {
-		this.emission[id] = (byte) state.getLightEmission();
-		this.constantTint[id] = -1;
-		// Minecraft's own spawn rules, asked of the block alone: none of them look around it.
-		try {
-			this.spawnOn[id] = state.isValidSpawn(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, EntityTypes.ZOMBIE);
-			this.spawnIn[id] = NaturalSpawner.isValidEmptySpawnBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state, state.getFluidState(), EntityTypes.ZOMBIE)
-				&& state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
-		} catch (RuntimeException | Error e) {
-			this.spawnOn[id] = false;
-			this.spawnIn[id] = false;
+	/** The state's colours from its model's textures, or its map colour while models reload. Under {@link #MAKING}. */
+	@Override
+	protected byte colours(int id, BlockState state, byte kind) {
+		if (!this.withModels) {
+			return this.flatColours(id, state, kind);
 		}
-		// A mod's block can give a null shape or throw when asked, and under ModernFix, which builds
-		// each state's cache on first use, so can anything that reads the cache. One that fails
-		// counts as a full block and keeps its model's colours.
-		byte kind = SOLID;
-		try {
-			kind = classify(state);
-			if (kind == SOLID) {
-				this.shape[id] = this.shapeIndex(state);
-			}
-		} catch (RuntimeException | Error e) {
-			if (!this.warnedShape) {
-				this.warnedShape = true;
-				Diorama.LOGGER.warn("The shape of {} failed when asked for ({}); such blocks draw as full blocks", state, e.toString());
-			}
-		}
+		kind = this.modelColours(id, state, kind);
 		if (kind == AIR) {
-			return AIR;
-		}
-		kind = withModels ? this.colours(id, state, kind) : this.flatColours(id, state, kind);
-		if (kind == AIR) {
-			this.shape[id] = 0;
 			return AIR;
 		}
 		// A fluid's block has no model of its own, so every cell holding a fluid and nothing solid
 		// (kelp and seagrass stand in water) draws as the fluid's still texture, tinted the way the
 		// fluid's own tint code asks: water by the biome.
-		if (kind == WATER && withModels) {
+		if (kind == WATER) {
 			FluidState fluid = state.getFluidState().getType().defaultFluidState();
 			FluidLook look = this.fluidLooks.computeIfAbsent(fluid.getType(), type -> this.fluidLook(fluid));
 			// With no texture to be found, the block's particle texture's colour stays.
@@ -594,17 +303,11 @@ public final class BlockLooks {
 				this.constantTint[id] = look.tint().constant();
 			}
 		}
-		if (this.shape[id] != 0 && !state.getFluidState().isEmpty()) {
-			int fluid = Block.BLOCK_STATE_REGISTRY.getId(state.getFluidState().createLegacyBlock());
-			if (fluid >= 0 && fluid < this.registrySize && fluid != id && this.kind[this.ensure(fluid)] == WATER) {
-				this.wetShape[id] = fluid;
-			}
-		}
 		return kind;
 	}
 
 	/** The state's colours from its model's textures; returns its kind, which they can change. */
-	private byte colours(int id, BlockState state, byte kind) {
+	private byte modelColours(int id, BlockState state, byte kind) {
 		//? if >=26.1 {
 		BlockStateModel model = this.models.get(state);
 		//?} else if >=1.21.5 {
@@ -673,12 +376,7 @@ public final class BlockLooks {
 		if (sideFace.isEmpty()) {
 			sideFace = topFace;
 		}
-		this.top[id] = topFace.untinted();
-		this.topTinted[id] = topFace.tinted();
-		this.topTintWeight[id] = topFace.tintWeight();
-		this.side[id] = sideFace.untinted();
-		this.sideTinted[id] = sideFace.tinted();
-		this.sideTintWeight[id] = sideFace.tintWeight();
+		this.setColours(id, topFace, sideFace);
 
 		if (kind == SOLID && !state.is(BlockTags.LEAVES) && topFace.coverage() < 0.55F) {
 			kind = GLASS;
@@ -691,26 +389,6 @@ public final class BlockLooks {
 			this.tint[id] = tint.kind();
 			this.constantTint[id] = tint.constant();
 		}
-		return kind;
-	}
-
-	/**
-	 * The block's colour on Minecraft's own maps instead of the missing texture's purple, seen
-	 * through where those maps see through it ({@link #AIR}). Returns its kind.
-	 */
-	private byte flatColours(int id, BlockState state, byte kind) {
-		int mapColor = mapColor(state);
-		if (mapColor == 0) {
-			return AIR;
-		}
-		FaceColor face = new FaceColor();
-		face.add(new float[] {(mapColor >> 16 & 0xFF) / 255.0F, (mapColor >> 8 & 0xFF) / 255.0F, (mapColor & 0xFF) / 255.0F, 1.0F}, -1);
-		this.top[id] = face.untinted();
-		this.topTinted[id] = face.tinted();
-		this.topTintWeight[id] = face.tintWeight();
-		this.side[id] = face.untinted();
-		this.sideTinted[id] = face.tinted();
-		this.sideTintWeight[id] = face.tintWeight();
 		return kind;
 	}
 
@@ -760,81 +438,6 @@ public final class BlockLooks {
 	}
 
 	*///?}
-	/** A shape with more boxes than this counts as its bounding box. */
-	private static final int MAX_BOXES = 16;
-
-	/** Finds or adds the state's outline in {@link #shapes}; 0 for a full cube. Under {@link #MAKING}. */
-	private int shapeIndex(BlockState state) {
-		Map<VoxelShape, Integer> byVoxels = this.shapeByVoxels;
-		List<float[]> shapes = this.shapeList;
-		VoxelShape outline;
-		try {
-			outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-		} catch (RuntimeException | Error e) {
-			return 0;
-		}
-		Integer known = byVoxels.get(outline);
-		if (known != null) {
-			return known;
-		}
-		int index = 0;
-		if (!outline.isEmpty() && outline != Shapes.block()) {
-			List<AABB> boxes = outline.toAabbs();
-			if (boxes.size() > MAX_BOXES) {
-				boxes = List.of(outline.bounds());
-			}
-			float[] flat = new float[boxes.size() * 6];
-			int n = 0;
-			boolean full = false;
-			for (AABB box : boxes) {
-				// Some mods' outlines reach into the next block; only the part in this one counts,
-				// and a box wholly outside it is dropped.
-				float[] b = {clamp01(box.minX), clamp01(box.minY), clamp01(box.minZ), clamp01(box.maxX), clamp01(box.maxY), clamp01(box.maxZ)};
-				if (b[0] >= b[3] || b[1] >= b[4] || b[2] >= b[5]) {
-					continue;
-				}
-				System.arraycopy(b, 0, flat, n, 6);
-				n += 6;
-				full |= b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1 && b[4] == 1 && b[5] == 1;
-			}
-			float[] kept = java.util.Arrays.copyOf(flat, n);
-			if (!full && n > 0) {
-				index = this.shapeByBoxes.computeIfAbsent(java.util.Arrays.toString(kept), key -> {
-					shapes.add(kept);
-					// Room for more by doubling; the entry is published before the look that uses it.
-					float[][] published = this.shapes;
-					if (published.length < shapes.size()) {
-						published = java.util.Arrays.copyOf(published, Math.max(16, published.length * 2));
-					}
-					published[shapes.size() - 1] = kept;
-					this.shapes = published;
-					return shapes.size() - 1;
-				});
-			}
-		}
-		byVoxels.put(outline, index);
-		return index;
-	}
-
-	private static float clamp01(double v) {
-		return (float) Math.max(0, Math.min(1, v));
-	}
-
-	private static byte classify(BlockState state) {
-		if (state.isAir() || state.getRenderShape() == RenderShape.INVISIBLE && state.getFluidState().isEmpty()) {
-			return AIR;
-		}
-		FluidState fluid = state.getFluidState();
-		boolean noCollision = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
-		if (!fluid.isEmpty() && noCollision) {
-			return fluid.is(FluidTags.LAVA) ? LAVA : WATER;
-		}
-		if (noCollision) {
-			return state.getBlock() instanceof SnowLayerBlock ? SOLID : PLANT;
-		}
-		return SOLID;
-	}
-
 	/** A fluid's colour as 0xRRGGBB, or -1 if its texture can't be found, and its tint. */
 	private record FluidLook(int color, Tint tint) {
 	}
@@ -981,15 +584,6 @@ public final class BlockLooks {
 	/** The game's magenta and black stand-in for a texture it can't find. */
 	private static boolean isMissing(TextureAtlasSprite sprite) {
 		return sprite.contents().name().equals(MissingTextureAtlasSprite.getLocation());
-	}
-
-	/** The block's colour on Minecraft's own maps as 0xRRGGBB, or 0 where those maps see through it. */
-	private static int mapColor(BlockState state) {
-		try {
-			return state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col;
-		} catch (RuntimeException | Error e) {
-			return 0;
-		}
 	}
 
 	private static final Field ORIGINAL_IMAGE;
@@ -1148,71 +742,5 @@ public final class BlockLooks {
 			(float) (r / weight / 255), (float) (g / weight / 255), (float) (b / weight / 255),
 			(float) visible / (w * h)
 		};
-	}
-
-	/** Running average of the quads that make up one face direction. */
-	private static final class FaceColor {
-		private float ur, ug, ub, uw;
-		private float tr, tg, tb, tw;
-		private float coverage;
-		private int count;
-		/** The first tint layer a quad asked for, or -1. */
-		private int tintIndex = -1;
-
-		void add(float[] avg, int tintIndex) {
-			float w = avg[3];
-			if (w <= 0) {
-				return;
-			}
-			if (tintIndex >= 0) {
-				if (this.tintIndex < 0) {
-					this.tintIndex = tintIndex;
-				}
-				this.tr += avg[0] * w;
-				this.tg += avg[1] * w;
-				this.tb += avg[2] * w;
-				this.tw += w;
-			} else {
-				this.ur += avg[0] * w;
-				this.ug += avg[1] * w;
-				this.ub += avg[2] * w;
-				this.uw += w;
-			}
-			this.coverage = Math.max(this.coverage, w);
-			this.count++;
-		}
-
-		boolean isEmpty() {
-			return this.count == 0;
-		}
-
-		float coverage() {
-			return this.coverage;
-		}
-
-		int tintIndex() {
-			return this.tintIndex;
-		}
-
-		int untinted() {
-			return this.uw == 0 ? 0 : pack(this.ur / this.uw, this.ug / this.uw, this.ub / this.uw);
-		}
-
-		int tinted() {
-			return this.tw == 0 ? 0 : pack(this.tr / this.tw, this.tg / this.tw, this.tb / this.tw);
-		}
-
-		float tintWeight() {
-			float total = this.uw + this.tw;
-			return total == 0 ? 0 : this.tw / total;
-		}
-
-		private static int pack(float r, float g, float b) {
-			return (clamp255(r) << 16) | (clamp255(g) << 8) | clamp255(b);
-		}
-
-		private static int clamp255(float v) {
-			return Math.max(0, Math.min(255, Math.round(v * 255)));
-		}
 	}
 }
