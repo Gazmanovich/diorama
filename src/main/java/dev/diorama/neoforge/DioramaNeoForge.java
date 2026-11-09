@@ -58,6 +58,12 @@ public final class DioramaNeoForge {
 		DioramaClient.init();
 		// The channel itself is DioramaNeoForgeCommon's.
 		ShareClient.init();
+		dev.diorama.share.ShareProtocol.toServer(data -> {
+			net.minecraft.client.multiplayer.ClientPacketListener connection = Minecraft.getInstance().getConnection();
+			if (connection != null) {
+				connection.send(new dev.diorama.share.ShareProtocol.Packet(data));
+			}
+		});
 		// The mod list's Config button opens the map settings.
 		container.registerExtensionPoint(IConfigScreenFactory.class, (mod, parent) -> new SettingsScreen(parent));
 		// The settings file sits in the game directory, and from NeoForge 21.5 mods are constructed

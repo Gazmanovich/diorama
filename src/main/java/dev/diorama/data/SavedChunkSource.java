@@ -18,7 +18,7 @@ public final class SavedChunkSource implements ChunkSource {
 	private static final int CACHED_SNAPSHOTS = Runtime.getRuntime().maxMemory() > 3L << 30 ? 1536 : 512;
 
 	private final ChunkSource live;
-	private final SavedChunks save;
+	private final ChunkSave save;
 	/** Says which saved chunks a bake may see, given a chunk's x and z and its top. */
 	private volatile Allowed allowed = (chunkX, chunkZ, top) -> true;
 
@@ -36,7 +36,7 @@ public final class SavedChunkSource implements ChunkSource {
 	/** Told the portals in each chunk read that has any, on the reading thread. */
 	private final Consumer<List<Portals.Spot>> portals;
 
-	public SavedChunkSource(ChunkSource live, SavedChunks save, Consumer<List<Portals.Spot>> portals) {
+	public SavedChunkSource(ChunkSource live, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
 		this.live = live;
 		this.save = save;
 		this.portals = portals;
