@@ -11,7 +11,7 @@ description = "A ray-traced, angled voxel map and minimap."
 authors = "Dara Adedeji"
 displayURL = "https://modrinth.com/mod/diorama-map"
 logoFile = "assets/diorama/icon.png"
-# Client-only: servers with or without it let the player in.
+# Optional on both sides: servers with or without it let the player in, players with or without it get in.
 displayTest = "IGNORE_ALL_VERSION"
 
 [[dependencies.diorama]]
@@ -19,11 +19,11 @@ modId = "forge"
 mandatory = true
 versionRange = "${forge}"
 ordering = "NONE"
-side = "CLIENT"
+side = "BOTH"
 
 [[dependencies.diorama]]
 modId = "minecraft"
 mandatory = true
 versionRange = "${minecraft}"
 ordering = "NONE"
-side = "CLIENT"
+side = "BOTH"
