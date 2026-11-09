@@ -54,6 +54,18 @@ for pair in "$@"; do
 	export "$pair"
 done
 
+# A real dedicated server for the tests to join (RealServer.java): the node's release jar first.
+if [ -n "${DIORAMA_REAL_SERVER:-}" ]; then
+	mark "building the release jar for the real server"
+	bash ./gradlew --no-daemon --console=plain --configuration-cache --configuration-cache-problems=warn ":$node:assemble" 2>&1 | stamp > ~/assemble.log
+	if [ "${PIPESTATUS[0]}" != 0 ]; then
+		tail -60 ~/assemble.log
+		exit 1
+	fi
+	export DIORAMA_REAL_SERVER=~/diorama/.claude/skills/boat-game-test/real_server.sh DIORAMA_NODE=$node
+	rm -rf ~/real-servers/$node/console-*.log ~/real-servers/$node/world
+fi
+
 run=versions/$node/build/run/clientGameTest
 rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps
 # The game starts from the folder the snapshot left (its settings, options and map folders), on a
@@ -117,6 +129,12 @@ mkdir -p ~/result || exit 1
 cp ~/gradle.log ~/sandbox.log ~/result/ || exit 1
 if [ -d ~/thread-dumps ]; then
 	cp -r ~/thread-dumps ~/result/ || exit 1
+fi
+if [ -n "${DIORAMA_REAL_SERVER:-}" ]; then
+	bash "$DIORAMA_REAL_SERVER" stop "$node"
+	mkdir -p ~/result/real-server
+	cp ~/real-servers/$node/console-*.log ~/result/real-server/ 2>/dev/null
+	cp ~/real-servers/$node/install.log ~/result/real-server/ 2>/dev/null
 fi
 for part in screenshots crash-reports logs/latest.log; do
 	if [ -e "$run/$part" ]; then

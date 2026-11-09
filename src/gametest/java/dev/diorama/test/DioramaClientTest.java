@@ -115,6 +115,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
+			if (tests.contains("share-settings")) {
+				ShareTest.singleplayer(context);
+			}
 			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
 				styleTour(context, world);
@@ -336,7 +339,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
+		if (tests.contains("real-server")) {
+			ShareTest.realServer(context);
+		}
 		//? if >=1.21.4 && fabric {
+		if (tests.contains("share-settings")) {
+			ShareTest.settings(context);
+		}
 		if (tests.contains("xaero-real-server")) {
 			XaeroRealTest.server(context);
 		}
@@ -6237,7 +6246,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
 			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
