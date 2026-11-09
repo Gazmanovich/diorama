@@ -36,6 +36,12 @@ final class FogLookTest {
 		world.getServer().runCommand("time set noon");
 		Settings.Quality quality = context.computeOnClient(mc -> Settings.get().quality);
 		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMinimap);
+		boolean mapRadar = context.computeOnClient(mc -> Settings.get().radarOnMap);
+		// No mobs on the map or the minimap: the world runs between shots, and they'd move.
+		context.runOnClient(mc -> {
+			Settings.get().radarOnMap = false;
+			Settings.get().radarOnMinimap = false;
+		});
 		// Nothing new on the map between the shots: a section before this one may have changed the
 		// render distance, and the chunks it brings keep landing for a while.
 		int last = context.computeOnClient(mc -> MapSession.get().map().chunkCount());
@@ -64,17 +70,17 @@ final class FogLookTest {
 			Settings.get().apply();
 		});
 		context.setScreen(() -> null);
-		// The minimap zoomed all the way out, so it reaches past the explored land, with no mobs on
-		// it: without the map screen open, 1.20.1's world keeps running. Only the minimap is compared.
+		// The minimap zoomed all the way out, so it reaches past the explored land. Only the minimap is
+		// compared: without the map screen open, 1.20.1's world keeps running even during a shot.
 		double zoom = context.computeOnClient(mc -> Settings.get().minimapPixelsPerBlock);
 		context.runOnClient(mc -> {
 			Settings.get().zoomStep(0);
-			Settings.get().radarOnMinimap = false;
 		});
 		check(context, failures, "minimap", minimapBox(context));
 		context.runOnClient(mc -> {
 			Settings.get().minimapPixelsPerBlock = zoom;
 			Settings.get().radarOnMinimap = radar;
+			Settings.get().radarOnMap = mapRadar;
 			Settings.get().fogLook = look;
 		});
 		if (failures.length() > 0) {
