@@ -121,7 +121,7 @@ public final class TileBaker {
 	}
 
 	private final TileKey key;
-	private final BlockLooks looks;
+	private final Looks looks;
 	final VoxelReader reader;
 	final boolean cave;
 	/** The sky view of a dimension with a roof: it starts under the roof and skips rock. */
@@ -231,7 +231,7 @@ public final class TileBaker {
 	/** In a surface pass, only where the ray lands is wanted, not how it's lit. */
 	private boolean surfaceDepthOnly;
 
-	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
+	private TileBaker(TileKey key, ChunkSource source, Looks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
 		this.overlays = overlays;
 		this.looks = looks;
@@ -370,7 +370,7 @@ public final class TileBaker {
 	}
 
 	/** A baker that only answers colour and occlusion questions, for {@link GpuMesher}. */
-	static TileBaker forMeshing(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, int @Nullable [] savedSpots) {
+	static TileBaker forMeshing(TileKey key, ChunkSource source, Looks looks, boolean fogOfWar, int @Nullable [] savedSpots) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
 		baker.useSavedSpots(savedSpots);
 		return baker;
@@ -392,7 +392,7 @@ public final class TileBaker {
 	 * with its light taken out and what lit it, for lights. Water counts as ground at its surface.
 	 * With {@code fogOfWar}, ground not seen yet has none, as the tile shows none. Any thread.
 	 */
-	public static TileSurface surface(TileKey key, int revision, ChunkSource source, BlockLooks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
+	public static TileSurface surface(TileKey key, int revision, ChunkSource source, Looks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
 		int count = width * height;
 		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new float[count], new boolean[count], new byte[count], new int[count], new int[count], new float[count]);
@@ -498,7 +498,7 @@ public final class TileBaker {
 	}
 
 	/** A baker only for {@link #sunBlocked}. */
-	public static TileBaker forSunChecks(ChunkSource source, BlockLooks looks, int pu0, int pv0, int pu1, int pv1) {
+	public static TileBaker forSunChecks(ChunkSource source, Looks looks, int pu0, int pv0, int pu1, int pv1) {
 		// Rays go as high as the tallest blocks around the tile with the most reach over these pixels.
 		int size = Projection.TILE_PIXELS;
 		TileKey tallest = null;
@@ -614,7 +614,7 @@ public final class TileBaker {
 		fast = value;
 	}
 
-	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar) {
+	public static TileImage bake(TileKey key, ChunkSource source, Looks looks, @Nullable BitSet blocks, boolean fogOfWar) {
 		return bake(key, source, looks, blocks, fogOfWar, null);
 	}
 
@@ -623,13 +623,13 @@ public final class TileBaker {
 	 * data for a pixel, the saved pixel stays. That shows places whose chunks aren't loaded, and
 	 * keeps a bake at the edge of loaded chunks from erasing what was saved.
 	 */
-	public static TileImage bake(TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
+	public static TileImage bake(TileKey key, ChunkSource source, Looks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved) {
 		return bake(key, source, looks, blocks, fogOfWar, saved, null, null, null);
 	}
 
 	/** Same, also recording the {@link Overlays} bits of every pixel when {@code overlays} isn't null. */
 	public static TileImage bake(
-		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
+		TileKey key, ChunkSource source, Looks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
 	) {
 		return bake(key, source, looks, blocks, fogOfWar, saved, null, null, overlays);
 	}
@@ -641,7 +641,7 @@ public final class TileBaker {
 	 * through them above where the saved rays stood (see {@link TileSpots#passedWhenSaved}).
 	 */
 	public static TileImage bake(
-		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, byte @Nullable [] savedLight,
+		TileKey key, ChunkSource source, Looks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, byte @Nullable [] savedLight,
 		int @Nullable [] savedSpots,
 		@Nullable Overlays overlays
 	) {
@@ -688,7 +688,7 @@ public final class TileBaker {
 	 * setting, and not merged with anything saved: what a GPU bake of it should look like.
 	 * {@code info} gets the overlay bits when {@code overlays} asks for them.
 	 */
-	public static int[] reference(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, byte @Nullable [] info) {
+	public static int[] reference(TileKey key, ChunkSource source, Looks looks, boolean fogOfWar, @Nullable Overlays overlays, byte @Nullable [] info) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
 		baker.fourSamples = true;
 		int size = Projection.TILE_PIXELS;
@@ -1112,7 +1112,7 @@ public final class TileBaker {
 
 	/** Sets {@code albedo*} to the block's linear colour for its top or front face at this column. */
 	void albedo(int id, int x, int z, boolean top) {
-		BlockLooks l = this.looks;
+		Looks l = this.looks;
 		int base = top ? l.top[id] : l.side[id];
 		int tinted = top ? l.topTinted[id] : l.sideTinted[id];
 		float w = top ? l.topTintWeight[id] : l.sideTintWeight[id];
