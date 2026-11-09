@@ -37,10 +37,14 @@ final class FogLookTest {
 		Settings.Quality quality = context.computeOnClient(mc -> Settings.get().quality);
 		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMinimap);
 		boolean mapRadar = context.computeOnClient(mc -> Settings.get().radarOnMap);
-		// No mobs on the map or the minimap: the world runs between shots, and they'd move.
+		boolean saved = context.computeOnClient(mc -> Settings.get().mapSavedChunks);
+		// No mobs on the map or the minimap: the world runs between shots, and they'd move. No
+		// filling in from the world save either: it draws tiles in the background, between shots.
 		context.runOnClient(mc -> {
 			Settings.get().radarOnMap = false;
 			Settings.get().radarOnMinimap = false;
+			Settings.get().mapSavedChunks = false;
+			Settings.get().apply();
 		});
 		// Nothing new on the map between the shots: a section before this one may have changed the
 		// render distance, and the chunks it brings keep landing for a while.
@@ -81,6 +85,8 @@ final class FogLookTest {
 			Settings.get().minimapPixelsPerBlock = zoom;
 			Settings.get().radarOnMinimap = radar;
 			Settings.get().radarOnMap = mapRadar;
+			Settings.get().mapSavedChunks = saved;
+			Settings.get().apply();
 			Settings.get().fogLook = look;
 		});
 		if (failures.length() > 0) {
