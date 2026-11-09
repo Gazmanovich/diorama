@@ -55,6 +55,8 @@ public final class SharedChunks implements ChunkSave {
 	/** An ask not answered in this long is asked again: the server drops asks past its queue's length. */
 	private static final long ASK_AGAIN_MS = 60_000;
 	private static final int TABLES_PER_ASK = 256;
+	/** The map asks for what changed at most this often. */
+	private static final long REFRESH_MS = 10_000;
 	private static final int KEPT_CHUNKS = 8192;
 	private static final int PARSED_CHUNKS = Runtime.getRuntime().maxMemory() > 3L << 30 ? 2048 : 768;
 
@@ -67,9 +69,16 @@ public final class SharedChunks implements ChunkSave {
 	private volatile boolean closed;
 	private volatile @Nullable Runnable changed;
 
+	/** The server's clock less this computer's, in milliseconds, as of its last list of regions. */
+	private volatile long serverClock;
+	/** When the map last asked for what changed, so a burst of map openings asks once. */
+	private long refreshedAt;
+
 	// Guarded by lock.
 	private @Nullable List<Long> regions;
 	private boolean regionsAsked;
+	/** Asked for the regions again: every region's table is asked for again when they come. */
+	private boolean refreshing;
 	private final Map<Long, Table> tables = new HashMap<>();
 	private final Set<Long> tablesAsked = new HashSet<>();
 	/** Chunks asked for or come, by {@link ChunkSnapshot#key}. */
@@ -208,6 +217,31 @@ public final class SharedChunks implements ChunkSave {
 			}
 		}
 		return times;
+	}
+
+	@Override
+	public int now() {
+		return (int) ((System.currentTimeMillis() + this.serverClock) / 1000);
+	}
+
+	/**
+	 * Asks the server for the regions and every region's table again. Each chunk saved since this
+	 * player's map drew it is drawn again; the rest isn't sent again. Client thread.
+	 */
+	@Override
+	public void refresh() {
+		long now = System.currentTimeMillis();
+		synchronized (this.lock) {
+			if (this.regions == null || this.refreshing || now - this.refreshedAt < REFRESH_MS) {
+				return;
+			}
+			this.refreshedAt = now;
+			this.refreshing = true;
+		}
+		this.send(out -> {
+			out.writeByte(ShareProtocol.REGIONS);
+			out.writeUTF(this.dimension);
+		});
 	}
 
 	/** Asks for regions' tables, the ones nearest the player first. */
@@ -389,14 +423,24 @@ public final class SharedChunks implements ChunkSave {
 	}
 
 	private void regions(DataInputStream in) throws IOException {
+		this.serverClock = in.readLong() - System.currentTimeMillis();
 		int count = in.readInt();
 		List<Long> regions = new ArrayList<>(count);
 		for (int i = 0; i < count; i++) {
 			regions.add(SavedChunks.regionKey(in.readInt(), in.readInt()));
 		}
+		boolean again;
 		synchronized (this.lock) {
 			this.regions = regions;
+			again = this.refreshing;
+			this.refreshing = false;
+			if (again) {
+				this.tablesAsked.addAll(regions);
+			}
 			this.lock.notifyAll();
+		}
+		if (again) {
+			this.askTables(new ArrayList<>(regions));
 		}
 	}
 

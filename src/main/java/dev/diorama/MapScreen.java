@@ -167,6 +167,11 @@ public final class MapScreen extends Screen {
 	public MapScreen() {
 		super(Component.translatable("diorama.screen.title"));
 		this.layer = this.layerOnOpening();
+		// On a server that shares its map, what others built since shows up as the map opens.
+		dev.diorama.render.SavedChunkImport fill = MapSession.get() == null ? null : MapSession.get().savedChunks();
+		if (fill != null) {
+			fill.refresh();
+		}
 	}
 
 	/** Underground the map opens on the cave the player is in, unless the settings say surface only. */

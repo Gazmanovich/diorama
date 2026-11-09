@@ -330,6 +330,8 @@ public final class ShareServer {
 		this.send(session, out -> {
 			out.writeByte(ShareProtocol.REGIONS);
 			out.writeUTF(dimension);
+			// The clock the save's times are in, for the client to tell how recent its drawing is.
+			out.writeLong(System.currentTimeMillis());
 			out.writeInt(found.size());
 			for (long region : found) {
 				out.writeInt((int) (region >> 32));

@@ -31,7 +31,7 @@ public final class ShareProtocol {
 	public static final int SETTINGS = 0;
 	/**
 	 * Client to server: which regions does the level have? Its dimension. Server to client, the
-	 * answer: the dimension, a count, and each region's x and z.
+	 * answer: the dimension, the server's clock in milliseconds, a count, and each region's x and z.
 	 */
 	public static final int REGIONS = 1;
 	/**

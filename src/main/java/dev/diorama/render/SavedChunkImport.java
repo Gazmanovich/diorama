@@ -272,6 +272,15 @@ public final class SavedChunkImport {
 		return this.idle && !this.rescanAsked;
 	}
 
+	/**
+	 * Asks the server for what's changed in the land it shares, which comes in as tables (see
+	 * {@link #rescanSoon}): chunks saved since they were drawn are drawn again. In singleplayer the
+	 * save is listed every minute anyway.
+	 */
+	public void refresh() {
+		this.save.refresh();
+	}
+
 	/** Lists the save again soon: for tests, and as tables of the land a server shares come in. */
 	public void rescanSoon() {
 		this.rescanAsked = true;
@@ -411,7 +420,7 @@ public final class SavedChunkImport {
 			this.idle = false;
 			this.rescanAsked = false;
 			this.lastScan = now;
-			this.scannedAt = (int) (now / 1000);
+			this.scannedAt = this.save.now();
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
 			if (progress.back(this.regions)) {
@@ -523,7 +532,7 @@ public final class SavedChunkImport {
 		// Everything read from here on, heights too, is at least this recent, which is what makes a
 		// tile drawn below good enough for a chunk saved before then, here or in the region next door.
 		this.source.clear();
-		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
+		int readSince = Math.min(this.scannedAt, this.save.now());
 		Plan plan = this.plans.get(region);
 		if (plan == null || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing()) {
 			plan = this.plan(region, progress);
