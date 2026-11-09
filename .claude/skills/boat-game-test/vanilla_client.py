@@ -49,7 +49,12 @@ def allowed(rules):
 def main():
     version, java, name, address, console, seconds = sys.argv[1:7]
     root = Path.home() / 'vanilla' / version
-    manifest = json.loads(fetch(MANIFEST, Path.home() / 'vanilla' / 'manifest.json').read_text())
+    # The list of versions is kept, and fetched again when it doesn't have this one yet.
+    cached = Path.home() / 'vanilla' / 'manifest.json'
+    manifest = json.loads(fetch(MANIFEST, cached).read_text())
+    if not any(v['id'] == version for v in manifest['versions']):
+        cached.unlink()
+        manifest = json.loads(fetch(MANIFEST, cached).read_text())
     entry = next(v for v in manifest['versions'] if v['id'] == version)
     info = json.loads(fetch(entry['url'], root / f'{version}.json', entry.get('sha1')).read_text())
     client = info['downloads']['client']
@@ -67,7 +72,8 @@ def main():
     loom = Path.home() / '.gradle' / 'caches' / 'fabric-loom' / 'assets' / 'objects'
     if loom.is_dir() and not (assets / 'objects').exists():
         (assets / 'objects').symlink_to(loom)
-    wanted = [o['hash'] for name, o in objects.items() if not name.startswith(('minecraft/sounds/', 'minecraft/music/', 'sounds/'))]
+    # Once per hash: names can share one, and two downloads of it would share a file.
+    wanted = sorted({o['hash'] for name, o in objects.items() if not name.startswith(('minecraft/sounds/', 'minecraft/music/', 'sounds/'))})
     with concurrent.futures.ThreadPoolExecutor(16) as pool:
         list(pool.map(lambda h: fetch(f'https://resources.download.minecraft.net/{h[:2]}/{h}', assets / 'objects' / h[:2] / h), wanted))
 
@@ -81,6 +87,8 @@ def main():
                '--assetsDir', str(assets), '--assetIndex', index['id'],
                '--uuid', hashlib.md5(name.encode()).hexdigest(), '--accessToken', '0', '--userType', 'legacy',
                '--quickPlayMultiplayer', address]
+    # Only what the console says from here on counts: the same name may have joined before.
+    before = len(Path(console).read_text(errors='replace'))
     started = time.time()
     with open(log, 'w') as out:
         process = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, cwd=game)
@@ -88,8 +96,9 @@ def main():
         joined = None
         while time.time() - started < 600:
             text = Path(console).read_text(errors='replace')
-            if f'{name} joined the game' in text:
-                joined = len(text)
+            at = text.find(f'{name} joined the game', before)
+            if at >= 0:
+                joined = at
                 break
             if process.poll() is not None:
                 break

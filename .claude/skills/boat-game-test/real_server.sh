@@ -59,8 +59,14 @@ java_home() {
 	echo ~/jdk$want
 }
 
+# What's installed, so a warm VM installs again after a loader or Minecraft version change.
+installed_as() {
+	echo "$loader $mc $(prop loader_version) $(prop fabric_api_version) $(prop neoforge_version) $(prop forge_version)"
+}
+
 install() {
-	[ -e "$root/installed" ] && return 0
+	[ "$(cat "$root/installed" 2>/dev/null)" = "$(installed_as)" ] && return 0
+	rm -rf "$root/libraries" "$root/libs" "$root/server.jar" "$root/installer.jar" "$root/run.sh" "$root/user_jvm_args.txt"
 	local java
 	java=$(java_home)/bin/java
 	case $loader in
@@ -84,7 +90,7 @@ install() {
 			(cd "$root" && "$java" -jar installer.jar --installServer "$root" > install.log 2>&1) || return 1
 			;;
 	esac
-	touch "$root/installed"
+	installed_as > "$root/installed"
 }
 
 running() {
@@ -104,7 +110,8 @@ start() {
 	fi
 	if [ "$with" = with ]; then
 		local jar
-		jar=$(ls "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
+		# The newest: a warm VM can still have an older version's jar there.
+		jar=$(ls -t "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
 		[ -n "$jar" ] || { echo "no release jar in versions/$node/build/libs: build it with :$node:assemble" >&2; exit 1; }
 		cp "$jar" "$root/mods/"
 	fi

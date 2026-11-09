@@ -80,7 +80,9 @@ final class ShareTest {
 		for (String problem : PROBLEMS) {
 			for (int at = lower.indexOf(problem); at >= 0; at = lower.indexOf(problem, at + 1)) {
 				int start = Math.max(0, console.lastIndexOf('\n', at) + 1);
-				int end = Math.min(console.length(), at + 3000);
+				// The line and its stack trace: up to the next line of the log.
+				int next = console.indexOf("\n[", at);
+				int end = Math.min(console.length(), Math.min(next < 0 ? console.length() : next, at + 3000));
 				String around = lower.substring(start, end);
 				if (around.contains("diorama") || around.contains("net/minecraft/client") || around.contains("net.minecraft.client")) {
 					throw new AssertionError("The real server's console has a problem: " + console.substring(start, end));
