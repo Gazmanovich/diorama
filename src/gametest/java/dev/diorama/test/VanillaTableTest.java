@@ -4,6 +4,7 @@ import dev.diorama.Diorama;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
+import dev.diorama.bake.Looks;
 import dev.diorama.bake.TableLooks;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
@@ -19,6 +20,10 @@ import java.util.Locale;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.world.level.FoliageColor;
 import net.minecraft.world.level.GrassColor;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Makes the vanilla colour table the jar ships ({@link VanillaTable}) from this version's game,
@@ -91,8 +96,28 @@ final class VanillaTableTest {
 			}
 		}
 
-		// A bake with the table's looks against one with the client's: the same, pixel for pixel.
+		// Every vanilla state's look from the table against the client's own, field by field.
 		TableLooks table = new TableLooks(made);
+		BlockLooks client = BlockLooks.get();
+		int states = 0;
+		for (Block block : BuiltInRegistries.BLOCK) {
+			if (!BuiltInRegistries.BLOCK.getKey(block).getNamespace().equals("minecraft")) {
+				continue;
+			}
+			for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+				int a = client.lookId(state);
+				int b = table.lookId(state);
+				String differs = differs(client, a, table, b);
+				if (differs != null) {
+					throw new AssertionError(state + ": the table's look differs from the client's in " + differs);
+				}
+				states++;
+			}
+		}
+		Diorama.LOGGER.info("{} vanilla states look the same from the table as from the client", states);
+
+		// A bake with the table's looks against one with the client's: the same, pixel for pixel,
+		// wherever a second bake with the client's says the world held still in between.
 		int[] at = context.computeOnClient(mc -> new int[] {
 			(int) Math.floor(mc.player.getX() / Projection.TILE_UNITS),
 			(int) Math.floor(Projection.v(mc.player.getY(), mc.player.getZ()) / Projection.TILE_UNITS)});
@@ -101,28 +126,32 @@ final class VanillaTableTest {
 		for (int dv = -1; dv <= 1; dv++) {
 			for (int du = -1; du <= 1; du++) {
 				TileKey key = new TileKey(TileKey.SURFACE, at[0] + du, at[1] + dv);
-				int[] client = TileBaker.reference(key, MapSession.get().map(), BlockLooks.get(), false, null, null);
+				int[] first = TileBaker.reference(key, MapSession.get().map(), client, false, null, null);
 				int[] fromTable = TileBaker.reference(key, MapSession.get().map(), table, false, null, null);
+				int[] again = TileBaker.reference(key, MapSession.get().map(), client, false, null, null);
 				int differ = 0;
+				int moved = 0;
 				int known = 0;
-				for (int i = 0; i < client.length; i++) {
-					if (client[i] != fromTable[i]) {
+				for (int i = 0; i < first.length; i++) {
+					if (first[i] != again[i]) {
+						moved++;
+					} else if (first[i] != fromTable[i]) {
 						differ++;
 					}
-					if (client[i] >>> 24 != 0) {
+					if (first[i] >>> 24 != 0) {
 						known++;
 					}
 				}
-				Diorama.LOGGER.info("Tile {}: {} drawn pixels, {} differ between the client's looks and the table's", key, known, differ);
+				Diorama.LOGGER.info("Tile {}: {} drawn pixels, {} differ between the client's looks and the table's, {} changed in the world meanwhile", key, known, differ, moved);
 				if (differ != 0) {
-					writeTile(out.resolve("client-" + tiles + ".png"), client);
+					writeTile(out.resolve("client-" + tiles + ".png"), first);
 					writeTile(out.resolve("table-" + tiles + ".png"), fromTable);
 					throw new AssertionError("Tile " + key + ": " + differ + " pixels differ between the client's looks and the table's");
 				}
 				if (du == 0 && dv == 0) {
 					writeTile(out.resolve("table-" + tiles + ".png"), fromTable);
 				}
-				drawn += known;
+				drawn += known - moved;
 				tiles++;
 			}
 		}
@@ -139,6 +168,32 @@ final class VanillaTableTest {
 			throw new AssertionError("The jar's vanilla colour table doesn't match the game (" + String.join("; ", differences)
 				+ "): copy " + out.resolve("vanilla_looks.dat") + " into src/main/resources/diorama/vanilla/");
 		}
+	}
+
+	/** The first field in which two looks differ, or null if none does. */
+	private static @Nullable String differs(Looks a, int i, Looks b, int j) {
+		if (a.kind[i] != b.kind[j]) {
+			return "kind " + a.kind[i] + " vs " + b.kind[j];
+		}
+		if (a.top[i] != b.top[j] || a.topTinted[i] != b.topTinted[j] || a.topTintWeight[i] != b.topTintWeight[j]) {
+			return "top colour";
+		}
+		if (a.side[i] != b.side[j] || a.sideTinted[i] != b.sideTinted[j] || a.sideTintWeight[i] != b.sideTintWeight[j]) {
+			return "side colour";
+		}
+		if (a.tint[i] != b.tint[j] || a.constantTint[i] != b.constantTint[j]) {
+			return "tint";
+		}
+		if (a.emission[i] != b.emission[j] || a.spawnOn[i] != b.spawnOn[j] || a.spawnIn[i] != b.spawnIn[j]) {
+			return "light or spawn rules";
+		}
+		if (!java.util.Arrays.equals(a.shapes[a.shape[i]], b.shapes[b.shape[j]])) {
+			return "outline";
+		}
+		if (a.wetShape[i] != b.wetShape[j]) {
+			return "water around it";
+		}
+		return null;
 	}
 
 	private static int dryFoliage(double temp, double rain) {
