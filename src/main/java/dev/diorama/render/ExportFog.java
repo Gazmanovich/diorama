@@ -88,12 +88,12 @@ public final class ExportFog implements ImageExport.Finish {
 	private final int[] codeW = new int[2];
 	private final int[] codeH = new int[2];
 
-	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke, float night) {
+	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke, boolean clouds, float night) {
 		this.lod = lod;
 		this.unitsPerPixel = (double) (1 << lod) / Projection.PIXELS_PER_UNIT;
 		this.known = known;
 		this.lift = new float[known.length];
-		this.clouds = !smoke;
+		this.clouds = clouds;
 		this.flags = new byte[known.length];
 		this.maskW = maskW;
 		this.maskH = maskH;
@@ -119,7 +119,10 @@ public final class ExportFog implements ImageExport.Finish {
 		return build(store, area, smoke, 0, smoke ? null : VanillaClouds.prepare());
 	}
 
-	/** The same, dimmed {@code night} into the night as the map draws it ({@link NightLook}). */
+	/**
+	 * The same, dimmed {@code night} into the night as the map draws it ({@link NightLook}), with
+	 * these clouds over the surface, or the soft fog for none.
+	 */
 	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke, float night, VanillaClouds.@Nullable Pattern clouds) {
 		loadNoise();
 		int lod = area.lod();
@@ -134,7 +137,8 @@ public final class ExportFog implements ImageExport.Finish {
 		double margin = 64 + 24 * Math.pow(2, steps + 1);
 		// The clouds read cells and distances a few of the biggest cells drawn away: read that far, or
 		// the clouds at the picture's edge depend on where it's cut.
-		if (!smoke) {
+		boolean withClouds = !smoke && clouds != null;
+		if (withClouds) {
 			margin += 4 * CLOUD_CELL * Math.pow(2, steps + 3);
 		}
 		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
@@ -185,12 +189,12 @@ public final class ExportFog implements ImageExport.Finish {
 			// Kept to bytes, like the mask texture.
 			sum[i] = Math.round(Math.min(1, sum[i] / perTexel) * 255) / 255F;
 		}
-		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, smoke, night);
+		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, smoke, withClouds, night);
 		if (MapStyle.get().roundedFog() && texel < 16) {
 			fog.roundOff(Math.max(1, Math.round(10 / texel)));
 		}
 		if (fog.clouds) {
-			fog.pattern = clouds != null ? clouds : VanillaClouds.prepare();
+			fog.pattern = clouds;
 			fog.cloudSetup(pixelsPerUnit);
 		} else {
 			java.util.Arrays.fill(fog.lift, 1);

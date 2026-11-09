@@ -91,8 +91,8 @@ layout(location = 0) in vec2 maskUv;
 *///?}
 // rg: noise offset in eighths of the coarser noise period, in the top three bits of each; r's low
 // five bits: how see-through the fog is, in 31sts (0 is opaque); b: cave flag (128), fog scale steps
-// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the fast
-// quality flag (4) and the smoke flag (1).
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the soft fog
+// flag (8), the fast quality flag (4) and the smoke flag (1).
 //? if >=26.3 {
 layout(location = 1) in vec4 params;
 
@@ -400,7 +400,9 @@ void main() {
     float night = mod(offsetBytes.g, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
-    // In the low nibble: 4 for Fast, 1 for smoke, 2 into the half-resolution layer (FogLayer).
+    // In the low nibble: 8 for the soft fog instead of clouds (Settings.fogLook), 4 for Fast, 1 for
+    // smoke, 2 into the half-resolution layer (FogLayer).
+    bool softLook = mod(alphaCode, 16.0) >= 8.0;
     fast = mod(floor(mod(alphaCode, 16.0) / 4.0), 2.0) >= 1.0;
     bool layer = mod(floor(mod(alphaCode, 16.0) / 2.0), 2.0) >= 1.0;
     bool smoke = mod(alphaCode, 2.0) >= 1.0;
@@ -441,7 +443,7 @@ void main() {
     pixelUnits = max(fwidth(p0).x, fwidth(p0).y);
 
     vec3 moonlit = mix(vec3(1.0), vec3(0.27, 0.33, 0.49), night);
-    if (!cave && !smoke) {
+    if (!cave && !smoke && !softLook) {
         // The noise origin is ten base cells from map 0 for each eighth of the coarse noise period it
         // moves. Past the middle of a zoom step the grid's cells are two base cells (MapViewport.CellGrid).
         cloudBase = CLOUD_CELL * exp2(scaleSteps);

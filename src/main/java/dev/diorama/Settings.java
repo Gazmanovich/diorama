@@ -147,6 +147,8 @@ public final class Settings {
 
 	public boolean outlines = true;
 	public boolean roundedFog = true;
+	/** What covers land never explored on the surface: Minecraft-style clouds, or the soft fog from before 0.8.0. */
+	public FogLook fogLook = FogLook.CLOUDS;
 	public boolean alwaysFogOfWar = false;
 	/**
 	 * Singleplayer: fills the map in from the chunks in the world's save, such as an area a
@@ -192,6 +194,12 @@ public final class Settings {
 	public enum Quality {
 		FANCY,
 		FAST
+	}
+
+	/** {@link #fogLook}: caves and the sky view under a roof keep their own fog either way. */
+	public enum FogLook {
+		CLOUDS,
+		SOFT
 	}
 
 	/** The game time under the minimap, in the formats Xaero's Minimap offers. */
@@ -383,6 +391,9 @@ public final class Settings {
 		}
 		if (settings.gameTime == null) {
 			settings.gameTime = GameTime.OFF;
+		}
+		if (settings.fogLook == null) {
+			settings.fogLook = FogLook.CLOUDS;
 		}
 		if (settings.quality == null) {
 			settings.quality = Quality.FANCY;

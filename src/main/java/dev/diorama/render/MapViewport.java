@@ -3,6 +3,7 @@ package dev.diorama.render;
 import dev.diorama.Diorama;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
+import dev.diorama.Settings;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
 import dev.diorama.render.gpu.FogLayer;
@@ -46,14 +47,15 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, double guiScale, int viewWidth, int viewHeight) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, int memoryLod, double originU, double originV, double texel, boolean rounded, int scaleSteps, int fraction, boolean fast, int nearU, int nearV, long clouds, boolean softFog, double guiScale, int viewWidth, int viewHeight) {
 		/**
 		 * Whether a mask built from these lies over the screen as one built from {@code other} does:
 		 * same place, scale, cells and fog. Only what the map knows differs, which may show a frame late.
 		 */
 		boolean sameGeometry(MaskInputs other) {
 			return this.layer == other.layer && this.originU == other.originU && this.originV == other.originV && this.texel == other.texel
-				&& this.rounded == other.rounded && this.scaleSteps == other.scaleSteps && this.fraction == other.fraction && this.fast == other.fast;
+				&& this.rounded == other.rounded && this.scaleSteps == other.scaleSteps && this.fraction == other.fraction && this.fast == other.fast
+				&& this.softFog == other.softFog;
 		}
 	}
 
@@ -161,7 +163,8 @@ public final class MapViewport {
 		// edge of known ground blends into it: the clouds' top (fog.fsh's CLOUD_TOP), smoke under a
 		// roof, or the dark of caves. The clouds stop at explored land's edge, so where a mask texel
 		// is partly explored a sliver of this can show beside the land: it reads as cloud.
-		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : CLOUD_BACKDROP;
+		// The soft fog keeps the blue-grey it always had.
+		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : softFog() ? 0xFF8C99AB : CLOUD_BACKDROP;
 		float night = this.night < 0 || cave || level.roofless() ? NightLook.forView(level, view.layer()) : this.night;
 		if (night > 0) {
 			background = NightLook.darken(background, night);
@@ -469,6 +472,11 @@ public final class MapViewport {
 	/** fog.fsh's CLOUD_TOP. */
 	private static final int CLOUD_BACKDROP = 0xFFD9DDE7;
 
+	/** The soft fog from before 0.8.0 over the surface, rather than the clouds: {@link Settings#fogLook}. */
+	private static boolean softFog() {
+		return Settings.get().fogLook == Settings.FogLook.SOFT;
+	}
+
 	private static volatile boolean fogHiddenForTests;
 
 	/** For tests that check the tiles under the fog (TileFilterTest): the map drawn without it. */
@@ -512,8 +520,9 @@ public final class MapViewport {
 		boolean cave = view.layer() != TileKey.SURFACE;
 		int fogCode = (cave ? 128 : 0) | steps << 4 | fraction;
 		// The mask scale code takes the alpha byte's high nibble; 4 in the low nibble asks for fast
-		// fog, and 1 for smoke instead of clouds over the sky view under a roof.
-		int quality = (fast ? 4 : 0) | (level.roofless() ? 1 : 0);
+		// fog, 1 for smoke instead of clouds over the sky view under a roof, and 8 for the soft fog
+		// instead of clouds (Settings.fogLook).
+		int quality = (fast ? 4 : 0) | (level.roofless() ? 1 : 0) | (softFog() ? 8 : 0);
 		// The low five bits of the noise offset's red byte hold how see-through the fog is, 0 for
 		// not at all, so a caller that sets nothing there gets the fog it always did.
 		int veil = Math.round((1 - this.opacity) * OPACITY_CODES);
@@ -522,7 +531,10 @@ public final class MapViewport {
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32 | dark) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
-		if (this.drawFogLayer(canvas, view, originU, originV, span, params)) {
+		// The soft fog on Fast draws at full resolution, as it did before 0.8.0: its two layers'
+		// dither, drawn at half and scaled up, came out twice as coarse.
+		boolean fullSize = fast && softFog() && !cave && !level.roofless();
+		if (!fullSize && this.drawFogLayer(canvas, view, originU, originV, span, params)) {
 			return;
 		}
 		if (view.round()) {
@@ -628,7 +640,7 @@ public final class MapViewport {
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		// The memory's level can change with the zoom while the real tiles' doesn't.
 		int memoryLod = memory == null ? -1 : memory.lod(view, lod);
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version(), Minecraft.getInstance().getWindow().getGuiScale(), view.width(), view.height());
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, memoryLod, originU, originV, texel, rounded, scaleSteps, fraction, fast, nearU, nearV, VanillaClouds.version(), softFog(), Minecraft.getInstance().getWindow().getGuiScale(), view.width(), view.height());
 		boolean sameLevel = this.maskLevel.get() == level;
 		this.takeFinished();
 		if (sameLevel && inputs.equals(this.maskInputs)) {
@@ -753,7 +765,7 @@ public final class MapViewport {
 			}
 		}
 		boolean surface = view.layer() == TileKey.SURFACE;
-		boolean clouds = surface && !level.roofless();
+		boolean clouds = surface && !level.roofless() && !softFog();
 		if (surface) {
 			if (memory != null) {
 				// The whole mask, not just the view: the clouds climb toward land the old map never
@@ -802,8 +814,8 @@ public final class MapViewport {
 		this.lifting = false;
 		this.reach = fogReach(texel, !surface, fast, scaleSteps, clouds ? cellScale : 0);
 		if (!clouds) {
-			// Caves and smoke keep the fog as it always was: full height (alpha 255), but over a
-			// remembered map, whose share alpha is 255 less, so the fog lies low there.
+			// Caves, smoke and the soft fog keep the fog as it always was: full height (alpha 255),
+			// but over a remembered map, whose share alpha is 255 less, so the fog lies low there.
 			this.markReach(this.reach, false);
 			if (surface) {
 				for (int k = 0; k < MASK * MASK; k++) {
