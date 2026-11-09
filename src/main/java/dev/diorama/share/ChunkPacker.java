@@ -77,12 +77,26 @@ final class ChunkPacker {
 		}
 	};
 	long hiddenBlocks;
+	/** When the neighbours kept were first read: chunks change, so they're read again after a while. */
+	private long keptSince = System.currentTimeMillis();
+	private static final long KEEP_MS = 30_000;
 
 	ChunkPacker(Level level, ChunkTags tags, BiFunction<Integer, Integer, @Nullable CompoundTag> neighbours) {
 		this.level = level;
 		this.tags = tags;
 		this.neighbours = neighbours;
 		this.hidden = level.dimension() == Level.END ? Blocks.END_STONE.defaultBlockState() : Blocks.STONE.defaultBlockState();
+	}
+
+	/** Forgets the neighbours read more than {@link #KEEP_MS} ago, which may have changed since. */
+	void forgetIfOld() {
+		long now = System.currentTimeMillis();
+		if (now - this.keptSince > KEEP_MS) {
+			this.sections.clear();
+			this.neighbourTags.clear();
+			this.missing.clear();
+			this.keptSince = now;
+		}
 	}
 
 	/** The chunk packed, or null if it has nothing finished to draw. {@code tag} is brought up to this version. */
@@ -181,10 +195,8 @@ final class ChunkPacker {
 		long[] east = null;
 		long[] north = null;
 		long[] south = null;
+		// Any block, opaque or not: a chest or spawner closed in stone is as hidden as an ore.
 		for (int i = 0; i < 4096; i++) {
-			if (!bit(self, i)) {
-				continue;
-			}
 			int x = i & 15;
 			int z = (i >> 4) & 15;
 			int y = i >> 8;

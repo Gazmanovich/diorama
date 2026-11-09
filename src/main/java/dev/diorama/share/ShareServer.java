@@ -47,6 +47,8 @@ import org.jspecify.annotations.Nullable;
 public final class ShareServer {
 	/** The most chunks a player can have waiting; older asks past this are dropped, and asked again. */
 	private static final int MAX_WAITING = 16384;
+	/** The most tables a player can have waiting: a world 16,000 blocks across has about 1,000 regions. */
+	private static final int MAX_TABLES = 4096;
 	/** How long a read waits for the server's storage or its thread. */
 	private static final long READ_SECONDS = 30;
 	/** Chunks read at once: one trip to the server thread for the loaded ones, the rest read together. */
@@ -122,14 +124,14 @@ public final class ShareServer {
 			Session session = share.sessions.computeIfAbsent(player.getUUID(), id -> new Session(player, share.settings.kilobytesPerSecond()));
 			session.player = player;
 			switch (kind) {
-				case ShareProtocol.REGIONS -> session.ask(new Ask.Regions(dimension));
+				case ShareProtocol.REGIONS -> session.askRegions(dimension);
 				case ShareProtocol.TABLES -> {
 					int count = in.readUnsignedShort();
 					Map<Long, Integer> regions = new LinkedHashMap<>();
 					for (int i = 0; i < count; i++) {
 						regions.put(RegionTables.key(in.readInt(), in.readInt()), in.readInt());
 					}
-					session.ask(new Ask.Tables(dimension, regions));
+					session.askTables(dimension, regions);
 				}
 				case ShareProtocol.CHUNKS -> {
 					boolean urgent = in.readBoolean();
@@ -153,20 +155,17 @@ public final class ShareServer {
 		}
 	}
 
-	/** What a player asked for, waiting for the worker. */
-	private sealed interface Ask {
-		record Regions(String dimension) implements Ask {
-		}
-
-		/** Each region with the newest save time the client has for it, 0 if it has no table. */
-		record Tables(String dimension, Map<Long, Integer> regions) implements Ask {
-		}
-	}
-
 	/** One player's asks and allowance. Fields are guarded by the session. */
 	private static final class Session {
 		volatile ServerPlayer player;
-		private final Deque<Ask> asks = new ArrayDeque<>();
+		/** Levels whose regions were asked for: a few at most, as one answer serves them all. */
+		private final Deque<String> regionAsks = new ArrayDeque<>();
+		/**
+		 * Regions whose tables were asked for, in order, for {@link #tablesDimension}, each with the
+		 * newest save time the client has for it.
+		 */
+		private final LinkedHashMap<Long, Integer> tables = new LinkedHashMap<>();
+		private String tablesDimension = "";
 		/** Chunks asked for, in the order they go out, for {@link #dimension}. */
 		private final LinkedHashSet<Long> chunks = new LinkedHashSet<>();
 		private String dimension = "";
@@ -187,12 +186,50 @@ public final class ShareServer {
 			this.allowance = this.bytesPerSecond;
 		}
 
-		synchronized void ask(Ask ask) {
-			this.asks.add(ask);
+		synchronized void askRegions(String dimension) {
+			if (this.regionAsks.size() < 4) {
+				this.regionAsks.add(dimension);
+			}
 		}
 
-		synchronized @Nullable Ask nextAsk() {
-			return this.asks.poll();
+		synchronized @Nullable String nextRegionsAsk() {
+			return this.regionAsks.poll();
+		}
+
+		/** More tables to send, past what's waiting, up to {@link #MAX_TABLES}. */
+		synchronized void askTables(String dimension, Map<Long, Integer> regions) {
+			if (!dimension.equals(this.tablesDimension)) {
+				this.tables.clear();
+				this.tablesDimension = dimension;
+			}
+			for (Map.Entry<Long, Integer> region : regions.entrySet()) {
+				if (this.tables.size() >= MAX_TABLES && !this.tables.containsKey(region.getKey())) {
+					break;
+				}
+				this.tables.put(region.getKey(), region.getValue());
+			}
+		}
+
+		/** The next table to send and its level, if the allowance has room; tables count against it like chunks. */
+		synchronized long @Nullable [] nextTable() {
+			this.refill();
+			if (this.allowance <= 0 || this.tables.isEmpty()) {
+				return null;
+			}
+			var it = this.tables.entrySet().iterator();
+			Map.Entry<Long, Integer> next = it.next();
+			it.remove();
+			return new long[] {next.getKey(), next.getValue()};
+		}
+
+		synchronized String tablesDimension() {
+			return this.tablesDimension;
+		}
+
+		private void refill() {
+			long now = System.nanoTime();
+			this.allowance = Math.min(this.bytesPerSecond, this.allowance + (now - this.refilledAt) / 1e9 * this.bytesPerSecond);
+			this.refilledAt = now;
 		}
 
 		/** Urgent ones go first, in their order; the rest after what's waiting. */
@@ -201,33 +238,35 @@ public final class ShareServer {
 				this.chunks.clear();
 				this.dimension = dimension;
 			}
+			// Past MAX_WAITING, what's at the end goes: the oldest asks that aren't urgent. The client
+			// asks again for what it still wants.
 			if (urgent) {
 				LinkedHashSet<Long> rest = new LinkedHashSet<>(this.chunks);
 				this.chunks.clear();
 				for (long chunk : asked) {
+					if (this.chunks.size() < MAX_WAITING) {
+						this.chunks.add(chunk);
+					}
+				}
+				for (long chunk : rest) {
+					if (this.chunks.size() >= MAX_WAITING) {
+						break;
+					}
 					this.chunks.add(chunk);
 				}
-				this.chunks.addAll(rest);
 			} else {
 				for (long chunk : asked) {
+					if (this.chunks.size() >= MAX_WAITING) {
+						break;
+					}
 					this.chunks.add(chunk);
 				}
-			}
-			while (this.chunks.size() > MAX_WAITING) {
-				// The oldest asks that aren't urgent: the end of the queue.
-				Long last = null;
-				for (Long chunk : this.chunks) {
-					last = chunk;
-				}
-				this.chunks.remove(last);
 			}
 		}
 
 		/** The next chunks to send, up to {@code most}, if the allowance has room. */
 		synchronized List<Long> nextChunks(int most) {
-			long now = System.nanoTime();
-			this.allowance = Math.min(this.bytesPerSecond, this.allowance + (now - this.refilledAt) / 1e9 * this.bytesPerSecond);
-			this.refilledAt = now;
+			this.refill();
 			List<Long> next = new ArrayList<>(most);
 			if (this.allowance <= 0) {
 				return next;
@@ -248,9 +287,6 @@ public final class ShareServer {
 			this.allowance -= bytes;
 		}
 
-		synchronized boolean waiting() {
-			return !this.asks.isEmpty() || !this.chunks.isEmpty() && this.allowance > 0;
-		}
 	}
 
 	private void work() {
@@ -264,9 +300,15 @@ public final class ShareServer {
 						this.logSession(session);
 						continue;
 					}
-					Ask ask = session.nextAsk();
-					if (ask != null) {
-						this.answer(session, ask);
+					String regionsOf = session.nextRegionsAsk();
+					if (regionsOf != null) {
+						this.regions(session, regionsOf);
+						busy = true;
+						continue;
+					}
+					long[] table = session.nextTable();
+					if (table != null) {
+						this.table(session, session.tablesDimension(), table[0], (int) table[1]);
 						busy = true;
 						continue;
 					}
@@ -313,14 +355,6 @@ public final class ShareServer {
 		return this.tables.computeIfAbsent(level, RegionTables::new);
 	}
 
-	private void answer(Session session, Ask ask) {
-		if (ask instanceof Ask.Regions regions) {
-			this.regions(session, regions.dimension());
-		} else if (ask instanceof Ask.Tables asked) {
-			this.tables(session, asked.dimension(), asked.regions());
-		}
-	}
-
 	/** Lists the regions the level's save has. */
 	private void regions(Session session, String dimension) {
 		ServerLevel level = this.levelOf(session, dimension);
@@ -341,50 +375,45 @@ public final class ShareServer {
 		});
 	}
 
-	/** Sends each region's table: for each chunk the share rule allows, when it was saved, how high it reaches and how deep it shows. */
-	private void tables(Session session, String dimension, Map<Long, Integer> regions) {
+	/** Sends a region's table: for each chunk the share rule allows, when it was saved, how high it reaches and how deep it shows. */
+	private void table(Session session, String dimension, long region, int known) {
 		ServerLevel level = this.levelOf(session, dimension);
 		if (level == null) {
 			return;
 		}
 		boolean generated = this.settings.land() == ShareSettings.Land.GENERATED;
-		for (Map.Entry<Long, Integer> asked : regions.entrySet()) {
-			if (this.stopped || session.player.hasDisconnected()) {
-				return;
-			}
-			int regionX = (int) (asked.getKey() >> 32);
-			int regionZ = (int) (long) asked.getKey();
-			RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated);
-			int newest = 0;
-			for (int saved : table.saved) {
-				newest = Math.max(newest, saved);
-			}
-			if (newest == asked.getValue()) {
-				// Nothing in it saved since the client's table.
-				continue;
-			}
-			int sentNewest = newest;
-			int sent = this.send(session, out -> {
-				out.writeByte(ShareProtocol.TABLES);
-				out.writeUTF(dimension);
-				out.writeInt(regionX);
-				out.writeInt(regionZ);
-				out.writeInt(sentNewest);
-				DeflaterOutputStream deflated = new DeflaterOutputStream(out);
-				DataOutputStream packed = new DataOutputStream(deflated);
-				for (int i = 0; i < 1024; i++) {
-					packed.writeInt(table.shared[i]);
-					if (table.shared[i] != 0) {
-						packed.writeShort(table.top[i]);
-						packed.writeShort(table.floor[i]);
-					}
-				}
-				packed.flush();
-				deflated.finish();
-			});
-			session.tableBytes += sent;
-			session.spent(sent);
+		int regionX = (int) (region >> 32);
+		int regionZ = (int) region;
+		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated);
+		int newest = 0;
+		for (int saved : table.saved) {
+			newest = Math.max(newest, saved);
 		}
+		if (newest == known) {
+			// Nothing in it saved since the client's table.
+			return;
+		}
+		int sentNewest = newest;
+		int sent = this.send(session, out -> {
+			out.writeByte(ShareProtocol.TABLES);
+			out.writeUTF(dimension);
+			out.writeInt(regionX);
+			out.writeInt(regionZ);
+			out.writeInt(sentNewest);
+			DeflaterOutputStream deflated = new DeflaterOutputStream(out);
+			DataOutputStream packed = new DataOutputStream(deflated);
+			for (int i = 0; i < 1024; i++) {
+				packed.writeInt(table.shared[i]);
+				if (table.shared[i] != 0) {
+					packed.writeShort(table.top[i]);
+					packed.writeShort(table.floor[i]);
+				}
+			}
+			packed.flush();
+			deflated.finish();
+		});
+		session.tableBytes += sent;
+		session.spent(sent);
 	}
 
 	/**
@@ -409,24 +438,30 @@ public final class ShareServer {
 		List<Long> wanted = times.entrySet().stream().filter(e -> e.getValue() != 0).map(Map.Entry::getKey).toList();
 		Map<Long, CompoundTag> tags = this.tags(level, tables, wanted);
 		this.batch = tags;
+		this.packer(level, tables).forgetIfOld();
 		try {
 			int packed = 0;
 			for (long chunk : chunks) {
 				int chunkX = (int) (chunk >> 32);
 				int chunkZ = (int) (long) chunk;
 				CompoundTag tag = tags.get(chunk);
+				int time = times.get(chunk);
+				if (tag == null && time != 0) {
+					// Shared, but it couldn't be read just now: no answer, so the client asks again.
+					continue;
+				}
 				byte[] body = tag != null && RegionTables.allowed(tag, generated) ? this.packer(level, tables).pack(chunkX, chunkZ, tag) : null;
 				if (body != null && body.length > ShareProtocol.MAX_CHUNK_BYTES) {
 					body = null;
 				}
 				byte[] sending = body;
-				int time = times.get(chunk);
 				int sent = this.send(session, out -> {
 					out.writeByte(ShareProtocol.CHUNKS);
 					out.writeUTF(dimension);
 					out.writeInt(chunkX);
 					out.writeInt(chunkZ);
-					out.writeInt(sending == null ? 0 : time);
+					// The save time even for a refusal: the client asks again once that changes.
+					out.writeInt(time);
 					out.writeInt(sending == null ? 0 : sending.length);
 					if (sending != null) {
 						out.write(sending);

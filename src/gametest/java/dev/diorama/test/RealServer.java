@@ -132,19 +132,26 @@ final class RealServer implements AutoCloseable {
 			ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
 			builder.environment().put("REAL_SERVER_PROPERTIES", properties);
 			Process process = builder.start();
-			byte[] out = process.getInputStream().readAllBytes();
+			// Read on the side, so a helper that hangs with its output open still hits the deadline.
+			java.util.concurrent.CompletableFuture<byte[]> out = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+				try {
+					return process.getInputStream().readAllBytes();
+				} catch (IOException e) {
+					return new byte[0];
+				}
+			});
 			if (!process.waitFor(seconds, TimeUnit.SECONDS)) {
 				process.destroyForcibly();
 				throw new AssertionError(String.join(" ", command) + " took over " + seconds + " s");
 			}
-			String text = new String(out, StandardCharsets.UTF_8);
+			String text = new String(out.get(30, TimeUnit.SECONDS), StandardCharsets.UTF_8);
 			Diorama.LOGGER.info("{}: exit {}\n{}", String.join(" ", command), process.exitValue(), text);
 			if (process.exitValue() != 0) {
 				throw new AssertionError(String.join(" ", command) + " failed (" + process.exitValue() + "): " + text);
 			}
 			return text;
-		} catch (IOException e) {
-			throw new AssertionError(e);
+		} catch (IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+			throw new AssertionError(String.join(" ", command) + " left its output open after it ended", e);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new AssertionError(e);

@@ -141,6 +141,10 @@ final class SharedMapTest {
 				if (both < 1000) {
 					throw new AssertionError("Too few pixels drawn both ways to compare: " + both);
 				}
+				// The GPU baker draws a hair differently from run to run (0.24 measured); a seam would be far more.
+				if (mean > 1.0 || far > both / 1000) {
+					throw new AssertionError("Shared land is drawn differently from the player's own: mean difference " + mean + "/255, " + far + " pixels over 16");
+				}
 				context.setScreen(() -> null);
 			}
 		}
