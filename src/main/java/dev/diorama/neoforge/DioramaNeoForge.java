@@ -15,6 +15,7 @@ import dev.diorama.XaeroChannels;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
+import dev.diorama.share.ShareClient;
 //? if >=1.21.6 {
 import dev.diorama.render.DioramaPipelines;
 //?}
@@ -47,13 +48,16 @@ import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 /**
- * Diorama's entrypoint on NeoForge: what {@code dev.diorama.fabric.DioramaFabric} does on Fabric,
- * through NeoForge's events. Only the NeoForge jars contain this package.
+ * Diorama's entrypoint on the client on NeoForge: what {@code dev.diorama.fabric.DioramaFabric}
+ * does on Fabric, through NeoForge's events. {@link DioramaNeoForgeCommon} runs on both sides.
+ * Only the NeoForge jars contain this package.
  */
 @Mod(value = Diorama.MOD_ID, dist = Dist.CLIENT)
 public final class DioramaNeoForge {
 	public DioramaNeoForge(IEventBus modBus, ModContainer container) {
 		DioramaClient.init();
+		// The channel itself is DioramaNeoForgeCommon's.
+		ShareClient.init();
 		// The mod list's Config button opens the map settings.
 		container.registerExtensionPoint(IConfigScreenFactory.class, (mod, parent) -> new SettingsScreen(parent));
 		// The settings file sits in the game directory, and from NeoForge 21.5 mods are constructed
@@ -101,6 +105,7 @@ public final class DioramaNeoForge {
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
+			ShareClient.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
@@ -115,6 +120,7 @@ public final class DioramaNeoForge {
 			// Mods sync block ids from the server before this, which can number block states differently.
 			BlockLooks.invalidate();
 			XaeroChannels.onJoinOrLeave();
+			ShareClient.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
