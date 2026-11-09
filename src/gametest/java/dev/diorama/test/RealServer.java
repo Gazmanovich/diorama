@@ -55,6 +55,27 @@ final class RealServer implements AutoCloseable {
 		run(List.of("bash", this.script, "cmd", this.node, command), "", 30);
 	}
 
+	/**
+	 * Runs a console command and waits until the console says {@code done} once more than it had,
+	 * for commands like {@code save-all flush} that hold the server for a while on a slow machine.
+	 */
+	void commandAndWait(String command, String done, int seconds) {
+		long before = this.console().lines().filter(line -> line.contains(done)).count();
+		this.command(command);
+		long deadline = System.currentTimeMillis() + seconds * 1000L;
+		while (this.console().lines().filter(line -> line.contains(done)).count() <= before) {
+			if (System.currentTimeMillis() > deadline) {
+				throw new AssertionError("The server never said \"" + done + "\" after " + command);
+			}
+			try {
+				Thread.sleep(500);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new AssertionError(e);
+			}
+		}
+	}
+
 	/** The server's console output so far. */
 	String console() {
 		try {
@@ -70,6 +91,15 @@ final class RealServer implements AutoCloseable {
 	 */
 	String vanillaPlayer(String name, int seconds) {
 		return run(List.of("bash", this.script, "vanilla", this.node, name, Integer.toString(seconds)), "", seconds + 900);
+	}
+
+	/** As {@link #vanillaPlayer}, but staying until {@link #vanillaPlayerLeaves}, for the console to move them about. */
+	void vanillaPlayerJoins(String name) {
+		run(List.of("bash", this.script, "vanilla-start", this.node, name), "", 960);
+	}
+
+	void vanillaPlayerLeaves(String name) {
+		run(List.of("bash", this.script, "vanilla-stop", this.node, name), "", 120);
 	}
 
 	@Override

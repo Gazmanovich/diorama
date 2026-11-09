@@ -50,6 +50,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		// The payload type is registered on both sides, in DioramaFabricCommon.
 		//? if >=1.21 {
 		ClientPlayNetworking.registerGlobalReceiver(ShareProtocol.TYPE, (packet, context) -> ShareProtocol.toClient(packet.data()));
+		ShareProtocol.toServer(data -> ClientPlayNetworking.send(new ShareProtocol.Packet(data)));
 		//?} else {
 		/*ClientPlayNetworking.registerGlobalReceiver(ShareProtocol.CHANNEL, (client, handler, buf, sender) -> {
 			// Read here: the buffer is only good until this returns. Handled on the client thread,
@@ -60,6 +61,11 @@ public final class DioramaFabric implements ClientModInitializer {
 					ShareProtocol.toClient(data);
 				}
 			});
+		});
+		ShareProtocol.toServer(data -> {
+			net.minecraft.network.FriendlyByteBuf buf = net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create();
+			buf.writeBytes(data);
+			ClientPlayNetworking.send(ShareProtocol.CHANNEL, buf);
 		});
 		*///?}
 		for (KeyMapping keyMapping : DioramaClient.KEY_MAPPINGS) {

@@ -29,11 +29,36 @@ public final class ShareProtocol {
 
 	/** Server to client: the server's {@link ShareSettings}, sent as the player joins. */
 	public static final int SETTINGS = 0;
+	/**
+	 * Client to server: which regions does the level have? Its dimension. Server to client, the
+	 * answer: the dimension, a count, and each region's x and z.
+	 */
+	public static final int REGIONS = 1;
+	/**
+	 * Client to server: these regions' tables. The dimension, a count, each region's x and z. Server
+	 * to client, one message a region: the dimension, its x and z, then deflated, for each of its
+	 * 1,024 chunks ({@code (z << 5) | x}) when the save wrote it if it's shared, else 0, and for a
+	 * shared one how high it reaches and how deep its sky view goes, as shorts.
+	 */
+	public static final int TABLES = 2;
+	/**
+	 * Client to server: these chunks. The dimension, whether they come before what's waiting, a
+	 * count, each chunk's x and z, most wanted first. Server to client, one message a chunk: the
+	 * dimension, its x and z, when it was saved, and the packed chunk's length and bytes; a length
+	 * of 0 if it isn't shared.
+	 */
+	public static final int CHUNKS = 3;
+	/** The most chunks one ask names, so it fits in a message to the server. */
+	public static final int MAX_ASK = 3000;
+	/** The biggest packed chunk sent; one past it is said not to be shared. */
+	public static final int MAX_CHUNK_BYTES = 1 << 19;
 
 	/** Where messages from the server go on the client; the client's entrypoint sets it. */
 	private static volatile @Nullable Consumer<byte[]> client;
 	/** How the server half sends; the loader's common entrypoint sets it. */
 	private static volatile @Nullable BiConsumer<ServerPlayer, byte[]> sender;
+	/** How the client sends to the server; the client's entrypoint sets it. */
+	private static volatile @Nullable Consumer<byte[]> serverSender;
 
 	private ShareProtocol() {
 	}
@@ -70,6 +95,24 @@ public final class ShareProtocol {
 	/** Sets where the server's messages go on this client. */
 	public static void onClient(Consumer<byte[]> receiver) {
 		client = receiver;
+	}
+
+	/** Sets how the client sends to the server. */
+	public static void toServer(Consumer<byte[]> send) {
+		serverSender = send;
+	}
+
+	/** Sends a message to the server, which has the channel. Client thread. */
+	public static void sendToServer(byte[] data) {
+		Consumer<byte[]> send = serverSender;
+		if (send != null) {
+			send.accept(data);
+		}
+	}
+
+	/** A chunk's x and z in one long, as the server queues them. */
+	public static long chunkKey(int chunkX, int chunkZ) {
+		return ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 	}
 
 	/** Sets how the server half sends to a player. */

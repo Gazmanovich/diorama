@@ -9,6 +9,7 @@ import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.SavedChunkImport;
+import dev.diorama.share.ShareClient;
 import dev.diorama.waypoint.Portals;
 import dev.diorama.waypoint.WaypointStore;
 import java.nio.file.Path;
@@ -496,16 +497,23 @@ public final class MapSession {
 	 */
 	private void updateSavedChunks(Minecraft mc) {
 		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
+		boolean singleplayer = mc.getSingleplayerServer() != null;
 		if (this.relight == null) {
-			this.relight = mc.getSingleplayerServer() != null && SavedChunkImport.needsRelight(this.map, this.level);
+			this.relight = singleplayer && SavedChunkImport.needsRelight(this.map, this.level);
 		}
 		// Only for the relighting: done once it has gone through the save.
 		if (this.relight && !fill && this.map.memory() == null && this.savedChunks != null && this.savedChunks.idle()) {
 			this.relight = false;
 		}
-		boolean on = (fill || this.map.memory() != null || this.relight) && mc.getSingleplayerServer() != null;
+		// On a server with Diorama, the land it shares, which only fills in.
+		boolean on = singleplayer ? fill || this.map.memory() != null || this.relight : fill && ShareClient.sharing();
 		if (on && this.savedChunks == null) {
-			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
+			this.savedChunks = singleplayer
+				? SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll)
+				: SavedChunkImport.startShared(this.map, this.level, this.savedPortals::addAll);
+			if (this.savedChunks == null) {
+				return;
+			}
 		} else if (!on && this.savedChunks != null) {
 			this.savedChunks.stop();
 			this.savedChunks = null;

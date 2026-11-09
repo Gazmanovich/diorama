@@ -1691,7 +1691,7 @@ public final class MapLevel implements ChunkSource {
 				if (result != null && !result.declined()) {
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
 				}
-			} catch (BlockLooks.StatesRenumbered e) {
+			} catch (BlockLooks.StatesRenumbered | dev.diorama.data.ChunkSave.Late e) {
 				throw e;
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Failed to mesh tile {} from the save; tracing it", key, e);

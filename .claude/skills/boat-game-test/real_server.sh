@@ -8,6 +8,8 @@
 #        real_server.sh cmd <node> <command...>     a console command
 #        real_server.sh stop <node>                 stop it and wait
 #        real_server.sh vanilla <node> <name> <seconds> the vanilla client joins, stays, leaves
+#        real_server.sh vanilla-start <node> <name>     the vanilla client joins and stays, for the console to move about
+#        real_server.sh vanilla-stop <node> <name>      it leaves
 # Prints the port on start. The world, the logs and the server's console are in ~/real-servers/<node>/.
 set -u
 action=$1
@@ -172,6 +174,15 @@ cmd() {
 }
 
 stop() {
+	# A test that failed before its vanilla player left leaves the helper waiting: it goes too.
+	for helper in "$root"/vanilla-*.pid; do
+		[ -e "$helper" ] || continue
+		# Only if that process is still the helper: a reused VM can give its number to another.
+		if grep -q vanilla_client.py "/proc/$(cat "$helper")/cmdline" 2>/dev/null; then
+			kill "$(cat "$helper")" 2>/dev/null
+		fi
+		rm -f "$helper"
+	done
 	running || return 0
 	cmd stop
 	for _ in $(seq 1 120); do
@@ -196,10 +207,48 @@ vanilla() {
 	python3 "$(dirname "$0")/vanilla_client.py" "$mc" "$(java_home)/bin/java" "$name" "127.0.0.1:$port" "$root/console.log" "$seconds"
 }
 
+# The same, staying until vanilla-stop: returns once it has joined.
+vanilla_start() {
+	local name=$1
+	local log="$root/vanilla-$name.log"
+	# Emptied first: an earlier run's log on a reused VM would say she joined already.
+	: > "$log"
+	nohup python3 "$(dirname "$0")/vanilla_client.py" "$mc" "$(java_home)/bin/java" "$name" "127.0.0.1:$port" "$root/console.log" 36000 > "$log" 2>&1 &
+	echo $! > "$root/vanilla-$name.pid"
+	for _ in $(seq 1 900); do
+		if grep -q "joined after" "$log"; then
+			cat "$log"
+			return 0
+		fi
+		if ! kill -0 "$(cat "$root/vanilla-$name.pid")" 2>/dev/null; then
+			cat "$log"
+			exit 1
+		fi
+		sleep 1
+	done
+	cat "$log"
+	exit 1
+}
+
+vanilla_stop() {
+	local pid
+	pid=$(cat "$root/vanilla-$1.pid" 2>/dev/null) || return 0
+	rm -f "$root/vanilla-$1.pid"
+	grep -q vanilla_client.py "/proc/$pid/cmdline" 2>/dev/null || return 0
+	kill "$pid" 2>/dev/null
+	for _ in $(seq 1 60); do
+		kill -0 "$pid" 2>/dev/null || return 0
+		sleep 1
+	done
+	kill -9 "$pid" 2>/dev/null
+}
+
 case $action in
 	start) start "$1" ;;
 	cmd) cmd "$@" ;;
 	stop) stop ;;
 	vanilla) vanilla "$1" "$2" ;;
+	vanilla-start) vanilla_start "$1" ;;
+	vanilla-stop) vanilla_stop "$1" ;;
 	*) echo "unknown action $action" >&2; exit 2 ;;
 esac

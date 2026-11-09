@@ -53,6 +53,13 @@ final class DioramaForgeClient {
 		DioramaClient.init();
 		// The channel itself is DioramaForge's.
 		ShareClient.init();
+		dev.diorama.share.ShareProtocol.toServer(data -> {
+			net.minecraft.client.multiplayer.ClientPacketListener connection = Minecraft.getInstance().getConnection();
+			if (connection != null) {
+				net.minecraft.network.FriendlyByteBuf buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(data));
+				connection.send(new net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket(dev.diorama.share.ShareProtocol.CHANNEL, buf));
+			}
+		});
 		// The mod list's Config button opens the map settings.
 		ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class,
 			() -> new ConfigScreenHandler.ConfigScreenFactory((mc, parent) -> new SettingsScreen(parent)));

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -95,6 +96,8 @@ def main():
     started = time.time()
     with open(log, 'w') as out:
         process = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, cwd=game)
+    # Stopped from outside (real_server.sh vanilla-stop): the client goes too.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         joined = None
         while time.time() - started < 600:
@@ -111,7 +114,7 @@ def main():
             print(f'{name} never joined the server')
             print(log.read_text(errors='replace')[-4000:])
             return 1
-        print(f'{name} joined after {time.time() - started:.0f} s')
+        print(f'{name} joined after {time.time() - started:.0f} s', flush=True)
         time.sleep(float(seconds))
         after = Path(console).read_text(errors='replace')[joined:]
         gone = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(name)} (lost connection|left the game)')
