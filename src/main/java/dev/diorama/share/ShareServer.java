@@ -367,7 +367,8 @@ public final class ShareServer {
 	/** The level a player asked about, if it's the one they're in. */
 	private @Nullable ServerLevel levelOf(Session session, String dimension) {
 		ServerLevel level = (ServerLevel) session.player.level();
-		return level.dimension().identifier().toString().equals(dimension) ? level : null;
+		// Under a roof the map's view is a cave view, and caves stay each player's own.
+		return level.dimension().identifier().toString().equals(dimension) && !level.dimensionType().hasCeiling() ? level : null;
 	}
 
 	private RegionTables tables(ServerLevel level) {
@@ -422,17 +423,22 @@ public final class ShareServer {
 			out.writeInt(regionX);
 			out.writeInt(regionZ);
 			out.writeInt(sentNewest);
-			DeflaterOutputStream deflated = new DeflaterOutputStream(out);
-			DataOutputStream packed = new DataOutputStream(deflated);
-			for (int i = 0; i < 1024; i++) {
-				packed.writeInt(table.shared[i]);
-				if (table.shared[i] != 0) {
-					packed.writeShort(table.top[i]);
-					packed.writeShort(table.floor[i]);
+			java.util.zip.Deflater deflater = new java.util.zip.Deflater();
+			try {
+				DeflaterOutputStream deflated = new DeflaterOutputStream(out, deflater);
+				DataOutputStream packed = new DataOutputStream(deflated);
+				for (int i = 0; i < 1024; i++) {
+					packed.writeInt(table.shared[i]);
+					if (table.shared[i] != 0) {
+						packed.writeShort(table.top[i]);
+						packed.writeShort(table.floor[i]);
+					}
 				}
+				packed.flush();
+				deflated.finish();
+			} finally {
+				deflater.end();
 			}
-			packed.flush();
-			deflated.finish();
 		});
 		session.tableBytes += sent;
 		session.spent(sent);
