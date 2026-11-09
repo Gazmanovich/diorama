@@ -41,8 +41,8 @@ location /map/ {
 
 For operators:
 
-- `/diorama webmap status` says what it's doing.
-- `/diorama webmap redraw` draws everything again.
+- `/diorama-web status` says what it's doing.
+- `/diorama-web redraw` draws everything again.
 
 Changing `share-land` redraws the whole map by itself the next time the server starts.
 

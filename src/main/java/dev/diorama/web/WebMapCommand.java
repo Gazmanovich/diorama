@@ -6,22 +6,23 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 
 /**
- * {@code /diorama webmap status} and {@code /diorama webmap redraw}, for operators: what the web
- * map is doing, and drawing every tile again (after changing which land it shows, say).
+ * {@code /diorama-web status} and {@code /diorama-web redraw}, for operators: what the web map is
+ * doing, and drawing every tile again. Not under {@code /diorama}, which the client's own commands
+ * take (waypoint sharing): an operator with Diorama typing a server command there would reach the
+ * client's.
  */
 public final class WebMapCommand {
 	private WebMapCommand() {
 	}
 
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-		dispatcher.register(Commands.literal("diorama")
+		dispatcher.register(Commands.literal("diorama-web")
 			//? if >=1.21.11 {
 			.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
 			//?} else {
 			/*.requires(source -> source.hasPermission(2))
 			*///?}
-			.then(Commands.literal("webmap")
-				.then(Commands.literal("status").executes(context -> {
+			.then(Commands.literal("status").executes(context -> {
 					WebMap map = WebMap.get();
 					context.getSource().sendSuccess(() -> Component.literal(map == null
 						? "The web map is off (web-map in config/" + WebSettings.FILE + ")"
@@ -37,6 +38,6 @@ public final class WebMapCommand {
 					map.redrawAll();
 					context.getSource().sendSuccess(() -> Component.literal("Drawing the whole web map again"), true);
 					return 1;
-				}))));
+				})));
 	}
 }

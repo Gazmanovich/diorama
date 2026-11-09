@@ -36,13 +36,22 @@ public record WebSettings(boolean enabled, int port, String address, @Nullable P
 				return DEFAULTS;
 			}
 		}
-		if (!properties.containsKey("web-map")) {
+		// The web map's settings the file lacks, with what each means; ones the owner set stay.
+		StringBuilder missing = new StringBuilder();
+		for (String[] setting : SETTINGS) {
+			if (!properties.containsKey(setting[0])) {
+				missing.append('\n').append(setting[1]).append(setting[0]).append('=').append(setting[2]).append('\n');
+			}
+		}
+		if (!missing.isEmpty()) {
 			try {
 				Files.createDirectories(configFolder);
-				Files.writeString(file, (Files.exists(file) ? Files.readString(file, StandardCharsets.UTF_8) + "\n" : "") + TEXT, StandardCharsets.UTF_8);
+				Files.writeString(file, (Files.exists(file) ? Files.readString(file, StandardCharsets.UTF_8) : "") + missing, StandardCharsets.UTF_8);
 			} catch (IOException e) {
 				Diorama.LOGGER.warn("Couldn't add the web map settings to {}", file, e);
 			}
+		}
+		if (!properties.containsKey("web-map")) {
 			return DEFAULTS;
 		}
 		boolean enabled = properties.getProperty("web-map", "false").trim().equalsIgnoreCase("true");
@@ -64,20 +73,22 @@ public record WebSettings(boolean enabled, int port, String address, @Nullable P
 		return new WebSettings(enabled, port, address, folder, everyChunk);
 	}
 
-	private static final String TEXT = """
-		# The web map: this server draws its map, in vanilla colours, for anyone to see in a browser.
-		# Off unless set to true. It covers the same land as the shared map (share-land).
-		web-map=false
-
-		# The port of the web map's own web server, at http://<this server>:<port>/. Set it to 0
-		# to only write the map's files to web-map-folder, for a web server of your own to serve.
-		web-map-port=8100
-
-		# The address the web map's server listens on: empty for every address, or 127.0.0.1 to
-		# reach it only through a web server of your own on this machine.
-		web-map-address=
-
-		# Where the web map's files go. Empty: diorama-web in the world folder.
-		web-map-folder=
-		""";
+	/** Each of the web map's settings: its key, what it means, its default. */
+	private static final String[][] SETTINGS = {
+		{"web-map", """
+			# The web map: this server draws its map, in vanilla colours, for anyone to see in a browser.
+			# Off unless set to true. It covers the same land as the shared map (share-land).
+			""", "false"},
+		{"web-map-port", """
+			# The port of the web map's own web server, at http://<this server>:<port>/. Set it to 0
+			# to only write the map's files to web-map-folder, for a web server of your own to serve.
+			""", Integer.toString(DEFAULT_PORT)},
+		{"web-map-address", """
+			# The address the web map's server listens on: empty for every address, or 127.0.0.1 to
+			# reach it only through a web server of your own on this machine.
+			""", ""},
+		{"web-map-folder", """
+			# Where the web map's files go. Empty: diorama-web in the world folder.
+			""", ""},
+	};
 }

@@ -45,13 +45,13 @@ import org.jspecify.annotations.Nullable;
  * Off unless the owner turns it on ({@link WebSettings}); dedicated servers only.
  *
  * <p>The first pass draws every tile with land the shared map shows (by default, land players
- * spent time near: vanilla's inhabited time). After that, a pass starts when a region file says
- * one of its chunks was saved since the last one, and draws only the tiles those chunks reach
- * into; so a build shows once the server autosaves, with nothing to press. {@code /diorama
- * webmap redraw} draws everything again.
+ * spent time near: vanilla's inhabited time). After that, at most every 5 minutes, a pass draws
+ * the tiles of chunks the region files say were saved since the last pass with other blocks or
+ * biomes; so a build shows once the server has saved it, with nothing to press.
+ * {@code /diorama-web redraw} draws everything again.
  *
- * <p>Reads only the save, through the server's own storage thread, so it never touches loaded
- * chunks, and names no client class.
+ * <p>Reads only the region files ({@link ServerSave}), so it never touches loaded chunks or the
+ * server's storage thread, and names no client class.
  */
 public final class WebMap {
 	/** How often the region files are looked at for saved chunks between passes. */
@@ -81,7 +81,8 @@ public final class WebMap {
 	private final Thread thread;
 	private @Nullable WebServer http;
 	private volatile boolean stopping;
-	private volatile boolean redrawAll;
+	/** An operator asked to draw everything again; taken by the next pass. */
+	private final java.util.concurrent.atomic.AtomicBoolean redrawAll = new java.util.concurrent.atomic.AtomicBoolean();
 	/** A full redraw that didn't complete: done again at the next pass, after the usual wait. */
 	private boolean redrawOwed;
 	private volatile String status = "starting";
@@ -115,8 +116,9 @@ public final class WebMap {
 			return;
 		}
 		WebMap map = new WebMap(server, settings, table, modsFolder);
-		running = map;
-		map.start();
+		if (map.start()) {
+			running = map;
+		}
 	}
 
 	/** Stops the web map, if it runs. Server thread. */
@@ -133,7 +135,8 @@ public final class WebMap {
 		return running;
 	}
 
-	private void start() {
+	/** Starts drawing and serving; false (logged) if the folder can't be written. */
+	private boolean start() {
 		try {
 			Files.createDirectories(this.folder);
 			try (InputStream page = WebMap.class.getResourceAsStream("/diorama/web/index.html")) {
@@ -142,8 +145,8 @@ public final class WebMap {
 				}
 			}
 		} catch (IOException e) {
-			Diorama.LOGGER.warn("Diorama's web map can't write to {}", this.folder, e);
-			return;
+			Diorama.LOGGER.warn("Diorama's web map can't write to {}, so it doesn't start", this.folder, e);
+			return false;
 		}
 		if (this.settings.port() > 0) {
 			this.http = WebServer.start(this.folder, this.settings.address(), this.settings.port());
@@ -151,6 +154,7 @@ public final class WebMap {
 		this.thread.start();
 		Diorama.LOGGER.info("Diorama's web map is drawing into {}{}", this.folder,
 			this.http != null ? ", served at http://" + (this.settings.address().isEmpty() ? "<this server>" : this.settings.address()) + ":" + this.settings.port() + "/" : "");
+		return true;
 	}
 
 	private void stop() {
@@ -170,7 +174,7 @@ public final class WebMap {
 
 	/** Draws everything again, starting now. */
 	public void redrawAll() {
-		this.redrawAll = true;
+		this.redrawAll.set(true);
 		synchronized (this.wake) {
 			this.wake.notifyAll();
 		}
@@ -198,13 +202,12 @@ public final class WebMap {
 			String land = this.settings.everyChunk() ? "generated" : "visited";
 			if (!land.equals(progress.getProperty("share-land", land))) {
 				Diorama.LOGGER.info("share-land changed to {}: drawing the whole web map again", land);
-				this.redrawAll = true;
+				this.redrawAll.set(true);
 			} else {
 				progress.setProperty("share-land", land);
 			}
 			while (!this.stopping) {
-				boolean all = this.redrawAll || this.redrawOwed;
-				this.redrawAll = false;
+				boolean all = this.redrawAll.getAndSet(false) || this.redrawOwed;
 				this.redrawOwed = false;
 				long passStarted = System.currentTimeMillis();
 				boolean complete = true;
@@ -248,7 +251,7 @@ public final class WebMap {
 	 * dimension's last pass; or until a redraw is asked for.
 	 */
 	private void waitForChanges(Properties progress, long notBefore) {
-		while (!this.stopping && !this.redrawAll) {
+		while (!this.stopping && !this.redrawAll.get()) {
 			long wait = Math.max(CHECK_MS, notBefore - System.currentTimeMillis());
 			synchronized (this.wake) {
 				try {
@@ -257,7 +260,7 @@ public final class WebMap {
 					return;
 				}
 			}
-			if (this.stopping || this.redrawAll || System.currentTimeMillis() < notBefore) {
+			if (this.stopping || this.redrawAll.get() || System.currentTimeMillis() < notBefore) {
 				continue;
 			}
 			if (this.redrawOwed) {
@@ -315,7 +318,7 @@ public final class WebMap {
 	}
 
 	boolean stopping() {
-		return this.stopping || this.redrawAll;
+		return this.stopping || this.redrawAll.get();
 	}
 
 	void setStatus(String status) {
@@ -524,6 +527,8 @@ public final class WebMap {
 		long pass(TableLooks looks, long last) {
 			long started = System.currentTimeMillis() / 1000;
 			long wallStart = System.nanoTime();
+			// Read before the headers: a header that can't be read counts as a failed read too.
+			int failedReads = this.save.failedReads();
 			Map<Long, int[]> regions = this.save.scan();
 			this.source.clear();
 			Set<Long> dirty = new HashSet<>();
@@ -532,7 +537,6 @@ public final class WebMap {
 				dirty.addAll(this.tiles[0]);
 			}
 			boolean failed = false;
-			int failedReads = this.save.failedReads();
 			int changed = 0;
 			int counted = 0;
 			for (Map.Entry<Long, int[]> region : regions.entrySet()) {
@@ -552,6 +556,13 @@ public final class WebMap {
 					changed++;
 					ServerSave.Info info = this.save.info(chunkX, chunkZ);
 					if (info == null || !info.summary().finished() || !this.map.settings.everyChunk() && info.inhabited() <= 0) {
+						// No longer on the map (reset, trimmed): where it was drawn is drawn again.
+						Drawn gone = this.drawn.remove(ChunkSnapshot.key(chunkX, chunkZ));
+						if (gone != null) {
+							this.markTiles(chunkX, chunkZ, gone.top(), gone.floor(), dirty);
+						} else if (wasShown) {
+							this.markTiles(chunkX, chunkZ, this.level.getMaxY(), this.level.getMinY(), dirty);
+						}
 						continue;
 					}
 					ChunkTags.Summary summary = info.summary();
@@ -729,18 +740,24 @@ public final class WebMap {
 				}
 				below = here;
 			}
-			// The map got smaller (land it no longer shows): the levels over the new top go.
+			// The map got smaller (land it no longer shows): the levels over the new top go. One that
+			// can't be deleted stays listed, and is tried again next pass.
+			int kept = levels;
 			for (int zoom = levels; zoom < this.zoomLevels && zoom <= MAX_ZOOM; zoom++) {
-				for (long key : this.tiles[zoom]) {
+				for (java.util.Iterator<Long> it = this.tiles[zoom].iterator(); it.hasNext();) {
+					long key = it.next();
 					try {
 						Files.deleteIfExists(WebTiles.file(this.folder, zoom, (int) (key >> 32), (int) key));
+						it.remove();
 					} catch (IOException e) {
 						failed = true;
 					}
 				}
-				this.tiles[zoom].clear();
+				if (!this.tiles[zoom].isEmpty()) {
+					kept = zoom + 1;
+				}
 			}
-			this.zoomLevels = levels;
+			this.zoomLevels = kept;
 			return failed ? -1 : bytes;
 		}
 

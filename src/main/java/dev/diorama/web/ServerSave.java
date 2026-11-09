@@ -257,7 +257,7 @@ final class ServerSave implements ChunkSave {
 	}
 
 	/** A region file's chunk save times, from its header: 4 KiB of locations, then 4 KiB of times. */
-	private static int @Nullable [] readHeader(Path file) {
+	private int @Nullable [] readHeader(Path file) {
 		try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
 			ByteBuffer header = ByteBuffer.allocate(8192);
 			while (header.hasRemaining() && channel.read(header) >= 0) {
@@ -275,6 +275,8 @@ final class ServerSave implements ChunkSave {
 			}
 			return times;
 		} catch (IOException e) {
+			// Its chunks weren't seen: the pass reads again later.
+			this.failedReads.incrementAndGet();
 			Diorama.LOGGER.warn("Couldn't read the region file header of {}", file, e);
 			return null;
 		}
