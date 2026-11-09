@@ -12,6 +12,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,8 @@ public final class ShareServer {
 	private static final int MAX_WAITING = 16384;
 	/** How long a read waits for the server's storage or its thread. */
 	private static final long READ_SECONDS = 30;
+	/** Chunks read at once: one trip to the server thread for the loaded ones, the rest read together. */
+	private static final int BATCH = 16;
 	private static volatile @Nullable ShareServer running;
 
 	private final MinecraftServer server;
@@ -56,6 +59,8 @@ public final class ShareServer {
 	/** The share worker's own from here on. */
 	private final Map<ServerLevel, RegionTables> tables = new HashMap<>();
 	private final Map<ServerLevel, ChunkPacker> packers = new HashMap<>();
+	/** The tags of the chunks being sent, for the packer's neighbours. */
+	private Map<Long, CompoundTag> batch = Map.of();
 	private final Thread worker;
 	private final Object wake = new Object();
 	private volatile boolean stopped;
@@ -217,18 +222,21 @@ public final class ShareServer {
 			}
 		}
 
-		/** The next chunk to send, if the allowance has room. */
-		synchronized @Nullable Long nextChunk() {
+		/** The next chunks to send, up to {@code most}, if the allowance has room. */
+		synchronized List<Long> nextChunks(int most) {
 			long now = System.nanoTime();
 			this.allowance = Math.min(this.bytesPerSecond, this.allowance + (now - this.refilledAt) / 1e9 * this.bytesPerSecond);
 			this.refilledAt = now;
-			if (this.allowance <= 0 || this.chunks.isEmpty()) {
-				return null;
+			List<Long> next = new ArrayList<>(most);
+			if (this.allowance <= 0) {
+				return next;
 			}
 			var it = this.chunks.iterator();
-			Long chunk = it.next();
-			it.remove();
-			return chunk;
+			while (it.hasNext() && next.size() < most) {
+				next.add(it.next());
+				it.remove();
+			}
+			return next;
 		}
 
 		synchronized String dimension() {
@@ -261,9 +269,9 @@ public final class ShareServer {
 						busy = true;
 						continue;
 					}
-					Long chunk = session.nextChunk();
-					if (chunk != null) {
-						this.serve(session, chunk);
+					List<Long> chunks = session.nextChunks(BATCH);
+					if (!chunks.isEmpty()) {
+						this.serve(session, chunks);
 						busy = true;
 					}
 				}
@@ -366,55 +374,116 @@ public final class ShareServer {
 		}
 	}
 
-	/** Sends one chunk, or says it's not shared. */
-	private void serve(Session session, long chunk) {
+	/**
+	 * Sends a few chunks, or says they're not shared: those loaded right now copied in one trip to
+	 * the server thread, the rest read from the save all at once.
+	 */
+	private void serve(Session session, List<Long> chunks) {
 		long start = System.nanoTime();
 		String dimension = session.dimension();
 		ServerLevel level = this.levelOf(session, dimension);
 		if (level == null) {
 			return;
 		}
-		int chunkX = (int) (chunk >> 32);
-		int chunkZ = (int) (long) chunk;
 		boolean generated = this.settings.land() == ShareSettings.Land.GENERATED;
 		RegionTables tables = this.tables(level);
-		RegionTables.Table table = tables.table(chunkX >> 5, chunkZ >> 5, generated);
-		int index = ((chunkZ & 31) << 5) | (chunkX & 31);
-		byte[] packed = null;
-		int time = table.shared[index];
-		if (time != 0) {
-			CompoundTag tag = this.tag(level, tables, chunkX, chunkZ);
-			if (tag != null && RegionTables.allowed(tag, generated)) {
-				packed = this.packer(level, tables).pack(chunkX, chunkZ, tag);
-			}
-			if (packed != null && packed.length > ShareProtocol.MAX_CHUNK_BYTES) {
-				packed = null;
-			}
+		Map<Long, Integer> times = new LinkedHashMap<>();
+		for (long chunk : chunks) {
+			int chunkX = (int) (chunk >> 32);
+			int chunkZ = (int) (long) chunk;
+			times.put(chunk, tables.table(chunkX >> 5, chunkZ >> 5, generated).shared[((chunkZ & 31) << 5) | (chunkX & 31)]);
 		}
-		byte[] body = packed;
-		int sent = this.send(session, out -> {
-			out.writeByte(ShareProtocol.CHUNKS);
-			out.writeUTF(dimension);
-			out.writeInt(chunkX);
-			out.writeInt(chunkZ);
-			out.writeInt(body == null ? 0 : time);
-			out.writeInt(body == null ? 0 : body.length);
-			if (body != null) {
-				out.write(body);
+		List<Long> wanted = times.entrySet().stream().filter(e -> e.getValue() != 0).map(Map.Entry::getKey).toList();
+		Map<Long, CompoundTag> tags = this.tags(level, tables, wanted);
+		this.batch = tags;
+		try {
+			int packed = 0;
+			for (long chunk : chunks) {
+				int chunkX = (int) (chunk >> 32);
+				int chunkZ = (int) (long) chunk;
+				CompoundTag tag = tags.get(chunk);
+				byte[] body = tag != null && RegionTables.allowed(tag, generated) ? this.packer(level, tables).pack(chunkX, chunkZ, tag) : null;
+				if (body != null && body.length > ShareProtocol.MAX_CHUNK_BYTES) {
+					body = null;
+				}
+				byte[] sending = body;
+				int time = times.get(chunk);
+				int sent = this.send(session, out -> {
+					out.writeByte(ShareProtocol.CHUNKS);
+					out.writeUTF(dimension);
+					out.writeInt(chunkX);
+					out.writeInt(chunkZ);
+					out.writeInt(sending == null ? 0 : time);
+					out.writeInt(sending == null ? 0 : sending.length);
+					if (sending != null) {
+						out.write(sending);
+					}
+				});
+				session.spent(sent);
+				if (body == null) {
+					session.refused++;
+				} else {
+					session.sentChunks++;
+					session.sentBytes += sent;
+					packed++;
+				}
 			}
-		});
-		session.spent(sent);
-		if (body == null) {
-			session.refused++;
-		} else {
-			session.sentChunks++;
-			session.sentBytes += sent;
-			session.workNanos += System.nanoTime() - start;
+			if (packed > 0) {
+				session.workNanos += System.nanoTime() - start;
+			}
+		} finally {
+			this.batch = Map.of();
 		}
 	}
 
+	/** The chunks' tags, brought up to this version: loaded ones as they are now, the rest as saved. */
+	private Map<Long, CompoundTag> tags(ServerLevel level, RegionTables tables, List<Long> chunks) {
+		Map<Long, CompoundTag> tags = new HashMap<>();
+		if (chunks.isEmpty()) {
+			return tags;
+		}
+		try {
+			Map<Long, Object> copies = this.server.submit(() -> {
+				Map<Long, Object> loaded = new HashMap<>();
+				for (long chunk : chunks) {
+					LevelChunk found = level.getChunkSource().getChunkNow((int) (chunk >> 32), (int) (long) chunk);
+					if (found != null) {
+						loaded.put(chunk, copy(level, found));
+					}
+				}
+				return loaded;
+			}).get(READ_SECONDS, TimeUnit.SECONDS);
+			Map<Long, CompletableFuture<java.util.Optional<CompoundTag>>> reads = new LinkedHashMap<>();
+			for (long chunk : chunks) {
+				if (!copies.containsKey(chunk)) {
+					reads.put(chunk, tables.readLater(new ChunkPos((int) (chunk >> 32), (int) (long) chunk)));
+				}
+			}
+			for (Map.Entry<Long, Object> copy : copies.entrySet()) {
+				tags.put(copy.getKey(), written(copy.getValue()));
+			}
+			for (Map.Entry<Long, CompletableFuture<java.util.Optional<CompoundTag>>> read : reads.entrySet()) {
+				java.util.Optional<CompoundTag> saved = read.getValue().get(READ_SECONDS, TimeUnit.SECONDS);
+				if (saved.isPresent()) {
+					tags.put(read.getKey(), tables.upgrade(saved.get()));
+				}
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		} catch (Exception e) {
+			if (!this.stopped) {
+				Diorama.LOGGER.warn("Couldn't read {} chunks to share them", chunks.size(), e);
+			}
+		}
+		return tags;
+	}
+
 	private ChunkPacker packer(ServerLevel level, RegionTables tables) {
-		return this.packers.computeIfAbsent(level, l -> new ChunkPacker(l, tables.tags(), (x, z) -> this.tag(l, tables, x, z)));
+		return this.packers.computeIfAbsent(level, l -> new ChunkPacker(l, tables.tags(), (x, z) -> {
+			// A neighbour in the same batch is already here.
+			CompoundTag known = this.batch.get(ShareProtocol.chunkKey(x, z));
+			return known != null ? known : this.tag(l, tables, x, z);
+		}));
 	}
 
 	/**

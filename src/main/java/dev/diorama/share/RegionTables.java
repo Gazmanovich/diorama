@@ -206,6 +206,16 @@ final class RegionTables {
 		table.visited[index] = Nbt.longValue(tag, "InhabitedTime") > 0;
 	}
 
+	/** Starts reading a chunk as saved, on the server's storage thread. */
+	CompletableFuture<Optional<CompoundTag>> readLater(ChunkPos pos) {
+		return this.chunkMap.read(pos);
+	}
+
+	/** A saved tag brought up to this version. */
+	CompoundTag upgrade(CompoundTag tag) {
+		return ((ChunkMapInvoker) this.chunkMap).diorama$upgrade(tag);
+	}
+
 	/** The chunk as saved, brought up to this version, or null if the save has none. Blocks. */
 	@Nullable CompoundTag read(ChunkPos pos) throws Exception {
 		Optional<CompoundTag> read = this.chunkMap.read(pos).get(READ_SECONDS, TimeUnit.SECONDS);
