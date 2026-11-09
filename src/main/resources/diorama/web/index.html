@@ -281,11 +281,15 @@ function paint() {
 			const finer = [];
 			for (let j = 0; j < i; j++) for (const [, f] of drawn[j]) if (f[0] < r[0] + r[2] && f[0] + f[2] > r[0] && f[1] < r[1] + r[3] && f[1] + f[3] > r[1]) finer.push(f);
 			if (finer.length) {
+				// One clip per finer picture: clips add up as an intersection, so this leaves out where
+				// any of them is (one path with them all would put back where two overlap).
 				ctx.save();
-				ctx.beginPath();
-				ctx.rect(r[0], r[1], r[2], r[3]);
-				for (const f of finer) ctx.rect(f[0], f[1], f[2], f[3]);
-				ctx.clip("evenodd");
+				for (const f of finer) {
+					ctx.beginPath();
+					ctx.rect(r[0], r[1], r[2], r[3]);
+					ctx.rect(f[0], f[1], f[2], f[3]);
+					ctx.clip("evenodd");
+				}
 			}
 			ctx.drawImage(img, r[0], r[1], r[2], r[3]);
 			if (finer.length) ctx.restore();
@@ -650,17 +654,23 @@ const clouds = (() => {
 				let ctx = null;
 				onmessage = async e => {
 					const { job, bitmap, size, bg } = e.data;
-					if (!ctx || ctx.canvas.width !== size) ctx = new OffscreenCanvas(size, size).getContext("2d", { willReadFrequently: true });
-					ctx.clearRect(0, 0, size, size);
-					ctx.drawImage(bitmap, 0, 0, size, size);
-					bitmap.close();
-					const data = ctx.getImageData(0, 0, size, size);
-					const out = cut(data.data, size, bg);
-					const picture = await createImageBitmap(data);
-					postMessage({ job, out, picture }, [out.buffer, picture]);
+					try {
+						if (!ctx || ctx.canvas.width !== size) ctx = new OffscreenCanvas(size, size).getContext("2d", { willReadFrequently: true });
+						ctx.clearRect(0, 0, size, size);
+						ctx.drawImage(bitmap, 0, 0, size, size);
+						const data = ctx.getImageData(0, 0, size, size);
+						const out = cut(data.data, size, bg);
+						const picture = await createImageBitmap(data);
+						postMessage({ job, out, picture }, [out.buffer, picture]);
+					} catch (err) {
+						postMessage({ job, failed: true });
+					} finally {
+						bitmap.close();
+					}
 				};`;
 			reader = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
-			reader.onmessage = e => { const w = waiting.get(e.data.job); waiting.delete(e.data.job); if (w) w.resolve(e.data); };
+			// A picture the worker couldn't do is done on the page's thread instead.
+			reader.onmessage = e => { const w = waiting.get(e.data.job); waiting.delete(e.data.job); if (w) { if (e.data.failed) w.reject(); else w.resolve(e.data); } };
 			// A worker that fails: what it had, and everything after, done on the page's thread.
 			reader.onerror = () => { reader = null; for (const w of waiting.values()) w.reject(); waiting.clear(); };
 		} catch (e) { reader = null; }
