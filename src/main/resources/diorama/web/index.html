@@ -220,7 +220,6 @@ function paint() {
 	ctx.fillStyle = map ? map.background : "#15171c";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 	if (!map || !dim) return;
-	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	const z = zoomFor(view.scale);
 	const left = view.u - w / 2 / view.scale, top = view.v - h / 2 / view.scale;
 	// Two levels coarser first: a handful of pictures fill the screen at once, blurred, while the
@@ -238,18 +237,23 @@ function paint() {
 	wantedList = list;
 	startLoads();
 
+	// Each picture from one whole screen pixel to another, a picture's edge where its neighbour's
+	// starts: an edge part-way across a pixel is drawn half see-through, and what's under it shows
+	// as a thin line between the pictures.
+	const k = view.scale * dpr;
+	const sx = m => Math.round((m - left) * k), sy = m => Math.round((m - top) * k);
 	let loaded = 0, any = 0;
 	for (let level = coarse; level >= z; level--) {
 		const units = tileUnits(level);
 		// Sharp pixels once a block takes more screen than the picture has for it.
-		ctx.imageSmoothingEnabled = view.scale * dpr < map.tilePixels / map.tileUnits / (1 << level);
+		ctx.imageSmoothingEnabled = k < map.tilePixels / map.tileUnits / (1 << level);
 		for (const [u, v] of level === z ? sharp : visible(level, left, top, w, h)) {
 			const img = tile(level, u, v);
 			if (!img) continue;
 			any++;
 			if (level === z) loaded++;
-			const x = (u * units - left) * view.scale, y = (v * units - top) * view.scale, size = units * view.scale;
-			ctx.drawImage(img, Math.floor(x), Math.floor(y), Math.ceil(size + (x - Math.floor(x))), Math.ceil(size + (y - Math.floor(y))));
+			const x0 = sx(u * units), x1 = sx((u + 1) * units), y0 = sy(v * units), y1 = sy((v + 1) * units);
+			ctx.drawImage(img, x0, y0, x1 - x0, y1 - y0);
 		}
 	}
 	fillState = { wanted: sharp.length, loaded, any };
