@@ -63,7 +63,18 @@ final class FogLookTest {
 	}
 
 	private static void check(ClientGameTestContext context, StringBuilder failures, String where) {
+		// The clouds once the view has stopped changing: tiles at its edge can still be loading in
+		// after the chunk count settles.
 		BufferedImage clouds = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds");
+		for (int i = 0; i < 10; i++) {
+			context.waitTicks(20);
+			BufferedImage next = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds");
+			boolean same = difference(clouds, next, new int[] {0, 0, clouds.getWidth(), clouds.getHeight()}) <= SAME / 10;
+			clouds = next;
+			if (same) {
+				break;
+			}
+		}
 		BufferedImage soft = shot(context, Settings.FogLook.SOFT, "fog-look-" + where + "-soft");
 		BufferedImage back = shot(context, Settings.FogLook.CLOUDS, "fog-look-" + where + "-clouds-again");
 		// Over what the look changes: the map's unexplored land, or the minimap.
