@@ -139,9 +139,12 @@ public final class WebMap {
 	private boolean start() {
 		try {
 			Files.createDirectories(this.folder);
-			try (InputStream page = WebMap.class.getResourceAsStream("/diorama/web/index.html")) {
-				if (page != null) {
-					Files.copy(page, this.folder.resolve("index.html"), StandardCopyOption.REPLACE_EXISTING);
+			// The page, and Minecraft's cloud pattern for the clouds it draws over unexplored land.
+			for (String file : new String[] {"index.html", "clouds.bin"}) {
+				try (InputStream in = WebMap.class.getResourceAsStream("/diorama/web/" + file)) {
+					if (in != null) {
+						Files.copy(in, this.folder.resolve(file), StandardCopyOption.REPLACE_EXISTING);
+					}
 				}
 			}
 		} catch (IOException e) {
@@ -763,7 +766,7 @@ public final class WebMap {
 
 		void json(StringBuilder json) {
 			json.append("{\"id\":\"").append(this.id).append("\",\"folder\":\"").append(this.folder.getFileName())
-				.append("\",\"zoomLevels\":").append(Math.max(1, this.zoomLevels)).append(",\"tiles\":[");
+				.append("\",\"zoomLevels\":").append(Math.max(1, this.zoomLevels)).append(",\"versions\":true,\"tiles\":[");
 			for (int z = 0; z < Math.max(1, this.zoomLevels); z++) {
 				if (z > 0) {
 					json.append(',');
@@ -775,7 +778,17 @@ public final class WebMap {
 						json.append(',');
 					}
 					first = false;
-					json.append((int) (key >> 32)).append(',').append((int) key);
+					int u = (int) (key >> 32);
+					int v = (int) key;
+					// When the tile was last written: the page asks for it with this, so a browser keeps a
+					// picture until it changes rather than asking again each visit.
+					long version;
+					try {
+						version = Files.getLastModifiedTime(WebTiles.file(this.folder, z, u, v)).toMillis() / 1000;
+					} catch (IOException e) {
+						version = 0;
+					}
+					json.append(u).append(',').append(v).append(',').append(version);
 				}
 				json.append(']');
 			}
