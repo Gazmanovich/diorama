@@ -321,6 +321,11 @@ public final class WebMap {
 		return this.stopping || this.redrawAll.get();
 	}
 
+	/** Whether the server is shutting down (not a redraw asked for). */
+	boolean shuttingDown() {
+		return this.stopping;
+	}
+
 	void setStatus(String status) {
 		this.status = status;
 	}
@@ -544,6 +549,10 @@ public final class WebMap {
 			int changed = 0;
 			int counted = 0;
 			for (Map.Entry<Long, int[]> region : regions.entrySet()) {
+				if (this.map.shuttingDown()) {
+					// Reading every chunk of a big world takes a while: not past the server's shutdown.
+					return -1;
+				}
 				int regionX = (int) (region.getKey() >> 32);
 				int regionZ = (int) (long) region.getKey();
 				int[] times = region.getValue();
