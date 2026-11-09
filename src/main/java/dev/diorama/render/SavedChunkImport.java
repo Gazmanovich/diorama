@@ -449,6 +449,9 @@ public final class SavedChunkImport {
 			this.chunksToDo = toDo;
 			this.chunksInSave = inSave;
 			this.chunksDone = 0;
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Saved chunks: listed {} regions, {} with work, {} chunks to draw", this.regions.size(), this.pending.size(), toDo);
+			}
 		}
 		Long next = this.nearestPending();
 		if (next == null) {

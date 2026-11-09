@@ -245,6 +245,9 @@ public final class SharedChunks implements ChunkSave {
 			this.refreshedAt = now;
 			this.refreshing = true;
 		}
+		if (Diorama.DEBUG) {
+			Diorama.LOGGER.info("Shared map: asking what changed");
+		}
 		this.send(out -> {
 			out.writeByte(ShareProtocol.REGIONS);
 			out.writeUTF(this.dimension);
@@ -484,6 +487,9 @@ public final class SharedChunks implements ChunkSave {
 			this.lock.notifyAll();
 		}
 		if (again) {
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Shared map: {} regions listed; asking for their tables", regions.size());
+			}
 			this.askTables(new ArrayList<>(regions));
 		}
 	}
@@ -508,6 +514,9 @@ public final class SharedChunks implements ChunkSave {
 		synchronized (this.lock) {
 			if (this.round != null && this.tables.containsKey(key)) {
 				this.round.put(key, table);
+				if (Diorama.DEBUG) {
+					Diorama.LOGGER.info("Shared map: region {}, {} changed, newest save {}", regionX, regionZ, newest);
+				}
 				return;
 			}
 			this.tables.put(key, table);
@@ -521,6 +530,9 @@ public final class SharedChunks implements ChunkSave {
 		synchronized (this.lock) {
 			if (this.round == null) {
 				return;
+			}
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Shared map: {} changed regions taken in", this.round.size());
 			}
 			this.tables.putAll(this.round);
 			this.round = null;

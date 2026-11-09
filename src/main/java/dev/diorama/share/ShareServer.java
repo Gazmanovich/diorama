@@ -405,7 +405,7 @@ public final class ShareServer {
 		boolean generated = this.settings.land() == ShareSettings.Land.GENERATED;
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
-		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated);
+		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated, true);
 		int newest = 0;
 		for (int saved : table.saved) {
 			newest = Math.max(newest, saved);

@@ -115,6 +115,14 @@ final class RegionTables {
 	 * out. {@code generated}: every finished chunk is shared, not only visited ones.
 	 */
 	Table table(int regionX, int regionZ, boolean generated) {
+		return this.table(regionX, regionZ, generated, false);
+	}
+
+	/**
+	 * The same; {@code fresh} reads the region file's header even if it was read moments ago, for a
+	 * client asking what changed, which a save a moment before must reach.
+	 */
+	Table table(int regionX, int regionZ, boolean generated, boolean fresh) {
 		long key = key(regionX, regionZ);
 		if (!Files.isRegularFile(this.regionFolder.resolve("r." + regionX + "." + regionZ + ".mca"))) {
 			// Nothing kept for regions with no file: a client can name any.
@@ -123,7 +131,7 @@ final class RegionTables {
 		}
 		Table table = this.tables.computeIfAbsent(key, k -> new Table());
 		long now = System.currentTimeMillis();
-		if (now - table.readAt < FRESH_MS) {
+		if (!fresh && now - table.readAt < FRESH_MS) {
 			return table;
 		}
 		table.readAt = now;
