@@ -531,7 +531,10 @@ public final class MapViewport {
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32 | dark) << 8 | fogCode;
 
 		MapCanvas canvas = MapCanvas.of(graphics);
-		if (this.drawFogLayer(canvas, view, originU, originV, span, params)) {
+		// The soft fog on Fast draws at full resolution, as it did before 0.8.0: its two layers'
+		// dither, drawn at half and scaled up, came out twice as coarse.
+		boolean fullSize = fast && softFog() && !cave && !level.roofless();
+		if (!fullSize && this.drawFogLayer(canvas, view, originU, originV, span, params)) {
 			return;
 		}
 		if (view.round()) {
