@@ -106,7 +106,7 @@ public final class ExportFog implements ImageExport.Finish {
 		this.lit = smoke ? new float[] {0.26F, 0.22F, 0.21F} : new float[] {0.97F, 0.97F, 0.99F};
 		this.shade = smoke ? new float[] {0.07F, 0.055F, 0.055F} : new float[] {0.48F, 0.55F, 0.67F};
 		// What the map draws behind its tiles, dimmed at night as the map dims it.
-		this.background = NightLook.darken(smoke ? 0xFF29211F : 0xFF8C99AB, night) & 0xFFFFFF;
+		this.background = NightLook.darken(smoke ? 0xFF29211F : this.clouds ? 0xFFD9DDE7 : 0xFF8C99AB, night) & 0xFFFFFF;
 		// The fog's colour at night, as fog.fsh's moonlit.
 		this.moonlit = NightLook.darken(new float[] {1, 1, 1}, night);
 	}

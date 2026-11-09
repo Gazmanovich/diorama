@@ -158,8 +158,10 @@ public final class MapViewport {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
-		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
-		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
+		// edge of known ground blends into it: the clouds' top (fog.fsh's CLOUD_TOP), smoke under a
+		// roof, or the dark of caves. The clouds stop at explored land's edge, so where a mask texel
+		// is partly explored a sliver of this can show beside the land: it reads as cloud.
+		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : CLOUD_BACKDROP;
 		float night = this.night < 0 || cave || level.roofless() ? NightLook.forView(level, view.layer()) : this.night;
 		if (night > 0) {
 			background = NightLook.darken(background, night);
@@ -463,6 +465,9 @@ public final class MapViewport {
 			}
 		}
 	}
+
+	/** fog.fsh's CLOUD_TOP. */
+	private static final int CLOUD_BACKDROP = 0xFFD9DDE7;
 
 	private static volatile boolean fogHiddenForTests;
 

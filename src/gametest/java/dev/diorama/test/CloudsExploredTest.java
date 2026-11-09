@@ -20,7 +20,8 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
  * The clouds never lie over explored land. Patchy exploration, the kind a walk or a server gives
  * (squares of chunks with gaps and holes between them), then the map at four zooms, Fancy and Fast,
  * and the minimap, each shot twice: with the fog and without it. Explored pixels (land drawn, a few
- * pixels from any unexplored ground) must look the same in both.
+ * pixels from any unexplored ground) must look the same in both, and land never explored must have
+ * clouds on it.
  */
 final class CloudsExploredTest {
 	/** Away from spawn, where the warm-up explored everything around. */
@@ -40,7 +41,10 @@ final class CloudsExploredTest {
 	private static final int CHANGED = 36;
 	/** The most explored pixels the clouds may change: under one in a hundred. */
 	private static final double MOST_COVERED = 0.01;
-	private static final int BACKDROP = 0x8C99AB;
+	/** What the map draws behind its tiles: the clouds' top colour. */
+	private static final int BACKDROP = 0xD9DDE7;
+	/** The fewest pixels of land never explored, well inside it, the clouds must change: their walls and shading. */
+	private static final double LEAST_CLOUDED = 0.05;
 	/** The map screen's bars, in GUI pixels from the top and bottom, and a little more. */
 	private static final int BARS = 20;
 
@@ -186,6 +190,26 @@ final class CloudsExploredTest {
 			}
 			near = next;
 		}
+		// The same the other way: distance to the nearest explored pixel.
+		int[] away = new int[w * h];
+		for (int y = y0; y < y1; y++) {
+			for (int x = x0; x < x1; x++) {
+				away[y * w + x] = near[y * w + x] == 0 ? EDGE + 1 : 0;
+			}
+		}
+		for (int pass = 0; pass < EDGE; pass++) {
+			int[] next = away.clone();
+			for (int y = y0 + 1; y < y1 - 1; y++) {
+				for (int x = x0 + 1; x < x1 - 1; x++) {
+					int k = y * w + x;
+					int m = Math.min(Math.min(away[k - 1], away[k + 1]), Math.min(away[k - w], away[k + w]));
+					next[k] = Math.min(away[k], m + 1);
+				}
+			}
+			away = next;
+		}
+		long unexplored = 0;
+		long clouded = 0;
 		long explored = 0;
 		long covered = 0;
 		BufferedImage marked = new BufferedImage(x1 - x0, y1 - y0, BufferedImage.TYPE_INT_RGB);
@@ -193,6 +217,12 @@ final class CloudsExploredTest {
 			for (int x = x0; x < x1; x++) {
 				int argb = with.getRGB(x, y);
 				int shown = argb & 0xFFFFFF;
+				if (y > y0 && y < y1 - 1 && x > x0 && x < x1 - 1 && away[y * w + x] > EDGE) {
+					unexplored++;
+					if (difference(argb, without.getRGB(x, y)) > CHANGED) {
+						clouded++;
+					}
+				}
 				if (y > y0 && y < y1 - 1 && x > x0 && x < x1 - 1 && near[y * w + x] > EDGE) {
 					explored++;
 					if (difference(argb, without.getRGB(x, y)) > CHANGED) {
@@ -209,7 +239,12 @@ final class CloudsExploredTest {
 			throw new UncheckedIOException(e);
 		}
 		double share = explored == 0 ? 0 : covered / (double) explored;
-		Diorama.LOGGER.info("CLOUDS-EXPLORED {}: {} of {} explored pixels covered ({})", name, covered, explored, String.format(Locale.ROOT, "%.2f%%", share * 100));
+		double cloudShare = unexplored == 0 ? 0 : clouded / (double) unexplored;
+		Diorama.LOGGER.info("CLOUDS-EXPLORED {}: {} of {} explored pixels covered ({}), {} of {} unexplored pixels clouded ({})", name, covered, explored,
+			String.format(Locale.ROOT, "%.2f%%", share * 100), clouded, unexplored, String.format(Locale.ROOT, "%.1f%%", cloudShare * 100));
+		if (unexplored >= 20_000 && cloudShare < LEAST_CLOUDED) {
+			failures.append("\n  ").append(name).append(String.format(Locale.ROOT, ": only %.1f%% of unexplored pixels have clouds on them", cloudShare * 100));
+		}
 		if (explored < 20_000) {
 			failures.append("\n  ").append(name).append(": only ").append(explored).append(" explored pixels to check");
 		} else if (share > MOST_COVERED) {
