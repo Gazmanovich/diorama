@@ -17,7 +17,6 @@
 	canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 	#map { touch-action: none; cursor: grab; }
 	#map.dragging { cursor: grabbing; }
-	#clouds { pointer-events: none; }
 	.bar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; flex-wrap: wrap; }
 	.bar > * { pointer-events: auto; }
 	.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); }
@@ -35,7 +34,6 @@
 </style>
 </head>
 <body>
-<canvas id="clouds" aria-hidden="true"></canvas>
 <canvas id="map" aria-label="Map"></canvas>
 <div class="bar"><div class="dims panel" id="dims"></div></div>
 <div class="zoom panel"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">&minus;</button></div>
@@ -75,8 +73,6 @@ function pick(d, first) {
 		return m;
 	}) : [];
 	document.getElementById("empty").style.display = dim && present[0] && present[0].size ? "none" : "flex";
-	// A new tile list can take land away as well as add it: the clouds work out their field again.
-	if (switched) clouds.reset(); else clouds.changed();
 	if (first || switched) home(first);
 	draw();
 }
@@ -132,7 +128,7 @@ function zoomFor(scale) {
 // fail. A browser opening a page asks for every picture at once; on a slow link that queues the
 // ones in the middle of the screen behind ones it has already panned away from.
 const MAX_LOADING = 6;
-// key "z/u_v" -> { img, state: "loading" | "preparing" | "ready" | "failed", retry, tries, ver, old }:
+// key "z/u_v" -> { img, state: "loading" | "ready" | "failed", retry, tries, ver, old }:
 // old is the picture from before a redraw, shown until the new one is ready.
 const tiles = new Map();
 let loading = 0;
@@ -145,12 +141,6 @@ function tile(z, u, v) {
 	return !t ? null : t.state === "ready" ? t.img : t.old || null;
 }
 
-function forget(key, t) {
-	tiles.delete(key);
-	clouds.forget(key);
-	for (const img of [t.img, t.old]) if (img && img.close) img.close();
-}
-
 function startLoads() {
 	const now = performance.now();
 	const wanted = new Set(wantedList);
@@ -160,7 +150,7 @@ function startLoads() {
 			t.img.onload = t.img.onerror = null;
 			t.img.src = "";
 			loading--;
-			forget(key, t);
+			tiles.delete(key);
 		}
 	}
 	for (const key of wantedList) {
@@ -171,23 +161,13 @@ function startLoads() {
 		let t = tiles.get(key);
 		// Already here and current, on its way, or waiting to try again. A picture the server has
 		// drawn again since (a newer version in map.json) is fetched again, the old one shown meanwhile.
-		if (t && (t.state === "loading" || t.state === "preparing" || (t.state === "failed" && t.retry > now) || (t.state === "ready" && t.ver === ver))) continue;
+		if (t && (t.state === "loading" || (t.state === "failed" && t.retry > now) || (t.state === "ready" && t.ver === ver))) continue;
 		const img = new Image();
 		const old = !t ? null : t.state === "ready" ? t.img : t.old;
 		t = { img, state: "loading", tries: t && t.state === "failed" ? t.tries : 0, ver, old };
 		tiles.set(key, t);
 		loading++;
-		img.onload = () => {
-			loading--;
-			t.state = "preparing";
-			clouds.prepare(key, img).then(picture => {
-				if (tiles.get(key) !== t) { if (picture.close) picture.close(); return; }
-				if (t.old && t.old.close) t.old.close();
-				t.img = picture; t.old = null; t.state = "ready";
-				draw();
-			});
-			draw();
-		};
+		img.onload = () => { loading--; t.state = "ready"; t.old = null; draw(); };
 		img.onerror = () => {
 			// A server or proxy too busy for a moment: again shortly, later and later.
 			t.state = "failed"; loading--; t.tries++;
@@ -201,7 +181,7 @@ function startLoads() {
 	if (tiles.size > 600) {
 		for (const [key, t] of tiles) {
 			if (tiles.size <= 400) break;
-			if (t.state !== "loading" && t.state !== "preparing" && !wanted.has(key)) forget(key, t);
+			if (t.state !== "loading" && !wanted.has(key)) tiles.delete(key);
 		}
 	}
 }
@@ -237,7 +217,8 @@ function paint() {
 		canvas.height = Math.round(h * dpr);
 	}
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.fillStyle = map ? map.background : "#15171c";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
 	if (!map || !dim) return;
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	const z = zoomFor(view.scale);
@@ -257,584 +238,22 @@ function paint() {
 	wantedList = list;
 	startLoads();
 
-	// Where each picture goes on screen, and which are in, finest level first: a coarser picture is
-	// drawn only where no finer one is, or its land would show through the finer one's unexplored
-	// (see-through) parts as a blurred rim.
-	const rect = (level, u, v) => {
-		const units = tileUnits(level), x = (u * units - left) * view.scale, y = (v * units - top) * view.scale, size = units * view.scale;
-		return [Math.floor(x), Math.floor(y), Math.ceil(size + (x - Math.floor(x))), Math.ceil(size + (y - Math.floor(y)))];
-	};
-	const drawn = [];
-	for (let level = z; level <= coarse; level++) {
-		const list = [];
+	let loaded = 0, any = 0;
+	for (let level = coarse; level >= z; level--) {
+		const units = tileUnits(level);
+		// Sharp pixels once a block takes more screen than the picture has for it.
+		ctx.imageSmoothingEnabled = view.scale * dpr < map.tilePixels / map.tileUnits / (1 << level);
 		for (const [u, v] of level === z ? sharp : visible(level, left, top, w, h)) {
 			const img = tile(level, u, v);
-			if (img) list.push([img, rect(level, u, v)]);
-		}
-		drawn.push(list);
-	}
-	let loaded = drawn[0].length, any = 0;
-	for (let i = drawn.length - 1; i >= 0; i--) {
-		// Sharp pixels once a block takes more screen than the picture has for it.
-		ctx.imageSmoothingEnabled = view.scale * dpr < map.tilePixels / map.tileUnits / (1 << (z + i));
-		for (const [img, r] of drawn[i]) {
+			if (!img) continue;
 			any++;
-			const finer = [];
-			for (let j = 0; j < i; j++) for (const [, f] of drawn[j]) if (f[0] < r[0] + r[2] && f[0] + f[2] > r[0] && f[1] < r[1] + r[3] && f[1] + f[3] > r[1]) finer.push(f);
-			if (finer.length) {
-				// One clip per finer picture: clips add up as an intersection, so this leaves out where
-				// any of them is (one path with them all would put back where two overlap).
-				ctx.save();
-				for (const f of finer) {
-					ctx.beginPath();
-					ctx.rect(r[0], r[1], r[2], r[3]);
-					ctx.rect(f[0], f[1], f[2], f[3]);
-					ctx.clip("evenodd");
-				}
-			}
-			ctx.drawImage(img, r[0], r[1], r[2], r[3]);
-			if (finer.length) ctx.restore();
+			if (level === z) loaded++;
+			const x = (u * units - left) * view.scale, y = (v * units - top) * view.scale, size = units * view.scale;
+			ctx.drawImage(img, Math.floor(x), Math.floor(y), Math.ceil(size + (x - Math.floor(x))), Math.ceil(size + (y - Math.floor(y))));
 		}
 	}
 	fillState = { wanted: sharp.length, loaded, any };
-	clouds.paint(left, top, w, h, z);
 }
-
-// The clouds over land nobody has explored, as the game draws them (ExportFog.paintClouds and
-// VanillaClouds.code): Minecraft's cloud pattern in cells about 40 pixels across, three layers
-// stacked like terraces, thinner near explored land, the cells growing as the map zooms out.
-// WebGL 2, drawn at a lower resolution than the map and under it: each picture is see-through
-// where nobody explored, so explored land always shows clear. Without WebGL 2, no clouds.
-const clouds = (() => {
-	const CELL = 12.8, REPEAT = 256, LARGEST = 4, RAMP = 112, CLOUD_PIXELS = 40;
-	const MIDDLE_U = 37, MIDDLE_V = 151, TOP_U = 97, TOP_V = 41;
-	const glCanvas = document.getElementById("clouds");
-	const gl = glCanvas.getContext("webgl2", { premultipliedAlpha: true, alpha: true, antialias: false });
-	const coverage = new Map(); // tile key -> Uint8Array(TILE_MASK squared), how much of each part of a loaded tile has land
-	let pattern = null;         // { middle: Float32Array[5], top: Float32Array[5] }
-	let noise = null;           // Uint8Array(256 * 256), FogTextures' red channel
-	let program = null, tex = {}, uni = {};
-	let field = null;           // the known mask, distances and codes for the region around the view
-	let dirty = true, fieldTimer = 0;
-	const TILE_MASK = 64; // a tile's land read at 64 by 64, as the game keeps its coverage
-	// #...&clouds=0 in the address shows the map without them.
-	const off = new URLSearchParams(location.hash.slice(1)).get("clouds") === "0";
-
-	function hash(x) { const s = Math.sin(x) * 43758.5453; return s - Math.floor(s); }
-	function mod(a, n) { return ((a % n) + n) % n; }
-	function smoothstep(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
-
-	// java.util.Random, for FogTextures' noise exactly as the game makes it.
-	function javaRandom(seed) {
-		let s = (BigInt(seed) ^ 0x5DEECE66Dn) & ((1n << 48n) - 1n);
-		return () => {
-			s = (s * 0x5DEECE66Dn + 0xBn) & ((1n << 48n) - 1n);
-			return Number(s >> 24n) / (1 << 24);
-		};
-	}
-	function valueNoise(size, cells, seed) {
-		const rnd = javaRandom(seed), lat = new Float32Array(cells * cells);
-		for (let i = 0; i < lat.length; i++) lat[i] = Math.fround(rnd());
-		const out = new Float32Array(size * size), sm = t => t * t * t * (t * (t * 6 - 15) + 10);
-		for (let y = 0; y < size; y++) {
-			const fy = y * cells / size, y0 = Math.floor(fy), ty = sm(fy - y0);
-			for (let x = 0; x < size; x++) {
-				const fx = x * cells / size, x0 = Math.floor(fx), tx = sm(fx - x0);
-				const a = lat[(y0 % cells) * cells + x0 % cells], b = lat[(y0 % cells) * cells + (x0 + 1) % cells];
-				const c = lat[((y0 + 1) % cells) * cells + x0 % cells], d = lat[((y0 + 1) % cells) * cells + (x0 + 1) % cells];
-				const top = a + (b - a) * tx, bottom = c + (d - c) * tx;
-				out[y * size + x] = top + (bottom - top) * ty;
-			}
-		}
-		return out;
-	}
-	function makeNoise() {
-		const a = valueNoise(256, 6, 1), b = valueNoise(256, 12, 31 + 7), out = new Uint8Array(256 * 256);
-		for (let i = 0; i < out.length; i++) out[i] = Math.round((a[i] * 0.7 + b[i] * 0.3) * 255);
-		return out;
-	}
-
-	// VanillaClouds.order: each cell's place in the order a layer fills in, at each size.
-	function order(texBits, level, finer, ou, ov) {
-		const period = REPEAT >> level, score = new Float64Array(period * period);
-		const cloud = (u, v) => texBits[mod(v, 256) * 256 + mod(u, 256)];
-		if (!finer) {
-			const reach = 3, side = 7, weights = [];
-			let total = 0;
-			for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) { const wgt = Math.exp(-(di * di + dj * dj) / (2 * 1.2 * 1.2)); weights.push(wgt); total += wgt; }
-			for (let k = 0; k < weights.length; k++) weights[k] /= total;
-			for (let j = 0; j < period; j++) for (let i = 0; i < period; i++) {
-				let near = 0;
-				for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
-					if (cloud(mod(i + di, period) + ou, mod(j + dj, period) + ov)) near += weights[(dj + reach) * side + di + reach];
-				}
-				const h = hash(i * 127.1 + j * 311.7 + ou * 74.7);
-				score[j * period + i] = cloud(i + ou, j + ov) ? -1 + 0.01 * h : -near + 0.25 * (h - 0.5);
-			}
-		} else {
-			const fp = period * 2;
-			for (let j = 0; j < period; j++) for (let i = 0; i < period; i++) {
-				score[j * period + i] = finer[2 * j * fp + 2 * i] + finer[2 * j * fp + 2 * i + 1] + finer[(2 * j + 1) * fp + 2 * i] + finer[(2 * j + 1) * fp + 2 * i + 1];
-			}
-		}
-		const index = Array.from(score, (_, n) => n);
-		index.sort((a, b) => score[a] - score[b]);
-		const ranked = new Float32Array(score.length);
-		for (let n = 0; n < index.length; n++) ranked[index[n]] = (n + 0.5) / index.length;
-		return ranked;
-	}
-	function makePattern(texBits) {
-		const middle = [], top = [];
-		for (let level = 0; level <= LARGEST; level++) {
-			middle.push(order(texBits, level, level ? middle[level - 1] : null, MIDDLE_U, MIDDLE_V));
-			top.push(order(texBits, level, level ? top[level - 1] : null, TOP_U, TOP_V));
-		}
-		return { middle, top };
-	}
-	function lattice(i, j) { return hash(mod(i, 10) * 17.3 + mod(j, 10) * 91.1); }
-	function bigNoise(u, v) {
-		const gu = u * 10, gv = v * 10, i = Math.floor(gu), j = Math.floor(gv);
-		let fu = gu - i, fv = gv - j;
-		fu = fu * fu * (3 - 2 * fu); fv = fv * fv * (3 - 2 * fv);
-		const a = lattice(i, j), b = lattice(i + 1, j), c = lattice(i, j + 1), d = lattice(i + 1, j + 1);
-		return (a + (b - a) * fu) * (1 - fv) + (c + (d - c) * fu) * fv;
-	}
-	// VanillaClouds.code: which layers a cell has, given how far its middle is from explored land.
-	function code(s, u, v, k) {
-		const size = CELL * Math.pow(2, k), level = Math.min(k, LARGEST), period = REPEAT >> level;
-		let i = mod(u, period), j = mod(v, period);
-		if (k > LARGEST) {
-			const way = Math.floor(hash(Math.floor(u / period) * 12.9898 + Math.floor(v / period) * 78.233 + k * 37.719) * 8);
-			if (way & 1) i = period - 1 - i;
-			if (way & 2) j = period - 1 - j;
-			if (way & 4) { const t = i; i = j; j = t; }
-		}
-		const r = size / CELL;
-		const far = s + 0.6 * size * Math.min(1, 2 / r);
-		const ramp = RAMP * Math.min(1, 1 / Math.sqrt(r));
-		const big = bigNoise(i / period, j / period);
-		let c = 0;
-		if (far > 2) c |= 1;
-		const toward = Math.max(0, Math.min(1, (far + ramp) / ramp));
-		const middle = far > 2 ? 0.5 * (0.4 + 1.2 * big) : 0.15 + 0.55 * Math.pow(toward, 1.5);
-		if (far > -ramp && pattern.middle[level][j * period + i] <= middle) c |= 2;
-		const inner = Math.max(0, Math.min(1, far / (48 * Math.sqrt(r))));
-		if (far > 10 && pattern.top[level][j * period + i] <= 0.4 * inner * (0.25 + 1.5 * big)) c |= 4;
-		return c;
-	}
-
-	// The chamfer distance of ExportFog: thirds of a texel to the nearest zero.
-	function chamfer(d, w, h) {
-		for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-			const k = j * w + i; let v = d[k];
-			if (i > 0) v = Math.min(v, d[k - 1] + 3);
-			if (j > 0) { v = Math.min(v, d[k - w] + 3); if (i > 0) v = Math.min(v, d[k - w - 1] + 4); if (i < w - 1) v = Math.min(v, d[k - w + 1] + 4); }
-			d[k] = v;
-		}
-		for (let j = h - 1; j >= 0; j--) for (let i = w - 1; i >= 0; i--) {
-			const k = j * w + i; let v = d[k];
-			if (i < w - 1) v = Math.min(v, d[k + 1] + 3);
-			if (j < h - 1) { v = Math.min(v, d[k + w] + 3); if (i < w - 1) v = Math.min(v, d[k + w + 1] + 4); if (i > 0) v = Math.min(v, d[k + w - 1] + 4); }
-			d[k] = v;
-		}
-	}
-
-	const VS = `#version 300 es
-	in vec2 p; out vec2 sp;
-	void main() { sp = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }`;
-	// ExportFog.paintClouds, per pixel.
-	const FS = `#version 300 es
-	precision highp float; precision highp int;
-	in vec2 sp; out vec4 outColor;
-	uniform vec2 origin; uniform vec2 extent;          // map units at the screen's top left, and across it
-	uniform float pixelUnits;                            // map units a CSS pixel
-	uniform sampler2D signedTex; uniform sampler2D noiseTex;
-	uniform vec2 fieldOrigin; uniform float fieldTexel; uniform vec2 fieldSize;
-	uniform highp usampler2D codes0; uniform highp usampler2D codes1;
-	uniform ivec2 codeOrigin0; uniform ivec2 codeOrigin1; uniform ivec2 codeSize0; uniform ivec2 codeSize1;
-	uniform float size0; uniform float size1; uniform float grow; uniform float bigShare; uniform float wrap;
-	const float COS_PITCH = 0.643; const float CLOUD_ROUND = 0.2; const float CLOUD_THICK = 0.55;
-	const vec3 TOP = vec3(0.85, 0.865, 0.905); const vec3 SIDE_HIGH = vec3(0.72, 0.75, 0.84);
-	const vec3 SIDE_LOW = vec3(0.55, 0.59, 0.72); const vec3 SHADED = vec3(0.70, 0.73, 0.83);
-	const float GROUND_SHADOW = 0.22; const vec2 SUN = vec2(-0.529999, -0.847998);
-	vec2 fieldUv(vec2 m) { return (m - fieldOrigin) / (fieldTexel * fieldSize); }
-	float signedAt(vec2 m) { return (texture(signedTex, fieldUv(m)).r * 255.0 - 128.0) * 2.0; }
-	uint cellAt(int n, ivec2 c) {
-		if (n == 0) return texelFetch(codes0, clamp(c - codeOrigin0, ivec2(0), codeSize0 - 1), 0).r;
-		return texelFetch(codes1, clamp(c - codeOrigin1, ivec2(0), codeSize1 - 1), 0).r;
-	}
-	float cloudRaw(vec2 m, int n, uint bit) {
-		float size = n == 0 ? size0 : size1;
-		vec2 g = m / size - 0.5; vec2 i = floor(g);
-		vec2 f = smoothstep(0.5 - CLOUD_ROUND, 0.5 + CLOUD_ROUND, g - i);
-		ivec2 c = ivec2(i);
-		float a = float((cellAt(n, c) & bit) != 0u), b = float((cellAt(n, c + ivec2(1, 0)) & bit) != 0u);
-		float cc = float((cellAt(n, c + ivec2(0, 1)) & bit) != 0u), d = float((cellAt(n, c + ivec2(1, 1)) & bit) != 0u);
-		return mix(mix(a, b, f.x), mix(cc, d, f.x), f.y);
-	}
-	float cloudShape(vec2 m, uint bit) { float a = cloudRaw(m, 0, bit); return grow > 0.0 ? mix(a, cloudRaw(m, 1, bit), grow) : a; }
-	float cloudCover(vec2 m, uint bit) {
-		float aa = clamp(pixelUnits / (size0 * exp2(grow)), 0.01, 0.5);
-		return smoothstep(0.48 - aa, 0.52 + aa, cloudShape(m, bit));
-	}
-	float bigHeight(vec2 m) { return texture(noiseTex, m * 2.0 / wrap + vec2(0.41, 0.27)).r; }
-	void main() {
-		vec2 m = origin + vec2(sp.x, 1.0 - sp.y) * extent;
-		float size = size0 * exp2(grow);
-		float thick = size * CLOUD_THICK;
-		float ramp = 112.0 * min(1.0, 1.0 / sqrt(size / 12.8));
-		// Well inside explored land, with no cloud near: nothing to draw.
-		float s0 = signedAt(m);
-		if (s0 < -ramp - 3.0 * size - 4.0 * thick) { outColor = vec4(0.0); return; }
-		float big = 1.0;
-		if (bigShare > 0.0) {
-			float e = wrap / 48.0, h0 = bigHeight(m);
-			float nx = -(bigHeight(m + vec2(e, 0.0)) - h0) * 9.0, ny = -(bigHeight(m + vec2(0.0, e)) - h0) * 9.0;
-			float dotl = (nx * -0.45 + ny * -0.55 + 0.7) / (sqrt(nx * nx + ny * ny + 1.0) * sqrt(0.45 * 0.45 + 0.55 * 0.55 + 0.7 * 0.7));
-			float light = clamp(dotl * 1.1 - 0.2 + 0.8 * (h0 - 0.5), 0.0, 1.0);
-			big = mix(1.0, mix(0.92, 1.03, light), bigShare);
-		}
-		bool tall = thick * COS_PITCH / pixelUnits >= 10.0;
-		vec3 col = vec3(0.0); float through = 1.0;
-		for (int k = 3; k >= 1; k--) {
-			uint bit = k == 3 ? 4u : (k == 2 ? 2u : 1u);
-			float top = float(k) * thick;
-			vec2 pv = vec2(m.x, m.y + top * COS_PITCH);
-			float face = cloudCover(pv, bit);
-			float w1 = face, w2 = face, w3 = face;
-			if (face < 0.999) {
-				w1 = cloudCover(vec2(m.x, m.y + (top - (tall ? 0.33 : 0.5) * thick) * COS_PITCH), bit);
-				w2 = tall ? cloudCover(vec2(m.x, m.y + (top - 0.66 * thick) * COS_PITCH), bit) : w1;
-				w3 = cloudCover(vec2(m.x, m.y + (top - 0.97 * thick) * COS_PITCH), bit);
-			}
-			float a1 = max(w1 - face, 0.0), a2 = max(w2 - max(face, w1), 0.0), a3 = max(w3 - max(max(face, w1), w2), 0.0);
-			float a = min(face + a1 + a2 + a3, 1.0);
-			if (a <= 0.001) continue;
-			float shaded = 0.0;
-			if (k < 3 && face > 0.001) {
-				for (int up = k + 1; up <= 3; up++) {
-					float lift = float(up - k) * thick;
-					shaded = max(shaded, cloudShape(pv + vec2(SUN.x * lift * 1.2, lift * COS_PITCH + SUN.y * lift * 1.2), up == 3 ? 4u : 2u));
-				}
-				shaded = smoothstep(0.15, 0.85, shaded) * (1.0 - cloudCover(vec2(m.x, m.y + (top + thick) * COS_PITCH), k == 2 ? 4u : 2u));
-			}
-			float sum = max(face + a1 + a2 + a3, 1e-4);
-			float sideBig = mix(1.0, big, 0.5);
-			vec3 topColor = mix(TOP, SHADED, 0.8 * shaded) * big;
-			vec3 sides = a1 * mix(SIDE_LOW, SIDE_HIGH, 0.85) + a2 * mix(SIDE_LOW, SIDE_HIGH, 0.5) + a3 * mix(SIDE_LOW, SIDE_HIGH, 0.15);
-			vec3 c = (face * topColor + sides * sideBig) / sum;
-			float alpha = 1.0;
-			if (k == 2) {
-				float s = signedAt(pv);
-				alpha = mix(mix(0.5, 0.75, clamp((s + ramp) / ramp, 0.0, 1.0)), 1.0, smoothstep(-4.0, 6.0, s));
-			}
-			alpha *= a;
-			col += through * alpha * c;
-			through *= 1.0 - alpha;
-			if (through < 0.01) break;
-		}
-		if (through > 0.01) {
-			vec2 q = vec2(m.x + SUN.x * 2.0 * thick * 0.6, m.y + 2.0 * thick * COS_PITCH + SUN.y * 2.0 * thick * 0.6);
-			through *= 1.0 - GROUND_SHADOW * smoothstep(0.1, 0.9, cloudShape(q, 2u)) * mix(0.5, 0.75, clamp((s0 + ramp) / ramp, 0.0, 1.0));
-		}
-		// Under the clouds, the clouds' own flat white: the ground is never seen. (The map's pictures,
-		// drawn over all this, hide it wherever anyone explored.)
-		col += through * TOP;
-		outColor = vec4(col, 1.0);
-	}`;
-
-	function setup() {
-		if (!gl) return false;
-		const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
-		program = gl.createProgram();
-		gl.attachShader(program, sh(gl.VERTEX_SHADER, VS));
-		gl.attachShader(program, sh(gl.FRAGMENT_SHADER, FS));
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
-		gl.useProgram(program);
-		const buf = gl.createBuffer();
-		gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-		const loc = gl.getAttribLocation(program, "p");
-		gl.enableVertexAttribArray(loc);
-		gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-		for (const name of ["origin", "extent", "pixelUnits", "signedTex", "noiseTex", "fieldOrigin", "fieldTexel", "fieldSize", "codes0", "codes1",
-			"codeOrigin0", "codeOrigin1", "codeSize0", "codeSize1", "size0", "size1", "grow", "bigShare", "wrap"]) uni[name] = gl.getUniformLocation(program, name);
-		const make = (unit, filter, wrapMode) => {
-			const t = gl.createTexture();
-			gl.activeTexture(gl.TEXTURE0 + unit);
-			gl.bindTexture(gl.TEXTURE_2D, t);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapMode);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapMode);
-			return t;
-		};
-		tex.signed = make(1, gl.LINEAR, gl.CLAMP_TO_EDGE);
-		tex.noise = make(2, gl.LINEAR, gl.REPEAT);
-		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 256, 256, 0, gl.RED, gl.UNSIGNED_BYTE, noise);
-		tex.codes0 = make(3, gl.NEAREST, gl.CLAMP_TO_EDGE);
-		tex.codes1 = make(4, gl.NEAREST, gl.CLAMP_TO_EDGE);
-		gl.uniform1i(uni.signedTex, 1); gl.uniform1i(uni.noiseTex, 2);
-		gl.uniform1i(uni.codes0, 3); gl.uniform1i(uni.codes1, 4);
-		gl.enable(gl.BLEND);
-		gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-		return true;
-	}
-
-	// The pattern, after the map's first pictures: Minecraft's clouds.png as the server ships it,
-	// or, as the game does without one, a scattered stand-in.
-	function init() {
-		fetch("clouds.bin").then(r => r.ok ? r.arrayBuffer() : null).catch(() => null).then(buf => {
-			const bits = new Uint8Array(65536);
-			if (buf && buf.byteLength === 8192) {
-				const b = new Uint8Array(buf);
-				for (let k = 0; k < 65536; k++) bits[k] = (b[k >> 3] >> (k & 7)) & 1;
-			} else {
-				for (let k = 0; k < 65536; k++) bits[k] = hash(k * 0.731) < 0.27 ? 1 : 0;
-			}
-			pattern = makePattern(bits);
-			noise = makeNoise();
-			try { if (!setup()) return; } catch (e) { console.warn("No clouds:", e); program = null; return; }
-			dirty = true;
-			draw();
-		});
-	}
-
-	/**
-	 * A picture that just arrived, made ready to draw: see-through where nobody explored, and how much
-	 * of each part of it has land (the share of its pixels that aren't the background), for the clouds.
-	 * Land nobody explored is the background exactly, give or take the picture's compression (within
-	 * 3 or so); the darkest builds, black roofs and the like, stay 10 or more away. A stray background
-	 * pixel in a part that's nearly all land (a dark build) stays as it is. Worked out off the page's
-	 * thread where the browser can, as it reads every pixel.
-	 */
-	function cut(px, size, bg) {
-		const per = size / TILE_MASK, land = new Uint16Array(TILE_MASK * TILE_MASK), n = size * size;
-		const br = bg >> 16 & 255, bgc = bg >> 8 & 255, bb = bg & 255;
-		const d = new Uint16Array(n);
-		let un = new Uint8Array(n);
-		for (let i = 0; i < n; i++) {
-			d[i] = Math.abs(px[i * 4] - br) + Math.abs(px[i * 4 + 1] - bgc) + Math.abs(px[i * 4 + 2] - bb);
-			un[i] = d[i] < 10 ? 1 : 0;
-		}
-		// The compression's ripple just past explored land: dim pixels (within 48) next to the
-		// background, twice over, are background too, or they'd speckle the clouds' edge.
-		for (let pass = 0; pass < 2; pass++) {
-			const next = un.slice();
-			for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-				const i = y * size + x;
-				if (un[i] || d[i] >= 48) continue;
-				for (let dy = -1; dy <= 1 && !next[i]; dy++) for (let dx = -1; dx <= 1; dx++) {
-					const yy = y + dy, xx = x + dx;
-					if (yy >= 0 && yy < size && xx >= 0 && xx < size && un[yy * size + xx]) { next[i] = 1; break; }
-				}
-			}
-			un = next;
-		}
-		const isLand = new Uint8Array(n);
-		for (let y = 0; y < size; y++) {
-			const row = Math.floor(y / per) * TILE_MASK;
-			for (let x = 0; x < size; x++) if (!un[y * size + x]) { isLand[y * size + x] = 1; land[row + Math.floor(x / per)]++; }
-		}
-		const out = new Uint8Array(TILE_MASK * TILE_MASK);
-		for (let k = 0; k < out.length; k++) out[k] = Math.round(land[k] / (per * per) * 255);
-		for (let y = 0; y < size; y++) {
-			const row = Math.floor(y / per) * TILE_MASK;
-			for (let x = 0; x < size; x++) if (!isLand[y * size + x] && out[row + Math.floor(x / per)] < 230) px[(y * size + x) * 4 + 3] = 0;
-		}
-		return out;
-	}
-	let reader = null;
-	const waiting = new Map(); // job -> { resolve, reject }
-	let jobs = 0;
-	if (!off && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined" && typeof createImageBitmap !== "undefined") {
-		try {
-			const source = "const TILE_MASK = " + TILE_MASK + "; " + cut.toString() + `
-				let ctx = null;
-				onmessage = async e => {
-					const { job, bitmap, size, bg } = e.data;
-					try {
-						if (!ctx || ctx.canvas.width !== size) ctx = new OffscreenCanvas(size, size).getContext("2d", { willReadFrequently: true });
-						ctx.clearRect(0, 0, size, size);
-						ctx.drawImage(bitmap, 0, 0, size, size);
-						const data = ctx.getImageData(0, 0, size, size);
-						const out = cut(data.data, size, bg);
-						const picture = await createImageBitmap(data);
-						postMessage({ job, out, picture }, [out.buffer, picture]);
-					} catch (err) {
-						postMessage({ job, failed: true });
-					} finally {
-						bitmap.close();
-					}
-				};`;
-			reader = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
-			// A picture the worker couldn't do is done on the page's thread instead.
-			reader.onmessage = e => { const w = waiting.get(e.data.job); waiting.delete(e.data.job); if (w) { if (e.data.failed) w.reject(); else w.resolve(e.data); } };
-			// A worker that fails: what it had, and everything after, done on the page's thread.
-			reader.onerror = () => { reader = null; for (const w of waiting.values()) w.reject(); waiting.clear(); };
-		} catch (e) { reader = null; }
-	}
-	function prepareHere(key, img, size, bg) {
-		const c = document.createElement("canvas");
-		c.width = c.height = size;
-		const cc = c.getContext("2d", { willReadFrequently: true });
-		cc.drawImage(img, 0, 0, size, size);
-		const data = cc.getImageData(0, 0, size, size);
-		coverage.set(key, cut(data.data, size, bg));
-		cc.putImageData(data, 0, 0);
-		dirty = true;
-		return c;
-	}
-	/** The picture to draw for a tile that just arrived: see-through where nobody explored. */
-	function prepare(key, img) {
-		if (off || !img.naturalWidth) return Promise.resolve(img);
-		const size = img.naturalWidth, bg = parseInt((map.background || "#15171c").slice(1), 16);
-		if (!reader) {
-			try { return Promise.resolve(prepareHere(key, img, size, bg)); } catch (e) { return Promise.resolve(img); }
-		}
-		return createImageBitmap(img).then(bitmap => new Promise((resolve, reject) => {
-			const job = ++jobs;
-			waiting.set(job, { resolve, reject });
-			reader.postMessage({ job, bitmap, size, bg }, [bitmap]);
-		})).then(r => { coverage.set(key, r.out); dirty = true; return r.picture; })
-			.catch(() => { try { return prepareHere(key, img, size, bg); } catch (e) { return img; } });
-	}
-
-	/**
-	 * The known mask for the region around the view, from the tiles at the level drawn (a tile not
-	 * there has no land; one still loading counts as land, so clouds don't flash over it), the signed
-	 * distance from explored land, and the cells' codes at the two sizes drawn.
-	 */
-	function build(left, top, w, h, z, sizeLevel) {
-		const unitsW = w / view.scale, unitsH = h / view.scale;
-		const rl = left - unitsW / 2, rt = top - unitsH / 2, rw = unitsW * 2, rh = unitsH * 2;
-		const texel = Math.max(1, Math.max(rw, rh) / 384);
-		const fw = Math.ceil(rw / texel), fh = Math.ceil(rh / texel);
-		const known = new Uint8Array(fw * fh);
-		const units = tileUnits(z), tileTexels = units / TILE_MASK;
-		const u0 = Math.floor(rl / units), u1 = Math.floor((rl + rw) / units), v0 = Math.floor(rt / units), v1 = Math.floor((rt + rh) / units);
-		for (let tv = v0; tv <= v1; tv++) for (let tu = u0; tu <= u1; tu++) {
-			if (!present[z] || !present[z].has(tu + "," + tv)) continue;
-			let cov = coverage.get(tileKey(z, tu, tv));
-			// Not here yet: a coarser picture already in says how much of it has land, else all of it.
-			let sub = null;
-			for (let c = z + 1; !cov && c < dim.zoomLevels; c++) {
-				const cu = Math.floor(tu / (1 << (c - z))), cv = Math.floor(tv / (1 << (c - z)));
-				const cc = coverage.get(tileKey(c, cu, cv));
-				if (cc) { cov = cc; sub = { k: 1 << (c - z), ou: tu - cu * (1 << (c - z)), ov: tv - cv * (1 << (c - z)) }; }
-			}
-			const fx0 = Math.max(0, Math.floor((tu * units - rl) / texel)), fx1 = Math.min(fw, Math.ceil(((tu + 1) * units - rl) / texel));
-			const fy0 = Math.max(0, Math.floor((tv * units - rt) / texel)), fy1 = Math.min(fh, Math.ceil(((tv + 1) * units - rt) / texel));
-			for (let fy = fy0; fy < fy1; fy++) {
-				const mv = rt + (fy + 0.5) * texel;
-				let ty = Math.floor((mv - tv * units) / tileTexels);
-				for (let fx = fx0; fx < fx1; fx++) {
-					if (!cov) { known[fy * fw + fx] = 255; continue; }
-					const mu = rl + (fx + 0.5) * texel;
-					let tx = Math.floor((mu - tu * units) / tileTexels);
-					let cx = tx, cy = ty;
-					if (sub) { cx = Math.floor((sub.ou * TILE_MASK + tx) / sub.k); cy = Math.floor((sub.ov * TILE_MASK + ty) / sub.k); }
-					cx = Math.max(0, Math.min(TILE_MASK - 1, cx)); cy = Math.max(0, Math.min(TILE_MASK - 1, cy));
-					known[fy * fw + fx] = cov[cy * TILE_MASK + cx];
-				}
-			}
-		}
-		// Signed distance from explored land, in map units, positive over the unexplored.
-		const big = 1 << 28, toKnown = new Int32Array(fw * fh), toUnknown = new Int32Array(fw * fh);
-		for (let k = 0; k < known.length; k++) { const isKnown = known[k] >= 128; toKnown[k] = isKnown ? 0 : big; toUnknown[k] = isKnown ? big : 0; }
-		chamfer(toKnown, fw, fh); chamfer(toUnknown, fw, fh);
-		const far = Math.max(fw, fh) * 3, s = new Float32Array(fw * fh), t = new Float32Array(fw * fh);
-		for (let k = 0; k < s.length; k++) s[k] = (Math.min(toKnown[k], far) - Math.min(toUnknown[k], far)) / 3 * texel;
-		for (let j = 0; j < fh; j++) for (let i = 0; i < fw; i++) {
-			let sum = 0; for (let d = -1; d <= 1; d++) sum += s[j * fw + Math.max(0, Math.min(fw - 1, i + d))]; t[j * fw + i] = sum / 3;
-		}
-		for (let j = 0; j < fh; j++) for (let i = 0; i < fw; i++) {
-			let sum = 0; for (let d = -1; d <= 1; d++) sum += t[Math.max(0, Math.min(fh - 1, j + d)) * fw + i]; s[j * fw + i] = sum / 3;
-		}
-		const signedBytes = new Uint8Array(fw * fh);
-		for (let k = 0; k < s.length; k++) signedBytes[k] = Math.max(0, Math.min(255, Math.round(s[k] / 2) + 128));
-		const signedAt = (mu, mv) => {
-			const fx = Math.max(0, Math.min(fw - 1, Math.floor((mu - rl) / texel))), fy = Math.max(0, Math.min(fh - 1, Math.floor((mv - rt) / texel)));
-			return s[fy * fw + fx];
-		};
-		const codes = [];
-		for (let n = 0; n < 2; n++) {
-			const k = sizeLevel + n, cell = CELL * Math.pow(2, k);
-			const cu0 = Math.floor(rl / cell) - 1, cv0 = Math.floor(rt / cell) - 1;
-			const cw = Math.ceil(rw / cell) + 3, ch = Math.ceil(rh / cell) + 3;
-			const c = new Uint8Array(cw * ch);
-			for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++) c[j * cw + i] = code(signedAt((cu0 + i + 0.5) * cell, (cv0 + j + 0.5) * cell), cu0 + i, cv0 + j, k);
-			codes.push({ c, cu0, cv0, cw, ch, cell });
-		}
-		return { rl, rt, rw, rh, texel, fw, fh, known, signedBytes, codes, z, sizeLevel };
-	}
-
-	function upload(f) {
-		gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, tex.signed);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, f.fw, f.fh, 0, gl.RED, gl.UNSIGNED_BYTE, f.signedBytes);
-		for (let n = 0; n < 2; n++) {
-			gl.activeTexture(gl.TEXTURE3 + n); gl.bindTexture(gl.TEXTURE_2D, n ? tex.codes1 : tex.codes0);
-			gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, f.codes[n].cw, f.codes[n].ch, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, f.codes[n].c);
-		}
-	}
-
-
-	function paint(left, top, w, h, z) {
-		if (off) return;
-		if (!program) {
-			if (!pattern && map && dim) { pattern = "loading"; setTimeout(init, 0); }
-			return;
-		}
-		// Drawn at most at the CSS pixel size, half that on an ordinary screen, as the game draws its
-		// clouds at half resolution: they're soft-edged cells about 40 pixels across.
-		const dpr = devicePixelRatio || 1, res = Math.min(dpr, 2) / 2;
-		const cw = Math.max(1, Math.round(w * res)), ch = Math.max(1, Math.round(h * res));
-		if (glCanvas.width !== cw || glCanvas.height !== ch) { glCanvas.width = cw; glCanvas.height = ch; }
-		const pixelUnits = 1 / view.scale;
-		const size = Math.max(0, Math.log2(CLOUD_PIXELS * pixelUnits / CELL));
-		let sizeLevel = Math.floor(size), grow = smoothstep(0.2, 0.8, size - sizeLevel);
-		if (grow >= 1) { sizeLevel++; grow = 0; }
-		// The region worked out lasts while the view stays inside it at the same zoom; tiles
-		// arriving rebuild it now and then, not every frame.
-		const inside = field && field.z === z && field.sizeLevel === sizeLevel && left >= field.rl && top >= field.rt
-			&& left + w / view.scale <= field.rl + field.rw && top + h / view.scale <= field.rt + field.rh;
-		if (!inside || (dirty && !fieldTimer)) {
-			const now = () => { fieldTimer = 0; dirty = false; field = build(left, top, w, h, z, sizeLevel); upload(field); };
-			if (!inside) now();
-			else fieldTimer = setTimeout(() => { now(); draw(); }, 150);
-		}
-		gl.viewport(0, 0, cw, ch);
-		gl.clearColor(0, 0, 0, 0);
-		gl.clear(gl.COLOR_BUFFER_BIT);
-		const f = field;
-		gl.uniform2f(uni.origin, left, top);
-		gl.uniform2f(uni.extent, w / view.scale, h / view.scale);
-		gl.uniform1f(uni.pixelUnits, pixelUnits);
-		gl.uniform2f(uni.fieldOrigin, f.rl, f.rt);
-		gl.uniform1f(uni.fieldTexel, f.texel);
-		gl.uniform2f(uni.fieldSize, f.fw, f.fh);
-		gl.uniform2i(uni.codeOrigin0, f.codes[0].cu0, f.codes[0].cv0);
-		gl.uniform2i(uni.codeOrigin1, f.codes[1].cu0, f.codes[1].cv0);
-		gl.uniform2i(uni.codeSize0, f.codes[0].cw, f.codes[0].ch);
-		gl.uniform2i(uni.codeSize1, f.codes[1].cw, f.codes[1].ch);
-		gl.uniform1f(uni.size0, f.codes[0].cell);
-		gl.uniform1f(uni.size1, f.codes[1].cell);
-		gl.uniform1f(uni.grow, grow);
-		gl.uniform1f(uni.bigShare, smoothstep(-0.6, 1, Math.log2(CLOUD_PIXELS * pixelUnits / CELL)));
-		gl.uniform1f(uni.wrap, 512 * Math.pow(2, Math.max(0, sizeLevel - 2) + 1));
-		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-	}
-
-	// Coverage stays with its picture: kept while the picture is (a dimension shown again has it),
-	// dropped with it.
-	function reset() { field = null; dirty = true; }
-	function forget(key) { if (coverage.delete(key)) dirty = true; }
-	function changed() { dirty = true; }
-
-	return { paint, prepare, forget, reset, changed, debug: () => ({ field, coverage }) };
-})();
 
 // Panning and zooming, by mouse, wheel, touch and keys.
 const pointers = new Map();

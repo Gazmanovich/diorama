@@ -221,8 +221,6 @@ final class WebMapTest {
 		if (compared == 0) {
 			throw new AssertionError("No tile had enough pixels drawn on both maps to compare: " + lines);
 		}
-		sideBySide(context, out, serverFolder);
-
 		// The land the server made but nobody visited: saved, and not drawn.
 		if (serverFolder != null) {
 			boolean saved = Files.exists(serverFolder.resolve("world/region/r.3.3.mca")) || Files.exists(serverFolder.resolve("world/dimensions/minecraft/overworld/region/r.3.3.mca"));
@@ -245,46 +243,6 @@ final class WebMapTest {
 		int outside = status(http, port, "/../../ops.json");
 		if (outside != 404) {
 			throw new AssertionError("The web server serves outside its folder (" + outside + ")");
-		}
-	}
-
-	/**
-	 * The in-game map and the web map at the same view, for a person to compare: a screenshot of the
-	 * map screen (web-map-in-game), its view in {@code view.json}, and on a real server a copy of the
-	 * web map's folder in {@code site/}, to open in a browser at that view. The browser's CSS pixels
-	 * are the game's GUI pixels, so cells come out the same size.
-	 */
-	private static void sideBySide(ClientGameTestContext context, Path out, @Nullable Path serverFolder) {
-		double u = 20;
-		double v = Projection.v(64, 100);
-		double zoom = 1.0;
-		context.setScreen(dev.diorama.MapScreen::new);
-		context.runOnClient(mc -> {
-			if (mc.gui.screen() instanceof dev.diorama.MapScreen screen) {
-				screen.lookAt(u, v, zoom, TileKey.SURFACE);
-			}
-		});
-		DioramaClientTest.settle(context, 80);
-		context.takeScreenshot("web-map-in-game");
-		String view = context.computeOnClient(mc -> String.format(Locale.ROOT, "{\"u\":%.2f,\"v\":%.2f,\"zoom\":%.3f,\"guiScale\":%s,\"width\":%d,\"height\":%d}",
-			u, v, zoom, mc.getWindow().getGuiScale(), mc.getWindow().getWidth(), mc.getWindow().getHeight()));
-		write(out.resolve("view.json"), view);
-		context.setScreen(() -> null);
-		if (serverFolder == null) {
-			return;
-		}
-		Path site = serverFolder.resolve("world/diorama-web");
-		try (var files = Files.walk(site)) {
-			for (Path file : (Iterable<Path>) files::iterator) {
-				Path to = out.resolve("site").resolve(site.relativize(file).toString());
-				if (Files.isDirectory(file)) {
-					Files.createDirectories(to);
-				} else {
-					Files.copy(file, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-				}
-			}
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
 		}
 	}
 

@@ -139,12 +139,9 @@ public final class WebMap {
 	private boolean start() {
 		try {
 			Files.createDirectories(this.folder);
-			// The page, and Minecraft's cloud pattern for the clouds it draws over unexplored land.
-			for (String file : new String[] {"index.html", "clouds.bin"}) {
-				try (InputStream in = WebMap.class.getResourceAsStream("/diorama/web/" + file)) {
-					if (in != null) {
-						Files.copy(in, this.folder.resolve(file), StandardCopyOption.REPLACE_EXISTING);
-					}
+			try (InputStream page = WebMap.class.getResourceAsStream("/diorama/web/index.html")) {
+				if (page != null) {
+					Files.copy(page, this.folder.resolve("index.html"), StandardCopyOption.REPLACE_EXISTING);
 				}
 			}
 		} catch (IOException e) {

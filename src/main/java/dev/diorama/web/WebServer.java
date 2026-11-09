@@ -72,8 +72,7 @@ final class WebServer {
 			Path file = root.resolve(path.substring(1)).normalize();
 			// Only what's in the folder, and only the page, its map file and the pictures.
 			String name = file.getFileName() == null ? "" : file.getFileName().toString();
-			String type = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".json") ? "application/json" : name.endsWith(".html") ? "text/html; charset=utf-8"
-				: name.equals("clouds.bin") ? "application/octet-stream" : null;
+			String type = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".json") ? "application/json" : name.endsWith(".html") ? "text/html; charset=utf-8" : null;
 			if (!file.startsWith(root) || type == null || !Files.isRegularFile(file) || !file.toRealPath().startsWith(root.toRealPath())) {
 				// Outside the folder, also through a link inside it.
 				send(exchange, 404, "text/plain", null);
