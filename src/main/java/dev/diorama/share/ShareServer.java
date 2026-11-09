@@ -47,8 +47,8 @@ import org.jspecify.annotations.Nullable;
 public final class ShareServer {
 	/** The most chunks a player can have waiting; older asks past this are dropped, and asked again. */
 	private static final int MAX_WAITING = 16384;
-	/** The most tables a player can have waiting: a world 16,000 blocks across has about 1,000 regions. */
-	private static final int MAX_TABLES = 4096;
+	/** The most tables a player can have waiting: a world 64,000 blocks across has about 16,000 regions. */
+	private static final int MAX_TABLES = 16384;
 	/** How long a read waits for the server's storage or its thread. */
 	private static final long READ_SECONDS = 30;
 	/** Chunks read at once: one trip to the server thread for the loaded ones, the rest read together. */
@@ -502,13 +502,22 @@ public final class ShareServer {
 					reads.put(chunk, tables.readLater(new ChunkPos((int) (chunk >> 32), (int) (long) chunk)));
 				}
 			}
+			// One at a time: a chunk that can't be read leaves the rest of the batch alone.
 			for (Map.Entry<Long, Object> copy : copies.entrySet()) {
-				tags.put(copy.getKey(), written(copy.getValue()));
+				try {
+					tags.put(copy.getKey(), written(copy.getValue()));
+				} catch (RuntimeException e) {
+					this.couldNotRead(copy.getKey(), e);
+				}
 			}
 			for (Map.Entry<Long, CompletableFuture<java.util.Optional<CompoundTag>>> read : reads.entrySet()) {
-				java.util.Optional<CompoundTag> saved = read.getValue().get(READ_SECONDS, TimeUnit.SECONDS);
-				if (saved.isPresent()) {
-					tags.put(read.getKey(), tables.upgrade(saved.get()));
+				try {
+					java.util.Optional<CompoundTag> saved = read.getValue().get(READ_SECONDS, TimeUnit.SECONDS);
+					if (saved.isPresent()) {
+						tags.put(read.getKey(), tables.upgrade(saved.get()));
+					}
+				} catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException | RuntimeException e) {
+					this.couldNotRead(read.getKey(), e);
 				}
 			}
 		} catch (InterruptedException e) {
@@ -519,6 +528,12 @@ public final class ShareServer {
 			}
 		}
 		return tags;
+	}
+
+	private void couldNotRead(long chunk, Exception e) {
+		if (!this.stopped) {
+			Diorama.LOGGER.warn("Couldn't read chunk {}, {} to share it", (int) (chunk >> 32), (int) (long) chunk, e);
+		}
 	}
 
 	private ChunkPacker packer(ServerLevel level, RegionTables tables) {
