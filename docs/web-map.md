@@ -50,7 +50,7 @@ Land taken out of the world stays on the web map until `/diorama-web redraw`: a 
 
 ## Disk
 
-About 44 KB a tile of land, plus a third more for the zoomed-out views. Hermitcraft Season 10's world took 127 MB: 91 MB for the overworld, 20 MB for the Nether, 14 MB for the End.
+About 59 KB a tile of land, plus half as much again for the zoomed-out views. Hermitcraft Season 10's world took 173 MB: 125 MB for the overworld, 30 MB for the Nether, 19 MB for the End.
 
 ## Modded blocks
 

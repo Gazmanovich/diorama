@@ -10,10 +10,15 @@ import java.nio.file.StandardCopyOption;
 import java.util.Iterator;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.stream.ImageOutputStream;
 import org.jspecify.annotations.Nullable;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * The web map's pictures on disk: one folder per dimension, one per zoom level, a JPEG per tile.
@@ -21,7 +26,7 @@ import org.jspecify.annotations.Nullable;
  * one tile made from the four under it. A tile with nothing drawn has no file.
  */
 final class WebTiles {
-	/** JPEG quality: the page's measure, about 69 KB a full tile. */
+	/** JPEG quality: about 59 KB a full tile with colour at full resolution (Hermitcraft's average). */
 	static final float QUALITY = 0.85F;
 	/** What the page shows where nothing is drawn; tiles blend their edges into it. */
 	static final int BACKGROUND = 0x15171C;
@@ -127,7 +132,18 @@ final class WebTiles {
 			ImageWriteParam param = writer.getDefaultWriteParam();
 			param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
 			param.setCompressionQuality(QUALITY);
-			writer.write(null, new IIOImage(image, null, null), param);
+			// Colour at every pixel (4:4:4): JPEG's default keeps it for every other pixel each way,
+			// which smears the edges between blocks of different colour.
+			IIOMetadata metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), param);
+			Node tree = metadata.getAsTree("javax_imageio_jpeg_image_1.0");
+			NodeList components = ((Element) tree).getElementsByTagName("componentSpec");
+			for (int i = 0; i < components.getLength(); i++) {
+				Element component = (Element) components.item(i);
+				component.setAttribute("HsamplingFactor", "1");
+				component.setAttribute("VsamplingFactor", "1");
+			}
+			metadata.setFromTree("javax_imageio_jpeg_image_1.0", tree);
+			writer.write(null, new IIOImage(image, null, metadata), param);
 		} finally {
 			writer.dispose();
 		}
