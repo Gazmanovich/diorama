@@ -15,7 +15,6 @@ import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
@@ -23,7 +22,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.PalettedContainer;
-import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
 //? if <1.21.2 {
 /*import net.minecraft.core.BlockPos;
@@ -33,8 +31,8 @@ import net.minecraft.world.level.EmptyBlockGetter;
 /**
  * Packs a chunk for a player's shared map: only the sections the view from the sky can reach, from
  * the lowest ground down to how far water and overhangs can hide it ({@link ChunkTags#summaryOf}) up
- * to the highest block, with their biomes and block light for night, and the two height maps the
- * map reads. Sky light stays out: only a view from under a roof uses it.
+ * to the highest block, with their biomes and block light for night. Sky light stays out: only a
+ * view from under a roof uses it. So do the height maps, which follow from the blocks.
  *
  * <p>A block with an opaque full block on all six sides can't show from the sky, so it goes out as
  * stone (end stone in the End): the picture is the same and the sections can't be read for ores, as
@@ -135,15 +133,7 @@ final class ChunkPacker {
 		out.putString("Status", "minecraft:full");
 		out.putInt("xPos", chunkX);
 		out.putInt("zPos", chunkZ);
-		CompoundTag heightmaps = Nbt.compound(tag, "Heightmaps");
-		CompoundTag keptHeights = new CompoundTag();
-		for (Heightmap.Types type : new Heightmap.Types[] {Heightmap.Types.WORLD_SURFACE, Heightmap.Types.MOTION_BLOCKING}) {
-			long[] packed = Nbt.longs(heightmaps, type.getSerializationKey());
-			if (packed != null) {
-				keptHeights.put(type.getSerializationKey(), new LongArrayTag(packed));
-			}
-		}
-		out.put("Heightmaps", keptHeights);
+		// No height maps: the client works them out from the blocks, which saves about half a kilobyte.
 		ListTag sections = new ListTag();
 		for (int y = lo; y <= hi; y++) {
 			CompoundTag section = byY.get(y);

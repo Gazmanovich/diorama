@@ -100,6 +100,11 @@ public final class ChunkTags {
 		}
 		int[] surface = finished ? this.surface(tag) : null;
 		int[] solid = finished ? this.solid(tag) : null;
+		if (finished && surface == null && solid == null && !Nbt.compound(tag, "Heightmaps").contains(Heightmap.Types.WORLD_SURFACE.getSerializationKey())) {
+			// A shared chunk comes without its height maps: they follow from its blocks.
+			surface = heights(states, minSection, Heightmap.Types.WORLD_SURFACE);
+			solid = heights(states, minSection, Heightmap.Types.MOTION_BLOCKING);
+		}
 		finished &= surface != null && solid != null;
 		return new SavedChunk(chunkX, chunkZ, finished, states, biomes, blockLight, skyLight, finished ? surface : new int[0], finished ? solid : new int[0]);
 	}
@@ -137,6 +142,39 @@ public final class ChunkTags {
 		} catch (RuntimeException e) {
 			return null;
 		}
+	}
+
+	/**
+	 * Each column's top block of the kind a height map counts, from the sections there are: below
+	 * the lowest of them if a column has none there.
+	 */
+	private int[] heights(PalettedContainer<BlockState>[] states, int minSection, Heightmap.Types type) {
+		java.util.function.Predicate<BlockState> counts = type.isOpaque();
+		int lowest = Integer.MAX_VALUE;
+		for (int i = 0; i < states.length; i++) {
+			if (states[i] != null) {
+				lowest = Math.min(lowest, (i + minSection) * 16 - 1);
+			}
+		}
+		int[] heights = new int[256];
+		java.util.Arrays.fill(heights, lowest == Integer.MAX_VALUE ? this.level.getMinY() - 1 : lowest);
+		for (int column = 0; column < 256; column++) {
+			int x = column & 15;
+			int z = column >> 4;
+			found:
+			for (int i = states.length - 1; i >= 0; i--) {
+				if (states[i] == null) {
+					continue;
+				}
+				for (int y = 15; y >= 0; y--) {
+					if (counts.test(states[i].get(x, y, z))) {
+						heights[column] = (i + minSection) * 16 + y;
+						break found;
+					}
+				}
+			}
+		}
+		return heights;
 	}
 
 	/** How high a finished chunk reaches and how deep its sky view can see. */
