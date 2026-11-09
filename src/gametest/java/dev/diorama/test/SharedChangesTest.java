@@ -17,7 +17,11 @@ final class SharedChangesTest {
 	private static final int X = 320;
 	private static final int Z = 8;
 	/** A red platform high over Alice's land: from the sky it covers the ground under it. */
-	private static final int BUILD_Y = 190;
+	/**
+	 * High enough to show a tile row above any the ground under it reaches: only the chunk's old
+	 * height brings that row back once the platform is gone.
+	 */
+	private static final int BUILD_Y = 240;
 	/** Vanilla's autosave is every 6,000 ticks; the test gives it twice that. */
 	private static final int AUTOSAVE_TICKS = 6600;
 
@@ -83,6 +87,10 @@ final class SharedChangesTest {
 				if (waited > AUTOSAVE_TICKS * 2) {
 					throw new AssertionError("The server never saved the chunk once the platform was gone");
 				}
+				context.waitTicks(20);
+			}
+			// Opening the map asks what changed at most every 10 s.
+			while (System.nanoTime() - opened < 11e9) {
 				context.waitTicks(20);
 			}
 			context.setScreen(MapScreen::new);
