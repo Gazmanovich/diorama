@@ -126,12 +126,14 @@ public final class ShareServer {
 			switch (kind) {
 				case ShareProtocol.REGIONS -> session.askRegions(dimension);
 				case ShareProtocol.TABLES -> {
+					int round = in.readInt();
+					boolean last = in.readBoolean();
 					int count = in.readUnsignedShort();
-					List<Long> regions = new ArrayList<>(count);
+					Map<Long, Integer> regions = new LinkedHashMap<>();
 					for (int i = 0; i < count; i++) {
-						regions.add(RegionTables.key(in.readInt(), in.readInt()));
+						regions.put(RegionTables.key(in.readInt(), in.readInt()), in.readInt());
 					}
-					session.askTables(dimension, regions);
+					session.askTables(dimension, regions, last ? round : 0);
 				}
 				case ShareProtocol.CHUNKS -> {
 					boolean urgent = in.readBoolean();
@@ -160,8 +162,14 @@ public final class ShareServer {
 		volatile ServerPlayer player;
 		/** Levels whose regions were asked for: a few at most, as one answer serves them all. */
 		private final Deque<String> regionAsks = new ArrayDeque<>();
-		/** Regions whose tables were asked for, in order, for {@link #tablesDimension}. */
-		private final LinkedHashSet<Long> tables = new LinkedHashSet<>();
+		/**
+		 * Regions whose tables were asked for, in order, for {@link #tablesDimension}, each with the
+		 * stamp of the table the client has of it; and after a refresh round's last region, a mark
+		 * ({@link #mark}) to say the round is done once everything before it is sent.
+		 */
+		private final LinkedHashMap<Long, Integer> tables = new LinkedHashMap<>();
+		/** The round mark waiting in {@link #tables}, if any: a client has one round open at a time. */
+		private long waitingMark = mark(0);
 		private String tablesDimension = "";
 		private long listedAt = System.nanoTime() - 10_000_000_000L;
 		/** Chunks asked for, in the order they go out, for {@link #dimension}. */
@@ -201,17 +209,23 @@ public final class ShareServer {
 			return this.regionAsks.poll();
 		}
 
-		/** More tables to send, past what's waiting, up to {@link #MAX_TABLES}. */
-		synchronized void askTables(String dimension, List<Long> regions) {
+		/** More tables to send, past what's waiting, up to {@link #MAX_TABLES}; {@code round}, if not 0, ends a refresh round. */
+		synchronized void askTables(String dimension, Map<Long, Integer> regions, int round) {
 			if (!dimension.equals(this.tablesDimension)) {
 				this.tables.clear();
 				this.tablesDimension = dimension;
 			}
-			for (long region : regions) {
-				if (this.tables.size() >= MAX_TABLES) {
+			for (Map.Entry<Long, Integer> region : regions.entrySet()) {
+				if (this.tables.size() >= MAX_TABLES && !this.tables.containsKey(region.getKey())) {
 					break;
 				}
-				this.tables.add(region);
+				this.tables.put(region.getKey(), region.getValue());
+			}
+			if (round != 0) {
+				// Only the newest round's mark waits: the client has given up on any before it.
+				this.tables.remove(this.waitingMark);
+				this.waitingMark = mark(round);
+				this.tables.put(this.waitingMark, round);
 			}
 		}
 
@@ -221,14 +235,23 @@ public final class ShareServer {
 			if (this.allowance <= 0 || this.tables.isEmpty()) {
 				return null;
 			}
-			var it = this.tables.iterator();
-			long region = it.next();
+			var it = this.tables.entrySet().iterator();
+			Map.Entry<Long, Integer> next = it.next();
 			it.remove();
-			return new long[] {region};
+			return new long[] {next.getKey(), next.getValue()};
 		}
 
 		synchronized String tablesDimension() {
 			return this.tablesDimension;
+		}
+
+		/** A refresh round's end in the queue: no region has x {@code Integer.MIN_VALUE}. */
+		static long mark(int round) {
+			return ((long) Integer.MIN_VALUE << 32) | (round & 0xFFFFFFFFL);
+		}
+
+		static boolean isMark(long key) {
+			return (int) (key >> 32) == Integer.MIN_VALUE;
 		}
 
 		private void refill() {
@@ -313,7 +336,18 @@ public final class ShareServer {
 					}
 					long[] table = session.nextTable();
 					if (table != null) {
-						this.table(session, session.tablesDimension(), table[0]);
+						String dimension = session.tablesDimension();
+						if (Session.isMark(table[0])) {
+							// Every table of the round went out before this.
+							int round = (int) table[1];
+							this.send(session, out -> {
+								out.writeByte(ShareProtocol.TABLES_DONE);
+								out.writeUTF(dimension);
+								out.writeInt(round);
+							});
+						} else {
+							this.table(session, dimension, table[0], (int) table[1]);
+						}
 						busy = true;
 						continue;
 					}
@@ -371,6 +405,8 @@ public final class ShareServer {
 		int sent = this.send(session, out -> {
 			out.writeByte(ShareProtocol.REGIONS);
 			out.writeUTF(dimension);
+			// The clock the save's times are in, for the client to tell how recent its drawing is.
+			out.writeLong(System.currentTimeMillis());
 			out.writeInt(found.size());
 			for (long region : found) {
 				out.writeInt((int) (region >> 32));
@@ -382,7 +418,7 @@ public final class ShareServer {
 	}
 
 	/** Sends a region's table: for each chunk the share rule allows, when it was saved, how high it reaches and how deep it shows. */
-	private void table(Session session, String dimension, long region) {
+	private void table(Session session, String dimension, long region, int known) {
 		ServerLevel level = this.levelOf(session, dimension);
 		if (level == null) {
 			return;
@@ -390,12 +426,22 @@ public final class ShareServer {
 		boolean generated = this.settings.land() == ShareSettings.Land.GENERATED;
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
-		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated);
+		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated, true);
+		// The table's stamp: any chunk saved again, or scanned again after a failure, changes it.
+		int stamp = java.util.Arrays.hashCode(table.saved);
+		stamp = stamp == 0 ? 1 : stamp;
+		if (known != 0 && stamp == known) {
+			// Nothing in it saved since the client's table. One it has no table of yet always gets one:
+			// tiles beside a region wait for its table.
+			return;
+		}
+		int sentStamp = stamp;
 		int sent = this.send(session, out -> {
 			out.writeByte(ShareProtocol.TABLES);
 			out.writeUTF(dimension);
 			out.writeInt(regionX);
 			out.writeInt(regionZ);
+			out.writeInt(sentStamp);
 			java.util.zip.Deflater deflater = new java.util.zip.Deflater();
 			try {
 				DeflaterOutputStream deflated = new DeflaterOutputStream(out, deflater);

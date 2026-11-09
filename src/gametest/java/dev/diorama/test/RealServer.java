@@ -76,6 +76,26 @@ final class RealServer implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * When the server last wrote a chunk of the overworld to its region file, in seconds, from the
+	 * file's header, or 0 if it hasn't.
+	 */
+	int savedAt(int chunkX, int chunkZ) {
+		String name = "r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca";
+		for (Path region : List.of(this.folder.resolve("world").resolve("region"), this.folder.resolve("world/dimensions/minecraft/overworld/region"))) {
+			Path file = region.resolve(name);
+			if (Files.isRegularFile(file)) {
+				try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(file.toFile(), "r")) {
+					in.seek(4096 + 4L * (((chunkZ & 31) << 5) | (chunkX & 31)));
+					return in.readInt();
+				} catch (IOException e) {
+					throw new AssertionError(e);
+				}
+			}
+		}
+		return 0;
+	}
+
 	/** The server's console output so far. */
 	String console() {
 		try {

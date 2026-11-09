@@ -25,18 +25,20 @@ import org.jspecify.annotations.Nullable;
 public final class ShareProtocol {
 	public static final Identifier CHANNEL = Diorama.id("share");
 	/** Changes when a message changes shape; a client and server on different versions don't talk. */
-	public static final int VERSION = 1;
+	public static final int VERSION = 2;
 
 	/** Server to client: the server's {@link ShareSettings}, sent as the player joins. */
 	public static final int SETTINGS = 0;
 	/**
 	 * Client to server: which regions does the level have? Its dimension. Server to client, the
-	 * answer: the dimension, a count, and each region's x and z.
+	 * answer: the dimension, the server's clock in milliseconds, a count, and each region's x and z.
 	 */
 	public static final int REGIONS = 1;
 	/**
-	 * Client to server: these regions' tables. The dimension, a count, each region's x and z. Server
-	 * to client, one message a region: the dimension, its x and z, then deflated, for each of its
+	 * Client to server: these regions' tables. The dimension, the refresh round (0 for none), whether
+	 * this is the round's last ask, a count, and each region's x and z and the stamp of the table
+	 * the client has of it, 0 for none. Server to client, one message a region changed since: the
+	 * dimension, its x and z, its stamp, then deflated, for each of its
 	 * 1,024 chunks ({@code (z << 5) | x}) when the save wrote it if it's shared, else 0, and for a
 	 * shared one how high it reaches and how deep its sky view goes, as shorts.
 	 */
@@ -48,6 +50,11 @@ public final class ShareProtocol {
 	 * of 0 if it isn't shared.
 	 */
 	public static final int CHUNKS = 3;
+	/**
+	 * Server to client: every table of a refresh round has been sent, or skipped as unchanged. The
+	 * dimension and the round. A refresh's tables are taken together once this comes.
+	 */
+	public static final int TABLES_DONE = 4;
 	/** The most chunks one ask names, so it fits in a message to the server. */
 	public static final int MAX_ASK = 3000;
 	/** The biggest packed chunk sent; one past it is said not to be shared. */

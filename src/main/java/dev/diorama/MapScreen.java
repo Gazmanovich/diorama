@@ -167,6 +167,22 @@ public final class MapScreen extends Screen {
 	public MapScreen() {
 		super(Component.translatable("diorama.screen.title"));
 		this.layer = this.layerOnOpening();
+		this.refreshShared();
+	}
+
+	/** Every so long while the map is open, as the server saves every few minutes. */
+	private static final int REFRESH_TICKS = 20 * 60;
+	private int refreshIn = REFRESH_TICKS;
+
+	/**
+	 * On a server that shares its map, asks what others changed since: as the map opens, and every
+	 * minute while it's open.
+	 */
+	private void refreshShared() {
+		dev.diorama.render.SavedChunkImport fill = MapSession.get() == null ? null : MapSession.get().savedChunks();
+		if (fill != null) {
+			fill.refresh();
+		}
 	}
 
 	/** Underground the map opens on the cave the player is in, unless the settings say surface only. */
@@ -343,6 +359,10 @@ public final class MapScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
+		if (--this.refreshIn <= 0) {
+			this.refreshIn = REFRESH_TICKS;
+			this.refreshShared();
+		}
 		// The session updates its own map.
 		if (this.otherMap != null) {
 			this.otherMap.map().update();
