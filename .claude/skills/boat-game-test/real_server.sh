@@ -176,7 +176,12 @@ cmd() {
 stop() {
 	# A test that failed before its vanilla player left leaves the helper waiting: it goes too.
 	for helper in "$root"/vanilla-*.pid; do
-		[ -e "$helper" ] && kill "$(cat "$helper")" 2>/dev/null
+		[ -e "$helper" ] || continue
+		# Only if that process is still the helper: a reused VM can give its number to another.
+		if grep -q vanilla_client.py "/proc/$(cat "$helper")/cmdline" 2>/dev/null; then
+			kill "$(cat "$helper")" 2>/dev/null
+		fi
+		rm -f "$helper"
 	done
 	running || return 0
 	cmd stop
@@ -228,6 +233,8 @@ vanilla_start() {
 vanilla_stop() {
 	local pid
 	pid=$(cat "$root/vanilla-$1.pid" 2>/dev/null) || return 0
+	rm -f "$root/vanilla-$1.pid"
+	grep -q vanilla_client.py "/proc/$pid/cmdline" 2>/dev/null || return 0
 	kill "$pid" 2>/dev/null
 	for _ in $(seq 1 60); do
 		kill -0 "$pid" 2>/dev/null || return 0
