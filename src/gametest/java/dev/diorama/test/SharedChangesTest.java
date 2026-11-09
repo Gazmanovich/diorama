@@ -34,8 +34,17 @@ final class SharedChangesTest {
 			server.command("gamerule advance_time false");
 			server.command("weather clear");
 			server.vanillaPlayerJoins("Alice");
+			// The land north of the platform too: the map looks past the platform onto it, and once
+			// the platform is gone that ground has to be on the map to take its place.
+			server.command("tp Alice " + X + " 200 " + (Z - 160));
+			context.waitTicks(20 * 30);
 			server.command("tp Alice " + X + " 200 " + Z);
 			context.waitTicks(20 * 30);
+			// Then she goes far away, and her land is saved as it unloads. Nobody is near the platform
+			// from here on, so the server saves only the chunks it's built in: a player close by would
+			// have the chunks around saved again too, and their tiles drawn again with them.
+			server.command("tp Alice " + X + " 200 " + (Z + 3000));
+			context.waitTicks(20 * 20);
 			// Not "save-all flush": that waits on every chunk still generating around Alice, and on a
 			// slow VM held the server so long her client timed out, which unloaded her land.
 			server.commandAndWait("save-all", "Saved the game", 600);
@@ -53,7 +62,9 @@ final class SharedChangesTest {
 			context.takeScreenshot("shared-changes-before");
 			context.setScreen(() -> null);
 
-			// Alice builds far from this player, and the server's own autosave writes it.
+			// The platform is built far from this player, and the server's own autosave writes it.
+			server.command("forceload add " + (X - 8) + " " + (Z - 8) + " " + (X + 7) + " " + (Z + 7));
+			context.waitTicks(20 * 5);
 			// Read first: the server can save the chunk within the second it's built.
 			int before = server.savedAt(X >> 4, Z >> 4);
 			server.commandAndWait("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:red_wool", "Successfully filled", 60);
@@ -78,8 +89,8 @@ final class SharedChangesTest {
 			context.takeScreenshot("shared-changes-after");
 			context.setScreen(() -> null);
 
-			// Alice takes it down again. The chunk then reaches less high than before, and the tiles
-			// that showed the platform, which only something that high shows in, are drawn again too.
+			// Taken down again. The chunk then reaches less high than before, and the tiles that showed
+			// the platform, which only something that high shows in, are drawn again too.
 			int built2 = server.savedAt(X >> 4, Z >> 4);
 			server.commandAndWait("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:air", "Successfully filled", 60);
 			long removed = System.nanoTime();
@@ -102,6 +113,7 @@ final class SharedChangesTest {
 			context.waitTicks(40);
 			context.takeScreenshot("shared-changes-removed");
 			context.setScreen(() -> null);
+			server.command("forceload remove all");
 			server.vanillaPlayerLeaves("Alice");
 			RealServer.leave(context);
 		}
