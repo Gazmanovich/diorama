@@ -126,12 +126,14 @@ public final class ShareServer {
 			switch (kind) {
 				case ShareProtocol.REGIONS -> session.askRegions(dimension);
 				case ShareProtocol.TABLES -> {
+					int round = in.readInt();
+					boolean last = in.readBoolean();
 					int count = in.readUnsignedShort();
 					Map<Long, Integer> regions = new LinkedHashMap<>();
 					for (int i = 0; i < count; i++) {
 						regions.put(RegionTables.key(in.readInt(), in.readInt()), in.readInt());
 					}
-					session.askTables(dimension, regions);
+					session.askTables(dimension, regions, last ? round : 0);
 				}
 				case ShareProtocol.CHUNKS -> {
 					boolean urgent = in.readBoolean();
@@ -162,7 +164,8 @@ public final class ShareServer {
 		private final Deque<String> regionAsks = new ArrayDeque<>();
 		/**
 		 * Regions whose tables were asked for, in order, for {@link #tablesDimension}, each with the
-		 * newest save time the client has for it.
+		 * stamp of the table the client has of it; and after a refresh round's last region, a mark
+		 * ({@link #mark}) to say the round is done once everything before it is sent.
 		 */
 		private final LinkedHashMap<Long, Integer> tables = new LinkedHashMap<>();
 		private String tablesDimension = "";
@@ -204,8 +207,8 @@ public final class ShareServer {
 			return this.regionAsks.poll();
 		}
 
-		/** More tables to send, past what's waiting, up to {@link #MAX_TABLES}. */
-		synchronized void askTables(String dimension, Map<Long, Integer> regions) {
+		/** More tables to send, past what's waiting, up to {@link #MAX_TABLES}; {@code round}, if not 0, ends a refresh round. */
+		synchronized void askTables(String dimension, Map<Long, Integer> regions, int round) {
 			if (!dimension.equals(this.tablesDimension)) {
 				this.tables.clear();
 				this.tablesDimension = dimension;
@@ -215,6 +218,9 @@ public final class ShareServer {
 					break;
 				}
 				this.tables.put(region.getKey(), region.getValue());
+			}
+			if (round != 0) {
+				this.tables.put(mark(round), round);
 			}
 		}
 
@@ -234,8 +240,13 @@ public final class ShareServer {
 			return this.tablesDimension;
 		}
 
-		synchronized boolean tablesDrained() {
-			return this.tables.isEmpty();
+		/** A refresh round's end in the queue: no region has x {@code Integer.MIN_VALUE}. */
+		static long mark(int round) {
+			return ((long) Integer.MIN_VALUE << 32) | (round & 0xFFFFFFFFL);
+		}
+
+		static boolean isMark(long key) {
+			return (int) (key >> 32) == Integer.MIN_VALUE;
 		}
 
 		private void refill() {
@@ -321,12 +332,16 @@ public final class ShareServer {
 					long[] table = session.nextTable();
 					if (table != null) {
 						String dimension = session.tablesDimension();
-						this.table(session, dimension, table[0], (int) table[1]);
-						if (session.tablesDrained()) {
+						if (Session.isMark(table[0])) {
+							// Every table of the round went out before this.
+							int round = (int) table[1];
 							this.send(session, out -> {
 								out.writeByte(ShareProtocol.TABLES_DONE);
 								out.writeUTF(dimension);
+								out.writeInt(round);
 							});
+						} else {
+							this.table(session, dimension, table[0], (int) table[1]);
 						}
 						busy = true;
 						continue;
@@ -407,22 +422,21 @@ public final class ShareServer {
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
 		RegionTables.Table table = this.tables(level).table(regionX, regionZ, generated, true);
-		int newest = 0;
-		for (int saved : table.saved) {
-			newest = Math.max(newest, saved);
-		}
-		if (known != 0 && newest == known) {
+		// The table's stamp: any chunk saved again, or scanned again after a failure, changes it.
+		int stamp = java.util.Arrays.hashCode(table.saved);
+		stamp = stamp == 0 ? 1 : stamp;
+		if (known != 0 && stamp == known) {
 			// Nothing in it saved since the client's table. One it has no table of yet always gets one:
 			// tiles beside a region wait for its table.
 			return;
 		}
-		int sentNewest = newest;
+		int sentStamp = stamp;
 		int sent = this.send(session, out -> {
 			out.writeByte(ShareProtocol.TABLES);
 			out.writeUTF(dimension);
 			out.writeInt(regionX);
 			out.writeInt(regionZ);
-			out.writeInt(sentNewest);
+			out.writeInt(sentStamp);
 			java.util.zip.Deflater deflater = new java.util.zip.Deflater();
 			try {
 				DeflaterOutputStream deflated = new DeflaterOutputStream(out, deflater);

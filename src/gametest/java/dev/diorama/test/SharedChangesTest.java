@@ -63,7 +63,8 @@ final class SharedChangesTest {
 			context.setScreen(MapScreen::new);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(X, Z), Projection.v(X, BUILD_Y, Z), 1, TileKey.SURFACE));
 			long opened = System.nanoTime();
-			context.waitFor(mc -> red(), 12000);
+			// Well inside the open map's once-a-minute check: opening it is what brings the change.
+			context.waitFor(mc -> red(), 600);
 			Diorama.LOGGER.info("Alice's build showed {} s after the map opened, {} s after she built it",
 				Math.round((System.nanoTime() - opened) / 1e9), Math.round((System.nanoTime() - built) / 1e9));
 			context.waitTicks(40);
