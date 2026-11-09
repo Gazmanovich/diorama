@@ -169,7 +169,7 @@ final class PortalPinsTest {
 
 	/**
 	 * Issue #315: a portal on the Nether roof gets a pin of its own, though one under the roof stands
-	 * a few blocks away on the map, and breaking it takes only its own pin.
+	 * a few blocks away on the map or straight below it, and breaking it takes only its own pin.
 	 */
 	static void netherRoof(ClientGameTestContext context, TestSingleplayerContext world) {
 		context.runOnClient(mc -> Settings.get().portalMarkers = true);
@@ -214,6 +214,18 @@ final class PortalPinsTest {
 		}
 		frameBroken(world, NETHER, x, 117, z);
 		expectNetherPins(context, 0, "breaking the portal under the roof");
+
+		// Straight above one under the roof, in the same chunk: the chunk has a portal on each side.
+		// The one under is wider, so most of the chunk's portal blocks are its.
+		int same = (x + 40) & ~15;
+		world.getServer().runCommand(NETHER + "fill " + (same - 1) + " 116 " + (z - 2) + " " + (same + 6) + " 122 " + (z + 2) + " air");
+		netherPortal(world, NETHER, same, 117, z, 4, 3);
+		expectNetherPins(context, 1, "a wide portal under the roof");
+		netherPortal(world, NETHER, same, 128, z, 2, 3);
+		expectNetherPins(context, 2, "a portal on the roof straight above it, in the same chunk");
+		world.getServer().runCommand(NETHER + "fill " + same + " 117 " + z + " " + (same + 5) + " 121 " + z + " air");
+		frameBroken(world, NETHER, same, 128, z);
+		expectNetherPins(context, 0, "breaking both");
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
 	}
 

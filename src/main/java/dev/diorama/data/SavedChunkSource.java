@@ -69,7 +69,7 @@ public final class SavedChunkSource implements ChunkSource {
 				}
 			}
 			snapshot = ChunkSnapshot.fromSave(chunk, around, this.save.level());
-			List<Portals.Spot> spots = Portals.find(snapshot);
+			List<Portals.Spot> spots = Portals.find(snapshot, this.roof());
 			if (!spots.isEmpty()) {
 				this.portals.accept(spots);
 			}
