@@ -552,7 +552,7 @@ public final class MapSession {
 			saved.add(spot);
 		}
 		if (pins != null) {
-			Portals.add(saved, dimension, pins);
+			Portals.add(saved, dimension, pins, this.map.roof());
 		}
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();

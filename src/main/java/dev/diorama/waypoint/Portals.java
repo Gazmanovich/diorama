@@ -26,7 +26,8 @@ public final class Portals {
 	/**
 	 * Portals of a kind this close, in blocks across the map, share a pin. It takes in the widest
 	 * Nether portal, 21 blocks plus its frame, from any block of it, and a pile of portals side by
-	 * side, which would be a pile of pins.
+	 * side, which would be a pile of pins. Not through a roof: on the Nether roof and under it are
+	 * different places (see {@link #add}).
 	 */
 	private static final int SAME_PORTAL = 24;
 	private static final int NETHER_COLOR = 0xFF8E4EC6;
@@ -54,9 +55,13 @@ public final class Portals {
 		return block == Blocks.END_GATEWAY ? Waypoint.Kind.END_GATEWAY : null;
 	}
 
-	/** Where the portals in a chunk are, one spot per kind. Any thread. */
-	public static List<Spot> find(ChunkSnapshot chunk) {
-		Map<Waypoint.Kind, List<int[]>> blocks = null;
+	/**
+	 * Where the portals in a chunk are, one spot per kind, and per side of the dimension's
+	 * {@code roof} ({@link ChunkSource#roof}): a portal on the Nether roof is often straight above one
+	 * under it. Any thread.
+	 */
+	public static List<Spot> find(ChunkSnapshot chunk, int roof) {
+		List<Map<Waypoint.Kind, List<int[]>>> blocks = null;
 		for (int i = 0; i < chunk.sectionCount(); i++) {
 			PalettedContainer<BlockState> section = chunk.section(i);
 			if (section == null || !section.maybeHas(PORTAL)) {
@@ -69,9 +74,10 @@ public final class Portals {
 						Waypoint.Kind kind = kind(section.get(x, y, z).getBlock());
 						if (kind != null) {
 							if (blocks == null) {
-								blocks = new EnumMap<>(Waypoint.Kind.class);
+								blocks = List.of(new EnumMap<>(Waypoint.Kind.class), new EnumMap<>(Waypoint.Kind.class));
 							}
-							blocks.computeIfAbsent(kind, k -> new ArrayList<>()).add(new int[] {(chunk.chunkX << 4) + x, baseY + y, (chunk.chunkZ << 4) + z});
+							int side = roof != ChunkSource.NO_ROOF && baseY + y >= roof ? 1 : 0;
+							blocks.get(side).computeIfAbsent(kind, k -> new ArrayList<>()).add(new int[] {(chunk.chunkX << 4) + x, baseY + y, (chunk.chunkZ << 4) + z});
 						}
 					}
 				}
@@ -81,9 +87,11 @@ public final class Portals {
 			return List.of();
 		}
 		List<Spot> spots = new ArrayList<>();
-		for (Map.Entry<Waypoint.Kind, List<int[]>> entry : blocks.entrySet()) {
-			int[] middle = entry.getValue().get(entry.getValue().size() / 2);
-			spots.add(new Spot(entry.getKey(), middle[0], middle[1], middle[2]));
+		for (Map<Waypoint.Kind, List<int[]>> side : blocks) {
+			for (Map.Entry<Waypoint.Kind, List<int[]>> entry : side.entrySet()) {
+				int[] middle = entry.getValue().get(entry.getValue().size() / 2);
+				spots.add(new Spot(entry.getKey(), middle[0], middle[1], middle[2]));
+			}
 		}
 		return spots;
 	}
@@ -95,7 +103,7 @@ public final class Portals {
 	 * moved is theirs, and stays.
 	 */
 	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store, ChunkSource around) {
-		add(find(chunk), dimension, store);
+		add(find(chunk, around.roof()), dimension, store, around.roof());
 		for (Waypoint pin : store.withHidden(dimension)) {
 			if (pin.kind.isPortal() && !pin.edited && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ && !onPortal(pin, chunk)) {
 				store.forget(pin);
@@ -104,7 +112,7 @@ public final class Portals {
 					for (int dz = -reach; dz <= reach; dz++) {
 						ChunkSnapshot near = around.chunk(chunk.chunkX + dx, chunk.chunkZ + dz);
 						if (near != null) {
-							add(find(near), dimension, store);
+							add(find(near, around.roof()), dimension, store, around.roof());
 						}
 					}
 				}
@@ -119,8 +127,13 @@ public final class Portals {
 		return section != null && kind(section.get(pin.x & 15, pin.y & 15, pin.z & 15).getBlock()) == pin.kind;
 	}
 
-	/** Pins the spots no pin covers yet, with one save. A waypoint the player gave the portal icon counts. Client thread. */
-	public static void add(List<Spot> spots, String dimension, WaypointStore store) {
+	/**
+	 * Pins the spots no pin covers yet, with one save. A waypoint the player gave the portal icon
+	 * counts. In a dimension with a {@code roof} ({@link ChunkSource#roof}), a pin only covers its own
+	 * side of it: a portal on the Nether roof is often built a few blocks from one under it, and no
+	 * portal reaches through the bedrock. Client thread.
+	 */
+	public static void add(List<Spot> spots, String dimension, WaypointStore store, int roof) {
 		if (spots.isEmpty()) {
 			return;
 		}
@@ -130,7 +143,8 @@ public final class Portals {
 			boolean pinned = false;
 			for (Waypoint waypoint : known) {
 				boolean marksPortals = waypoint.kind == spot.kind() || !waypoint.kind.isPortal() && waypoint.icon.equals(WaypointIcons.PORTAL);
-				pinned |= marksPortals && Math.abs(waypoint.x - spot.x()) <= SAME_PORTAL && Math.abs(waypoint.z - spot.z()) <= SAME_PORTAL;
+				boolean sameSide = roof == ChunkSource.NO_ROOF || (waypoint.y >= roof) == (spot.y() >= roof);
+				pinned |= marksPortals && sameSide && Math.abs(waypoint.x - spot.x()) <= SAME_PORTAL && Math.abs(waypoint.z - spot.z()) <= SAME_PORTAL;
 			}
 			if (!pinned) {
 				int color = spot.kind() == Waypoint.Kind.NETHER_PORTAL ? NETHER_COLOR : END_COLOR;
