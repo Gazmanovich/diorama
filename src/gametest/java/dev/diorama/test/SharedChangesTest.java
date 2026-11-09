@@ -18,7 +18,7 @@ final class SharedChangesTest {
 	private static final int Z = 8;
 	/** A red platform high over Alice's land: from the sky it covers the ground under it. */
 	private static final int BUILD_Y = 190;
-	/** Vanilla's autosave is every 6,000 ticks; a little more, as the server can fall behind. */
+	/** Vanilla's autosave is every 6,000 ticks; the test gives it twice that. */
 	private static final int AUTOSAVE_TICKS = 6600;
 
 	private SharedChangesTest() {
@@ -50,7 +50,15 @@ final class SharedChangesTest {
 			// Alice builds far from this player, and the server's own autosave writes it.
 			server.command("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:red_wool");
 			long built = System.nanoTime();
-			context.waitTicks(AUTOSAVE_TICKS);
+			// The server's own autosave, as its region file shows: no command saves it.
+			int before = server.savedAt(X >> 4, Z >> 4);
+			for (int waited = 0; server.savedAt(X >> 4, Z >> 4) == before; waited += 20) {
+				if (waited > AUTOSAVE_TICKS * 2) {
+					throw new AssertionError("The server never saved the build's chunk");
+				}
+				context.waitTicks(20);
+			}
+			Diorama.LOGGER.info("The server's autosave wrote the build's chunk {} s after it was built", Math.round((System.nanoTime() - built) / 1e9));
 
 			context.setScreen(MapScreen::new);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(X, Z), Projection.v(X, BUILD_Y, Z), 1, TileKey.SURFACE));
@@ -82,9 +90,10 @@ final class SharedChangesTest {
 		int px = Math.floorMod((int) Math.floor(u * Projection.PIXELS_PER_UNIT), Projection.TILE_PIXELS);
 		int py = Math.floorMod((int) Math.floor(v * Projection.PIXELS_PER_UNIT), Projection.TILE_PIXELS);
 		int pixel = pixels[py * Projection.TILE_PIXELS + px];
-		int r = (pixel >> 16) & 0xFF;
+		// Tiles keep their pixels as ABGR.
+		int r = pixel & 0xFF;
 		int g = (pixel >> 8) & 0xFF;
-		int b = pixel & 0xFF;
+		int b = (pixel >> 16) & 0xFF;
 		return (pixel >>> 24) != 0 && r > 100 && r > 2 * g && r > 2 * b;
 	}
 }
