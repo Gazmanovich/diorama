@@ -389,8 +389,9 @@ public final class ShareServer {
 		for (int saved : table.saved) {
 			newest = Math.max(newest, saved);
 		}
-		if (newest == known) {
-			// Nothing in it saved since the client's table.
+		if (known != 0 && newest == known) {
+			// Nothing in it saved since the client's table. One it has no table of yet always gets one:
+			// tiles beside a region wait for its table.
 			return;
 		}
 		int sentNewest = newest;
