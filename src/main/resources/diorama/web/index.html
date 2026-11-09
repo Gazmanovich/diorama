@@ -116,11 +116,11 @@ function nameOf(id) {
 }
 
 function zoomFor(scale) {
-	// The coarsest level still about as sharp as the screen. A tile pixel may cover up to one and a
-	// half screen pixels: on a phone's dense screen, a quarter of the pictures to fetch for a look
-	// that's hardly softer.
+	// The coarsest level at least as sharp as the screen: a picture's pixel never covers more than
+	// one screen pixel, so a picture is only ever shrunk (up to half), never stretched, until the
+	// view is closer in than the map's own pixels.
 	const native = map.tilePixels / map.tileUnits; // CSS px per unit at zoom 0, 1:1
-	let z = Math.floor(Math.log2(native * 1.5 / (scale * (devicePixelRatio || 1))));
+	let z = Math.floor(Math.log2(native / (scale * (devicePixelRatio || 1))) + 1e-9);
 	return Math.max(0, Math.min(dim.zoomLevels - 1, z));
 }
 
@@ -245,8 +245,10 @@ function paint() {
 	let loaded = 0, any = 0;
 	for (let level = coarse; level >= z; level--) {
 		const units = tileUnits(level);
-		// Sharp pixels once a block takes more screen than the picture has for it.
+		// Shrunk pictures averaged with the browser's best filter; stretched ones (closer in than the
+		// map's pixels, or a zoomed-out stand-in while the sharp one loads) keep their pixels square.
 		ctx.imageSmoothingEnabled = k < map.tilePixels / map.tileUnits / (1 << level);
+		ctx.imageSmoothingQuality = "high";
 		for (const [u, v] of level === z ? sharp : visible(level, left, top, w, h)) {
 			const img = tile(level, u, v);
 			if (!img) continue;
