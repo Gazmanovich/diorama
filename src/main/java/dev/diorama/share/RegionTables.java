@@ -67,6 +67,10 @@ final class RegionTables {
 		final boolean[] finished = new boolean[1024];
 		/** When the header was last read, in milliseconds; 0 for never. */
 		long readAt;
+		/** The region file's modification time when the header was last read, or -1. */
+		long modifiedAt = -1;
+		/** A scan failed since: the header is read again even if the file didn't change. */
+		boolean failed;
 	}
 
 	/** A table read this recently is taken as it is: serving a region's chunks reads it for each. */
@@ -115,6 +119,14 @@ final class RegionTables {
 	 * out. {@code generated}: every finished chunk is shared, not only visited ones.
 	 */
 	Table table(int regionX, int regionZ, boolean generated) {
+		return this.table(regionX, regionZ, generated, false);
+	}
+
+	/**
+	 * The same; {@code fresh} reads the region file's header even if it was read moments ago, for a
+	 * client asking what changed, which a save a moment before must reach.
+	 */
+	Table table(int regionX, int regionZ, boolean generated, boolean fresh) {
 		long key = key(regionX, regionZ);
 		if (!Files.isRegularFile(this.regionFolder.resolve("r." + regionX + "." + regionZ + ".mca"))) {
 			// Nothing kept for regions with no file: a client can name any.
@@ -123,11 +135,26 @@ final class RegionTables {
 		}
 		Table table = this.tables.computeIfAbsent(key, k -> new Table());
 		long now = System.currentTimeMillis();
-		if (now - table.readAt < FRESH_MS) {
+		if (!fresh && now - table.readAt < FRESH_MS) {
 			return table;
 		}
 		table.readAt = now;
-		int[] times = readHeader(this.regionFolder.resolve("r." + regionX + "." + regionZ + ".mca"));
+		Path file = this.regionFolder.resolve("r." + regionX + "." + regionZ + ".mca");
+		long modified;
+		try {
+			modified = Files.getLastModifiedTime(file).toMillis();
+		} catch (IOException e) {
+			modified = -1;
+		}
+		if (modified != -1 && modified == table.modifiedAt && !table.failed) {
+			// Not written since: every open map asks once a minute, and this saves the header read.
+			return table;
+		}
+		table.modifiedAt = modified;
+		table.failed = false;
+		int[] times = readHeader(file);
+		// Read again next time, even if the file isn't written again before then.
+		table.failed = times == null;
 		List<Integer> changed = new ArrayList<>();
 		for (int i = 0; i < 1024; i++) {
 			int time = times == null ? 0 : times[i];
@@ -192,11 +219,13 @@ final class RegionTables {
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			table.saved[index] = 0;
+			table.failed = true;
 			return;
 		} catch (Exception e) {
 			Diorama.LOGGER.warn("Couldn't scan saved chunk {} to share it", pos, e);
 			// Scanned again next time rather than taken for unshared until it's saved again.
 			table.saved[index] = 0;
+			table.failed = true;
 			return;
 		}
 		if (tag == null || tag.isEmpty() || !ChunkTags.finished(tag)) {

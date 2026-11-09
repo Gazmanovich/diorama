@@ -86,7 +86,7 @@ public final class SavedChunkSource implements ChunkSource {
 			snapshot = this.blendRadius < 0 ? ChunkSnapshot.fromSave(chunk, around, this.save.level())
 				: ChunkSnapshot.fromSave(chunk, around, this.save.level(), this.blendRadius);
 			if (this.portals != null) {
-				List<Portals.Spot> spots = Portals.find(snapshot);
+				List<Portals.Spot> spots = Portals.find(snapshot, this.roof());
 				if (!spots.isEmpty()) {
 					this.portals.accept(spots);
 				}

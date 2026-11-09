@@ -55,6 +55,8 @@ public final class SharedChunks implements ChunkSave {
 	/** An ask not answered in this long is asked again: the server drops asks past its queue's length. */
 	private static final long ASK_AGAIN_MS = 60_000;
 	private static final int TABLES_PER_ASK = 256;
+	/** The map asks for what changed at most this often. */
+	private static final long REFRESH_MS = 10_000;
 	/** The most NBT one shared chunk may unpack to; a whole chunk's sections with light are about 100 KB. */
 	private static final long NBT_QUOTA = 8L << 20;
 	private static final int KEPT_CHUNKS = 8192;
@@ -69,10 +71,33 @@ public final class SharedChunks implements ChunkSave {
 	private volatile boolean closed;
 	private volatile @Nullable Runnable changed;
 
+	/** The server's clock less this computer's, in milliseconds, as of its last list of regions. */
+	private volatile long serverClock;
+	/** When the map last asked for what changed, so a burst of map openings asks once. */
+	private long refreshedAt;
+
 	// Guarded by lock.
 	private @Nullable List<Long> regions;
 	private boolean regionsAsked;
 	private long regionsAskedAt;
+	/** Asked for the regions again: every region's table is asked for again when they come. */
+	private boolean refreshing;
+	/**
+	 * A refresh's tables, kept until the server says the round is done and then taken together. A
+	 * tile spanning two regions drawn with one region's new table and the other's old one would be
+	 * marked drawn as of now, and the other's change, saved a moment before, would never reach it.
+	 */
+	private @Nullable Map<Long, Table> round;
+	/** The refresh round under way, numbered so a late answer to an earlier one isn't taken for it. */
+	private int roundId;
+	private long roundStartedAt;
+	/**
+	 * The server's time, in seconds, that every table in use is at least as recent as: when it
+	 * listed the regions before they were asked for. 0 before the first listing.
+	 */
+	private volatile int tablesAsOf;
+	/** The same for the round under way, taken on once it's done. */
+	private int roundAsOf;
 	private final Map<Long, Table> tables = new HashMap<>();
 	/** When each region's table was asked for: one that hasn't come in {@link #ASK_AGAIN_MS} is asked for again. */
 	private final Map<Long, Long> tablesAsked = new HashMap<>();
@@ -90,7 +115,24 @@ public final class SharedChunks implements ChunkSave {
 	private final Map<Long, Integer> parsedTimes = new HashMap<>();
 
 	/** One region's table, indexed {@code (z << 5) | x}. */
-	private record Table(int[] times, short[] top, short[] floor) {
+	private record Table(int[] times, short[] top, short[] floor, int stamp) {
+		/**
+		 * This table, with each chunk reaching as high and as low as it did in {@code before} too:
+		 * the tiles a removed tower showed in are drawn again, without it. Kept for the session, so
+		 * a later round can't drop the old height before the fill has drawn from it.
+		 */
+		Table reaching(Table before) {
+			short[] top = this.top.clone();
+			short[] floor = this.floor.clone();
+			for (int i = 0; i < this.times.length; i++) {
+				if (this.times[i] != 0 && before.times[i] != 0) {
+					top[i] = (short) Math.max(top[i], before.top[i]);
+					floor[i] = (short) Math.min(floor[i], before.floor[i]);
+				}
+			}
+			return new Table(this.times, top, floor, this.stamp);
+		}
+
 	}
 
 	/** A chunk asked for, when, and its answer: the packed chunk and when it was saved, or null if it isn't shared. */
@@ -196,7 +238,7 @@ public final class SharedChunks implements ChunkSave {
 			}
 		}
 		if (!toAsk.isEmpty()) {
-			this.askTables(toAsk);
+			this.askTables(toAsk, 0);
 			long first = System.currentTimeMillis() + FIRST_TABLES_WAIT_MS;
 			synchronized (this.lock) {
 				while (this.tables.isEmpty() && !this.closed && System.currentTimeMillis() < first) {
@@ -213,8 +255,46 @@ public final class SharedChunks implements ChunkSave {
 		return times;
 	}
 
-	/** Asks for regions' tables, the ones nearest the player first. */
-	private void askTables(List<Long> regions) {
+	@Override
+	public int now() {
+		// Not the clock: a tile drawn while a round's tables wait is drawn from the older ones.
+		int asOf = this.tablesAsOf;
+		return asOf != 0 ? asOf : (int) ((System.currentTimeMillis() + this.serverClock) / 1000);
+	}
+
+	/**
+	 * Asks the server for the regions and every region's table again. Each chunk saved since this
+	 * player's map drew it is drawn again; the rest isn't sent again. Client thread.
+	 */
+	@Override
+	public void refresh() {
+		long now = System.currentTimeMillis();
+		synchronized (this.lock) {
+			// One round at a time; one the server never finished is given up after a minute.
+			boolean roundOpen = (this.refreshing || this.round != null) && now - this.roundStartedAt < ASK_AGAIN_MS;
+			if (this.regions == null || roundOpen || now - this.refreshedAt < REFRESH_MS) {
+				return;
+			}
+			this.refreshedAt = now;
+			this.roundStartedAt = now;
+			this.refreshing = true;
+			this.round = null;
+			this.roundId++;
+		}
+		if (Diorama.DEBUG) {
+			Diorama.LOGGER.info("Shared map: asking what changed");
+		}
+		this.send(out -> {
+			out.writeByte(ShareProtocol.REGIONS);
+			out.writeUTF(this.dimension);
+		});
+	}
+
+	/**
+	 * Asks for regions' tables, the ones nearest the player first. {@code round}, if not 0, is the
+	 * refresh round these are for: its last ask says so, and the server answers with the round done.
+	 */
+	private void askTables(List<Long> regions, int round) {
 		Entity viewer = MapSession.viewer();
 		double x = viewer == null ? 0 : viewer.getX();
 		double z = viewer == null ? 0 : viewer.getZ();
@@ -223,15 +303,28 @@ public final class SharedChunks implements ChunkSave {
 			double dz = (int) (long) region * 512.0 + 256 - z;
 			return dx * dx + dz * dz;
 		}));
-		for (int from = 0; from < regions.size(); from += TABLES_PER_ASK) {
+		// A round with no regions still sends its last ask, for the server to say it's done.
+		for (int from = 0; from < regions.size() || from == 0 && round != 0; from += TABLES_PER_ASK) {
 			List<Long> part = regions.subList(from, Math.min(regions.size(), from + TABLES_PER_ASK));
+			boolean last = from + TABLES_PER_ASK >= regions.size();
+			int[] stamps = new int[part.size()];
+			synchronized (this.lock) {
+				for (int i = 0; i < part.size(); i++) {
+					Table known = this.tables.get(part.get(i));
+					stamps[i] = known == null ? 0 : known.stamp();
+				}
+			}
 			this.send(out -> {
 				out.writeByte(ShareProtocol.TABLES);
 				out.writeUTF(this.dimension);
+				out.writeInt(round);
+				out.writeBoolean(last);
 				out.writeShort(part.size());
-				for (long region : part) {
-					out.writeInt((int) (region >> 32));
-					out.writeInt((int) region);
+				for (int i = 0; i < part.size(); i++) {
+					out.writeInt((int) (part.get(i) >> 32));
+					out.writeInt((int) (long) part.get(i));
+					// The server answers only if something there was saved since.
+					out.writeInt(stamps[i]);
 				}
 			});
 		}
@@ -425,12 +518,16 @@ public final class SharedChunks implements ChunkSave {
 			case ShareProtocol.REGIONS -> shared.regions(in);
 			case ShareProtocol.TABLES -> shared.table(in);
 			case ShareProtocol.CHUNKS -> shared.chunk(in);
+			case ShareProtocol.TABLES_DONE -> shared.roundDone(in.readInt());
 			default -> {
 			}
 		}
 	}
 
 	private void regions(DataInputStream in) throws IOException {
+		long serverTime = in.readLong();
+		this.serverClock = serverTime - System.currentTimeMillis();
+		int listedAt = (int) (serverTime / 1000);
 		int count = in.readInt();
 		// Never more than the message holds, whatever it says.
 		if (count < 0 || count > in.available() / 8) {
@@ -440,15 +537,39 @@ public final class SharedChunks implements ChunkSave {
 		for (int i = 0; i < count; i++) {
 			regions.add(SavedChunks.regionKey(in.readInt(), in.readInt()));
 		}
+		boolean again;
 		synchronized (this.lock) {
 			this.regions = regions;
+			again = this.refreshing;
+			this.refreshing = false;
+			if (again) {
+				this.roundAsOf = listedAt;
+			} else if (this.tablesAsOf == 0) {
+				// The first listing: every table is asked for after it.
+				this.tablesAsOf = listedAt;
+			}
+			if (again) {
+				long now = System.currentTimeMillis();
+				for (long region : regions) {
+					this.tablesAsked.put(region, now);
+				}
+				this.round = new HashMap<>();
+				this.roundStartedAt = System.currentTimeMillis();
+			}
 			this.lock.notifyAll();
+		}
+		if (again) {
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Shared map: {} regions listed; asking for their tables", regions.size());
+			}
+			this.askTables(new ArrayList<>(regions), this.roundId);
 		}
 	}
 
 	private void table(DataInputStream in) throws IOException {
 		int regionX = in.readInt();
 		int regionZ = in.readInt();
+		int stamp = in.readInt();
 		int[] times = new int[1024];
 		short[] top = new short[1024];
 		short[] floor = new short[1024];
@@ -465,8 +586,41 @@ public final class SharedChunks implements ChunkSave {
 		} finally {
 			inflater.end();
 		}
+		Table table = new Table(times, top, floor, stamp);
+		long key = SavedChunks.regionKey(regionX, regionZ);
 		synchronized (this.lock) {
-			this.tables.put(SavedChunks.regionKey(regionX, regionZ), new Table(times, top, floor));
+			// Every table while a round is open, new regions' too: drawn with some new tables and
+			// some old, a tile could miss a change for good.
+			if (this.round != null) {
+				this.round.put(key, table);
+				// Still coming: a round is given up only after a minute with nothing from it.
+				this.roundStartedAt = System.currentTimeMillis();
+				if (Diorama.DEBUG) {
+					Diorama.LOGGER.info("Shared map: region {}, {} changed", regionX, regionZ);
+				}
+				return;
+			}
+			this.tables.put(key, table);
+			this.lock.notifyAll();
+		}
+		this.changed();
+	}
+
+	/** The server sent every table of the round: a refresh's tables go in together. */
+	private void roundDone(int id) {
+		synchronized (this.lock) {
+			if (this.round == null || id != this.roundId) {
+				return;
+			}
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Shared map: {} changed regions taken in", this.round.size());
+			}
+			for (Map.Entry<Long, Table> changed : this.round.entrySet()) {
+				Table before = this.tables.get(changed.getKey());
+				this.tables.put(changed.getKey(), before == null ? changed.getValue() : changed.getValue().reaching(before));
+			}
+			this.round = null;
+			this.tablesAsOf = this.roundAsOf;
 			this.lock.notifyAll();
 		}
 		this.changed();

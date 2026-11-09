@@ -32,6 +32,18 @@ public interface ChunkSave {
 	/** The chunk, or null if there's none or it can't be read. Blocks. */
 	@Nullable SavedChunk read(int chunkX, int chunkZ);
 
+	/**
+	 * The save's clock, in seconds: what {@link #scan} measures chunks' save times in. A server's
+	 * clock can differ from this computer's.
+	 */
+	default int now() {
+		return (int) (System.currentTimeMillis() / 1000);
+	}
+
+	/** Looks for chunks saved since the last {@link #scan}, if that takes asking someone. */
+	default void refresh() {
+	}
+
 	/** Whether {@link #prefetch} does anything: working out what to prefetch costs reads of its own. */
 	default boolean prefetches() {
 		return false;
