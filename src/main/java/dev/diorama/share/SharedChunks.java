@@ -116,6 +116,22 @@ public final class SharedChunks implements ChunkSave {
 
 	/** One region's table, indexed {@code (z << 5) | x}. */
 	private record Table(int[] times, short[] top, short[] floor, int stamp) {
+		/**
+		 * This table, with each chunk saved again since {@code before} reaching as high and as low
+		 * as it did then too: the tiles a removed tower showed in are drawn again, without it.
+		 */
+		Table reaching(Table before) {
+			short[] top = this.top.clone();
+			short[] floor = this.floor.clone();
+			for (int i = 0; i < this.times.length; i++) {
+				if (this.times[i] != 0 && before.times[i] != 0 && this.times[i] != before.times[i]) {
+					top[i] = (short) Math.max(top[i], before.top[i]);
+					floor[i] = (short) Math.min(floor[i], before.floor[i]);
+				}
+			}
+			return new Table(this.times, top, floor, this.stamp);
+		}
+
 	}
 
 	/** A chunk asked for, when, and its answer: the packed chunk and when it was saved, or null if it isn't shared. */
@@ -576,6 +592,8 @@ public final class SharedChunks implements ChunkSave {
 			// some old, a tile could miss a change for good.
 			if (this.round != null) {
 				this.round.put(key, table);
+				// Still coming: a round is given up only after a minute with nothing from it.
+				this.roundStartedAt = System.currentTimeMillis();
 				if (Diorama.DEBUG) {
 					Diorama.LOGGER.info("Shared map: region {}, {} changed", regionX, regionZ);
 				}
@@ -596,7 +614,10 @@ public final class SharedChunks implements ChunkSave {
 			if (Diorama.DEBUG) {
 				Diorama.LOGGER.info("Shared map: {} changed regions taken in", this.round.size());
 			}
-			this.tables.putAll(this.round);
+			for (Map.Entry<Long, Table> changed : this.round.entrySet()) {
+				Table before = this.tables.get(changed.getKey());
+				this.tables.put(changed.getKey(), before == null ? changed.getValue() : changed.getValue().reaching(before));
+			}
 			this.round = null;
 			this.tablesAsOf = this.roundAsOf;
 			this.lock.notifyAll();

@@ -73,6 +73,27 @@ final class SharedChangesTest {
 			context.waitTicks(40);
 			context.takeScreenshot("shared-changes-after");
 			context.setScreen(() -> null);
+
+			// Alice takes it down again. The chunk then reaches less high than before, and the tiles
+			// that showed the platform, which only something that high shows in, are drawn again too.
+			int built2 = server.savedAt(X >> 4, Z >> 4);
+			server.commandAndWait("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:air", "Successfully filled", 60);
+			long removed = System.nanoTime();
+			for (int waited = 0; server.savedAt(X >> 4, Z >> 4) == built2; waited += 20) {
+				if (waited > AUTOSAVE_TICKS * 2) {
+					throw new AssertionError("The server never saved the chunk once the platform was gone");
+				}
+				context.waitTicks(20);
+			}
+			context.setScreen(MapScreen::new);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(X, Z), Projection.v(X, BUILD_Y, Z), 1, TileKey.SURFACE));
+			long reopened = System.nanoTime();
+			context.waitFor(mc -> !red(), 600);
+			Diorama.LOGGER.info("Alice's platform left this player's map {} s after the map opened, {} s after she took it down",
+				Math.round((System.nanoTime() - reopened) / 1e9), Math.round((System.nanoTime() - removed) / 1e9));
+			context.waitTicks(40);
+			context.takeScreenshot("shared-changes-removed");
+			context.setScreen(() -> null);
 			server.vanillaPlayerLeaves("Alice");
 			RealServer.leave(context);
 		}
