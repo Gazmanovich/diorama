@@ -32,7 +32,9 @@ final class SharedChangesTest {
 			server.vanillaPlayerJoins("Alice");
 			server.command("tp Alice " + X + " 200 " + Z);
 			context.waitTicks(20 * 30);
-			server.commandAndWait("save-all flush", "Saved the game", 600);
+			// Not "save-all flush": that waits on every chunk still generating around Alice, and on a
+			// slow VM held the server so long her client timed out, which unloaded her land.
+			server.commandAndWait("save-all", "Saved the game", 600);
 
 			server.join(context);
 			context.waitFor(mc -> ShareClient.sharing() && MapSession.get() != null && MapSession.get().savedChunks() != null, 1200);
@@ -48,7 +50,7 @@ final class SharedChangesTest {
 			context.setScreen(() -> null);
 
 			// Alice builds far from this player, and the server's own autosave writes it.
-			server.command("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:red_wool");
+			server.commandAndWait("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:red_wool", "Successfully filled", 60);
 			long built = System.nanoTime();
 			// The server's own autosave, as its region file shows: no command saves it.
 			int before = server.savedAt(X >> 4, Z >> 4);
