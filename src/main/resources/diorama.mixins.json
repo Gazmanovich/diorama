@@ -3,10 +3,10 @@
 	"package": "dev.diorama.mixin",
 	"compatibilityLevel": "JAVA_${java}",
 	"mixins": [
+		"BiomeManagerAccessor",
 		"ChunkMapInvoker"
 	],
 	"client": [
-		"BiomeManagerAccessor",
 		"ChatComponentMixin",
 		"ClientChunkCacheMixin",
 		"ClientPacketListenerMixin",

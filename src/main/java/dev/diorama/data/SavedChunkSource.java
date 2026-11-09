@@ -33,13 +33,28 @@ public final class SavedChunkSource implements ChunkSource {
 		}
 	};
 
-	/** Told the portals in each chunk read that has any, on the reading thread. */
-	private final Consumer<List<Portals.Spot>> portals;
+	/** Told the portals in each chunk read that has any, on the reading thread; null to not look. */
+	private final @Nullable Consumer<List<Portals.Spot>> portals;
+	/** The tint blend radius of snapshots read, or -1 for the player's own. */
+	private final int blendRadius;
 
 	public SavedChunkSource(ChunkSource live, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
+		this(live, save, portals, -1);
+	}
+
+	/**
+	 * A source on a server, which has no player options: tints blended over {@code blendRadius}
+	 * blocks, and no portals looked for.
+	 */
+	public SavedChunkSource(ChunkSource live, ChunkSave save, int blendRadius) {
+		this(live, save, null, blendRadius);
+	}
+
+	private SavedChunkSource(ChunkSource live, ChunkSave save, @Nullable Consumer<List<Portals.Spot>> portals, int blendRadius) {
 		this.live = live;
 		this.save = save;
 		this.portals = portals;
+		this.blendRadius = blendRadius;
 	}
 
 	@Override
@@ -68,10 +83,13 @@ public final class SavedChunkSource implements ChunkSource {
 					around[(dx + 1) * 3 + dz + 1] = dx == 0 && dz == 0 ? chunk : this.save.read(chunkX + dx, chunkZ + dz);
 				}
 			}
-			snapshot = ChunkSnapshot.fromSave(chunk, around, this.save.level());
-			List<Portals.Spot> spots = Portals.find(snapshot);
-			if (!spots.isEmpty()) {
-				this.portals.accept(spots);
+			snapshot = this.blendRadius < 0 ? ChunkSnapshot.fromSave(chunk, around, this.save.level())
+				: ChunkSnapshot.fromSave(chunk, around, this.save.level(), this.blendRadius);
+			if (this.portals != null) {
+				List<Portals.Spot> spots = Portals.find(snapshot);
+				if (!spots.isEmpty()) {
+					this.portals.accept(spots);
+				}
 			}
 		}
 		this.snapshots.put(key, snapshot);

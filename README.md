@@ -32,7 +32,7 @@ A minimap and world map for Minecraft that draws your world at an angle, like a 
 
 Diorama runs on Fabric for Minecraft 1.20.1, 1.21 to 1.21.11 and 26.1 to 26.3, and on NeoForge for every version NeoForge has a stable release for: 1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.8, 1.21.10, 1.21.11, 26.1.2, 26.2 and 26.3. On Forge it runs on 1.20.1, with Forge 47.1 or later.
 
-It only runs in your game. Servers don't need it.
+Players don't need it on the server. A server can have it too, to draw a map of its world anyone can open in a browser: see [The web map](docs/web-map.md).
 
 ## Keys
 

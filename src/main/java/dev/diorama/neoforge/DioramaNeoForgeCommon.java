@@ -3,6 +3,8 @@ package dev.diorama.neoforge;
 import dev.diorama.Diorama;
 import dev.diorama.share.ShareProtocol;
 import dev.diorama.share.ShareServer;
+import dev.diorama.web.WebMap;
+import dev.diorama.web.WebMapCommand;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -11,6 +13,8 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 //? if <1.21.6 {
@@ -27,8 +31,14 @@ public final class DioramaNeoForgeCommon {
 	public DioramaNeoForgeCommon(IEventBus modBus) {
 		modBus.addListener(RegisterPayloadHandlersEvent.class, DioramaNeoForgeCommon::register);
 		ShareProtocol.sender((player, data) -> player.connection.send(new ShareProtocol.Packet(data)));
-		NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> ShareServer.started(event.getServer(), FMLPaths.CONFIGDIR.get()));
+		NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
+			ShareServer.started(event.getServer(), FMLPaths.CONFIGDIR.get());
+			// After the share settings: both live in one file, which the share settings start.
+			WebMap.started(event.getServer(), FMLPaths.CONFIGDIR.get(), FMLPaths.MODSDIR.get());
+		});
+		NeoForge.EVENT_BUS.addListener(ServerStoppingEvent.class, event -> WebMap.stopped());
 		NeoForge.EVENT_BUS.addListener(ServerStoppedEvent.class, event -> ShareServer.stopped(event.getServer()));
+		NeoForge.EVENT_BUS.addListener(RegisterCommandsEvent.class, event -> WebMapCommand.register(event.getDispatcher()));
 		// The client says which channels it has while it's configured, before it plays.
 		NeoForge.EVENT_BUS.addListener(PlayerEvent.PlayerLoggedInEvent.class, event -> {
 			if (event.getEntity() instanceof ServerPlayer player && player.connection.hasChannel(ShareProtocol.TYPE)) {
