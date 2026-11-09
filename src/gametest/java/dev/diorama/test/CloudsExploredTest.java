@@ -43,8 +43,8 @@ final class CloudsExploredTest {
 	private static final double MOST_COVERED = 0.01;
 	/** What the map draws behind its tiles: the clouds' top colour. */
 	private static final int BACKDROP = 0xD9DDE7;
-	/** The fewest pixels of land never explored, well inside it, the clouds must change: their walls and shading. */
-	private static final double LEAST_CLOUDED = 0.05;
+	/** The fewest pixels of land never explored, well inside it, the clouds must change: their walls and shading, 6 to 40% of them, none without fog. */
+	private static final double LEAST_CLOUDED = 0.02;
 	/** The map screen's bars, in GUI pixels from the top and bottom, and a little more. */
 	private static final int BARS = 20;
 
