@@ -75,7 +75,8 @@ function pick(d, first) {
 		return m;
 	}) : [];
 	document.getElementById("empty").style.display = dim && present[0] && present[0].size ? "none" : "flex";
-	if (switched) clouds.reset();
+	// A new tile list can take land away as well as add it: the clouds work out their field again.
+	if (switched) clouds.reset(); else clouds.changed();
 	if (first || switched) home(first);
 	draw();
 }
@@ -830,8 +831,9 @@ const clouds = (() => {
 	// dropped with it.
 	function reset() { field = null; dirty = true; }
 	function forget(key) { if (coverage.delete(key)) dirty = true; }
+	function changed() { dirty = true; }
 
-	return { paint, prepare, forget, reset, debug: () => ({ field, coverage }) };
+	return { paint, prepare, forget, reset, changed, debug: () => ({ field, coverage }) };
 })();
 
 // Panning and zooming, by mouse, wheel, touch and keys.
