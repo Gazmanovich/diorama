@@ -202,6 +202,8 @@ vanilla() {
 vanilla_start() {
 	local name=$1
 	local log="$root/vanilla-$name.log"
+	# Emptied first: an earlier run's log on a reused VM would say she joined already.
+	: > "$log"
 	nohup python3 "$(dirname "$0")/vanilla_client.py" "$mc" "$(java_home)/bin/java" "$name" "127.0.0.1:$port" "$root/console.log" 36000 > "$log" 2>&1 &
 	echo $! > "$root/vanilla-$name.pid"
 	for _ in $(seq 1 900); do
