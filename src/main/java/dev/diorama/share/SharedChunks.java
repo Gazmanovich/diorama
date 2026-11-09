@@ -117,14 +117,15 @@ public final class SharedChunks implements ChunkSave {
 	/** One region's table, indexed {@code (z << 5) | x}. */
 	private record Table(int[] times, short[] top, short[] floor, int stamp) {
 		/**
-		 * This table, with each chunk saved again since {@code before} reaching as high and as low
-		 * as it did then too: the tiles a removed tower showed in are drawn again, without it.
+		 * This table, with each chunk reaching as high and as low as it did in {@code before} too:
+		 * the tiles a removed tower showed in are drawn again, without it. Kept for the session, so
+		 * a later round can't drop the old height before the fill has drawn from it.
 		 */
 		Table reaching(Table before) {
 			short[] top = this.top.clone();
 			short[] floor = this.floor.clone();
 			for (int i = 0; i < this.times.length; i++) {
-				if (this.times[i] != 0 && before.times[i] != 0 && this.times[i] != before.times[i]) {
+				if (this.times[i] != 0 && before.times[i] != 0) {
 					top[i] = (short) Math.max(top[i], before.top[i]);
 					floor[i] = (short) Math.min(floor[i], before.floor[i]);
 				}

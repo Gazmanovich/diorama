@@ -107,7 +107,7 @@ final class SharedChangesTest {
 			context.setScreen(MapScreen::new);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(X, Z), Projection.v(X, BUILD_Y, Z), 1, TileKey.SURFACE));
 			long reopened = System.nanoTime();
-			context.waitFor(mc -> !red(), 600);
+			context.waitFor(mc -> groundInstead(), 600);
 			Diorama.LOGGER.info("Alice's platform left this player's map {} s after the map opened, {} s after she took it down",
 				Math.round((System.nanoTime() - reopened) / 1e9), Math.round((System.nanoTime() - removed) / 1e9));
 			context.waitTicks(40);
@@ -125,16 +125,30 @@ final class SharedChangesTest {
 
 	/** Whether the saved map shows the red platform's middle. */
 	private static boolean red() {
+		return red(pixel());
+	}
+
+	/** Whether the saved map shows ground, not red, where the platform's middle was. */
+	private static boolean groundInstead() {
+		int pixel = pixel();
+		return (pixel >>> 24) != 0 && !red(pixel);
+	}
+
+	/** The saved map's pixel at the platform's middle, as ABGR, or 0 if that tile isn't saved. */
+	private static int pixel() {
 		double u = Projection.u(X, Z);
 		double v = Projection.v(X, BUILD_Y, Z);
 		TileKey tile = new TileKey(TileKey.SURFACE, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(v / Projection.TILE_UNITS));
 		int[] pixels = MapSession.get().map().savedMap().read(tile);
 		if (pixels == null) {
-			return false;
+			return 0;
 		}
 		int px = Math.floorMod((int) Math.floor(u * Projection.PIXELS_PER_UNIT), Projection.TILE_PIXELS);
 		int py = Math.floorMod((int) Math.floor(v * Projection.PIXELS_PER_UNIT), Projection.TILE_PIXELS);
-		int pixel = pixels[py * Projection.TILE_PIXELS + px];
+		return pixels[py * Projection.TILE_PIXELS + px];
+	}
+
+	private static boolean red(int pixel) {
 		// Tiles keep their pixels as ABGR.
 		int r = pixel & 0xFF;
 		int g = (pixel >> 8) & 0xFF;
