@@ -80,7 +80,8 @@ public final class MapExport {
 		}
 		//?}
 		// The clouds' texture comes from the resource packs: read it here, on the render thread.
-		dev.diorama.render.VanillaClouds.Pattern clouds = smoke ? null : dev.diorama.render.VanillaClouds.prepare();
+		// The soft fog (Settings.fogLook) has no clouds.
+		dev.diorama.render.VanillaClouds.Pattern clouds = smoke || Settings.get().fogLook == Settings.FogLook.SOFT ? null : dev.diorama.render.VanillaClouds.prepare();
 		Thread thread = new Thread(() -> export.run(store, area, smoke, night, clouds, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);

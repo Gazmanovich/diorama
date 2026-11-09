@@ -167,6 +167,7 @@ public final class SettingsScreen extends Screen {
 		SettingsTab look = new SettingsTab("diorama.settings.look");
 		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
 		look.choice("day_night", Settings.DayNight.values(), () -> s.dayNight, v -> s.dayNight = v);
+		look.choice("fog_look", Settings.FogLook.values(), () -> s.fogLook, v -> s.fogLook = v);
 		look.toggle("rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
 		look.toggle("saved_chunks", () -> s.mapSavedChunks, v -> s.mapSavedChunks = v);

@@ -76,8 +76,7 @@ uniform sampler2D Sampler0;
 uniform sampler2D Sampler1;
 // What would otherwise be worked out from the mask for every pixel, worked out once instead
 // (MapViewport.writeCells). Blue: a texel a mask texel, the known share blurred as knownSoft reads
-// it, and beside it (from x 256) the signed distance from explored land, two map units a step, 128
-// at its edge. Red and green: a texel a cloud cell of the grid drawn, from CELL_MARGIN cells before
+// it. Red and green: a texel a cloud cell of the grid drawn, from CELL_MARGIN cells before
 // the mask's first, the cell's VanillaClouds code at 1, 2, 4 and 8 times the base cell, three bits
 // each (red the two smaller, green the two bigger). Alpha: the layers any cell within reach has, and
 // whether all of them are the deck alone (MapViewport.cloudNear); at (0, 0), 1 when the cells are there.
@@ -92,8 +91,8 @@ layout(location = 0) in vec2 maskUv;
 *///?}
 // rg: noise offset in eighths of the coarser noise period, in the top three bits of each; r's low
 // five bits: how see-through the fog is, in 31sts (0 is opaque); b: cave flag (128), fog scale steps
-// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the fast
-// quality flag (4) and the smoke flag (1).
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the soft fog
+// flag (8), the fast quality flag (4) and the smoke flag (1).
 //? if >=26.3 {
 layout(location = 1) in vec4 params;
 
@@ -134,15 +133,13 @@ const float FOG_SHADOW = 0.7;
 // Over the surface the fog is Minecraft's own clouds (VanillaClouds): cells of vanilla's clouds.png,
 // in three layers stacked like terraces, each a slab with a flat top and darker south side as
 // vanilla draws its clouds, corners a little rounded, soft shadows from the layers above, cooler and
-// less white than vanilla's. See-through near explored land, solid over land never explored. The
-// smallest cell is CLOUD_CELL map units; zoomed out the cells double in size to stay about
+// less white than vanilla's. They lie only over land never explored and stop at explored land's
+// edge, however they stand or lean: explored land is never under them. The smallest cell is CLOUD_CELL map units; zoomed out the cells double in size to stay about
 // CLOUD_PIXELS across, each size growing into the next through the zoom step.
 const float CLOUD_CELL = 12.8;
 const float CLOUD_PIXELS = 40.0;
 // Cell sizes drawn: 1, 2, 4, 8 and 16 times the base cell (MapViewport.CLOUD_SIZES).
 const int CLOUD_SIZES = 5;
-// How far into explored land the see-through clouds reach for the smallest cells (VanillaClouds.RAMP).
-const float CLOUD_RAMP = 112.0;
 // How sharply cells meet (smaller is boxier), and a slab's thickness as a share of its cell.
 const float CLOUD_ROUND = 0.2;
 const float CLOUD_THICK = 0.55;
@@ -150,8 +147,6 @@ const vec3 CLOUD_TOP = vec3(0.85, 0.865, 0.905);
 const vec3 CLOUD_SIDE_HIGH = vec3(0.72, 0.75, 0.84);
 const vec3 CLOUD_SIDE_LOW = vec3(0.55, 0.59, 0.72);
 const vec3 CLOUD_SHADED = vec3(0.70, 0.73, 0.83);
-// How dark the see-through clouds' shadow is on explored land.
-const float GROUND_SHADOW = 0.22;
 // How much of a remembered map shows under the cover over it, close to the land already redrawn.
 const float MEMORY_SEE = 0.4;
 // Map units at uv 0, from the noise origin, so cells stay put as the view moves.
@@ -255,12 +250,6 @@ float thickness(vec2 uv) {
     return thicknessAt(uv, knownSoft(uv));
 }
 
-// Signed distance from explored land at map point p, in map units, positive over the unexplored.
-float signedAt(vec2 p) {
-    vec2 at = clamp((p - originMap) / unitsPerUv * SOFT_TEXELS, vec2(0.5), vec2(SOFT_TEXELS - 0.5)) + vec2(SOFT_TEXELS, 0.0);
-    return (texture(Sampler2, at / vec2(textureSize(Sampler2, 0))).b * 255.0 - 128.0) * 2.0;
-}
-
 // How much of a point is under a layer (its bit) at a cell size: the four nearest cells blended,
 // squeezed into a band at each cell's edge, so runs of cells read as one with slightly rounded
 // corners; 0.5 is the edge. Each size's cells have a block of the detail texture (MapViewport.slotX),
@@ -311,7 +300,6 @@ vec4 clouds(vec2 p0) {
     float size = cloudBase * exp2(float(cloudSize) + cloudGrow);
     float thick = size * CLOUD_THICK;
     vec2 sunward = normalize(vec2(-0.5, -0.8));
-    float ramp = CLOUD_RAMP * min(1.0, inversesqrt(size / CLOUD_CELL));
     float big = mix(1.0, mix(0.92, 1.03, bigLight), bigShare);
     // Which layers any cell within reach has, and whether all of them are the deck alone.
     // A texel a cell of the smallest size drawn (MapViewport.cloudNear).
@@ -368,24 +356,11 @@ vec4 clouds(vec2 p0) {
         vec3 topColor = mix(CLOUD_TOP, CLOUD_SHADED, 0.8 * shaded) * big;
         vec3 sides = a1 * mix(CLOUD_SIDE_LOW, CLOUD_SIDE_HIGH, 0.85) + a2 * mix(CLOUD_SIDE_LOW, CLOUD_SIDE_HIGH, 0.5) + a3 * mix(CLOUD_SIDE_LOW, CLOUD_SIDE_HIGH, 0.15);
         vec3 color = (face * topColor + sides * mix(1.0, big, 0.5)) / max(face + a1 + a2 + a3, 1e-4);
-        // The middle layer is see-through over explored land, more solid toward the unexplored.
-        float alpha = 1.0;
-        if (k == 2) {
-            float s = signedAt(pt);
-            alpha = mix(mix(0.5, 0.75, clamp((s + ramp) / ramp, 0.0, 1.0)), 1.0, smoothstep(-4.0, 6.0, s));
-        }
-        alpha *= a;
-        glow += through * alpha * color;
-        through *= 1.0 - alpha;
+        glow += through * a * color;
+        through *= 1.0 - a;
         if (through < 0.01) {
             break;
         }
-    }
-    // The see-through layer's soft shadow on the land under it.
-    if (!fast && through > 0.01) {
-        vec2 q = vec2(p0.x, p0.y + 2.0 * thick * COS_PITCH) + sunward * 2.0 * thick * 0.6;
-        float s = signedAt(p0);
-        through *= 1.0 - GROUND_SHADOW * smoothstep(0.1, 0.9, cloudShape(q, 2)) * mix(0.5, 0.75, clamp((s + ramp) / ramp, 0.0, 1.0));
     }
     return vec4(glow, through);
 }
@@ -425,7 +400,9 @@ void main() {
     float night = mod(offsetBytes.g, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
-    // In the low nibble: 4 for Fast, 1 for smoke, 2 into the half-resolution layer (FogLayer).
+    // In the low nibble: 8 for the soft fog instead of clouds (Settings.fogLook), 4 for Fast, 1 for
+    // smoke, 2 into the half-resolution layer (FogLayer).
+    bool softLook = mod(alphaCode, 16.0) >= 8.0;
     fast = mod(floor(mod(alphaCode, 16.0) / 4.0), 2.0) >= 1.0;
     bool layer = mod(floor(mod(alphaCode, 16.0) / 2.0), 2.0) >= 1.0;
     bool smoke = mod(alphaCode, 2.0) >= 1.0;
@@ -466,7 +443,7 @@ void main() {
     pixelUnits = max(fwidth(p0).x, fwidth(p0).y);
 
     vec3 moonlit = mix(vec3(1.0), vec3(0.27, 0.33, 0.49), night);
-    if (!cave && !smoke) {
+    if (!cave && !smoke && !softLook) {
         // The noise origin is ten base cells from map 0 for each eighth of the coarse noise period it
         // moves. Past the middle of a zoom step the grid's cells are two base cells (MapViewport.CellGrid).
         cloudBase = CLOUD_CELL * exp2(scaleSteps);
@@ -491,6 +468,31 @@ void main() {
             cloudSize++;
             cloudGrow = 0.0;
         }
+        // Explored land is never under the clouds, whichever cells stand or lean over it: they are cut
+        // at its edge, and the blend across that edge sits over the unexplored side. A remembered map
+        // (from before a turn) not yet redrawn is explored land too: it lies under a soft cover in the
+        // clouds' colour, thinnest beside the land already redrawn, and goes with the eased heights, so
+        // redrawn land fades in instead of appearing a tile at a time. Ground with no map at all, never
+        // explored, is never seen.
+        if (clear) {
+            if (!layer) {
+                discard;
+            }
+            fragColor = vec4(CLOUD_TOP * moonlit, 0.0);
+            return;
+        }
+        float knownHere = knownAt(maskUv);
+        float notDrawn = 1.0 - smoothstep(0.05, 0.5, knownHere);
+        float remembered = clamp(texture(Sampler0, maskUv).g / 0.4, 0.0, 1.0);
+        float open = notDrawn * (1.0 - remembered);
+        float cover = mix(notDrawn, smoothstep(0.0, 0.5, liftHere) * mix(1.0 - MEMORY_SEE, 1.0, smoothstep(0.5, 1.0, liftHere)), remembered);
+        if (open <= 0.0 && cover <= 0.002) {
+            if (!layer) {
+                discard;
+            }
+            fragColor = vec4(CLOUD_TOP * moonlit, 0.0);
+            return;
+        }
         // Zoomed out, a slow lit height field groups the clouds into big masses (VanillaClouds gathers
         // the top layer by the same idea).
         float zoomedOut = log2(CLOUD_PIXELS * screen / CLOUD_CELL);
@@ -502,15 +504,8 @@ void main() {
             vec3 n = normalize(vec3(-(bigHeight(p0 + vec2(e, 0.0), wrap) - h0) * 9.0, -(bigHeight(p0 + vec2(0.0, e), wrap) - h0) * 9.0, 1.0));
             bigLight = clamp(dot(n, normalize(vec3(-0.45, -0.55, 0.7))) * 1.1 - 0.2 + 0.8 * (h0 - 0.5), 0.0, 1.0);
         }
-        vec4 c = cellsReady ? clouds(p0) : vec4(0.0, 0.0, 0.0, 1.0);
-        // Under the clouds: a remembered map (from before a turn) not yet redrawn lies under a soft
-        // cover in the clouds' colour, thinnest beside the land already redrawn, and goes with the
-        // eased heights, so redrawn land fades in instead of appearing a tile at a time. Ground with
-        // no map at all, never explored, is never seen.
-        float knownHere = knownAt(maskUv);
-        float notDrawn = 1.0 - smoothstep(0.3, 0.85, knownHere);
-        float remembered = clear ? 0.0 : clamp(texture(Sampler0, maskUv).g / 0.4, 0.0, 1.0);
-        float cover = mix(notDrawn, smoothstep(0.0, 0.5, liftHere) * mix(1.0 - MEMORY_SEE, 1.0, smoothstep(0.5, 1.0, liftHere)), remembered);
+        vec4 c = cellsReady && open > 0.0 ? clouds(p0) : vec4(0.0, 0.0, 0.0, 1.0);
+        c = vec4(c.rgb * open, 1.0 - (1.0 - c.a) * open);
         c.rgb += c.a * cover * CLOUD_TOP;
         c.a *= 1.0 - cover;
         float alpha = 1.0 - c.a;
