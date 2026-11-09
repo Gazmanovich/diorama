@@ -96,11 +96,12 @@ public final class SharedChunks implements ChunkSave {
 
 	/** A chunk asked for, when, and its answer: the packed chunk and when it was saved, or null if it isn't shared. */
 	private static final class Asked {
-		final CompletableFuture<@Nullable Answer> answer = new CompletableFuture<>();
+		final CompletableFuture<Answer> answer = new CompletableFuture<>();
 		long askedAt;
 	}
 
-	private record Answer(byte[] packed, int time) {
+	/** {@code packed} is null when the server doesn't share the chunk, as of the save at {@code time}. */
+	private record Answer(byte @Nullable [] packed, int time) {
 	}
 
 	private SharedChunks(ClientLevel level) {
@@ -285,7 +286,7 @@ public final class SharedChunks implements ChunkSave {
 		Asked asked = this.chunks.get(key);
 		if (asked != null && asked.answer.isDone() && !asked.answer.isCompletedExceptionally()) {
 			Answer answer = asked.answer.getNow(null);
-			if (answer == null || answer.time() >= this.time((int) (key >> 32), (int) key)) {
+			if (answer != null && answer.time() >= this.time((int) (key >> 32), (int) key)) {
 				return false;
 			}
 		} else if (asked != null && !asked.answer.isDone() && now - asked.askedAt < ASK_AGAIN_MS) {
@@ -341,9 +342,9 @@ public final class SharedChunks implements ChunkSave {
 			Thread.currentThread().interrupt();
 			throw new Late("interrupted");
 		}
-		SavedChunk chunk = answer == null ? null : this.unpack(chunkX, chunkZ, answer.packed());
+		SavedChunk chunk = answer.packed() == null ? null : this.unpack(chunkX, chunkZ, answer.packed());
 		this.parsed.put(key, chunk);
-		this.parsedTimes.put(key, answer == null ? time : answer.time());
+		this.parsedTimes.put(key, answer.time());
 		return chunk;
 	}
 
@@ -435,7 +436,7 @@ public final class SharedChunks implements ChunkSave {
 				asked = new Asked();
 				this.chunks.put(key, asked);
 			}
-			asked.answer.complete(length == 0 ? null : new Answer(packed, time));
+			asked.answer.complete(new Answer(length == 0 ? null : packed, time));
 		}
 	}
 

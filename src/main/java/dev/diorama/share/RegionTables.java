@@ -116,6 +116,11 @@ final class RegionTables {
 	 */
 	Table table(int regionX, int regionZ, boolean generated) {
 		long key = key(regionX, regionZ);
+		if (!Files.isRegularFile(this.regionFolder.resolve("r." + regionX + "." + regionZ + ".mca"))) {
+			// Nothing kept for regions with no file: a client can name any.
+			this.tables.remove(key);
+			return new Table();
+		}
 		Table table = this.tables.computeIfAbsent(key, k -> new Table());
 		long now = System.currentTimeMillis();
 		if (now - table.readAt < FRESH_MS) {
