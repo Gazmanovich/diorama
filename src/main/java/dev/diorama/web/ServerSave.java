@@ -66,6 +66,12 @@ final class ServerSave implements ChunkSave {
 	private final Map<Long, short[]> tops = new HashMap<>();
 	/** Reads of a chunk its region file has that failed every try; see {@link #failedReads}. */
 	private final AtomicInteger failedReads = new AtomicInteger();
+	/**
+	 * When each chunk that can't be read first failed, by {@link #chunkKey}: one that still fails
+	 * {@link #GIVE_UP_MS} later is damaged, not being written, and stops holding passes back.
+	 */
+	private final Map<Long, Long> failingSince = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final long GIVE_UP_MS = 15 * 60_000;
 	private volatile boolean closed;
 
 	private ServerSave(ServerLevel level) {
@@ -125,6 +131,10 @@ final class ServerSave implements ChunkSave {
 		return this.failedReads.get();
 	}
 
+	private static long chunkKey(int chunkX, int chunkZ) {
+		return ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
+	}
+
 	/** The chunk's tag, upgraded if an older version saved it; null if there's none or it can't be read. */
 	private @Nullable CompoundTag tag(int chunkX, int chunkZ) {
 		CompoundTag tag = this.readFile(chunkX, chunkZ);
@@ -158,12 +168,24 @@ final class ServerSave implements ChunkSave {
 				}
 			}
 			try {
-				return this.readFile(file, chunkX, chunkZ);
+				CompoundTag tag = this.readFile(file, chunkX, chunkZ);
+				this.failingSince.remove(chunkKey(chunkX, chunkZ));
+				return tag;
 			} catch (IOException | RuntimeException e) {
 				// Being written: once more.
 			}
 		}
-		this.failedReads.incrementAndGet();
+		long now = System.currentTimeMillis();
+		long since = this.failingSince.computeIfAbsent(chunkKey(chunkX, chunkZ), k -> now);
+		if (now - since < GIVE_UP_MS) {
+			// The pass read less than the save holds: it's done again later.
+			this.failedReads.incrementAndGet();
+		} else if (since > 0) {
+			// Still unreadable after several passes: damaged. Drawn as missing until it reads again
+			// (saved anew), or every pass would start over for it.
+			this.failingSince.put(chunkKey(chunkX, chunkZ), -1L);
+			Diorama.LOGGER.warn("Saved chunk {}, {} has been unreadable for {} minutes; the web map leaves it out until it can be read", chunkX, chunkZ, GIVE_UP_MS / 60_000);
+		}
 		return null;
 	}
 

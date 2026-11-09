@@ -460,11 +460,15 @@ public final class WebMap {
 					for (Path file : files) {
 						String name = file.getFileName().toString();
 						int sep = name.indexOf('_');
-						if (sep > 0) {
-							this.tiles[z].add(key(Integer.parseInt(name.substring(0, sep)), Integer.parseInt(name.substring(sep + 1, name.length() - 4))));
+						try {
+							if (sep > 0) {
+								this.tiles[z].add(key(Integer.parseInt(name.substring(0, sep)), Integer.parseInt(name.substring(sep + 1, name.length() - 4))));
+							}
+						} catch (NumberFormatException e) {
+							// Not one of the map's tiles: someone else's file.
 						}
 					}
-				} catch (IOException | NumberFormatException e) {
+				} catch (IOException e) {
 					Diorama.LOGGER.warn("Couldn't list the web map's tiles in {}", zoom, e);
 				}
 				if (!this.tiles[z].isEmpty()) {
@@ -551,7 +555,7 @@ public final class WebMap {
 					any = true;
 					int chunkX = regionX * 32 + (i & 31);
 					int chunkZ = regionZ * 32 + (i >> 5);
-					boolean wasShown = last >= 0 && this.shows(chunkX, chunkZ);
+					boolean wasShown = last >= 0 && (this.map.settings.everyChunk() || this.shows(chunkX, chunkZ));
 					this.forget(chunkX, chunkZ);
 					changed++;
 					ServerSave.Info info = this.save.info(chunkX, chunkZ);
@@ -621,7 +625,15 @@ public final class WebMap {
 				this.map.setStatus(String.format(Locale.ROOT, "drawing %s: tile %d of %d", this.id, drawn + empty + 1, order.size()));
 				int u = (int) (key >> 32);
 				int v = (int) key;
-				int[] pixels = TileBaker.reference(new TileKey(TileKey.SURFACE, u, v), this.source, looks, false, null, null);
+				int[] pixels;
+				try {
+					pixels = TileBaker.reference(new TileKey(TileKey.SURFACE, u, v), this.source, looks, false, null, null);
+				} catch (RuntimeException | LinkageError | StackOverflowError e) {
+					// A block a mod draws in a way the server can't: this tile stays as it was, and the rest
+					// are drawn. It's tried again when its land is saved again or on a redraw.
+					Diorama.LOGGER.warn("Couldn't draw web map tile {} {},{}", this.id, u, v, e);
+					continue;
+				}
 				try {
 					long size = WebTiles.write(WebTiles.file(this.folder, 0, u, v), pixels);
 					bytes += size;
