@@ -117,8 +117,8 @@ function nameOf(id) {
 
 function zoomFor(scale) {
 	// The coarsest level at least as sharp as the screen: a picture's pixel never covers more than
-	// one screen pixel, so a picture is only ever shrunk (up to half), never stretched, until the
-	// view is closer in than the map's own pixels.
+	// one screen pixel, so a picture is only ever shrunk (to half at most, short of the farthest
+	// zoom), never stretched, until the view is closer in than the map's own pixels.
 	const native = map.tilePixels / map.tileUnits; // CSS px per unit at zoom 0, 1:1
 	let z = Math.floor(Math.log2(native / (scale * (devicePixelRatio || 1))) + 1e-9);
 	return Math.max(0, Math.min(dim.zoomLevels - 1, z));
