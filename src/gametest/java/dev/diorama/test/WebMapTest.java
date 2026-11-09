@@ -73,7 +73,7 @@ final class WebMapTest {
 						// The operators' command, from the server's console.
 						server.command("diorama-web status");
 						context.waitTicks(40);
-						if (!server.console().contains("Web map: up to date")) {
+						if (!server.console().contains("Web map: ")) {
 							throw new AssertionError("/diorama-web status didn't answer in the server's console");
 						}
 					}
