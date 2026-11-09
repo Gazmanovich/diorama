@@ -66,6 +66,10 @@ final class VanillaTableTest {
 		for (int which = 0; which < 3; which++) {
 			int[] map = made.colourMap(which);
 			if (map == null) {
+				// Dry foliage only came in 1.21.5; without grass or foliage a server's grass is black.
+				if (which != VanillaTable.DRY_FOLIAGE) {
+					throw new AssertionError("The table has no colour map " + which);
+				}
 				continue;
 			}
 			long sum = 0;
