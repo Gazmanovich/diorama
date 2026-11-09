@@ -44,6 +44,11 @@ public interface ChunkSave {
 	default void refresh() {
 	}
 
+	/** Whether {@link #prefetch} does anything: working out what to prefetch costs reads of its own. */
+	default boolean prefetches() {
+		return false;
+	}
+
 	/** Says which chunks will be read soon, by {@link ChunkSnapshot#key}, most wanted first. */
 	default void prefetch(Collection<Long> chunks, boolean urgent) {
 	}

@@ -302,10 +302,26 @@ public final class SharedChunks implements ChunkSave {
 		}
 	}
 
+	/**
+	 * A bake reads this for every chunk its tile can show. A chunk in a region whose table hasn't
+	 * come yet isn't known to be empty: the tile is drawn later, when it is, rather than saved
+	 * without it.
+	 */
 	@Override
 	public int top(int chunkX, int chunkZ) {
+		this.knownOrLate(chunkX, chunkZ);
 		ChunkTags.Summary summary = this.summary(chunkX, chunkZ);
 		return summary == null ? Integer.MIN_VALUE : summary.maxY();
+	}
+
+	/** Throws {@link Late} if the chunk's region is in the server's list but its table hasn't come. */
+	private void knownOrLate(int chunkX, int chunkZ) {
+		long region = SavedChunks.regionKey(chunkX >> 5, chunkZ >> 5);
+		synchronized (this.lock) {
+			if (this.regions != null && !this.tables.containsKey(region) && this.regions.contains(region)) {
+				throw new Late("region " + (chunkX >> 5) + ", " + (chunkZ >> 5) + " hasn't come yet");
+			}
+		}
 	}
 
 	/** When the server last saved a shared chunk, or 0 if it doesn't share it. */
@@ -314,6 +330,11 @@ public final class SharedChunks implements ChunkSave {
 			Table table = this.tables.get(SavedChunks.regionKey(chunkX >> 5, chunkZ >> 5));
 			return table == null ? 0 : table.times()[((chunkZ & 31) << 5) | (chunkX & 31)];
 		}
+	}
+
+	@Override
+	public boolean prefetches() {
+		return true;
 	}
 
 	@Override
@@ -366,6 +387,7 @@ public final class SharedChunks implements ChunkSave {
 	@Override
 	public @Nullable SavedChunk read(int chunkX, int chunkZ) {
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
+		this.knownOrLate(chunkX, chunkZ);
 		int time = this.time(chunkX, chunkZ);
 		if (time == 0) {
 			return null;
@@ -442,6 +464,10 @@ public final class SharedChunks implements ChunkSave {
 	private void regions(DataInputStream in) throws IOException {
 		this.serverClock = in.readLong() - System.currentTimeMillis();
 		int count = in.readInt();
+		// Never more than the message holds, whatever it says.
+		if (count < 0 || count > in.available() / 8) {
+			throw new IOException("a list of " + count + " regions in " + in.available() + " bytes");
+		}
 		List<Long> regions = new ArrayList<>(count);
 		for (int i = 0; i < count; i++) {
 			regions.add(SavedChunks.regionKey(in.readInt(), in.readInt()));
@@ -508,6 +534,9 @@ public final class SharedChunks implements ChunkSave {
 		int chunkZ = in.readInt();
 		int time = in.readInt();
 		int length = in.readInt();
+		if (length < 0 || length > ShareProtocol.MAX_CHUNK_BYTES || length > in.available()) {
+			throw new IOException("a chunk of " + length + " bytes in " + in.available());
+		}
 		byte[] packed = new byte[length];
 		in.readFully(packed);
 		synchronized (this.lock) {

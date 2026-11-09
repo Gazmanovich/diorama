@@ -166,6 +166,7 @@ public final class ShareServer {
 		 */
 		private final LinkedHashMap<Long, Integer> tables = new LinkedHashMap<>();
 		private String tablesDimension = "";
+		private long listedAt = System.nanoTime() - 10_000_000_000L;
 		/** Chunks asked for, in the order they go out, for {@link #dimension}. */
 		private final LinkedHashSet<Long> chunks = new LinkedHashSet<>();
 		private String dimension = "";
@@ -192,7 +193,14 @@ public final class ShareServer {
 			}
 		}
 
+		/** The next level whose regions to list, if the allowance has room and the last list wasn't moments ago. */
 		synchronized @Nullable String nextRegionsAsk() {
+			this.refill();
+			long now = System.nanoTime();
+			if (this.regionAsks.isEmpty() || this.allowance <= 0 || now - this.listedAt < 2_000_000_000L) {
+				return null;
+			}
+			this.listedAt = now;
 			return this.regionAsks.poll();
 		}
 
@@ -373,7 +381,7 @@ public final class ShareServer {
 			return;
 		}
 		List<Long> found = this.tables(level).regions();
-		this.send(session, out -> {
+		int sent = this.send(session, out -> {
 			out.writeByte(ShareProtocol.REGIONS);
 			out.writeUTF(dimension);
 			// The clock the save's times are in, for the client to tell how recent its drawing is.
@@ -384,6 +392,8 @@ public final class ShareServer {
 				out.writeInt((int) region);
 			}
 		});
+		session.tableBytes += sent;
+		session.spent(sent);
 	}
 
 	/** Sends a region's table: for each chunk the share rule allows, when it was saved, how high it reaches and how deep it shows. */
