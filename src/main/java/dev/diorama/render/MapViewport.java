@@ -791,7 +791,7 @@ public final class MapViewport {
 		double originU = inputs.originU();
 		double originV = inputs.originV();
 		if (rounded) {
-			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
+			this.roundOff(Math.max(1, (int) Math.round(10 / texel)), clouds);
 		}
 		this.writeSoft(texel, !surface, fast);
 		this.lifting = false;
@@ -1160,8 +1160,14 @@ public final class MapViewport {
 	 * Rounds the known area off so the fog edge follows a smooth line instead of chunk steps.
 	 * Blurs the mask, keeps only what stays solidly known, and takes the smaller of that and the
 	 * original, so the fog only ever grows over the edge and never uncovers ground with no data.
+	 * The soft fog rolls over the edge anyway, so it keeps only what stays well inside, a few
+	 * blocks in. The clouds are cut where the mask's known share is a half and would hide that
+	 * explored land, so for them only the corners round off: straight edges stay where the
+	 * chunks end ({@code corners}).
 	 */
-	private void roundOff(int radius) {
+	private void roundOff(int radius, boolean corners) {
+		float from = corners ? 0.2F : 0.5F;
+		float span = corners ? 0.3F : 0.35F;
 		for (int i = 0; i < this.maskPixels.length; i++) {
 			this.blurA[i] = (this.maskPixels[i] & 0xFF) / 255.0F;
 		}
@@ -1170,7 +1176,7 @@ public final class MapViewport {
 		boxBlur(this.blurA, this.blurB, radius, true);
 		boxBlur(this.blurB, this.blurA, radius, false);
 		for (int i = 0; i < this.maskPixels.length; i++) {
-			float t = Math.max(0, Math.min(1, (this.blurA[i] - 0.5F) / 0.35F));
+			float t = Math.max(0, Math.min(1, (this.blurA[i] - from) / span));
 			float rounded = t * t * (3 - 2 * t);
 			int known = Math.min(this.maskPixels[i] & 0xFF, Math.round(rounded * 255));
 			this.maskPixels[i] = 0xFF000000 | known;

@@ -41,6 +41,8 @@ final class CloudsExploredTest {
 	/** The most explored pixels the clouds may change: under one in a hundred. */
 	private static final double MOST_COVERED = 0.01;
 	private static final int BACKDROP = 0x8C99AB;
+	/** The map screen's bars, in GUI pixels from the top and bottom, and a little more. */
+	private static final int BARS = 20;
 
 	private CloudsExploredTest() {
 	}
@@ -70,6 +72,8 @@ final class CloudsExploredTest {
 				still = now > last ? 0 : still + 1;
 				last = now;
 			}
+			// Every chunk drawn before the next stop, so each run explores the same squares.
+			DioramaClientTest.settle(context, 10);
 		}
 		// The player beside a left-out square, so the minimap shows a hole.
 		world.getServer().runCommand("tp @a " + (spawn[0] + STEP) + " 160 " + (spawn[1] + STEP / 2));
@@ -117,7 +121,8 @@ final class CloudsExploredTest {
 		int[] box = context.computeOnClient(mc -> {
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
 			int s = (int) Math.round(mc.getWindow().getGuiScale());
-			return new int[] {view.x() * s, view.y() * s, (view.x() + view.width()) * s, (view.y() + view.height()) * s};
+			// The bars along the top and bottom are see-through over the map: not what's checked.
+			return new int[] {view.x() * s, (view.y() + BARS) * s, (view.x() + view.width()) * s, (view.y() + view.height() - BARS) * s};
 		});
 		compare(context, failures, "clouds-explored-map-" + name, box);
 	}

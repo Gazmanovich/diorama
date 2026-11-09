@@ -220,8 +220,10 @@ public final class ExportFog implements ImageExport.Finish {
 		noiseA = a;
 	}
 
-	/** {@link MapViewport}'s rounding of the known area, so the edge follows a smooth line. */
+	/** {@link MapViewport}'s rounding of the known area, so the edge follows a smooth line: for the clouds, only the corners. */
 	private void roundOff(int radius) {
+		float from = this.clouds ? 0.2F : 0.5F;
+		float span = this.clouds ? 0.3F : 0.35F;
 		float[] a = this.known.clone();
 		float[] b = new float[a.length];
 		boxBlur(a, b, radius, true);
@@ -229,7 +231,7 @@ public final class ExportFog implements ImageExport.Finish {
 		boxBlur(a, b, radius, true);
 		boxBlur(b, a, radius, false);
 		for (int i = 0; i < a.length; i++) {
-			float t = Math.max(0, Math.min(1, (a[i] - 0.5F) / 0.35F));
+			float t = Math.max(0, Math.min(1, (a[i] - from) / span));
 			float rounded = t * t * (3 - 2 * t);
 			this.known[i] = Math.min(this.known[i], Math.round(rounded * 255) / 255F);
 		}
