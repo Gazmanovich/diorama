@@ -226,6 +226,10 @@ public final class ShareServer {
 			return this.tablesDimension;
 		}
 
+		synchronized boolean tablesDrained() {
+			return this.tables.isEmpty();
+		}
+
 		private void refill() {
 			long now = System.nanoTime();
 			this.allowance = Math.min(this.bytesPerSecond, this.allowance + (now - this.refilledAt) / 1e9 * this.bytesPerSecond);
@@ -308,7 +312,14 @@ public final class ShareServer {
 					}
 					long[] table = session.nextTable();
 					if (table != null) {
-						this.table(session, session.tablesDimension(), table[0], (int) table[1]);
+						String dimension = session.tablesDimension();
+						this.table(session, dimension, table[0], (int) table[1]);
+						if (session.tablesDrained()) {
+							this.send(session, out -> {
+								out.writeByte(ShareProtocol.TABLES_DONE);
+								out.writeUTF(dimension);
+							});
+						}
 						busy = true;
 						continue;
 					}

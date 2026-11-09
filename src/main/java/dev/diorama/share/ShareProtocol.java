@@ -49,6 +49,11 @@ public final class ShareProtocol {
 	 * of 0 if it isn't shared.
 	 */
 	public static final int CHUNKS = 3;
+	/**
+	 * Server to client: every table asked for so far has been sent, or skipped as unchanged. The
+	 * dimension. A refresh's tables are taken together once this comes.
+	 */
+	public static final int TABLES_DONE = 4;
 	/** The most chunks one ask names, so it fits in a message to the server. */
 	public static final int MAX_ASK = 3000;
 	/** The biggest packed chunk sent; one past it is said not to be shared. */

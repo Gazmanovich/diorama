@@ -79,6 +79,12 @@ public final class SharedChunks implements ChunkSave {
 	private boolean regionsAsked;
 	/** Asked for the regions again: every region's table is asked for again when they come. */
 	private boolean refreshing;
+	/**
+	 * A refresh's tables, kept until the server says the round is done and then taken together. A
+	 * tile spanning two regions drawn with one region's new table and the other's old one would be
+	 * marked drawn as of now, and the other's change, saved a moment before, would never reach it.
+	 */
+	private @Nullable Map<Long, Table> round;
 	private final Map<Long, Table> tables = new HashMap<>();
 	private final Set<Long> tablesAsked = new HashSet<>();
 	/** Chunks asked for or come, by {@link ChunkSnapshot#key}. */
@@ -427,6 +433,7 @@ public final class SharedChunks implements ChunkSave {
 			case ShareProtocol.REGIONS -> shared.regions(in);
 			case ShareProtocol.TABLES -> shared.table(in);
 			case ShareProtocol.CHUNKS -> shared.chunk(in);
+			case ShareProtocol.TABLES_DONE -> shared.roundDone();
 			default -> {
 			}
 		}
@@ -446,6 +453,7 @@ public final class SharedChunks implements ChunkSave {
 			this.refreshing = false;
 			if (again) {
 				this.tablesAsked.addAll(regions);
+				this.round = new HashMap<>();
 			}
 			this.lock.notifyAll();
 		}
@@ -469,8 +477,27 @@ public final class SharedChunks implements ChunkSave {
 				floor[i] = packed.readShort();
 			}
 		}
+		Table table = new Table(times, top, floor, newest);
+		long key = SavedChunks.regionKey(regionX, regionZ);
 		synchronized (this.lock) {
-			this.tables.put(SavedChunks.regionKey(regionX, regionZ), new Table(times, top, floor, newest));
+			if (this.round != null && this.tables.containsKey(key)) {
+				this.round.put(key, table);
+				return;
+			}
+			this.tables.put(key, table);
+			this.lock.notifyAll();
+		}
+		this.changed();
+	}
+
+	/** The server sent every table of the round: a refresh's tables go in together. */
+	private void roundDone() {
+		synchronized (this.lock) {
+			if (this.round == null) {
+				return;
+			}
+			this.tables.putAll(this.round);
+			this.round = null;
 			this.lock.notifyAll();
 		}
 		this.changed();
