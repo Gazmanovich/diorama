@@ -46,6 +46,8 @@ For operators:
 
 Changing `share-land` redraws the whole map by itself the next time the server starts.
 
+Land taken out of the world stays on the web map until `/diorama-web redraw`: a dimension reset by deleting its folder, region files deleted, or chunks trimmed with a tool such as MCA Selector.
+
 ## Disk
 
 About 44 KB a tile of land, plus a third more for the zoomed-out views. Hermitcraft Season 10's world took 127 MB: 91 MB for the overworld, 20 MB for the Nether, 14 MB for the End.
