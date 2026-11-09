@@ -13,10 +13,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * The fog's clouds, built from Minecraft's own: vanilla's clouds.png (a resource pack's, if it has
  * one), one texel a cell, in three layers stacked like terraces. Each cell gets a code, three bits:
- * {@link #DECK}, the solid layer over land never explored; {@link #MIDDLE}, see-through cloud in
- * vanilla's own pattern, sparse far from the unexplored and denser close to it, and over the
- * unexplored half the cells; {@link #TOP}, a few cells stacked on that, gathered into big masses.
- * fog.fsh draws the codes; {@link ExportFog} paints them the same way.
+ * {@link #DECK}, the layer over land never explored; {@link #MIDDLE}, cloud in vanilla's own pattern
+ * on about half the deck's cells; {@link #TOP}, a few cells stacked on that further from explored
+ * land, gathered into big masses. Only cells reaching over land never explored have any: fog.fsh
+ * draws the codes and cuts them at explored land's edge, and {@link ExportFog} paints them the same way.
  *
  * <p>Cells come in sizes of {@link #CELL} map units times a power of two, so zoomed out the map
  * draws bigger cells. A size's pattern is the smaller one's, four cells averaged into one, so a
@@ -33,8 +33,6 @@ public final class VanillaClouds {
 	 * units; vanilla's own sky repeats every 3072 blocks). Cells are numbered from map 0.
 	 */
 	private static final int REPEAT = 256;
-	/** How far into explored land the see-through clouds reach, in map units, for the smallest cells; matches fog.fsh. */
-	public static final double RAMP = 112;
 	/**
 	 * The biggest size with a pattern of its own (16 cells of the smallest, 16 a repeat). Bigger
 	 * cells, only seen zoomed far out, take that pattern turned or flipped, a different way for each
@@ -108,21 +106,17 @@ public final class VanillaClouds {
 			}
 		}
 		// Its furthest point from explored land, near enough: the middle plus most of a half
-		// diagonal. Big cells reach less far, so zoomed out they don't eat into explored land; the
-		// part of one over unexplored land they leave is covered by the no-map fill in fog.fsh.
+		// diagonal. Big cells reach less far, so zoomed out their edges keep close to explored land's;
+		// the part of one over unexplored land they leave is covered by the no-map fill in fog.fsh.
 		double r = size / CELL;
 		double far = s + 0.6 * size * Math.min(1, 2 / r);
-		// The see-through band narrows as cells grow, so zoomed out it doesn't cover explored land.
-		double ramp = RAMP * Math.min(1, 1 / Math.sqrt(r));
 		// Big masses: the top layer gathers where slow noise is high and thins where it's low.
 		double big = bigNoise((double) i / period, (double) j / period);
-		int code = 0;
-		if (far > 2) {
-			code |= DECK;
+		if (far <= 2) {
+			return 0;
 		}
-		double toward = Math.max(0, Math.min(1, (far + ramp) / ramp));
-		double middle = far > 2 ? 0.5 * (0.4 + 1.2 * big) : 0.15 + 0.55 * Math.pow(toward, 1.5);
-		if (far > -ramp && pattern.middle[level][j * period + i] <= middle) {
+		int code = DECK;
+		if (pattern.middle[level][j * period + i] <= 0.5 * (0.4 + 1.2 * big)) {
 			code |= MIDDLE;
 		}
 		double inner = Math.max(0, Math.min(1, far / (48 * Math.sqrt(r))));

@@ -28,14 +28,12 @@ public final class ExportFog implements ImageExport.Finish {
 	private static final float CLOUD_CELL = (float) VanillaClouds.CELL;
 	private static final float CLOUD_PIXELS = 40;
 	private static final int CLOUD_SIZES = 5;
-	private static final float CLOUD_RAMP = (float) VanillaClouds.RAMP;
 	private static final float CLOUD_ROUND = 0.2F;
 	private static final float CLOUD_THICK = 0.55F;
 	private static final float[] CLOUD_TOP = {0.85F, 0.865F, 0.905F};
 	private static final float[] CLOUD_SIDE_HIGH = {0.72F, 0.75F, 0.84F};
 	private static final float[] CLOUD_SIDE_LOW = {0.55F, 0.59F, 0.72F};
 	private static final float[] CLOUD_SHADED = {0.70F, 0.73F, 0.83F};
-	private static final float GROUND_SHADOW = 0.22F;
 	private static final float SUN_U = -0.529999F;
 	private static final float SUN_V = -0.847998F;
 	/**
@@ -134,11 +132,10 @@ public final class ExportFog implements ImageExport.Finish {
 		// About four export pixels per texel, as on screen, and never under the 2 units the screen stops at.
 		float texel = (float) Math.max(2, 1 << lod);
 		double margin = 64 + 24 * Math.pow(2, steps + 1);
-		// The clouds read cells and distances a few of the biggest cells drawn away, and their see-
-		// through band reaches into explored land: read that far, or the clouds at the picture's edge
-		// depend on where it's cut.
+		// The clouds read cells and distances a few of the biggest cells drawn away: read that far, or
+		// the clouds at the picture's edge depend on where it's cut.
 		if (!smoke) {
-			margin += 2 * CLOUD_RAMP + 4 * CLOUD_CELL * Math.pow(2, steps + 3);
+			margin += 4 * CLOUD_CELL * Math.pow(2, steps + 3);
 		}
 		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
 		while (span / texel > MAX_MASK) {
@@ -512,13 +509,8 @@ public final class ExportFog implements ImageExport.Finish {
 				s[j * w + i] = sum / 3;
 			}
 		}
-		// The cells are worked out from the distance as it is (MapViewport.cloudCells); the shader
-		// reads it from a byte, two map units a step, 128 at the edge, for how see-through they are.
-		float[] exact = s.clone();
-		for (int k = 0; k < s.length; k++) {
-			s[k] = (Math.max(0, Math.min(255, Math.round(s[k] / 2) + 128)) - 128) * 2;
-		}
-		this.signed = exact;
+		// The cells are worked out from the distance (MapViewport.cloudCells).
+		this.signed = s;
 
 		for (int n = 0; n < 2; n++) {
 			int level = Math.min(this.cloudSize + n, CLOUD_SIZES - 1);
@@ -541,7 +533,6 @@ public final class ExportFog implements ImageExport.Finish {
 			this.codeW[n] = cw;
 			this.codeH[n] = ch;
 		}
-		this.signed = s;
 	}
 
 	/** Distances in thirds of a texel to the nearest 0, by the 3-4 chamfer, over a w by h grid. */
@@ -645,6 +636,16 @@ public final class ExportFog implements ImageExport.Finish {
 
 	/** fog.fsh's surface path for one export pixel: the clouds and the cover, over the tile and the backdrop. */
 	private int paintClouds(int abgr, double u, double v) {
+		float ta = (abgr >>> 24) / 255F;
+		float gr = ((abgr & 0xFF) / 255F) * ta + ((this.background >> 16) & 0xFF) / 255F * (1 - ta);
+		float gg = (((abgr >> 8) & 0xFF) / 255F) * ta + ((this.background >> 8) & 0xFF) / 255F * (1 - ta);
+		float gb = (((abgr >> 16) & 0xFF) / 255F) * ta + (this.background & 0xFF) / 255F * (1 - ta);
+		// Explored land is never under the clouds: they are cut at its edge, the blend across it over
+		// the unexplored side. Ground with no map at all is never seen.
+		float cover = 1 - smoothstep(0.05F, 0.5F, this.sample(u, v));
+		if (cover <= 0) {
+			return 0xFF000000 | channel(gb) << 16 | channel(gg) << 8 | channel(gr);
+		}
 		float big = 1;
 		if (this.bigShare > 0) {
 			double wrap = NOISE_PERIOD * Math.pow(2, this.scaleSteps + 1);
@@ -660,7 +661,6 @@ public final class ExportFog implements ImageExport.Finish {
 		}
 		float size = (float) (this.cloudBase * Math.pow(2, this.cloudSize + this.cloudGrow));
 		float thick = size * CLOUD_THICK;
-		float ramp = (float) (CLOUD_RAMP * Math.min(1, 1 / Math.sqrt(size / CLOUD_CELL)));
 		boolean tall = thick * COS_PITCH / this.pixelUnits >= 10;
 		float r = 0;
 		float g = 0;
@@ -702,37 +702,23 @@ public final class ExportFog implements ImageExport.Finish {
 				float sides = a1 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.85F) + a2 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.5F) + a3 * mix(CLOUD_SIDE_LOW[c], CLOUD_SIDE_HIGH[c], 0.15F);
 				color[c] = (face * topColor + sides * sideBig) / sum;
 			}
-			float alpha = 1;
-			if (k == 2) {
-				float s = this.signedAt(u, pv);
-				alpha = mix(mix(0.5F, 0.75F, clamp((s + ramp) / ramp)), 1, smoothstep(-4, 6, s));
-			}
-			alpha *= a;
-			r += through * alpha * color[0];
-			g += through * alpha * color[1];
-			b += through * alpha * color[2];
-			through *= 1 - alpha;
+			r += through * a * color[0];
+			g += through * a * color[1];
+			b += through * a * color[2];
+			through *= 1 - a;
 			if (through < 0.01F) {
 				break;
 			}
 		}
-		if (through > 0.01F) {
-			double qu = u + SUN_U * 2 * thick * 0.6;
-			double qv = v + 2 * thick * COS_PITCH + SUN_V * 2 * thick * 0.6;
-			float s = this.signedAt(u, v);
-			through *= 1 - GROUND_SHADOW * smoothstep(0.1F, 0.9F, this.cloudShape(qu, qv, 2)) * mix(0.5F, 0.75F, clamp((s + ramp) / ramp));
-		}
-		// Ground with no map at all is never seen.
-		float cover = 1 - smoothstep(0.3F, 0.85F, this.sample(u, v));
+		r *= cover;
+		g *= cover;
+		b *= cover;
+		through = 1 - (1 - through) * cover;
 		r += through * cover * CLOUD_TOP[0];
 		g += through * cover * CLOUD_TOP[1];
 		b += through * cover * CLOUD_TOP[2];
 		through *= 1 - cover;
 		float alpha = 1 - through;
-		float ta = (abgr >>> 24) / 255F;
-		float gr = ((abgr & 0xFF) / 255F) * ta + ((this.background >> 16) & 0xFF) / 255F * (1 - ta);
-		float gg = (((abgr >> 8) & 0xFF) / 255F) * ta + ((this.background >> 8) & 0xFF) / 255F * (1 - ta);
-		float gb = (((abgr >> 16) & 0xFF) / 255F) * ta + (this.background & 0xFF) / 255F * (1 - ta);
 		if (alpha <= 0.002F) {
 			return 0xFF000000 | channel(gb) << 16 | channel(gg) << 8 | channel(gr);
 		}

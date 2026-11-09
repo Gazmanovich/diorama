@@ -1222,8 +1222,7 @@ public final class MapViewport {
 	private @Nullable CellGrid cellGrid;
 
 	/**
-	 * Into the detail texture: blue holds the soft known share (writeSoft) for the mask's texels
-	 * and, beside it, the signed distance from explored land ({@link #cloudDistances}); alpha, a
+	 * Into the detail texture: blue holds the soft known share (writeSoft) for the mask's texels; alpha, a
 	 * texel a cell of the grid drawn, what clouds are within reach ({@link #cloudNear}); and further
 	 * down, red, green and blue a texel a cloud cell of each size, its layers ({@link #cloudCells}).
 	 * Alpha at (0, 0) says the cells are there: 255, or 170 with the bigger layout. Written and
@@ -1255,13 +1254,7 @@ public final class MapViewport {
 		int[] pixels = this.detailPixels;
 		for (int j = 0; j < edge; j++) {
 			for (int i = 0; i < edge; i++) {
-				int blue = 0;
-				if (j < MASK && i < MASK) {
-					blue = this.softBytes[j * MASK + i] & 0xFF;
-				} else if (j < MASK && i < 2 * MASK) {
-					// Two map units a step, 128 at explored land's edge.
-					blue = Math.max(0, Math.min(255, Math.round(this.signed[j * MASK + i - MASK] / 2) + 128));
-				}
+				int blue = j < MASK && i < MASK ? this.softBytes[j * MASK + i] & 0xFF : 0;
 				pixels[j * edge + i] = blue << 16;
 			}
 		}
@@ -1451,7 +1444,7 @@ public final class MapViewport {
 	 * reach has, so the shader skips the rest, and whether every cell within reach is the deck alone,
 	 * so it draws the deck's plain top with no reads. The low nibble for the two smallest sizes, the
 	 * high one for the three bigger: the three layer bits, then the deck-alone bit. Within reach: a
-	 * wall, shadow or ground-shadow read lands under 3.5 cells of the biggest size away. {@code range}
+	 * wall or shadow read lands under 3.5 cells of the biggest size away. {@code range}
 	 * is {first u, last u, first v, last v} of the smallest size's cells written, from its first, and
 	 * that first.
 	 */
