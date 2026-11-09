@@ -148,6 +148,9 @@ final class WebMapTest {
 			// Falls to the ground, the chunks around count the time, the client's map draws them.
 			context.waitTicks(200);
 			DioramaClientTest.settle(context, 60);
+			// The ground under the spot, once the client has its chunk: before, it reads as the world's bottom.
+			context.waitFor(mc -> mc.level != null && mc.level.hasChunk(spot[0] >> 4, spot[1] >> 4)
+				&& mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, spot[0], spot[1]) > mc.level.getMinY(), 1200);
 			int y = context.computeOnClient(mc -> mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, spot[0], spot[1]));
 			want[i] = Math.floorDiv(spot[0], Projection.TILE_UNITS) + "_" + (int) Math.floor(Projection.v(y, spot[1]) / Projection.TILE_UNITS);
 		}
