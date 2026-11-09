@@ -77,6 +77,7 @@ public final class SharedChunks implements ChunkSave {
 	// Guarded by lock.
 	private @Nullable List<Long> regions;
 	private boolean regionsAsked;
+	private long regionsAskedAt;
 	/** Asked for the regions again: every region's table is asked for again when they come. */
 	private boolean refreshing;
 	/**
@@ -86,7 +87,8 @@ public final class SharedChunks implements ChunkSave {
 	 */
 	private @Nullable Map<Long, Table> round;
 	private final Map<Long, Table> tables = new HashMap<>();
-	private final Set<Long> tablesAsked = new HashSet<>();
+	/** When each region's table was asked for: one that hasn't come in {@link #ASK_AGAIN_MS} is asked for again. */
+	private final Map<Long, Long> tablesAsked = new HashMap<>();
 	/** Chunks asked for or come, by {@link ChunkSnapshot#key}. */
 	private final Map<Long, Asked> chunks = new LinkedHashMap<>(KEPT_CHUNKS, 0.75F, true) {
 		@Override
@@ -188,8 +190,9 @@ public final class SharedChunks implements ChunkSave {
 		long deadline = System.currentTimeMillis() + LIST_WAIT_MS;
 		List<Long> toAsk;
 		synchronized (this.lock) {
-			if (this.regions == null && !this.regionsAsked) {
+			if (this.regions == null && (!this.regionsAsked || System.currentTimeMillis() - this.regionsAskedAt > ASK_AGAIN_MS)) {
 				this.regionsAsked = true;
+				this.regionsAskedAt = System.currentTimeMillis();
 				this.send(out -> {
 					out.writeByte(ShareProtocol.REGIONS);
 					out.writeUTF(this.dimension);
@@ -203,7 +206,9 @@ public final class SharedChunks implements ChunkSave {
 			}
 			toAsk = new ArrayList<>();
 			for (long region : this.regions) {
-				if (!this.tables.containsKey(region) && this.tablesAsked.add(region)) {
+				Long askedAt = this.tablesAsked.get(region);
+				if (!this.tables.containsKey(region) && (askedAt == null || System.currentTimeMillis() - askedAt > ASK_AGAIN_MS)) {
+					this.tablesAsked.put(region, System.currentTimeMillis());
 					toAsk.add(region);
 				}
 			}
@@ -481,7 +486,10 @@ public final class SharedChunks implements ChunkSave {
 			again = this.refreshing;
 			this.refreshing = false;
 			if (again) {
-				this.tablesAsked.addAll(regions);
+				long now = System.currentTimeMillis();
+				for (long region : regions) {
+					this.tablesAsked.put(region, now);
+				}
 				this.round = new HashMap<>();
 			}
 			this.lock.notifyAll();
