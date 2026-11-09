@@ -70,6 +70,12 @@ final class WebMapTest {
 						command(context, server::command);
 					} else {
 						explore(context, port, server::command, server.folder);
+						// The operators' command, from the server's console.
+						server.command("diorama-web status");
+						context.waitTicks(40);
+						if (!server.console().contains("Web map: up to date")) {
+							throw new AssertionError("/diorama-web status didn't answer in the server's console");
+						}
 					}
 				} finally {
 					// What the server said about itself: overloaded, players dropped, the web map's passes.
