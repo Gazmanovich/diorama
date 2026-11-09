@@ -50,6 +50,12 @@ public final class TableLooks extends Looks {
 		this.sideTintWeight[id] = look.sideTintWeight();
 		this.tint[id] = look.tint();
 		this.constantTint[id] = look.constantTint();
-		return look.kind();
+		// The game's rules here say how rays treat the block; the table only adds what its
+		// textures say, as BlockLooks's do: a see-through solid is glass, a block with nothing to
+		// show is air.
+		if (look.kind() == AIR || kind == SOLID && look.kind() == GLASS) {
+			return look.kind();
+		}
+		return kind;
 	}
 }

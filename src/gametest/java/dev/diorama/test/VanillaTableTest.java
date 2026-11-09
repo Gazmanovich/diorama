@@ -29,7 +29,8 @@ import org.jspecify.annotations.Nullable;
  * Makes the vanilla colour table the jar ships ({@link VanillaTable}) from this version's game,
  * with no resource pack, and checks the jar's copy still matches it. Writes the table to
  * {@code screenshots/vanilla-table/vanilla_looks.dat}: when the check fails, that file goes in
- * {@code src/main/resources/diorama/vanilla/<minecraft_version>.dat}.
+ * {@code src/main/resources/diorama/vanilla/<minecraft_version>.dat}, the node's
+ * {@code minecraft_version}.
  *
  * <p>Also bakes the tiles around the player with the client's own looks and with looks from the
  * table, which must come out the same to the pixel, and measures how far the shrunk colour maps
@@ -135,11 +136,13 @@ final class VanillaTableTest {
 				for (int i = 0; i < first.length; i++) {
 					if (first[i] != again[i]) {
 						moved++;
-					} else if (first[i] != fromTable[i]) {
-						differ++;
-					}
-					if (first[i] >>> 24 != 0) {
-						known++;
+					} else {
+						if (first[i] != fromTable[i]) {
+							differ++;
+						}
+						if (first[i] >>> 24 != 0) {
+							known++;
+						}
 					}
 				}
 				Diorama.LOGGER.info("Tile {}: {} drawn pixels, {} differ between the client's looks and the table's, {} changed in the world meanwhile", key, known, differ, moved);
@@ -151,7 +154,7 @@ final class VanillaTableTest {
 				if (du == 0 && dv == 0) {
 					writeTile(out.resolve("table-" + tiles + ".png"), fromTable);
 				}
-				drawn += known - moved;
+				drawn += known;
 				tiles++;
 			}
 		}
@@ -159,14 +162,15 @@ final class VanillaTableTest {
 			throw new AssertionError("Only " + drawn + " drawn pixels in " + tiles + " tiles to compare");
 		}
 
+		String copy = "copy " + out.resolve("vanilla_looks.dat") + " to src/main/resources/diorama/vanilla/" + minecraftVersion() + ".dat";
 		VanillaTable shipped = VanillaTable.shipped();
 		if (shipped == null) {
-			throw new AssertionError("This jar ships no vanilla colour table: copy " + out.resolve("vanilla_looks.dat") + " into src/main/resources/diorama/vanilla/");
+			throw new AssertionError("This jar ships no vanilla colour table: " + copy);
 		}
 		List<String> differences = shipped.differences(made, 20);
 		if (!differences.isEmpty()) {
 			throw new AssertionError("The jar's vanilla colour table doesn't match the game (" + String.join("; ", differences)
-				+ "): copy " + out.resolve("vanilla_looks.dat") + " into src/main/resources/diorama/vanilla/");
+				+ "): " + copy);
 		}
 	}
 
@@ -194,6 +198,15 @@ final class VanillaTableTest {
 			return "water around it";
 		}
 		return null;
+	}
+
+	/** This game's version name, which names its table file. */
+	private static String minecraftVersion() {
+		//? if >=1.21.6 {
+		return net.minecraft.SharedConstants.getCurrentVersion().name();
+		//?} else {
+		/*return net.minecraft.SharedConstants.getCurrentVersion().getName();
+		*///?}
 	}
 
 	private static int dryFoliage(double temp, double rain) {

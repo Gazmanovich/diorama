@@ -353,6 +353,9 @@ public final class VanillaTable {
 	/** Every difference from another table, one line each, at most {@code limit} lines. */
 	public List<String> differences(VanillaTable other, int limit) {
 		List<String> out = new ArrayList<>();
+		if (limit <= 0) {
+			return out;
+		}
 		java.util.Set<String> names = new java.util.TreeSet<>(this.blocks.keySet());
 		names.addAll(other.blocks.keySet());
 		for (String name : names) {
@@ -379,7 +382,7 @@ public final class VanillaTable {
 		for (int m = 0; m < 3; m++) {
 			int[] a = this.colourMaps == null || m >= this.colourMaps.length ? null : this.colourMaps[m];
 			int[] b = other.colourMaps == null || m >= other.colourMaps.length ? null : other.colourMaps[m];
-			if (!Arrays.equals(a, b)) {
+			if (!Arrays.equals(a, b) && out.size() < limit) {
 				out.add("colour map " + m + " differs");
 			}
 		}
