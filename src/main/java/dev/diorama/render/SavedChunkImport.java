@@ -511,7 +511,9 @@ public final class SavedChunkImport {
 			// Its region can get work later, so it's only looked at, once, when there is some.
 			if (this.pending.contains(SavedChunks.regionKey(regionX, regionZ)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
 				// From a server, the blocks behind what's on screen come before anything else.
-				this.save.prefetch(this.chunksUnder(Set.of(key), regionX, regionZ, facing), true);
+				if (this.save.prefetches()) {
+					this.save.prefetch(this.chunksUnder(Set.of(key), regionX, regionZ, facing), true);
+				}
 				return key;
 			}
 		}
@@ -784,7 +786,7 @@ public final class SavedChunkImport {
 		// Taken from the end: one column of tiles after another, west to east, each north to south, so
 		// the chunks read for a tile serve the tiles beside it.
 		plan.order.sort(Comparator.comparingInt(TileKey::tileU).thenComparingInt(TileKey::tileV).reversed());
-		if (!plan.tiles.isEmpty()) {
+		if (!plan.tiles.isEmpty() && this.save.prefetches()) {
 			this.save.prefetch(this.chunksUnder(plan.tiles.keySet(), regionX, regionZ, plan.facing), false);
 		}
 		return plan;

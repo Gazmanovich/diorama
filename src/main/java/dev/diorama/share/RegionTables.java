@@ -191,9 +191,12 @@ final class RegionTables {
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
+			table.saved[index] = 0;
 			return;
 		} catch (Exception e) {
 			Diorama.LOGGER.warn("Couldn't scan saved chunk {} to share it", pos, e);
+			// Scanned again next time rather than taken for unshared until it's saved again.
+			table.saved[index] = 0;
 			return;
 		}
 		if (tag == null || tag.isEmpty() || !ChunkTags.finished(tag)) {

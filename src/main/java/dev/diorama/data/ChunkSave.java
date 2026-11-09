@@ -32,6 +32,11 @@ public interface ChunkSave {
 	/** The chunk, or null if there's none or it can't be read. Blocks. */
 	@Nullable SavedChunk read(int chunkX, int chunkZ);
 
+	/** Whether {@link #prefetch} does anything: working out what to prefetch costs reads of its own. */
+	default boolean prefetches() {
+		return false;
+	}
+
 	/** Says which chunks will be read soon, by {@link ChunkSnapshot#key}, most wanted first. */
 	default void prefetch(Collection<Long> chunks, boolean urgent) {
 	}
