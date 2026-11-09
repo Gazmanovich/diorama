@@ -158,8 +158,10 @@ public final class MapViewport {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
-		// edge of known ground blends into it: clouds, smoke under a roof, or the dark of caves.
-		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : 0xFF8C99AB;
+		// edge of known ground blends into it: the clouds' top (fog.fsh's CLOUD_TOP), smoke under a
+		// roof, or the dark of caves. The clouds stop at explored land's edge, so where a mask texel
+		// is partly explored a sliver of this can show beside the land: it reads as cloud.
+		int background = cave ? 0xFF0C0E12 : level.roofless() ? 0xFF29211F : CLOUD_BACKDROP;
 		float night = this.night < 0 || cave || level.roofless() ? NightLook.forView(level, view.layer()) : this.night;
 		if (night > 0) {
 			background = NightLook.darken(background, night);
@@ -463,6 +465,9 @@ public final class MapViewport {
 			}
 		}
 	}
+
+	/** fog.fsh's CLOUD_TOP. */
+	private static final int CLOUD_BACKDROP = 0xFFD9DDE7;
 
 	private static volatile boolean fogHiddenForTests;
 
@@ -791,7 +796,7 @@ public final class MapViewport {
 		double originU = inputs.originU();
 		double originV = inputs.originV();
 		if (rounded) {
-			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
+			this.roundOff(Math.max(1, (int) Math.round(10 / texel)), clouds);
 		}
 		this.writeSoft(texel, !surface, fast);
 		this.lifting = false;
@@ -1160,8 +1165,14 @@ public final class MapViewport {
 	 * Rounds the known area off so the fog edge follows a smooth line instead of chunk steps.
 	 * Blurs the mask, keeps only what stays solidly known, and takes the smaller of that and the
 	 * original, so the fog only ever grows over the edge and never uncovers ground with no data.
+	 * The soft fog rolls over the edge anyway, so it keeps only what stays well inside, a few
+	 * blocks in. The clouds are cut where the mask's known share is a half and would hide that
+	 * explored land, so for them only the corners round off: straight edges stay where the
+	 * chunks end ({@code corners}).
 	 */
-	private void roundOff(int radius) {
+	private void roundOff(int radius, boolean corners) {
+		float from = corners ? 0.2F : 0.5F;
+		float span = corners ? 0.3F : 0.35F;
 		for (int i = 0; i < this.maskPixels.length; i++) {
 			this.blurA[i] = (this.maskPixels[i] & 0xFF) / 255.0F;
 		}
@@ -1170,7 +1181,7 @@ public final class MapViewport {
 		boxBlur(this.blurA, this.blurB, radius, true);
 		boxBlur(this.blurB, this.blurA, radius, false);
 		for (int i = 0; i < this.maskPixels.length; i++) {
-			float t = Math.max(0, Math.min(1, (this.blurA[i] - 0.5F) / 0.35F));
+			float t = Math.max(0, Math.min(1, (this.blurA[i] - from) / span));
 			float rounded = t * t * (3 - 2 * t);
 			int known = Math.min(this.maskPixels[i] & 0xFF, Math.round(rounded * 255));
 			this.maskPixels[i] = 0xFF000000 | known;
@@ -1222,8 +1233,7 @@ public final class MapViewport {
 	private @Nullable CellGrid cellGrid;
 
 	/**
-	 * Into the detail texture: blue holds the soft known share (writeSoft) for the mask's texels
-	 * and, beside it, the signed distance from explored land ({@link #cloudDistances}); alpha, a
+	 * Into the detail texture: blue holds the soft known share (writeSoft) for the mask's texels; alpha, a
 	 * texel a cell of the grid drawn, what clouds are within reach ({@link #cloudNear}); and further
 	 * down, red, green and blue a texel a cloud cell of each size, its layers ({@link #cloudCells}).
 	 * Alpha at (0, 0) says the cells are there: 255, or 170 with the bigger layout. Written and
@@ -1255,13 +1265,7 @@ public final class MapViewport {
 		int[] pixels = this.detailPixels;
 		for (int j = 0; j < edge; j++) {
 			for (int i = 0; i < edge; i++) {
-				int blue = 0;
-				if (j < MASK && i < MASK) {
-					blue = this.softBytes[j * MASK + i] & 0xFF;
-				} else if (j < MASK && i < 2 * MASK) {
-					// Two map units a step, 128 at explored land's edge.
-					blue = Math.max(0, Math.min(255, Math.round(this.signed[j * MASK + i - MASK] / 2) + 128));
-				}
+				int blue = j < MASK && i < MASK ? this.softBytes[j * MASK + i] & 0xFF : 0;
 				pixels[j * edge + i] = blue << 16;
 			}
 		}
@@ -1451,7 +1455,7 @@ public final class MapViewport {
 	 * reach has, so the shader skips the rest, and whether every cell within reach is the deck alone,
 	 * so it draws the deck's plain top with no reads. The low nibble for the two smallest sizes, the
 	 * high one for the three bigger: the three layer bits, then the deck-alone bit. Within reach: a
-	 * wall, shadow or ground-shadow read lands under 3.5 cells of the biggest size away. {@code range}
+	 * wall or shadow read lands under 3.5 cells of the biggest size away. {@code range}
 	 * is {first u, last u, first v, last v} of the smallest size's cells written, from its first, and
 	 * that first.
 	 */
