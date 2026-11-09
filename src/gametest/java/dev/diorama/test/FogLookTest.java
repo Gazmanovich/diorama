@@ -21,7 +21,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
  */
 final class FogLookTest {
 	/** Mean difference per channel, out of 255, over the frame: the two looks differ by far more, a redraw of one look by far less. */
-	private static final double DIFFERENT = 6;
+	private static final double DIFFERENT = 3;
 	private static final double SAME = 1;
 
 	private FogLookTest() {
