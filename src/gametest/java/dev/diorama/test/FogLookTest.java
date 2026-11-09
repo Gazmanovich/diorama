@@ -20,7 +20,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
  * replaces the clouds over unexplored land, and switching back brings the clouds back as they were.
  */
 final class FogLookTest {
-	/** Mean difference per channel, out of 255, over the frame: the two looks differ by far more, a redraw of one look by far less. */
+	/** Mean difference per channel, out of 255, over what changes: the two looks differ by 4.9 to 24 on boat, a redraw of one look by under 1. */
 	private static final double DIFFERENT = 3;
 	private static final double SAME = 1;
 
