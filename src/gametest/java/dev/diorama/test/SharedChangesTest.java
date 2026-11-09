@@ -50,10 +50,11 @@ final class SharedChangesTest {
 			context.setScreen(() -> null);
 
 			// Alice builds far from this player, and the server's own autosave writes it.
+			// Read first: the server can save the chunk within the second it's built.
+			int before = server.savedAt(X >> 4, Z >> 4);
 			server.commandAndWait("fill " + (X - 8) + " " + BUILD_Y + " " + (Z - 8) + " " + (X + 7) + " " + BUILD_Y + " " + (Z + 7) + " minecraft:red_wool", "Successfully filled", 60);
 			long built = System.nanoTime();
 			// The server's own autosave, as its region file shows: no command saves it.
-			int before = server.savedAt(X >> 4, Z >> 4);
 			for (int waited = 0; server.savedAt(X >> 4, Z >> 4) == before; waited += 20) {
 				if (waited > AUTOSAVE_TICKS * 2) {
 					throw new AssertionError("The server never saved the build's chunk");
