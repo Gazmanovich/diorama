@@ -57,6 +57,8 @@ done
 # A real dedicated server for the tests to join (RealServer.java): the node's release jar first.
 if [ -n "${DIORAMA_REAL_SERVER:-}" ]; then
 	mark "building the release jar for the real server"
+	# Only this build's jar is left for real_server.sh to find.
+	rm -f "versions/$node/build/libs/"diorama-*.jar
 	bash ./gradlew --no-daemon --console=plain --configuration-cache --configuration-cache-problems=warn ":$node:assemble" 2>&1 | stamp > ~/assemble.log
 	if [ "${PIPESTATUS[0]}" != 0 ]; then
 		tail -60 ~/assemble.log
