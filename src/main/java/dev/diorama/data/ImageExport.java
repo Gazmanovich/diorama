@@ -30,10 +30,10 @@ public final class ImageExport {
 	public static final int MAX_EDGE = 16384;
 	/** The detail an export starts at is the sharpest that keeps its long side within this. */
 	public static final int DEFAULT_EDGE = 8192;
-	/** Whole-map exports get this many map units of cloud around what's explored, so its edge shows. */
+	/** Whole-map exports get this many map units of fog around what's explored, so its edge shows. */
 	public static final double WHOLE_MAP_MARGIN = 32;
 	/**
-	 * Bytes per pixel of a saved PNG with clouds, by level, measured on Hermitcraft: finer levels
+	 * Bytes per pixel of a saved PNG with fog, by level, measured on Hermitcraft: finer levels
 	 * compress better, since neighbouring pixels repeat.
 	 */
 	private static final double[] BYTES_PER_PIXEL = {1.1, 2.0, 2.3, 2.4};
@@ -110,7 +110,7 @@ public final class ImageExport {
 		return levels.isEmpty() ? COARSEST : levels.get(levels.size() - 1);
 	}
 
-	/** Roughly how big the PNG of {@code area} will be, with clouds. */
+	/** Roughly how big the PNG of {@code area} will be, with fog. */
 	public static long estimateBytes(Area area) {
 		return Math.round(area.pixels() * BYTES_PER_PIXEL[Math.min(area.lod(), BYTES_PER_PIXEL.length - 1)]);
 	}

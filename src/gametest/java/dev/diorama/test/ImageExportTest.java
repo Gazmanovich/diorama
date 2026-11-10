@@ -122,7 +122,7 @@ final class ImageExportTest {
 			throw new AssertionError("The note in Unifont characters isn't in " + areaFile.getFileName() + ": " + cjk[0] + " pixels over " + cjk[1]);
 		}
 
-		// Whole map: everything explored, boxed with clouds round it.
+		// Whole map: everything explored, boxed with fog round it.
 		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
 		context.waitTicks(3);
 		click(context, mc -> {
@@ -285,7 +285,7 @@ final class ImageExportTest {
 		}
 	}
 
-	/** The PNG is the size the screen said, fully opaque (clouds where nothing is mapped), and not all cloud. */
+	/** The PNG is the size the screen said, fully opaque (fog where nothing is mapped), and not all fog. */
 	private static void checkImage(Path file, ImageExport.Area area) {
 		BufferedImage image = read(file);
 		if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
@@ -304,7 +304,7 @@ final class ImageExportTest {
 			}
 		}
 		if (seeThrough > 0) {
-			throw new AssertionError(file.getFileName() + " has " + seeThrough + " see-through pixels; unmapped ground should be clouds");
+			throw new AssertionError(file.getFileName() + " has " + seeThrough + " see-through pixels; unmapped ground should be fog");
 		}
 		if (colours.size() < 200) {
 			throw new AssertionError(file.getFileName() + " has only " + colours.size() + " colours: no map in it?");

@@ -32,7 +32,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What a map remembers while it's redrawn after its tiles' label changed: the tiles it had before,
- * fitted to the new view, sharp, under low clouds you can see through. The clouds go as real tiles land
+ * fitted to the new view, sharp, under low fog you can see through. The fog goes as real tiles land
  * on top. A memory can't be right in detail, since the old tiles show the world from another view,
  * so it stays too soft to pass for the map; nothing that needs an exact place reads it.
  *

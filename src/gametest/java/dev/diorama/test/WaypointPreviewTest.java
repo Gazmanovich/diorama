@@ -133,7 +133,7 @@ final class WaypointPreviewTest {
 		if (unseenShare.red > 0.02) {
 			wrong.add("ground the player hasn't seen shows through fog of war: " + unseenShare);
 		}
-		if (unmappedShare.cloud < 0.15 || unmappedShare.green > 0.02 || unmappedShare.gold > 0.01) {
+		if (unmappedShare.fog < 0.15 || unmappedShare.green > 0.02 || unmappedShare.gold > 0.01) {
 			wrong.add("the never-mapped waypoint shows ground: " + unmappedShare);
 		}
 		if (typedShare.gold < 0.03) {
@@ -181,8 +181,8 @@ final class WaypointPreviewTest {
 		return read(context.takeScreenshot(name));
 	}
 
-	/** How much of the preview panel is grass green, netherrack red, gold and white cloud, as fractions of its pixels. */
-	private record Share(double green, double red, double gold, double cloud) {
+	/** How much of the preview panel is grass green, netherrack red, gold and bright fog, as fractions of its pixels. */
+	private record Share(double green, double red, double gold, double fog) {
 	}
 
 	/** The preview panel, right of the form, from the editor's own layout. */
@@ -199,7 +199,7 @@ final class WaypointPreviewTest {
 		int green = 0;
 		int red = 0;
 		int gold = 0;
-		int cloud = 0;
+		int fog = 0;
 		int all = 0;
 		for (int y = y0; y < Math.min(y1, shot.getHeight()); y++) {
 			for (int x = x0; x < Math.min(x1, shot.getWidth()); x++) {
@@ -215,11 +215,11 @@ final class WaypointPreviewTest {
 				} else if (r > g * 1.35 && r > b * 1.35 && r > 50) {
 					red++;
 				} else if (Math.min(r, Math.min(g, b)) > 180 && Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) < 40) {
-					cloud++;
+					fog++;
 				}
 			}
 		}
-		return new Share(green / (double) all, red / (double) all, gold / (double) all, cloud / (double) all);
+		return new Share(green / (double) all, red / (double) all, gold / (double) all, fog / (double) all);
 	}
 
 	private static BufferedImage read(Path file) {
