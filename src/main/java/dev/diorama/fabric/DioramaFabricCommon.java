@@ -2,7 +2,10 @@ package dev.diorama.fabric;
 
 import dev.diorama.share.ShareProtocol;
 import dev.diorama.share.ShareServer;
+import dev.diorama.web.WebMap;
+import dev.diorama.web.WebMapCommand;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -23,8 +26,14 @@ import net.minecraft.network.FriendlyByteBuf;
 public final class DioramaFabricCommon implements ModInitializer {
 	@Override
 	public void onInitialize() {
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> ShareServer.started(server, FabricLoader.getInstance().getConfigDir()));
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			ShareServer.started(server, FabricLoader.getInstance().getConfigDir());
+			// After the share settings: both live in one file, which the share settings start.
+			WebMap.started(server, FabricLoader.getInstance().getConfigDir(), FabricLoader.getInstance().getGameDir().resolve("mods"));
+		});
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> WebMap.stopped());
 		ServerLifecycleEvents.SERVER_STOPPED.register(ShareServer::stopped);
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> WebMapCommand.register(dispatcher));
 		//? if >=1.21 {
 		PayloadTypeRegistry.clientboundPlay().register(ShareProtocol.TYPE, ShareProtocol.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(ShareProtocol.TYPE, ShareProtocol.CODEC);

@@ -3,6 +3,8 @@ package dev.diorama.forge;
 import dev.diorama.Diorama;
 import dev.diorama.share.ShareProtocol;
 import dev.diorama.share.ShareServer;
+import dev.diorama.web.WebMap;
+import dev.diorama.web.WebMapCommand;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
@@ -12,6 +14,8 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLEnvironment;
@@ -36,8 +40,14 @@ public final class DioramaForge {
 			FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(data));
 			player.connection.send(new ClientboundCustomPayloadPacket(ShareProtocol.CHANNEL, buf));
 		});
-		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ServerStartedEvent.class, event -> ShareServer.started(event.getServer(), FMLPaths.CONFIGDIR.get()));
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ServerStartedEvent.class, event -> {
+			ShareServer.started(event.getServer(), FMLPaths.CONFIGDIR.get());
+			// After the share settings: both live in one file, which the share settings start.
+			WebMap.started(event.getServer(), FMLPaths.CONFIGDIR.get(), FMLPaths.MODSDIR.get());
+		});
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ServerStoppingEvent.class, event -> WebMap.stopped());
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ServerStoppedEvent.class, event -> ShareServer.stopped(event.getServer()));
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, RegisterCommandsEvent.class, event -> WebMapCommand.register(event.getDispatcher()));
 		// A Forge client says which channels it has as it logs in.
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, PlayerEvent.PlayerLoggedInEvent.class, event -> {
 			if (event.getEntity() instanceof ServerPlayer player && channel.isRemotePresent(player.connection.connection)) {
