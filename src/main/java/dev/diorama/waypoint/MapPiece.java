@@ -38,9 +38,9 @@ import org.jspecify.annotations.Nullable;
  * lit like the map's, until the map's tiles there have baked.
  *
  * <p>The waypoint editor shows a {@link Place} instead: the waypoint's own spot, from the map of
- * its dimension, even one the player isn't in. Ground the map has never seen is fog, clouds or a
- * roof's smoke, as on the map. The cut face shows blocks only where the game has them loaded;
- * elsewhere it is {@link #UNKNOWN}, a plain face that claims no blocks.
+ * its dimension, even one the player isn't in. Ground the map has never seen is fog or a roof's
+ * smoke, as on the map. The cut face shows blocks only where the game has them loaded; elsewhere
+ * it is {@link #UNKNOWN}, a plain face that claims no blocks.
  */
 final class MapPiece {
 	/** GUI pixels per block across, close to what the full map shows by default. */

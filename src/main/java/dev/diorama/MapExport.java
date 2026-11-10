@@ -44,7 +44,7 @@ public final class MapExport {
 	}
 
 	/**
-	 * Starts saving {@code area} of the saved sky view with the map's clouds over unexplored
+	 * Starts saving {@code area} of the saved sky view with the map's fog over unexplored
 	 * ground, or its smoke when {@code smoke} (the sky view under a roof), and {@code drawings} over
 	 * it. False if an export is already running.
 	 */
@@ -79,22 +79,19 @@ public final class MapExport {
 			fontOptions.add("jp");
 		}
 		//?}
-		// The clouds' texture comes from the resource packs: read it here, on the render thread.
-		// The soft fog (Settings.fogLook) has no clouds.
-		dev.diorama.render.VanillaClouds.Pattern clouds = smoke || Settings.get().fogLook == Settings.FogLook.SOFT ? null : dev.diorama.render.VanillaClouds.prepare();
-		Thread thread = new Thread(() -> export.run(store, area, smoke, night, clouds, copied, fontOptions), "diorama-export");
+		Thread thread = new Thread(() -> export.run(store, area, smoke, night, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, dev.diorama.render.VanillaClouds.@org.jspecify.annotations.Nullable Pattern clouds, List<Drawing> drawings, Set<String> fontOptions) {
+	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings, Set<String> fontOptions) {
 		Component message;
 		try {
 			store.catchUp();
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
-			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night, clouds);
+			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night);
 			if (!drawings.isEmpty()) {
 				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager(), fontOptions));
 			}

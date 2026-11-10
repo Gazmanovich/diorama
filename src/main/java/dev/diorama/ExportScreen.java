@@ -64,7 +64,7 @@ public final class ExportScreen extends Screen {
 	private double v0;
 	private double u1;
 	private double v1;
-	/** Everything explored with a margin of clouds, once found; null until then or when nothing is. */
+	/** Everything explored with a margin of fog, once found; null until then or when nothing is. */
 	private double @Nullable [] explored;
 	private @Nullable CompletableFuture<double @Nullable []> finding;
 	/** The saved tiles {@link #explored} was found in. */
