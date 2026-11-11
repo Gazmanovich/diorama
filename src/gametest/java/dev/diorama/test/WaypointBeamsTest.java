@@ -10,6 +10,8 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -41,7 +43,7 @@ final class WaypointBeamsTest {
 		BlockPos spawn = context.computeOnClient(mc -> mc.player.blockPosition());
 		// A lookout over the trees, facing north and a little down, as from a hilltop: the beams ahead
 		// stand against the land and the sky both.
-		BlockPos at = new BlockPos(spawn.getX(), surface(context, spawn.getX(), spawn.getZ()) + 10, spawn.getZ());
+		BlockPos at = new BlockPos(spawn.getX(), surface(context, spawn.getX(), spawn.getZ()) + 16, spawn.getZ());
 		stand(world, at.getX(), at.getY(), at.getZ(), 4);
 		// Long enough for the commands' chat lines to fade.
 		context.waitTicks(220);
@@ -53,8 +55,8 @@ final class WaypointBeamsTest {
 		death.kind = Waypoint.Kind.DEATH;
 		Waypoint home = on(context, "Home", at.getX() + 25, at.getZ() - 80, 0xFFD6409F);
 		// Past where the land is loaded, at the lookout's own height.
-		Waypoint farm = new Waypoint("Iron Farm", at.getX() - 150, at.getY() - 10, at.getZ() - 600, OVERWORLD, 0xFFFFFFFF);
-		Waypoint village = new Waypoint("Village", at.getX() + 420, at.getY() - 10, at.getZ() - 1400, OVERWORLD, 0xFFFFC53D);
+		Waypoint farm = new Waypoint("Iron Farm", at.getX() - 150, at.getY() - 16, at.getZ() - 600, OVERWORLD, 0xFFFFFFFF);
+		Waypoint village = new Waypoint("Village", at.getX() + 420, at.getY() - 16, at.getZ() - 1400, OVERWORLD, 0xFFFFC53D);
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
 			store.all().stream().toList().forEach(store::remove);
@@ -66,10 +68,10 @@ final class WaypointBeamsTest {
 		BufferedImage off = shot(context, Settings.Beams.OFF, "beams-day-off");
 		BufferedImage temporary = shot(context, Settings.Beams.TEMPORARY, "beams-day-temporary");
 		BufferedImage all = shot(context, Settings.Beams.ALL, "beams-day-all");
-		// A point on each beam, well above its pin: 14, 40 and 25 blocks up.
-		int[] onCamp = point(context, camp, 14, off);
-		int[] onDeath = point(context, death, 40, off);
-		int[] onHome = point(context, home, 25, off);
+		// Points up each beam, above its pin.
+		int[][] onCamp = points(context, camp, off);
+		int[][] onDeath = points(context, death, off);
+		int[][] onHome = points(context, home, off);
 		expect(off, onCamp, camp, false, "off, the temporary waypoint");
 		expect(off, onDeath, death, false, "off, the death marker");
 		expect(off, onHome, home, false, "off, the ordinary waypoint");
@@ -173,31 +175,50 @@ final class WaypointBeamsTest {
 		world.getServer().runCommand("tp @a " + (x + 0.5) + " " + y + " " + (z + 0.5) + " 180 " + pitch);
 	}
 
-	/** Where on a screenshot the point {@code up} blocks above a waypoint's spot is. */
-	private static int[] point(ClientGameTestContext context, Waypoint waypoint, int up, BufferedImage shot) {
-		float[] screen = context.computeOnClient(mc -> WorldProjection.project(waypoint.x + 0.5, waypoint.y + 1.0 + up, waypoint.z + 0.5, shot.getWidth(), shot.getHeight()));
-		if (screen == null || screen[0] < 0 || screen[1] < 0 || screen[0] >= shot.getWidth() || screen[1] >= shot.getHeight()) {
-			throw new AssertionError("The point " + up + " blocks above " + waypoint.name + " isn't on screen");
-		}
-		return new int[] {Math.round(screen[0]), Math.round(screen[1])};
-	}
-
-	private static void expect(BufferedImage shot, int[] at, Waypoint waypoint, boolean beam, String what) {
-		int colour = WaypointBeams.coreColor(waypoint.color & 0xFFFFFF);
-		// A far beam is a few pixels wide, and the point is rounded to one: the nearest match close by counts.
-		double away = Double.MAX_VALUE;
-		int nearest = 0;
-		for (int x = Math.max(0, at[0] - 4); x <= Math.min(shot.getWidth() - 1, at[0] + 4); x++) {
-			int rgb = shot.getRGB(x, at[1]);
-			double d = Math.sqrt(square((rgb >> 16 & 0xFF) - (colour >> 16 & 0xFF)) + square((rgb >> 8 & 0xFF) - (colour >> 8 & 0xFF)) + square((rgb & 0xFF) - (colour & 0xFF)));
-			if (d < away) {
-				away = d;
-				nearest = rgb;
+	/** Where on a screenshot the points 8 to 40 blocks above a waypoint's spot are, those that are on it. */
+	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot) {
+		List<int[]> points = new ArrayList<>();
+		for (int up = 8; up <= 40; up += 4) {
+			double y = waypoint.y + 1.0 + up;
+			float[] screen = context.computeOnClient(mc -> WorldProjection.project(waypoint.x + 0.5, y, waypoint.z + 0.5, shot.getWidth(), shot.getHeight()));
+			if (screen != null && screen[0] >= 0 && screen[1] >= 0 && screen[0] < shot.getWidth() && screen[1] < shot.getHeight()) {
+				points.add(new int[] {Math.round(screen[0]), Math.round(screen[1])});
 			}
 		}
-		if (away < IN_BEAM != beam) {
-			throw new AssertionError("With beams " + what + (beam ? " should stand in a beam" : " should have no beam") + ": the nearest pixel around " + at[0] + ","
-				+ at[1] + " is #" + Integer.toHexString(nearest & 0xFFFFFF) + ", " + Math.round(away) + " from the beam's colour");
+		if (points.size() < 4) {
+			throw new AssertionError("Too little of the beam of " + waypoint.name + " would be on screen: " + points.size() + " points");
+		}
+		return points.toArray(int[][]::new);
+	}
+
+	/**
+	 * A beam shows at most of its points: another waypoint's pin or label may cover a few. Without one,
+	 * none of them is the beam's colour.
+	 */
+	private static void expect(BufferedImage shot, int[][] points, Waypoint waypoint, boolean beam, String what) {
+		int colour = WaypointBeams.coreColor(waypoint.color & 0xFFFFFF);
+		int found = 0;
+		StringBuilder seen = new StringBuilder();
+		for (int[] at : points) {
+			// A far beam is a few pixels wide, and the point is rounded to one: the nearest match close by counts.
+			double away = Double.MAX_VALUE;
+			int nearest = 0;
+			for (int x = Math.max(0, at[0] - 4); x <= Math.min(shot.getWidth() - 1, at[0] + 4); x++) {
+				int rgb = shot.getRGB(x, at[1]);
+				double d = Math.sqrt(square((rgb >> 16 & 0xFF) - (colour >> 16 & 0xFF)) + square((rgb >> 8 & 0xFF) - (colour >> 8 & 0xFF)) + square((rgb & 0xFF) - (colour & 0xFF)));
+				if (d < away) {
+					away = d;
+					nearest = rgb;
+				}
+			}
+			if (away < IN_BEAM) {
+				found++;
+			}
+			seen.append(" #").append(Integer.toHexString(nearest & 0xFFFFFF)).append(" at ").append(at[0]).append(',').append(at[1]);
+		}
+		if (beam ? found * 3 < points.length * 2 : found > 0) {
+			throw new AssertionError("With beams " + what + (beam ? " should stand in a beam" : " should have no beam") + ": " + found + " of " + points.length
+				+ " points up it are the beam's colour #" + Integer.toHexString(colour) + ":" + seen);
 		}
 	}
 
