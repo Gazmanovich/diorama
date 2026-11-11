@@ -257,6 +257,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("zoom-stand-in")) {
 				ZoomStandInTest.run(context, world);
 			}
+			if (tests.contains("far-zoom")) {
+				FarZoomTest.run(context, world);
+			}
 			if (tests.contains("minimap-zoom")) {
 				MinimapZoomTest.ruler(context, world);
 			}

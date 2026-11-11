@@ -76,6 +76,8 @@ public final class TileStore {
 	private static final long RETRY_DELAY_SECONDS = 30;
 	/** Overview tiles are rebuilt this long after the first tile under them is written. */
 	private static final long OVERVIEW_DELAY_SECONDS = 2;
+	/** The coarsest overview level maps had before the fullscreen map zoomed further out (0.9.0 and older). */
+	private static final int OLD_MAX_LOD = 5;
 
 	/** The only thread that writes tiles. */
 	private static final ScheduledThreadPoolExecutor WRITER = new ScheduledThreadPoolExecutor(1, task -> {
@@ -143,6 +145,7 @@ public final class TileStore {
 
 	public TileStore(Path folder) {
 		this.folder = folder;
+		WRITER.execute(() -> this.extendOverviews(OLD_MAX_LOD, null));
 	}
 
 	/** Where the tiles are saved: one folder for each map of each dimension of each world. */
@@ -225,41 +228,98 @@ public final class TileStore {
 			Set<TileKey> level = levels.pollFirstEntry().getValue();
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
-				Saved shrunk = this.shrinkChildren(key);
-				if (shrunk == null) {
-					continue;
-				}
-				Tile tile = new Tile(shrunk.pixels(), null, this.shrinkChunks(key), shrunk.blockLight());
-				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
-				synchronized (this.io) {
-					synchronized (this) {
-						this.cache.put(key, tile);
-						// Pending until written, like a bake.
-						this.unwritten.put(key, tile);
-					}
-				}
-				boolean saved = this.store(key, tile);
-				synchronized (this) {
-					if (this.unwritten.get(key) == tile) {
-						if (saved) {
-							this.unwritten.remove(key);
-						} else if (!this.closed) {
-							WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
-						}
-					}
-				}
-				this.overviewChanged.accept(key);
-				if (key.lod() < TileKey.MAX_LOD) {
+				if (this.rebuild(key, true) && key.lod() < TileKey.MAX_LOD) {
 					above.add(key.parent());
-				}
-				synchronized (this) {
-					this.trimCache();
 				}
 			}
 			if (!above.isEmpty()) {
 				levels.computeIfAbsent(above.iterator().next().lod(), lod -> new HashSet<>()).addAll(above);
 			}
 		}
+	}
+
+	/**
+	 * Makes one overview tile from its children and writes it; false if it has none. A child saved
+	 * without chunks leaves it without too, and is rebuilt first if {@code repair}. Writer thread.
+	 */
+	private boolean rebuild(TileKey key, boolean repair) {
+		Saved shrunk = this.shrinkChildren(key);
+		if (shrunk == null) {
+			return false;
+		}
+		Tile tile = new Tile(shrunk.pixels(), null, this.shrinkChunks(key, repair), shrunk.blockLight());
+		// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
+		synchronized (this.io) {
+			synchronized (this) {
+				this.cache.put(key, tile);
+				// Pending until written, like a bake.
+				this.unwritten.put(key, tile);
+			}
+		}
+		boolean saved = this.store(key, tile);
+		synchronized (this) {
+			if (this.unwritten.get(key) == tile) {
+				if (saved) {
+					this.unwritten.remove(key);
+				} else if (!this.closed) {
+					WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+				}
+			}
+		}
+		this.overviewChanged.accept(key);
+		synchronized (this) {
+			this.trimCache();
+		}
+		return true;
+	}
+
+	/**
+	 * Builds the overview levels above {@link #OLD_MAX_LOD} for a map saved before they existed, a
+	 * level at a time from that one up, so zooming all the way out shows the whole of an old map and
+	 * not fog. A tile whose children are no newer is left alone, which is every tile from the second
+	 * time on. Stops when the store closes; the next one opened on the folder goes on from there.
+	 *
+	 * <p>A tile a turn on the writer thread, which every store shares: tiles waiting to be written,
+	 * and another map closing, get their turn in between rather than after the whole of a big map.
+	 * {@code lod} is the level whose tiles are being read, and {@code stale} the tiles above it still
+	 * to build, null before they're looked for. Writer thread.
+	 */
+	private void extendOverviews(int lod, @Nullable ArrayDeque<TileKey> stale) {
+		while (lod < TileKey.MAX_LOD && !this.closed) {
+			if (stale == null) {
+				stale = this.staleAbove(lod);
+			}
+			TileKey key = stale.poll();
+			if (key == null) {
+				lod++;
+				stale = null;
+				continue;
+			}
+			// Without repairing a map from before overview tiles kept their chunks: that rebuilds
+			// every overview tile it has, and waits, as it did, until land claims are drawn on it.
+			this.rebuild(key, false);
+			int level = lod;
+			ArrayDeque<TileKey> rest = stale;
+			WRITER.execute(() -> this.extendOverviews(level, rest));
+			return;
+		}
+	}
+
+	/** The tiles one level above {@code lod} that are missing, or older than a tile under them. Writer thread. */
+	private ArrayDeque<TileKey> staleAbove(int lod) {
+		Set<TileKey> stale = new HashSet<>();
+		for (TileKey key : this.saved(lod)) {
+			Path child = this.file(key);
+			Path parent = this.file(key.parent());
+			try {
+				if (!Files.isRegularFile(parent) || Files.isRegularFile(child) && Files.getLastModifiedTime(parent).compareTo(Files.getLastModifiedTime(child)) < 0) {
+					stale.add(key.parent());
+				}
+			} catch (IOException e) {
+				// Can't tell: leave it as it is.
+			}
+		}
+		return new ArrayDeque<>(stale);
 	}
 
 	/**
@@ -288,7 +348,7 @@ public final class TileStore {
 	 * a child overview was saved before chunks were kept. That child is rebuilt first, and this
 	 * tile again after it, so a tile never keeps chunks with holes where its children had none.
 	 */
-	private byte @Nullable [] shrinkChunks(TileKey key) {
+	private byte @Nullable [] shrinkChunks(TileKey key, boolean repair) {
 		byte[][] children = new byte[4][];
 		boolean complete = true;
 		boolean anyTile = false;
@@ -308,7 +368,9 @@ public final class TileStore {
 					children[dy * 2 + dx] = TileChunks.fromSpots(child, tile.spots);
 				} else if (tile.chunks == null) {
 					complete = false;
-					this.askChunks(child);
+					if (repair) {
+						this.askChunks(child);
+					}
 				} else {
 					children[dy * 2 + dx] = tile.chunks;
 				}
@@ -350,20 +412,34 @@ public final class TileStore {
 		return tile.chunks;
 	}
 
-	/** Rebuilds an overview tile saved without chunks, and every level-1 tile under it, so each gets them. */
-	private synchronized void askChunks(TileKey key) {
-		if (this.closed || !this.chunksAsked.add(key)) {
-			return;
-		}
-		int span = 1 << (key.lod() - 1);
-		for (int du = 0; du < span; du++) {
-			for (int dv = 0; dv < span; dv++) {
-				this.staleOverviews.add(new TileKey(key.layer(), key.tileU() * span + du, key.tileV() * span + dv, 1));
+	/**
+	 * Rebuilds an overview tile saved without chunks, and every level-1 tile under it, so each gets
+	 * them. Only the level-1 tiles there are: the coarsest tile has a million places for one under
+	 * it, nearly all of them unmapped.
+	 */
+	private void askChunks(TileKey key) {
+		synchronized (this) {
+			if (this.closed || !this.chunksAsked.add(key)) {
+				return;
 			}
 		}
-		if (!this.rebuildScheduled) {
-			this.rebuildScheduled = true;
-			WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
+		// Listed outside the lock: the render thread takes it to hand bakes over.
+		int shift = key.lod() - 1;
+		Set<TileKey> under = new HashSet<>();
+		for (TileKey one : this.saved(1)) {
+			if (one.layer() == key.layer() && one.tileU() >> shift == key.tileU() && one.tileV() >> shift == key.tileV()) {
+				under.add(one);
+			}
+		}
+		synchronized (this) {
+			if (this.closed || under.isEmpty()) {
+				return;
+			}
+			this.staleOverviews.addAll(under);
+			if (!this.rebuildScheduled) {
+				this.rebuildScheduled = true;
+				WRITER.schedule(this::rebuildOverviews, OVERVIEW_DELAY_SECONDS, TimeUnit.SECONDS);
+			}
 		}
 	}
 
@@ -512,6 +588,45 @@ public final class TileStore {
 			}
 		}
 		return spots;
+	}
+
+	/**
+	 * For tests: makes the map look like one saved before overview levels above {@link #OLD_MAX_LOD}
+	 * existed, on disk too, and with {@code chunks} false like one from before overview tiles kept
+	 * their chunks. A store opened on the folder after that builds the levels again. Waits for the
+	 * writer.
+	 */
+	public void forgetHighOverviews(boolean chunks) throws InterruptedException {
+		if (!chunks) {
+			for (TileKey key : this.saved(OLD_MAX_LOD)) {
+				this.forgetChunks(key);
+			}
+		}
+		Future<?> done = WRITER.submit(() -> {
+			for (int lod = OLD_MAX_LOD + 1; lod <= TileKey.MAX_LOD; lod++) {
+				for (TileKey key : this.saved(lod)) {
+					synchronized (this.io) {
+						synchronized (this) {
+							this.cache.remove(key);
+							this.unwritten.remove(key);
+						}
+						try {
+							Files.deleteIfExists(this.file(key));
+						} catch (IOException e) {
+							throw new java.io.UncheckedIOException(e);
+						}
+					}
+				}
+			}
+			if (!this.saved(OLD_MAX_LOD + 1).isEmpty()) {
+				throw new IllegalStateException("Overview tiles above level " + OLD_MAX_LOD + " are still there");
+			}
+		});
+		try {
+			done.get();
+		} catch (ExecutionException e) {
+			throw new IllegalStateException(e.getCause());
+		}
 	}
 
 	/** For tests: makes an overview tile look like one saved before chunks were kept, on disk too. */

@@ -112,6 +112,11 @@ public final class MapMemory {
 	private final Map<Integer, Set<TileKey>> savedTiles = new HashMap<>();
 	private final Set<Integer> listing = new HashSet<>();
 	private final ConcurrentLinkedQueue<Listed> listed = new ConcurrentLinkedQueue<>();
+	/**
+	 * Overview tiles the store made since it was opened: the levels a map from an older version
+	 * didn't have. A level listed, or a tile found missing, before then is looked for again.
+	 */
+	private final ConcurrentLinkedQueue<TileKey> made = new ConcurrentLinkedQueue<>();
 	private @Nullable TileKey lastKnownKey;
 	private byte @Nullable [] lastKnown;
 	private long version;
@@ -120,6 +125,7 @@ public final class MapMemory {
 
 	private MapMemory(Path folder, TileLabel label) {
 		this.store = new TileStore(folder);
+		this.store.onOverviewChanged(this.made::add);
 		this.sin = Math.sin(Math.toRadians(label.pitch()));
 		this.cos = Math.cos(Math.toRadians(label.pitch()));
 		this.facing = label.facing();
@@ -498,6 +504,16 @@ public final class MapMemory {
 
 	/** Uploads what the loader finished, a few tiles a frame: each is a megabyte and a third. */
 	private void takeLoaded(long now) {
+		TileKey fresh;
+		while ((fresh = this.made.poll()) != null) {
+			this.savedTiles.remove(fresh.lod());
+			this.listing.remove(fresh.lod());
+			Entry missing = this.tiles.get(fresh);
+			if (missing != null && missing.texture == null) {
+				this.tiles.remove(fresh);
+			}
+			this.version++;
+		}
 		Listed list;
 		while ((list = this.listed.poll()) != null) {
 			this.savedTiles.put(list.lod(), list.keys());

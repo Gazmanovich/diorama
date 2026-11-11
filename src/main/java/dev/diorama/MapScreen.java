@@ -72,8 +72,13 @@ import com.mojang.blaze3d.platform.InputConstants;
 public final class MapScreen extends Screen {
 	/** How many Overworld blocks a block of the Nether stands for. */
 	private static final double NETHER_SCALE = 8;
-	/** How far out the saved surface map zooms; overview tiles make it cheap. */
-	private static final double MIN_ZOOM = 0.04;
+	/**
+	 * How far out the saved surface map zooms, in screen pixels per block: 512 blocks to a pixel, as
+	 * Xaero's World Map with its Unlimited Fullscreen Zoom-out on. In screen pixels, not the GUI's,
+	 * so the map reaches as far at any GUI scale. Overview tiles go up to a level that draws this
+	 * with a texture pixel a screen pixel ({@link TileKey#MAX_LOD}), so it costs what any zoom does.
+	 */
+	private static final double MIN_SCREEN_ZOOM = 1.0 / 512;
 	/** How long the open map keeps the layer on screen while the one the player moved into bakes; as the minimap. */
 	private static final long FOLLOW_HOLD_MS = 3000;
 
@@ -1763,7 +1768,12 @@ public final class MapScreen extends Screen {
 	private double minZoom(int layer) {
 		MapSession session = MapSession.get();
 		boolean overviews = layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
-		return overviews ? MIN_ZOOM : MapViewport.DETAILED_ZOOM;
+		return overviews ? MIN_SCREEN_ZOOM / net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScale() : MapViewport.DETAILED_ZOOM;
+	}
+
+	/** For tests: the zoom the map last drew at, in GUI pixels per block. */
+	public double zoom() {
+		return this.zoom;
 	}
 
 	/** For tests: put the view at a spot without following the player. */

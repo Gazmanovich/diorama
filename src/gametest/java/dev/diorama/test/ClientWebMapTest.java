@@ -160,7 +160,7 @@ final class ClientWebMapTest {
 		}
 		// The same tile asked for as another map's (another world, or the address from before these named the map).
 		for (String path : new String[] {folder + "/0/9999_9999.jpg", "/minecraft_overworld/0/" + tileU + "_" + tileV + ".jpg", folder + "0/0/" + tileU + "_" + tileV + ".jpg",
-			"/minecraft_the_nether/0/" + tileU + "_" + tileV + ".jpg", "/../config.json", folder + "/0/x.jpg", folder + "/9/0_0.jpg"}) {
+			"/minecraft_the_nether/0/" + tileU + "_" + tileV + ".jpg", "/../config.json", folder + "/0/x.jpg", folder + "/" + (TileKey.MAX_LOD + 1) + "/0_0.jpg"}) {
 			int code = getBytes(http, port, path).statusCode();
 			if (code != 404) {
 				throw new AssertionError(path + " answered " + code);

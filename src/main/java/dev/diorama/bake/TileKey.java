@@ -9,8 +9,12 @@ import dev.diorama.Projection;
  */
 public record TileKey(int layer, int tileU, int tileV, int lod) {
 	public static final int SURFACE = Integer.MIN_VALUE;
-	/** Coarsest overview level: one tile covers 4096 blocks across. */
-	public static final int MAX_LOD = 5;
+	/**
+	 * Coarsest overview level: one tile covers 262,144 blocks across, 512 to a pixel. That's a
+	 * texture pixel a screen pixel at the furthest the fullscreen map zooms out, so a screen of the
+	 * map is a screen's worth of tiles at any zoom.
+	 */
+	public static final int MAX_LOD = 11;
 
 	public TileKey(int layer, int tileU, int tileV) {
 		this(layer, tileU, tileV, 0);
