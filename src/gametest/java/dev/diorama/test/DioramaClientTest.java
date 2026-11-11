@@ -134,6 +134,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("drawings")) {
 				DrawingTest.run(context, world);
 			}
+			if (tests.contains("world-border")) {
+				WorldBorderTest.run(context, world);
+			}
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
 			}
