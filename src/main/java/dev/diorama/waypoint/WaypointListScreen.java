@@ -1090,6 +1090,11 @@ public final class WaypointListScreen extends Screen {
 			// A search may have waystones among its rows whatever the folder.
 			if (hasWaystones != this.hadWaystones || WaypointStore.WAYSTONES_KEY.equals(this.folderKey) || !this.query().isEmpty()) {
 				this.rebuildWidgets();
+			} else if (store != null) {
+				// Nothing typed and another folder shown: the waystones a search would look through, made anew.
+				this.others.removeIf(w -> w.kind == Waypoint.Kind.WAYSTONE);
+				this.others.addAll(store.waystones());
+				this.resort(store);
 			}
 		}
 		if (this.newWaypointPressed) {
