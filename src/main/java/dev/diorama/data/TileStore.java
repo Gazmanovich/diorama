@@ -145,6 +145,11 @@ public final class TileStore {
 		this.folder = folder;
 	}
 
+	/** Where the tiles are saved: one folder for each map of each dimension of each world. */
+	public Path folder() {
+		return this.folder;
+	}
+
 	public void onOverviewChanged(Consumer<TileKey> listener) {
 		this.overviewChanged = listener;
 	}
@@ -651,6 +656,47 @@ public final class TileStore {
 			}
 		}
 		return keys;
+	}
+
+	/**
+	 * Every saved tile at an overview level with when its file was last written, in milliseconds;
+	 * one not on disk yet has the time now. For a viewer that fetches a tile again when this changes.
+	 */
+	public Map<TileKey, Long> savedTimes(int lod) {
+		Map<TileKey, Long> times = new HashMap<>();
+		Path dir = lod == 0 ? this.folder : this.folder.resolve("lod" + lod);
+		if (Files.isDirectory(dir)) {
+			// The times come with the listing, without opening each file.
+			try (java.util.stream.Stream<Path> files = Files.find(dir, 1, (file, attributes) -> {
+				String name = file.getFileName().toString();
+				int split = name.indexOf('_');
+				if (!attributes.isRegularFile() || !name.endsWith(".omt") || split < 0) {
+					return false;
+				}
+				try {
+					int u = Integer.parseInt(name.substring(0, split));
+					int v = Integer.parseInt(name.substring(split + 1, name.length() - 4));
+					times.put(new TileKey(TileKey.SURFACE, u, v, lod), attributes.lastModifiedTime().toMillis());
+				} catch (NumberFormatException e) {
+					// Not a tile.
+				}
+				return false;
+			})) {
+				files.forEach(file -> {
+				});
+			} catch (IOException | java.io.UncheckedIOException e) {
+				Diorama.LOGGER.warn("Couldn't list saved tiles in {}", dir, e);
+			}
+		}
+		long now = System.currentTimeMillis();
+		synchronized (this) {
+			for (TileKey key : this.unwritten.keySet()) {
+				if (key.lod() == lod) {
+					times.put(key, now);
+				}
+			}
+		}
+		return times;
 	}
 
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
