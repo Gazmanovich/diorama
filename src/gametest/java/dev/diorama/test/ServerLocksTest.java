@@ -129,7 +129,7 @@ final class ServerLocksTest {
 	 * as the client has the server's word, then {@code inGame} with the server. After leaving, nothing
 	 * is locked and the player's own settings are back as they were.
 	 */
-	private static void onServer(ClientGameTestContext context, String name, String file, Runnable locked, java.util.function.Consumer<RealServer> inGame) {
+	static void onServer(ClientGameTestContext context, String name, String file, Runnable locked, java.util.function.Consumer<RealServer> inGame) {
 		Path config = Path.of(System.getProperty("user.home"), "real-servers", System.getenv("DIORAMA_NODE"), "config", "diorama-server.properties");
 		write(config, file);
 		try (RealServer server = RealServer.start(true)) {
