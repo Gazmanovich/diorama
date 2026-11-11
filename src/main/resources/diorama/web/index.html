@@ -114,7 +114,7 @@ function pick(d, first) {
 	const empty = document.getElementById("empty");
 	empty.style.display = dim && present[0] && present[0].size ? "none" : "flex";
 	empty.textContent = !map.live ? "The map is still being drawn. It fills in as the server draws it."
-		: dim ? "Nothing is mapped here yet. The map fills in as you explore." : "Join a world in Minecraft to see its map here.";
+		: dim ? "Nothing is mapped here yet. The map fills in as you explore." : "No map to show right now. It appears here while you're in a world with a map.";
 	if (first || switched) home(first);
 	draw();
 }

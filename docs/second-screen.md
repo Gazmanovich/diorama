@@ -18,7 +18,7 @@ The address looks like `http://localhost:8100/` for this computer, or `http://19
 - Your arrow shows where you are and which way you look. **Follow** keeps the map centred on you; moving the map turns it off, and the button turns it back on.
 - Drag to move, scroll or pinch to zoom, or use the + and − buttons.
 - The map fills in a few seconds after the one in the game does. It shows the map of the dimension you're in, and switches when you go through a portal.
-- Close the game, or leave the world, and the page waits for you to come back.
+- Close the game, leave the world, or go to a dimension where the map is off, and the page waits for you to come back.
 
 ## The port
 
