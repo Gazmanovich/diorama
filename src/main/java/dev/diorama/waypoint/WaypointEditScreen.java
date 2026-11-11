@@ -6,6 +6,7 @@ import dev.diorama.MapSession;
 import dev.diorama.render.Pins;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
@@ -623,7 +624,7 @@ public final class WaypointEditScreen extends Screen {
 
 	/**
 	 * The player's block coordinate for a box, in the waypoint's dimension the way Xaero's reckons
-	 * it: X and Z scaled between the Nether and the rest, Y as it is. Null with no player.
+	 * it: X and Z scaled from the player's dimension to the waypoint's, Y as it is. Null with no player.
 	 */
 	private @Nullable Integer here(EditBox box) {
 		Entity viewer = MapSession.viewer();
@@ -634,7 +635,8 @@ public final class WaypointEditScreen extends Screen {
 		if (box == this.y) {
 			return viewer.blockPosition().getY();
 		}
-		double scale = MapScreen.dimensionScale(dimension) / MapScreen.dimensionScale(this.waypoint.dimension);
+		double scale = dimension.equals(this.waypoint.dimension) ? 1
+			: viewer.level().dimensionType().coordinateScale() / MapScreen.dimensionScale(this.waypoint.dimension);
 		return Mth.floor((box == this.x ? viewer.blockPosition().getX() : viewer.blockPosition().getZ()) * scale);
 	}
 
@@ -647,7 +649,8 @@ public final class WaypointEditScreen extends Screen {
 
 	private void hintHere(EditBox box, String axis) {
 		Integer here = this.here(box);
-		box.setHint(here == null ? Component.translatable(axis) : Component.literal(Integer.toString(here)));
+		// Styled here, as 1.20.1 draws an unstyled hint in the text's own colour.
+		box.setHint((here == null ? Component.translatable(axis) : Component.literal(Integer.toString(here))).withStyle(ChatFormatting.DARK_GRAY));
 	}
 
 	private static @Nullable Integer parse(String text) {
