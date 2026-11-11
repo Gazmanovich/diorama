@@ -229,7 +229,7 @@
     "diorama.settings.chunk_grid.tooltip": "Отображает границы чанков на карте.",
     "diorama.settings.slime_chunks.tooltip": "Отмечает на карте чанки, где появляются слизни. Только для одиночной игры в Верхнем мире: требуется сид мира.",
     "diorama.settings.spawn_spots.tooltip": "Отмечает на карте блоки, где могут спавниться монстры: те, которые темны даже днем, или те, которые темны только ночью.",
-    "diorama.settings.claims.tooltip": "Указывает, где отображается земля, захваченная с помощью FTB Chunks или Open Parties and Claims (цветом владельца): на полноэкранной карте или также на мини-карте.",
+    "diorama.settings.claims.tooltip": "Указывает, где отображается земля, захваченная с помощью FTB Chunks, Open Parties and Claims или MineColonies (цветом владельца): на полноэкранной карте или также на мини-карте.",
     "diorama.settings.drawings.tooltip": "Где отображаются ваши рисунки на карте: на полноэкранной карте или также на мини-карте (линии и области; заметки остаются на полноэкранной карте).",
     "diorama.settings.web_map": "Веб-карта",
     "diorama.settings.web_map.off": "Выкл",

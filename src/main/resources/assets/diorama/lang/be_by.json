@@ -229,7 +229,7 @@
     "diorama.settings.chunk_grid.tooltip": "Адмалёўваць межы чанкаў з мапы.",
     "diorama.settings.slime_chunks.tooltip": "Пазначае на мапе чанкі, дзе з'яўляюцца слімакі. Толькі ў адзіночнай гульні ў Верхнім свеце: патрабуе зерне свету.",
     "diorama.settings.spawn_spots.tooltip": "Пазначае месцы мапы, дзе мобы могуць з'яўляцца: месцы, дзе цёмна заўсёды ці толькі ноччу.",
-    "diorama.settings.claims.tooltip": "Дзе ёсць занятыя тэрыторыі FTB Chunks ці Open Parties and Claims, амалёўваюцца у колер уладальніка: ці на поўнаразмернай мапе, ці на мінімапе.",
+    "diorama.settings.claims.tooltip": "Дзе ёсць занятыя тэрыторыі FTB Chunks, Open Parties and Claims ці MineColonies, амалёўваюцца у колер уладальніка: ці на поўнаразмернай мапе, ці на мінімапе.",
     "diorama.settings.drawings.tooltip": "Дзе паказваюцца малюнкі на мапе: на поўнаэкраннай ці на мінімапе таксама (лініі і вобласці; нататкі застаюцца на поўнаэкраннай мапе).",
     "diorama.settings.web_map": "Вэб-мапа",
     "diorama.settings.web_map.off": "Адкл",

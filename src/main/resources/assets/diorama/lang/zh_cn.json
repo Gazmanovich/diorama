@@ -198,7 +198,7 @@
 	"diorama.settings.chunk_grid.tooltip": "在地图上绘制区块边界。",
 	"diorama.settings.slime_chunks.tooltip": "在地图上标记史莱姆生成的区块。仅限单人游戏的主世界：需要世界种子。",
 	"diorama.settings.spawn_spots.tooltip": "在地图上标记怪物可生成的方块：白天也较暗的方块，或仅在夜晚较暗的方块。",
-	"diorama.settings.claims.tooltip": "用所有者颜色显示通过 FTB Chunks 或 Open Parties and Claims 认领的土地：仅在全屏地图上，或在小地图上也显示。",
+	"diorama.settings.claims.tooltip": "用所有者颜色显示通过 FTB Chunks、Open Parties and Claims 或 MineColonies 认领的土地：仅在全屏地图上，或在小地图上也显示。",
 	"diorama.settings.waypoints_map.tooltip": "在小地图和地图上显示你的路径点。",
 	"diorama.settings.waypoints_world.tooltip": "在世界中显示你的路径点及其距离，即使隔着地形也能看到。",
 	"diorama.settings.deaths.tooltip": "在你死亡的位置添加一个路径点。",

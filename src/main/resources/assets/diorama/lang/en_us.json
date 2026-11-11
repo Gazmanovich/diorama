@@ -260,7 +260,7 @@
 	"diorama.settings.chunk_grid.tooltip": "Draws chunk borders on the map.",
 	"diorama.settings.slime_chunks.tooltip": "Marks the chunks where slimes spawn on the map. Single player only, in the Overworld: it needs the world's seed.",
 	"diorama.settings.spawn_spots.tooltip": "Marks blocks on the map where monsters can spawn: those dark even by day, or also those dark only at night.",
-	"diorama.settings.claims.tooltip": "Where land claimed with FTB Chunks or Open Parties and Claims shows, in its owner's colour: on the fullscreen map, or on the minimap too.",
+	"diorama.settings.claims.tooltip": "Where land claimed with FTB Chunks, Open Parties and Claims or MineColonies shows, in its owner's colour: on the fullscreen map, or on the minimap too.",
 	"diorama.settings.drawings.tooltip": "Where what you draw on the map shows: on the fullscreen map, or on the minimap too (lines and areas; notes stay on the fullscreen map).",
 	"diorama.settings.web_map": "Web map",
 	"diorama.settings.web_map.off": "Off",

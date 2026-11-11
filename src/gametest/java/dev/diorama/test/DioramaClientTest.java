@@ -287,6 +287,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("opac-claims")) {
 				opacClaims(context, world);
 			}
+			if (tests.contains("minecolonies")) {
+				mineColonies(context, world);
+			}
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
 			}
@@ -4966,6 +4969,256 @@ public class DioramaClientTest implements FabricClientGameTest {
 		opacRequest(context, "requestAreaUnclaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
 		context.waitFor(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) == null, 600);
 		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	/**
+	 * A MineColonies colony's land, with MineColonies installed (opt-in: DIORAMA_TESTS=minecolonies).
+	 * The player founds a colony where they stand, through MineColonies' own colony manager. The map
+	 * tints the colony's land in its team colour and names the colony on hover, the minimap shows
+	 * it, a new name and colour follow, and deleting the colony takes the tint away. With Open
+	 * Parties and Claims installed too, a claim made inside the colony shows as that claim, and the
+	 * chunk goes back to the colony once it's unclaimed.
+	 */
+	private static void mineColonies(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> dev.diorama.compat.MineColonies.available())) {
+			throw new AssertionError("DIORAMA_TESTS=minecolonies needs MineColonies installed");
+		}
+		// The middle of a chunk, on an open patch far from anything placed before.
+		int cx = -2800 + 8;
+		int cz = 2400 + 8;
+		int flat = 6 * 16 + 8;
+		int x0 = cx - flat;
+		int z0 = cz - flat;
+		int x1 = cx + flat - 1;
+		int z1 = cz + flat - 1;
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		int y = Math.max(72, world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz)));
+		for (int x = x0; x <= x1; x += 16) {
+			for (int z = z0; z <= z1; z += 16) {
+				int xe = Math.min(x1, x + 15);
+				int ze = Math.min(z1, z + 15);
+				world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + xe + " " + (y + 60) + " " + ze + " air");
+				world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + z + " " + xe + " " + (y - 1) + " " + ze + " grass_block");
+			}
+		}
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+		int chunkX = cx >> 4;
+		int chunkZ = cz >> 4;
+		if (claimAt(context, chunkX, chunkZ) != null) {
+			throw new AssertionError("The ground is claimed before the colony is founded");
+		}
+
+		context.runOnClient(mc -> Claims.resetSlowestTick());
+		long founded = System.nanoTime();
+		int id = world.getServer().computeOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object manager = managers.getMethod("getInstance").invoke(null);
+				for (java.lang.reflect.Method method : managers.getMethods()) {
+					if (method.getName().equals("createColony") && method.getParameterCount() == 5) {
+						Object colony = method.invoke(manager, server.overworld(), new BlockPos(cx, y, cz), server.getPlayerList().getPlayers().get(0), "Riverside", "");
+						Class<?> colonies = Class.forName("com.minecolonies.api.colony.IColony");
+						colonies.getMethod("setColonyColor", net.minecraft.ChatFormatting.class).invoke(colony, net.minecraft.ChatFormatting.GOLD);
+						return (int) colonies.getMethod("getID").invoke(colony);
+					}
+				}
+				throw new AssertionError("MineColonies has no createColony");
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't found a colony through MineColonies' colony manager", e);
+			}
+		});
+		int gold = net.minecraft.ChatFormatting.GOLD.getColor();
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == gold, 600);
+		Diorama.LOGGER.info("MineColonies colony {} reached the map's claims {} ms after it was founded", id, (System.nanoTime() - founded) / 1_000_000);
+		Claims.Claim colony = claimAt(context, chunkX, chunkZ);
+		if (!colony.titled() || !colony.name().equals("Riverside") || colony.forceLoaded()) {
+			throw new AssertionError("Expected the colony Riverside in gold: " + colony);
+		}
+		// How far the colony's land reaches: the same in every direction, and no further.
+		int reach = 0;
+		while (reach < 12 && colony.equals(claimAt(context, chunkX + reach + 1, chunkZ))) {
+			reach++;
+		}
+		int chunks = 0;
+		for (int x = -12; x <= 12; x++) {
+			for (int z = -12; z <= 12; z++) {
+				if (claimAt(context, chunkX + x, chunkZ + z) != null) {
+					chunks++;
+				}
+			}
+		}
+		int r = reach;
+		Diorama.LOGGER.info("MineColonies colony: {}, reaching {} chunks from its middle, {} chunks in all", colony, reach, chunks);
+		if (reach < 1 || reach > 4 || claimAt(context, chunkX - reach, chunkZ) == null || claimAt(context, chunkX - reach - 1, chunkZ) != null
+			|| claimAt(context, chunkX, chunkZ + reach) == null || claimAt(context, chunkX, chunkZ + reach + 1) != null) {
+			throw new AssertionError("The colony's land isn't the block of chunks round its middle: it reaches " + reach + " chunks east, " + chunks + " chunks in all");
+		}
+		settle(context, 40);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, true, "the ground under the player");
+		assertClaimTint(context, cx + r * 16 + 0.5, y, cz + 0.5, true, "the colony's easternmost chunk");
+		assertClaimTint(context, cx + (r + 1) * 16 + 0.5, y, cz + 0.5, false, "the ground east of the colony");
+		assertClaimTint(context, cx + 0.5, y, cz - (r + 1) * 16 + 0.5, false, "the ground north of the colony");
+
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS))), 200);
+		settle(context, 20);
+		context.takeScreenshot("minecolonies-01-map");
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("minecolonies-02-map-zoom-1");
+		// Hovering the colony's land names the colony.
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 10);
+		double[] spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("minecolonies-03-hover");
+		// Turned off, the colony's land goes.
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> !Claims.get().isEmpty())) {
+			throw new AssertionError("Claims still known with the setting off");
+		}
+		context.takeScreenshot("minecolonies-04-off");
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.ALWAYS);
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null, 600);
+		context.setScreen(() -> null);
+		// From just inside the colony's east edge, the minimap shows where its land ends.
+		int edge = cx + r * 16 + 2;
+		world.getServer().runCommand("tp @a " + edge + " " + y + " " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == edge, 200);
+		settle(context, 40);
+		context.takeScreenshot("minecolonies-05-minimap");
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(20);
+
+		// Forgotten, as on joining a server, the colony's land is read again.
+		context.runOnClient(mc -> Claims.clear());
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX + r, chunkZ - r) != null, 200);
+		Diorama.LOGGER.info("MineColonies: slowest tick spent on claims while the colony arrived and was read again {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
+		// With nothing changing, what looking at the colony once a second costs.
+		context.waitTicks(100);
+		Diorama.LOGGER.info("MineColonies: slowest tick spent on claims with nothing changing {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
+
+		// A new name and team colour follow.
+		mineColony(world, id, "setName", String.class, "Lakeside");
+		mineColony(world, id, "setColonyColor", net.minecraft.ChatFormatting.class, net.minecraft.ChatFormatting.AQUA);
+		int aqua = net.minecraft.ChatFormatting.AQUA.getColor();
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == aqua && Claims.get().at(chunkX, chunkZ).name().equals("Lakeside"), 600);
+		openMapOnPlayer(context);
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 40);
+		spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("minecolonies-06-renamed");
+
+		// Beside another claims mod: its claim inside the colony shows as its own, the colony keeps
+		// the rest, and gets the chunk back when the claim goes.
+		if (context.computeOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.available())) {
+			opacLogResults(context);
+			opacRequest(context, "requestAreaClaim", chunkX + 1, chunkZ, chunkX + 1, chunkZ, false);
+			opacWait(context, "claim inside the colony", mc -> Claims.get().at(chunkX + 1, chunkZ) != null && !isColony(Claims.get().at(chunkX + 1, chunkZ)));
+			// From the colony's edge: Open Parties and Claims turns down a claim far from the player.
+			int near = cx + r * 16;
+			world.getServer().runCommand("tp @a " + near + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == near, 200);
+			opacRequest(context, "requestAreaClaim", chunkX + r + 2, chunkZ, chunkX + r + 2, chunkZ, false);
+			opacWait(context, "claim outside the colony", mc -> Claims.get().at(chunkX + r + 2, chunkZ) != null);
+			world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+			// Past the next few looks at the colony, both are still there.
+			context.waitTicks(60);
+			Claims.Claim inside = claimAt(context, chunkX + 1, chunkZ);
+			Claims.Claim outside = claimAt(context, chunkX + r + 2, chunkZ);
+			Claims.Claim rest = claimAt(context, chunkX, chunkZ);
+			Diorama.LOGGER.info("MineColonies beside Open Parties and Claims: inside the colony {}, outside {}, the colony {}", inside, outside, rest);
+			if (inside == null || isColony(inside) || outside == null || !outside.owner().equals(inside.owner())
+				|| !isColony(rest) || claimAt(context, chunkX + r + 1, chunkZ) != null) {
+				throw new AssertionError("Expected the player's claim inside and outside the colony, and the colony's land round it: " + inside + ", " + outside + ", " + rest);
+			}
+			settle(context, 40);
+			assertClaimTint(context, cx + (r + 2) * 16 + 0.5, y, cz + 0.5, true, "the claim outside the colony");
+			assertClaimTint(context, cx + (r + 1) * 16 + 0.5, y, cz + 0.5, false, "the ground between the colony and the claim");
+			lookAtPlayer(context, 1.0, TileKey.SURFACE);
+			settle(context, 20);
+			// Hovering the claim outside the colony names it; the one inside stays in view.
+			spot = mapPoint(context, (r + 2) * 16, 2);
+			moveCursor(context, spot[2], spot[3]);
+			context.waitTicks(10);
+			context.takeScreenshot("minecolonies-07-with-opac");
+			// Open Parties and Claims' claims forgotten, as when it says a dimension changed: the
+			// colony's land stays, and the colony takes its chunk back.
+			context.runOnClient(mc -> Claims.forget(mc.level.dimension(), inside.owner().getClass()));
+			context.waitTicks(5);
+			if (!isColony(claimAt(context, chunkX, chunkZ)) || !isColony(claimAt(context, chunkX - r, chunkZ + r))) {
+				throw new AssertionError("Forgetting Open Parties and Claims' claims took the colony's land with them");
+			}
+			context.waitFor(mc -> isColony(Claims.get().at(chunkX + 1, chunkZ)), 100);
+			// Read again, Open Parties and Claims' claim is back over the colony's chunk.
+			context.runOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.cleared());
+			opacWait(context, "claim inside the colony, read again", mc -> Claims.get().at(chunkX + 1, chunkZ) != null && !isColony(Claims.get().at(chunkX + 1, chunkZ)));
+			opacRequest(context, "requestAreaUnclaim", chunkX + 1, chunkZ, chunkX + 1, chunkZ, false);
+			context.waitFor(mc -> isColony(Claims.get().at(chunkX + 1, chunkZ)), 600);
+			world.getServer().runCommand("tp @a " + near + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == near, 200);
+			opacRequest(context, "requestAreaUnclaim", chunkX + r + 2, chunkZ, chunkX + r + 2, chunkZ, false);
+			context.waitFor(mc -> Claims.get().at(chunkX + r + 2, chunkZ) == null, 600);
+			world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+			Diorama.LOGGER.info("MineColonies beside Open Parties and Claims: the colony got its chunk back after the claim went");
+		}
+
+		// Deleting the colony takes its land off the map.
+		world.getServer().runOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				managers.getMethod("deleteColonyByDimension", int.class, boolean.class, net.minecraft.resources.ResourceKey.class)
+					.invoke(managers.getMethod("getInstance").invoke(null), id, false, net.minecraft.world.level.Level.OVERWORLD);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't delete the colony through MineColonies' colony manager", e);
+			}
+		});
+		long deleted = System.nanoTime();
+		context.waitFor(mc -> Claims.get().isEmpty(), 600);
+		Diorama.LOGGER.info("MineColonies colony left the map's claims {} ms after it was deleted", (System.nanoTime() - deleted) / 1_000_000);
+		settle(context, 20);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, false, "the ground under the player after the colony was deleted");
+		openMapOnPlayer(context);
+		context.waitTicks(40);
+		context.takeScreenshot("minecolonies-08-deleted");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	private static Claims.Claim claimAt(ClientGameTestContext context, int chunkX, int chunkZ) {
+		return context.computeOnClient(mc -> Claims.get().at(chunkX, chunkZ));
+	}
+
+	private static boolean isColony(Claims.Claim claim) {
+		return claim != null && claim.owner() instanceof dev.diorama.compat.MineColonies.Colony;
+	}
+
+	/** Calls a one-argument setter on a colony, on the server. */
+	private static void mineColony(TestSingleplayerContext world, int id, String setter, Class<?> type, Object value) {
+		world.getServer().runOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object colony = managers.getMethod("getColonyByDimension", int.class, net.minecraft.resources.ResourceKey.class)
+					.invoke(managers.getMethod("getInstance").invoke(null), id, net.minecraft.world.level.Level.OVERWORLD);
+				Class.forName("com.minecolonies.api.colony.IColony").getMethod(setter, type).invoke(colony, value);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't change the colony through MineColonies' colony manager", e);
+			}
+		});
 	}
 
 	/** Claims (or unclaims) 64 chunks in each of 20 by 20 regions from {@code regionX, regionZ}, for 50 owners, through Open Parties and Claims' server API. */
