@@ -101,8 +101,8 @@ public final class MinimapHud implements HudElement {
 		Settings.Corner corner = settings.minimapCorner;
 		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
 		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
-		// Held, the enlarge key shows it bigger, in the same corner.
-		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
+		// The enlarge key shows it bigger, in the same corner.
+		int size = DioramaClient.minimapEnlarged() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
 		this.draw(graphics, partialTick, right, top, top && effectIcons ? this.effectRows(mc.player, right) : 0, size);
 	}
 
