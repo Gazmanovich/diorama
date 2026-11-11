@@ -352,7 +352,7 @@ public final class MapScreen extends Screen {
 		return dimensionScale(here) / dimensionScale(this.dimension());
 	}
 
-	private static double dimensionScale(String dimension) {
+	public static double dimensionScale(String dimension) {
 		return dimension.equals("minecraft:the_nether") ? NETHER_SCALE : 1;
 	}
 
