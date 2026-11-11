@@ -65,6 +65,14 @@ final class WaypointSelectTest {
 			wrong.add("one selected row had the buttons " + rowButtons(context));
 		}
 		context.takeScreenshot("select-01-one");
+		// The same screen in the smallest window and at 1280 x 720: the hint line clear of the list and Done.
+		for (int[] size : new int[][] {{640, 480}, {1280, 720}}) {
+			context.getInput().resizeWindow(size[0], size[1]);
+			context.waitTicks(5);
+			context.takeScreenshot("select-01-hint-" + size[0] + "x" + size[1]);
+		}
+		context.getInput().resizeWindow(1600, 900);
+		context.waitTicks(5);
 
 		// Shift click: the rows from the one clicked before to this one.
 		click(context, spots.get(3), true, false);

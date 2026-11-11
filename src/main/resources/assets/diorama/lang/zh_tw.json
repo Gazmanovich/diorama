@@ -43,6 +43,7 @@
 	"diorama.waypoints.hide": "隱藏",
 	"diorama.waypoints.show": "顯示",
 	"diorama.waypoints.move": "移動",
+	"diorama.waypoints.select_hint": "%s+點擊多選 · Shift+點擊選擇範圍",
 	"diorama.waypoints.delete_many": "再次點擊以刪除 %s 個路徑點",
 	"diorama.folder.own_dimensions": "各自的維度",
 	"diorama.xaero.import": "從 Xaero's Minimap 匯入（%s）",

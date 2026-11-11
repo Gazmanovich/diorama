@@ -43,6 +43,7 @@
     "diorama.waypoints.hide": "Схаваць",
     "diorama.waypoints.show": "Паказаць",
     "diorama.waypoints.move": "Перамясціць",
+    "diorama.waypoints.select_hint": "%s+клік — выбраць яшчэ · Shift+клік — дыяпазон",
     "diorama.waypoints.delete_many": "Націсніце зноў, каб выдаліць указальнікі: %s",
     "diorama.folder.own_dimensions": "Свае вымярэнні",
     "diorama.xaero.import": "Імпартаваць з Xaero's Minimap (%s)",

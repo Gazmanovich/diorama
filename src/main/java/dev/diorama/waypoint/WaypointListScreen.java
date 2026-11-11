@@ -33,7 +33,8 @@ import org.jspecify.annotations.Nullable;
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
  * which asks for a second click in place. Double-clicking a row edits it. A Ctrl click adds a row to
  * the selection and a Shift click the rows up to it, as in Xaero's Minimap's list; several rows have
- * Move, which sends them all to a folder picked from a list, hide or show, and delete. With no waypoints in
+ * Move, which sends them all to a folder picked from a list, hide or show, and delete. A grey line
+ * under the list says so. With no waypoints in
  * this dimension, a pin standing on a piece of the map shows what one is and how to add one.
  * When Xaero's Minimap has waypoints for this world that aren't here yet, a button imports them.
  */
@@ -129,6 +130,12 @@ public final class WaypointListScreen extends Screen {
 	private final java.util.Set<Waypoint> marked = new java.util.LinkedHashSet<>();
 	/** The row a Shift click selects from: the last one clicked without Shift. */
 	private @Nullable Waypoint anchor;
+	/**
+	 * Whether the click being handled came with Ctrl (Cmd on macOS, as the game reads it for its own
+	 * shortcuts) or Shift held.
+	 */
+	private boolean controlClick;
+	private boolean shiftClick;
 	/** Move, which only several rows have: one row's folder is picked in its editor. */
 	private @Nullable Button move;
 	/** The selected row's Delete was clicked once: its buttons are one Click again to delete. */
@@ -352,21 +359,8 @@ public final class WaypointListScreen extends Screen {
 		this.rebuildWidgets();
 	}
 
-	private static boolean controlDown() {
-		//? if >=1.21.9 {
-		return net.minecraft.client.Minecraft.getInstance().hasControlDown();
-		//?} else {
-		/*return Screen.hasControlDown();
-		*///?}
-	}
-
-	private static boolean shiftDown() {
-		//? if >=1.21.9 {
-		return net.minecraft.client.Minecraft.getInstance().hasShiftDown();
-		//?} else {
-		/*return Screen.hasShiftDown();
-		*///?}
-	}
+	/** macOS, where the game's own shortcuts use Cmd for Ctrl, and a Ctrl click is a right click. */
+	private static final boolean MAC = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
 
 	private void stepFolder(int step) {
 		int index = this.folders.indexOf(this.folder());
@@ -422,7 +416,7 @@ public final class WaypointListScreen extends Screen {
 		int left = cx - LIST_WIDTH / 2;
 
 		// The footer: Done alone, and the import button above it when Xaero's has something new.
-		int footer = this.height - 28;
+		int footer = this.height - 26;
 		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> this.onClose()).bounds(cx - 100, footer, 200, 20).build());
 		int above = footer;
 		Button importButton = this.importButton(store);
@@ -441,7 +435,7 @@ public final class WaypointListScreen extends Screen {
 			above -= 12;
 			this.importedY = above;
 		}
-		this.listBottom = above - (above == footer ? 10 : 6);
+		this.listBottom = above - 12;
 
 		if (this.empty) {
 			// The empty list: the piece of map, the headline and hints, then New waypoint under them.
@@ -1039,6 +1033,9 @@ public final class WaypointListScreen extends Screen {
 		if (this.imported != null) {
 			graphics.centeredText(this.font, this.imported, cx, this.importedY, 0xFFA0E0A0);
 		}
+		// Under the list, like the line under the map: nothing else says several rows can be selected.
+		String hint = Component.translatable("diorama.waypoints.select_hint", MAC ? "Cmd" : "Ctrl").getString();
+		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.listBottom + 2, HINT);
 	}
 
 	/** The scrollbar: its x, the handle's height and how far down the track it sits. */
@@ -1180,6 +1177,14 @@ public final class WaypointListScreen extends Screen {
 			this.clickFolderMenu(event.x(), event.y(), event.button());
 			return true;
 		}
+		// What came with the click, and what's held now: a click made by a test brings no modifiers.
+		net.minecraft.client.Minecraft held = net.minecraft.client.Minecraft.getInstance();
+		this.shiftClick = event.hasShiftDown() || held.hasShiftDown();
+		//? if >=1.21.11 {
+		this.controlClick = event.hasControlDownWithQuirk() || !MAC && held.hasControlDown();
+		//?} else {
+		/*this.controlClick = event.hasControlDown() || !MAC && held.hasControlDown();
+		*///?}
 		this.disarmUnless(event.x(), event.y());
 		if (!usedByList(event.button()) && DioramaClient.NEW_WAYPOINT.matchesMouse(event)) {
 			this.newWaypointPressed = true;
@@ -1225,6 +1230,8 @@ public final class WaypointListScreen extends Screen {
 			this.clickFolderMenu(x, y, button);
 			return true;
 		}
+		this.shiftClick = Screen.hasShiftDown();
+		this.controlClick = Screen.hasControlDown();
 		this.disarmUnless(x, y);
 		if (!usedByList(button) && DioramaClient.NEW_WAYPOINT.matchesMouse(button)) {
 			this.newWaypointPressed = true;
@@ -1298,8 +1305,8 @@ public final class WaypointListScreen extends Screen {
 		this.lastClicked = waypoint;
 		this.lastClick = now;
 		this.setFocused(null);
-		boolean shift = shiftDown();
-		if (shift || controlDown()) {
+		boolean shift = this.shiftClick;
+		if (shift || this.controlClick) {
 			this.lastClicked = null;
 			this.selectMore(waypoint, row, shift);
 			return true;
