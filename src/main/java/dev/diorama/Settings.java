@@ -87,6 +87,12 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public GameTime gameTime = GameTime.OFF;
+	/**
+	 * How big the compass letters and the lines under the minimap are, in percent of the game's own
+	 * text: {@link #MIN_TEXT_SIZE} to {@link #MAX_TEXT_SIZE}. {@code TextSize.scale} rounds it to
+	 * whole screen pixels.
+	 */
+	public int minimapTextSize = 100;
 	/** Whether the sky view is drawn by day, at night, or as the world's time has it; see {@code NightLook}. */
 	public DayNight dayNight = DayNight.FOLLOW;
 	public boolean autoCaves = true;
@@ -139,11 +145,13 @@ public final class Settings {
 	/**
 	 * How big pins are drawn in each view, in percent of the size they're drawn at one pixel per GUI
 	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
-	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4.
+	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4. In the world
+	 * the name and distance under a pin follow its size: the game's own text size at
+	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller as the pin is drawn ({@code Pins.textScale}).
 	 */
-	public int waypointMinimapSize = 60;
-	public int waypointMapSize = 60;
-	public int waypointWorldSize = 60;
+	public int waypointMinimapSize = DEFAULT_WAYPOINT_SIZE;
+	public int waypointMapSize = DEFAULT_WAYPOINT_SIZE;
+	public int waypointWorldSize = DEFAULT_WAYPOINT_SIZE;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
@@ -280,6 +288,14 @@ public final class Settings {
 	public static final int SCALE_STEP = 25;
 
 	public static final int MIN_WAYPOINT_SIZE = 25;
+	public static final int DEFAULT_WAYPOINT_SIZE = 60;
+
+	public static final int MIN_TEXT_SIZE = 25;
+	public static final int MAX_TEXT_SIZE = 400;
+
+	private static int clampTextSize(int size) {
+		return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, size));
+	}
 
 	private static int clampWaypointSize(int size) {
 		return Math.max(MIN_WAYPOINT_SIZE, Math.min(MAX_SCALE, size));
@@ -490,6 +506,7 @@ public final class Settings {
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
+		settings.minimapTextSize = clampTextSize(settings.minimapTextSize);
 		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
