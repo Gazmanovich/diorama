@@ -168,6 +168,11 @@ public final class Settings {
 	 */
 	public boolean mapSavedChunks = true;
 	/**
+	 * The IDs of the dimensions where the map is off: no minimap, no map, no waypoints in the
+	 * world, and nothing mapped. For a dimension that's about finding the way without one.
+	 */
+	public java.util.Set<String> mapOffDimensions = new java.util.TreeSet<>();
+	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
 	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
 	 * lighting them from the sun.
@@ -426,6 +431,16 @@ public final class Settings {
 			settings.waypointLabels = WaypointLabels.AUTO;
 		}
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
+		// Hand-edited IDs: trimmed, lower case, and Minecraft's own if they name no mod.
+		java.util.Set<String> off = new java.util.TreeSet<>();
+		if (settings.mapOffDimensions != null) {
+			for (String dimension : settings.mapOffDimensions) {
+				if (dimension != null) {
+					off.addAll(dev.diorama.share.ServerLocks.dimensions(dimension));
+				}
+			}
+		}
+		settings.mapOffDimensions = off;
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		if (settings.minimapZoom != null) {
