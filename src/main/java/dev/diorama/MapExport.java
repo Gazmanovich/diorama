@@ -1,10 +1,13 @@
 package dev.diorama;
 
+import dev.diorama.bake.BlockLooks;
 import dev.diorama.data.ImageExport;
 import dev.diorama.data.TileStore;
 import dev.diorama.drawing.Drawing;
 import dev.diorama.drawing.ExportDrawings;
+import dev.diorama.render.CaveSliceTiles;
 import dev.diorama.render.ExportFog;
+import dev.diorama.render.MapLevel;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -53,7 +56,37 @@ public final class MapExport {
 	}
 
 	/** The same, the ground drawn {@code night} into the night (0..1) as the map draws it. */
-	public static synchronized boolean start(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings) {
+	public static boolean start(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings) {
+		return start(() -> {
+			store.catchUp();
+			return ImageExport.Tiles.of(store);
+		}, area, smoke ? ExportFog.Look.SMOKE : ExportFog.Look.FOG, night, drawings);
+	}
+
+	/**
+	 * Starts saving {@code area} of the cave slice cut at {@code layer}, drawn from the chunks the
+	 * map holds, as the map draws it, with the dark the map has around it. False if an export is
+	 * already running, or the map can't draw yet.
+	 */
+	public static boolean startCave(MapLevel level, int layer, ImageExport.Area area, List<Drawing> drawings) {
+		BlockLooks looks = BlockLooks.get();
+		if (looks == null) {
+			return false;
+		}
+		if (running != null) {
+			return false;
+		}
+		// Made here, on the render thread: the slice as it is now.
+		CaveSliceTiles tiles = new CaveSliceTiles(level, layer, looks);
+		return start(() -> tiles, area, ExportFog.Look.CAVE, 0, drawings);
+	}
+
+	/** Makes an export's tiles on its own thread, where waiting is fine. */
+	private interface Source {
+		ImageExport.Tiles open() throws InterruptedException;
+	}
+
+	private static synchronized boolean start(Source source, ImageExport.Area area, ExportFog.Look look, float night, List<Drawing> drawings) {
 		if (running != null) {
 			return false;
 		}
@@ -79,23 +112,26 @@ public final class MapExport {
 			fontOptions.add("jp");
 		}
 		//?}
-		Thread thread = new Thread(() -> export.run(store, area, smoke, night, copied, fontOptions), "diorama-export");
+		Thread thread = new Thread(() -> export.run(source, area, look, night, copied, fontOptions), "diorama-export");
 		thread.setDaemon(true);
 		thread.setPriority(Thread.MIN_PRIORITY + 1);
 		thread.start();
 		return true;
 	}
 
-	private void run(TileStore store, ImageExport.Area area, boolean smoke, float night, List<Drawing> drawings, Set<String> fontOptions) {
+	private void run(Source source, ImageExport.Area area, ExportFog.Look look, float night, List<Drawing> drawings, Set<String> fontOptions) {
 		Component message;
 		try {
-			store.catchUp();
+			ImageExport.Tiles tiles = source.open();
+			// A view that isn't saved is drawn first, which takes most of its export's time.
+			double drawing = tiles.prepareShare();
+			tiles.prepare(area, p -> this.progress = p * drawing);
 			// The fog reads tiles to build its mask, so it's made here rather than on the render thread.
-			ImageExport.Finish finish = ExportFog.build(store, area, smoke, night);
+			ImageExport.Finish finish = ExportFog.build(tiles, area, look, night);
 			if (!drawings.isEmpty()) {
 				finish = finish.then(ExportDrawings.build(drawings, area, Minecraft.getInstance().getResourceManager(), fontOptions));
 			}
-			ImageExport.write(store, area, this.file, finish, night, p -> this.progress = p);
+			ImageExport.write(tiles, area, this.file, finish, night, p -> this.progress = drawing + (1 - drawing) * p);
 			Path absolute = this.file.toAbsolutePath();
 			Component link = Component.literal(absolute.getFileName().toString())
 				.withStyle(ChatFormatting.UNDERLINE)

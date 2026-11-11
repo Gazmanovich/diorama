@@ -30,8 +30,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Exporting the map as an image, through the screen as a player does: the Export button, the
- * Area box dragged bigger, panning beside it, a detail button, Save image, then Whole map. Each
- * saved PNG is opened and checked against what the screen said it would be.
+ * Area box dragged bigger, panning beside it, a detail button, Save image, then Whole map, and the
+ * same from the cave view. Each saved PNG is opened and checked against what the screen said it
+ * would be.
  */
 final class ImageExportTest {
 	private ImageExportTest() {
@@ -146,6 +147,129 @@ final class ImageExportTest {
 		context.runOnClient(mc -> DrawingStore.get().batch(() -> made.forEach(DrawingStore.get()::remove)));
 		noteMatchesMap(context, drawn);
 		context.setScreen(() -> null);
+		caveSlice(context);
+	}
+
+	/**
+	 * The cave view has the Export button too (#257), and what it saves is the slice on the map:
+	 * an Area image is compared with a screenshot of the map at the same scale, pixel for pixel,
+	 * and Whole map saves as much of the slice as the map's chunks cover.
+	 */
+	private static void caveSlice(ClientGameTestContext context) {
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		// At GUI scale 2 and zoom 2 a screen pixel is a map pixel, as it is in an image at 4 px per block.
+		DioramaClientTest.setGuiScale(context, 2);
+		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
+		context.runOnClient(mc -> Settings.get().radarOnMap = false);
+		int layer = Integer.getInteger("diorama.caveY", 24);
+		// On whole map pixels, so the screen's and the image's line up.
+		double[] at = context.computeOnClient(mc -> new double[] {Math.floor(mc.player.getX()), Math.round(Projection.v(layer - 6, mc.player.getZ()) * 4) / 4.0});
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(at[0], at[1], 2.0, layer));
+		context.getInput().setCursorPos(0, 0);
+		settle(context);
+		BufferedImage map = read(context.takeScreenshot("image-export-05-cave-map"));
+		if (!context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).exportButton().visible)) {
+			throw new AssertionError("The cave view has no Export button");
+		}
+		int[] middle = context.computeOnClient(mc -> {
+			var view = ((MapScreen) mc.gui.screen()).view();
+			double g = mc.getWindow().getGuiScale();
+			return new int[] {(int) Math.round(view.screenX(at[0]) * g), (int) Math.round(view.screenY(at[1]) * g)};
+		});
+
+		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
+		context.waitTicks(3);
+		if (!context.computeOnClient(mc -> mc.gui.screen() instanceof ExportScreen)) {
+			throw new AssertionError("The Export button didn't open the export screen from the cave view");
+		}
+		settle(context);
+		context.takeScreenshot("image-export-06-cave-area");
+		ImageExport.Area area = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
+		if (area == null || area.lod() != 0) {
+			throw new AssertionError("The cave export didn't start at 4 px per block: " + area);
+		}
+		long started = System.nanoTime();
+		Path areaFile = save(context);
+		System.out.println("IMAGE-EXPORT cave area " + area + " took " + (System.nanoTime() - started) / 1_000_000 + " ms");
+		BufferedImage image = checkCave(areaFile, area);
+		// Left of the player's arrow, clear of the bars and buttons: the image against the map on screen.
+		int span = 90;
+		int sx = middle[0] - 130;
+		int sy = middle[1];
+		int ix = (int) (Math.round(at[0] * 4) - area.x()) - 130;
+		int iy = (int) (Math.round(at[1] * 4) - area.y());
+		int first = image.getRGB(ix - span, iy - span);
+		long difference = 0;
+		long spread = 0;
+		int count = 0;
+		for (int dy = -span; dy < span; dy++) {
+			for (int dx = -span; dx < span; dx++) {
+				int a = map.getRGB(sx + dx, sy + dy);
+				int b = image.getRGB(ix + dx, iy + dy);
+				for (int shift = 0; shift <= 16; shift += 8) {
+					difference += Math.abs((a >> shift & 0xFF) - (b >> shift & 0xFF));
+					spread += Math.abs((first >> shift & 0xFF) - (b >> shift & 0xFF));
+				}
+				count += 3;
+			}
+		}
+		System.out.println("IMAGE-EXPORT cave area differs from the map on screen by " + (double) difference / count + "/255 a channel, its own spread " + (double) spread / count);
+		if (spread / count < 6) {
+			throw new AssertionError(areaFile.getFileName() + " is one flat colour beside the player: no cave in it?");
+		}
+		if (difference / count > 14) {
+			throw new AssertionError(areaFile.getFileName() + " isn't the cave slice on the map: off by " + difference / count + "/255 a channel on average");
+		}
+
+		// Whole map: as much of the slice as the map's chunks cover, at 1 px per block.
+		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
+		context.waitTicks(3);
+		click(context, mc -> {
+			int[] tab = ((ExportScreen) mc.gui.screen()).tabCenter(1);
+			return new double[] {tab[0], tab[1]};
+		}, false);
+		context.waitFor(mc -> mc.gui.screen() instanceof ExportScreen screen && screen.plannedArea() != null, 600);
+		click(context, mc -> centre(((ExportScreen) mc.gui.screen()).detailButton(2)), false);
+		settle(context);
+		context.takeScreenshot("image-export-07-cave-whole");
+		ImageExport.Area whole = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
+		double[] units = whole.units();
+		if (whole.lod() != 2 || !(units[0] < at[0] - 64 && units[2] > at[0] + 64 && units[1] < at[1] - 48 && units[3] > at[1] + 48)) {
+			throw new AssertionError("Whole map of the cave slice is " + whole + ", not the chunks around the player at 1 px per block");
+		}
+		started = System.nanoTime();
+		Path wholeFile = save(context);
+		System.out.println("IMAGE-EXPORT cave whole " + whole + " took " + (System.nanoTime() - started) / 1_000_000 + " ms");
+		checkCave(wholeFile, whole);
+
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> Settings.get().radarOnMap = radar);
+		DioramaClientTest.setGuiScale(context, scale);
+	}
+
+	/** A cave image is the size the screen said and fully opaque: the cave's dark where nothing shows. */
+	private static BufferedImage checkCave(Path file, ImageExport.Area area) {
+		BufferedImage image = read(file);
+		if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
+			throw new AssertionError(file.getFileName() + " is " + (image == null ? "unreadable" : image.getWidth() + "x" + image.getHeight())
+				+ ", but the screen said " + area.width() + "x" + area.height());
+		}
+		Set<Integer> colours = new HashSet<>();
+		for (int y = 0; y < image.getHeight(); y += 3) {
+			for (int x = 0; x < image.getWidth(); x += 3) {
+				int argb = image.getRGB(x, y);
+				if ((argb >>> 24) != 0xFF) {
+					throw new AssertionError(file.getFileName() + " has see-through pixels; where nothing shows should be the cave's dark");
+				}
+				colours.add(argb & 0xF0F0F0);
+			}
+		}
+		if (colours.size() < 40) {
+			throw new AssertionError(file.getFileName() + " has only " + colours.size() + " colours: no cave in it?");
+		}
+		System.out.println("IMAGE-EXPORT " + file.getFileName() + " " + image.getWidth() + "x" + image.getHeight() + " " + colours.size() + " colours");
+		return image;
 	}
 
 	/**
@@ -264,7 +388,8 @@ final class ImageExportTest {
 		if (!context.computeOnClient(mc -> mc.gui.screen() instanceof MapScreen)) {
 			throw new AssertionError("Save image didn't go back to the map");
 		}
-		context.waitFor(mc -> MapExport.running() == null, 2400);
+		// A cave slice is drawn for its export, which takes a while without a graphics card.
+		context.waitFor(mc -> MapExport.running() == null, 12000);
 		List<Path> made = exports(context).stream().filter(p -> !old.contains(p)).toList();
 		if (made.size() != 1) {
 			throw new AssertionError("Expected one new export, found " + made);

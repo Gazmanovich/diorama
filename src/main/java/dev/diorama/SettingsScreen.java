@@ -147,6 +147,10 @@ public final class SettingsScreen extends Screen {
 			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
 		}
 		overlays.choice("drawings", Settings.DrawingsShown.values(), () -> s.drawings, v -> s.drawings = v);
+		// The map in a browser; beside Drawings, so the tab doesn't grow.
+		overlays.choice("web_map", Settings.WebMap.values(), () -> s.webMap, v -> s.webMap = v);
+		overlays.lastTwoSideBySide();
+		overlays.choice("world_border", Settings.WorldBorderShown.values(), () -> s.worldBorder, v -> s.worldBorder = v);
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
@@ -174,6 +178,7 @@ public final class SettingsScreen extends Screen {
 		look.toggle("rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v, ServerRules.fogOfWarForced() ? true : null);
 		look.toggle("saved_chunks", () -> s.mapSavedChunks, v -> s.mapSavedChunks = v);
+		look.open("map_off", DimensionsScreen.summary(), () -> this.minecraft.gui.setScreen(new DimensionsScreen(this)));
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
 			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));
@@ -270,28 +275,7 @@ public final class SettingsScreen extends Screen {
 		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set, @Nullable Boolean serverSet) {
 			int column = (CONTENT - COLUMN_GAP) / 2;
 			boolean shown = serverSet != null ? serverSet : get.getAsBoolean();
-			//? if >=1.21 {
-			Checkbox checkbox = Checkbox.builder(Component.translatable("diorama.settings." + key), SettingsScreen.this.font)
-				.selected(shown)
-				.maxWidth(column)
-				.onValueChange((box, value) -> {
-					set.accept(value);
-					Settings.get().save();
-				})
-				.build();
-			//?} else {
-			/*// 1.20.1's checkbox has no builder and tells no one it changed. It's a 20 pixel box with
-			// the label 4 pixels right of it, as wide as both, and no wider than the column.
-			Component label = Component.translatable("diorama.settings." + key);
-			Checkbox checkbox = new Checkbox(0, 0, Math.min(24 + SettingsScreen.this.font.width(label), column), 20, label, shown) {
-				@Override
-				public void onPress() {
-					super.onPress();
-					set.accept(this.selected());
-					Settings.get().save();
-				}
-			};
-			*///?}
+			Checkbox checkbox = checkbox(Component.translatable("diorama.settings." + key), SettingsScreen.this.font, shown, column, set);
 			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
 			checkbox.setTooltip(serverSet == null ? tooltip(key) : Tooltip.create(Component.empty().append(serverSetLine(false)).append("\n\n")
 				.append(Component.translatable("diorama.settings." + key + ".tooltip"))));
@@ -446,11 +430,36 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
+	/** A checkbox no wider than {@code maxWidth} that saves the settings after telling {@code set} its new value. */
+	static Checkbox checkbox(Component label, net.minecraft.client.gui.Font font, boolean selected, int maxWidth, Consumer<Boolean> set) {
+		//? if >=1.21 {
+		return Checkbox.builder(label, font)
+			.selected(selected)
+			.maxWidth(maxWidth)
+			.onValueChange((box, value) -> {
+				set.accept(value);
+				Settings.get().save();
+			})
+			.build();
+		//?} else {
+		/*// 1.20.1's checkbox has no builder and tells no one it changed. It's a 20 pixel box with
+		// the label 4 pixels right of it, as wide as both, and no wider than the column.
+		return new Checkbox(0, 0, Math.min(24 + font.width(label), maxWidth), 20, label, selected) {
+			@Override
+			public void onPress() {
+				super.onPress();
+				set.accept(this.selected());
+				Settings.get().save();
+			}
+		};
+		*///?}
+	}
+
 	/**
 	 * Says who set a greyed-out setting: the server the player is on, or in singleplayer the file a
 	 * modpack ships, which the player can change. As the tab's {@code note} or a tooltip's first line.
 	 */
-	private static Component serverSetLine(boolean note) {
+	static Component serverSetLine(boolean note) {
 		boolean file = net.minecraft.client.Minecraft.getInstance().hasSingleplayerServer();
 		return Component.translatable("diorama.settings." + (note ? "server_note" : "server_set") + (file ? "_file" : ""))
 			.withStyle(net.minecraft.ChatFormatting.GRAY);

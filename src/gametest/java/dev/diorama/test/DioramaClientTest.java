@@ -134,6 +134,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("drawings")) {
 				DrawingTest.run(context, world);
 			}
+			if (tests.contains("world-border")) {
+				WorldBorderTest.run(context, world);
+			}
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
 			}
@@ -197,8 +200,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("cross-dimension")) {
 				CrossDimensionTest.run(context, world);
 			}
+			if (tests.contains("dimensions-off")) {
+				DimensionsOffTest.run(context, world);
+			}
 			if (tests.contains("waypoint-sort")) {
 				WaypointSortTest.run(context, world);
+			}
+			if (tests.contains("waypoint-search")) {
+				WaypointSearchTest.run(context, world);
+			}
+			if (tests.contains("web-map-client")) {
+				ClientWebMapTest.run(context, world);
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
@@ -368,6 +380,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("server-locks")) {
 			ServerLocksTest.run(context);
+		}
+		if (tests.contains("dimensions-off-file")) {
+			DimensionsOffTest.file(context);
+		}
+		if (tests.contains("dimensions-off-server")) {
+			DimensionsOffTest.server(context);
 		}
 		if (tests.contains("server-locks-old-server")) {
 			ServerLocksTest.oldServer(context);
@@ -6571,10 +6589,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

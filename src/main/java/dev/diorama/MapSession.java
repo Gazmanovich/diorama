@@ -215,6 +215,15 @@ public final class MapSession {
 			current.end();
 			current = null;
 		}
+		if (level != null && ServerRules.mapOff(level.dimension().identifier().toString())) {
+			// The map is off in this dimension: nothing is mapped or saved there, and what was
+			// mapped before stays as it is on disk.
+			if (current != null) {
+				current.end();
+				current = null;
+			}
+			return null;
+		}
 		if (level != null && current == null) {
 			String key = WorldKey.current(level);
 			if (key == null && WorldKey.waiting(level)) {
