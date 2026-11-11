@@ -59,7 +59,8 @@ import org.jspecify.annotations.Nullable;
  * The chunks in the world's save, in singleplayer: where the map gets blocks for places the client
  * never loaded, such as an area a pre-generation tool made. Chunks are read through the game's own
  * server, which owns the files: it hands back chunks it hasn't written yet, and its files never
- * change under a read. Reading is all this does; nothing here loads a chunk into the world.
+ * change under a read. Nothing here loads a chunk into the world; before listing the files it has
+ * the server write the chunks it holds, as its autosave would (see {@link #saveHeldChunks}).
  *
  * <p>Only the region files' headers are read directly, to list the chunks and when each was last
  * saved. The rest parses the save's chunk format, which has stayed the same from 1.18 on, with the
@@ -174,6 +175,7 @@ public final class SavedChunks implements ChunkSave {
 	 */
 	@Override
 	public Map<Long, int[]> scan() {
+		this.saveHeldChunks();
 		Map<Long, int[]> regions = new HashMap<>();
 		if (!Files.isDirectory(this.regionFolder)) {
 			return regions;
@@ -193,6 +195,27 @@ public final class SavedChunks implements ChunkSave {
 			Diorama.LOGGER.warn("Couldn't list the saved chunks in {}", this.regionFolder, e);
 		}
 		return regions;
+	}
+
+	/**
+	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, so the
+	 * files list them. A chunk it keeps loaded past the client's view, such as one Distant Horizons
+	 * had it generate near the player, is otherwise only written by the next autosave, and while it
+	 * waits the map shows a ring of fog with the land beyond it filled in. Xaero's World Map does
+	 * the same before it reads the save. A server with time to spare has written most of them already.
+	 */
+	private void saveHeldChunks() {
+		try {
+			this.await(this.serverLevel.getServer().submit(() -> {
+				long start = System.nanoTime();
+				this.serverLevel.getChunkSource().save(false);
+				if (Diorama.DEBUG) {
+					Diorama.LOGGER.info("Saved chunks: the server saved its loaded chunks in {} ms", (System.nanoTime() - start) / 100_000 / 10.0);
+				}
+			}));
+		} catch (RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't have the server save its loaded chunks", e);
+		}
 	}
 
 	/** A region file's chunk save times, from its header: 4 KiB of locations, then 4 KiB of times. */
