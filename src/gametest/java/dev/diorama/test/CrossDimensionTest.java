@@ -85,9 +85,10 @@ final class CrossDimensionTest {
 		if (labels.isEmpty() || !labels.get(0).equals("Base (Overworld)")) {
 			throw new AssertionError("The menu of the Overworld's pin should be titled Base (Overworld): " + labels);
 		}
-		// Teleport goes to the waypoint itself, in the Overworld.
+		// Teleport goes to the waypoint itself, in the Overworld. Across the ground only: the player
+		// may fall from there, as spawn, and so the waypoint's height, can be in the air.
 		DioramaClientTest.clickMenu(context, "Teleport");
-		context.waitFor(mc -> mc.level.dimension() == Level.OVERWORLD && mc.player.distanceToSqr(base.x + 0.5, base.y, base.z + 0.5) < 4, 600);
+		context.waitFor(mc -> mc.level.dimension() == Level.OVERWORLD && Math.hypot(mc.player.getX() - (base.x + 0.5), mc.player.getZ() - (base.z + 0.5)) < 2, 600);
 
 		// The other way: back home in the Overworld, the Nether's Hub at eight times its x and z.
 		world.getServer().runCommand("tp @a " + home.getX() + " " + home.getY() + " " + home.getZ());
