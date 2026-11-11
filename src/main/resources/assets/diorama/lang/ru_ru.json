@@ -336,7 +336,7 @@
     "diorama.folder.taken": "Папка с таким именем уже существует",
     "diorama.folder.empty": "В этой папке пока нет точек",
     "diorama.waypoint.folder_caption": "Папка",
-    "diorama.waypoint.folder_tooltip": "Папка, в которой находится эта точка. Нажмите, чтобы переместить ее в следующую; папки можно создавать в списке точек.",
+    "diorama.waypoint.folder_tooltip": "Папка, в которой находится эта точка. Нажмите, чтобы выбрать другую; папки можно создавать в списке точек.",
     "diorama.settings.icon_size": "Размер иконок",
     "diorama.settings.icon_size.tooltip": "Размер отображения игроков и мобов на мини-карте и карте.",
     "diorama.folder.rename": "Переименовать",

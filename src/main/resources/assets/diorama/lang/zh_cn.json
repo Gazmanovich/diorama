@@ -286,7 +286,7 @@
 	"diorama.folder.taken": "已存在同名文件夹",
 	"diorama.folder.empty": "此文件夹中还没有路径点",
 	"diorama.waypoint.folder_caption": "文件夹",
-	"diorama.waypoint.folder_tooltip": "此路径点所在的文件夹。点击可移动到下一个；在路径点列表中创建文件夹。",
+	"diorama.waypoint.folder_tooltip": "此路径点所在的文件夹。点击可选择其他文件夹；在路径点列表中创建文件夹。",
 	"diorama.settings.icon_size": "图标大小",
 	"diorama.settings.icon_size.tooltip": "玩家和生物在小地图和地图上的绘制大小。",
 	"diorama.folder.rename": "重命名",
