@@ -34,6 +34,8 @@ Diorama runs on Fabric for Minecraft 1.20.1, 1.21 to 1.21.11 and 26.1 to 26.3, a
 
 Players don't need it on the server. A server can have it too, to draw a map of its world anyone can open in a browser: see [The web map](docs/web-map.md).
 
+Your own map can show in a browser too, on a second monitor, a tablet or a phone, in singleplayer as well: see [Your map on a second screen](docs/second-screen.md).
+
 ## Keys
 
 | Key | What it does |

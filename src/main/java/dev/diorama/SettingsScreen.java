@@ -144,6 +144,9 @@ public final class SettingsScreen extends Screen {
 			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
 		}
 		overlays.choice("drawings", Settings.DrawingsShown.values(), () -> s.drawings, v -> s.drawings = v);
+		// The map in a browser; beside Drawings, so the tab doesn't grow.
+		overlays.choice("web_map", Settings.WebMap.values(), () -> s.webMap, v -> s.webMap = v);
+		overlays.lastTwoSideBySide();
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);

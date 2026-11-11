@@ -32,18 +32,8 @@ final class WebServer {
 	/** Starts serving {@code folder}, or returns null (logged) if the port can't be had. */
 	static @Nullable WebServer start(Path folder, String address, int port) {
 		try {
-			InetSocketAddress bind = address.isEmpty() ? new InetSocketAddress(port) : new InetSocketAddress(address, port);
-			HttpServer server = HttpServer.create(bind, 64);
 			Path root = folder.toAbsolutePath().normalize();
-			server.createContext("/", exchange -> serve(root, exchange));
-			java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(2, task -> {
-				Thread thread = new Thread(task, "Diorama web map server");
-				thread.setDaemon(true);
-				return thread;
-			});
-			server.setExecutor(workers);
-			server.start();
-			return new WebServer(server, workers);
+			return start(address, port, exchange -> serve(root, exchange));
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Diorama's web map can't serve on port {} ({}); set web-map-port to a free one, or 0 to serve the folder yourself", port, e.toString());
 			return null;
@@ -51,6 +41,30 @@ final class WebServer {
 			Diorama.LOGGER.warn("This Java has no built-in web server; serve {} with one of your own", folder);
 			return null;
 		}
+	}
+
+	/**
+	 * Starts answering every request with {@code handler}, on {@code address} (empty for every
+	 * address). Throws if the port can't be had, and {@link NoClassDefFoundError} on a Java without
+	 * the built-in web server.
+	 */
+	static WebServer start(String address, int port, com.sun.net.httpserver.HttpHandler handler) throws IOException {
+		InetSocketAddress bind = address.isEmpty() ? new InetSocketAddress(port) : new InetSocketAddress(address, port);
+		HttpServer server = HttpServer.create(bind, 64);
+		server.createContext("/", handler);
+		java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(2, task -> {
+			Thread thread = new Thread(task, "Diorama web map server");
+			thread.setDaemon(true);
+			return thread;
+		});
+		server.setExecutor(workers);
+		server.start();
+		return new WebServer(server, workers);
+	}
+
+	/** The port it listens on. */
+	int port() {
+		return this.server.getAddress().getPort();
 	}
 
 	void stop() {
@@ -112,7 +126,7 @@ final class WebServer {
 		}
 	}
 
-	private static void send(HttpExchange exchange, int code, String type, byte @Nullable [] body) throws IOException {
+	static void send(HttpExchange exchange, int code, String type, byte @Nullable [] body) throws IOException {
 		exchange.getResponseHeaders().set("Content-Type", type);
 		exchange.sendResponseHeaders(code, body == null ? -1 : body.length);
 		if (body != null) {
