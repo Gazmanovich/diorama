@@ -118,6 +118,17 @@ final class DimensionsOffTest {
 		if (!mapDimensions(context).contains(NETHER)) {
 			throw new AssertionError("The Nether was mapped while on, but the map doesn't offer it: " + mapDimensions(context));
 		}
+		// Looking at the Nether's saved map from here, then turning it off (Settings opens over the
+		// map): the map goes back to the dimension the player is in.
+		otherDimension(context, NETHER);
+		DioramaClientTest.settle(context, 20);
+		context.takeScreenshot("dimensions-off-10-overworld-map-shows-nether");
+		context.runOnClient(mc -> Settings.get().mapOffDimensions.add(NETHER));
+		context.waitTicks(5);
+		if (otherDimension(context, null) != null) {
+			throw new AssertionError("The map still shows the Nether's saved map after the Nether was turned off");
+		}
+		context.takeScreenshot("dimensions-off-11-overworld-map-back");
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			Settings.get().mapOffDimensions.clear();
@@ -203,16 +214,19 @@ final class DimensionsOffTest {
 	/** The map, new waypoint and waypoint list keys open nothing, and say why over the hotbar. */
 	private static void keys(ClientGameTestContext context, String screenshot, String message) {
 		for (int key : new int[] {InputConstants.KEY_B, InputConstants.KEY_U, InputConstants.KEY_M}) {
+			String before = context.computeOnClient(mc -> ServerRules.lastMapOffMessage());
+			int count = Integer.parseInt(before.substring(0, before.indexOf(':')));
 			context.getInput().pressKey(key);
 			context.waitTicks(3);
 			String screen = context.computeOnClient(mc -> mc.gui.screen() == null ? null : mc.gui.screen().getClass().getSimpleName());
 			if (screen != null) {
 				throw new AssertionError("A map key opened " + screen + " where the map is off");
 			}
-		}
-		String said = context.computeOnClient(mc -> ServerRules.lastMapOffMessage());
-		if (!message.equals(said)) {
-			throw new AssertionError("The map key should say \"" + message + "\", not \"" + said + "\"");
+			// Each key says so itself.
+			String said = context.computeOnClient(mc -> ServerRules.lastMapOffMessage());
+			if (!said.equals((count + 1) + ": " + message)) {
+				throw new AssertionError("Key " + key + " should say \"" + message + "\" once: was \"" + before + "\", now \"" + said + "\"");
+			}
 		}
 		context.takeScreenshot(screenshot);
 	}
@@ -225,6 +239,22 @@ final class DimensionsOffTest {
 				java.lang.reflect.Method method = dev.diorama.MapScreen.class.getDeclaredMethod("dimensions");
 				method.setAccessible(true);
 				return (java.util.List<String>) method.invoke(mc.gui.screen());
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
+	}
+
+	/** The other dimension the open map shows, or null for the player's own; sets it first if {@code show} isn't null. */
+	private static String otherDimension(ClientGameTestContext context, String show) {
+		return context.computeOnClient(mc -> {
+			try {
+				java.lang.reflect.Field field = dev.diorama.MapScreen.class.getDeclaredField("otherDimension");
+				field.setAccessible(true);
+				if (show != null) {
+					field.set(mc.gui.screen(), show);
+				}
+				return (String) field.get(mc.gui.screen());
 			} catch (ReflectiveOperationException e) {
 				throw new AssertionError(e);
 			}

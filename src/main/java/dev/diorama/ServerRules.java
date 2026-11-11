@@ -30,6 +30,7 @@ public final class ServerRules {
 	private static boolean noMinimap;
 	private static ServerLocks locks = ServerLocks.NONE;
 	private static String lastMapOffMessage = "";
+	private static int mapOffMessages;
 	/** Player setting: fog of war everywhere, even where the server allows full cave maps. */
 	private static boolean alwaysFogOfWar = Boolean.getBoolean("diorama.fogOfWar");
 
@@ -131,6 +132,7 @@ public final class ServerRules {
 		Component message = Component.translatable(!mapOffByServer(here) ? "diorama.map_off.here"
 			: mc.hasSingleplayerServer() ? "diorama.map_off.here_file" : "diorama.map_off.here_server");
 		lastMapOffMessage = message.getString();
+		mapOffMessages++;
 		//? if >=26.1 {
 		mc.gui.hud.setOverlayMessage(message, false);
 		//?} else {
@@ -139,9 +141,9 @@ public final class ServerRules {
 		return true;
 	}
 
-	/** For tests: what {@link #sayMapOffHere} last told the player. */
+	/** For tests: what {@link #sayMapOffHere} last told the player, after how many times it has. */
 	public static String lastMapOffMessage() {
-		return lastMapOffMessage;
+		return mapOffMessages + ": " + lastMapOffMessage;
 	}
 
 	public static void setAlwaysFogOfWar(boolean value) {

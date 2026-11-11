@@ -316,7 +316,8 @@ public final class MapScreen extends Screen {
 		if (other == null) {
 			return session.map();
 		}
-		if (maps == null || this.minecraft.level == null || other.equals(this.minecraft.level.dimension().identifier().toString())) {
+		// Or the player turned the map off in the dimension shown, in Settings over this screen.
+		if (maps == null || this.minecraft.level == null || other.equals(this.minecraft.level.dimension().identifier().toString()) || ServerRules.mapOff(other)) {
 			this.draw.leaveDimension();
 			this.closeOtherMap();
 			this.otherDimension = null;

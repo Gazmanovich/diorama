@@ -215,10 +215,6 @@ public final class WebMap {
 					if (this.stopping) {
 						break;
 					}
-					if (dev.diorama.share.ShareServer.mapOff(level)) {
-						// The server turns the map off there, for the page as for its players.
-						continue;
-					}
 					String id = level.dimension().identifier().toString();
 					Dimension dimension = this.dimensions.computeIfAbsent(id, key -> new Dimension(this, level, key));
 					long last = all ? -1 : Long.parseLong(progress.getProperty(id, "-1"));
