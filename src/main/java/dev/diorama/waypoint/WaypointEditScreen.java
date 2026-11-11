@@ -13,6 +13,7 @@ import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 //? if >=1.21.9 {
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 //?}
 import net.minecraft.network.chat.CommonComponents;
@@ -72,6 +73,12 @@ public final class WaypointEditScreen extends Screen {
 	/** The custom folder name, or empty for the dimension's own folder. */
 	private String folder;
 	private @Nullable Button folderButton;
+	/**
+	 * The folders to pick from, open under the folder button after a click on it, as Xaero's Minimap
+	 * picks a waypoint's set from a dropdown in its editor. Drawn over the screen, which hands it the
+	 * clicks while it's open.
+	 */
+	private @Nullable FolderMenu folderMenu;
 	/** The icon picked, by {@link dev.diorama.render.WaypointIcons} id; empty shows the initials. */
 	private String icon;
 	private @Nullable Button iconButton;
@@ -156,7 +163,8 @@ public final class WaypointEditScreen extends Screen {
 		int previewWidth = WIDTH - PREVIEW_LEFT;
 		this.share = null;
 		this.teleport = null;
-		this.folderButton = this.addRenderableWidget(Button.builder(this.folderLabel(), b -> this.nextFolder())
+		this.folderMenu = null;
+		this.folderButton = this.addRenderableWidget(Button.builder(this.folderLabel(), b -> this.openFolderMenu())
 			.bounds(previewLeft, this.previewBottom() + 14, previewWidth, 20)
 			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.waypoint.folder_tooltip")))
 			.build());
@@ -217,12 +225,33 @@ public final class WaypointEditScreen extends Screen {
 		return out;
 	}
 
-	private void nextFolder() {
-		List<String> folders = this.folders();
-		int index = folders.indexOf(this.folder);
-		this.folder = folders.get((index + 1) % folders.size());
-		if (this.folderButton != null) {
-			this.folderButton.setMessage(this.folderLabel());
+	/** Opens the list of folders under the folder button, or above it where there's more room. */
+	private void openFolderMenu() {
+		Button button = this.folderButton;
+		if (button == null) {
+			return;
+		}
+		WaypointStore store = WaypointStore.get();
+		List<FolderMenu.Entry> entries = new ArrayList<>();
+		for (String folder : this.folders()) {
+			String name = folder.isEmpty() ? Waypoints.dimensionName(this.waypoint.dimension).getString() : folder;
+			String key = folder.isEmpty() ? WaypointStore.dimensionKey(this.waypoint.dimension) : WaypointStore.customKey(folder);
+			entries.add(new FolderMenu.Entry(folder, name, -1, store != null && store.folderHidden(key)));
+		}
+		this.folderMenu = new FolderMenu(this.font, entries, this.folder, button.getX(), button.getY(), button.getY() + button.getHeight(),
+			button.getWidth(), this.height);
+	}
+
+	/** A click while the list of folders is open: on a folder it picks that folder, anywhere else it only closes the list. */
+	private void clickFolderMenu(double x, double y, int button) {
+		FolderMenu menu = this.folderMenu;
+		this.folderMenu = null;
+		FolderMenu.Entry picked = menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y);
+		if (picked != null) {
+			this.folder = picked.key();
+			if (this.folderButton != null) {
+				this.folderButton.setMessage(this.folderLabel());
+			}
 		}
 	}
 
@@ -280,7 +309,9 @@ public final class WaypointEditScreen extends Screen {
 		//? if <1.21 {
 		/*this.renderBackground(graphics);
 		*///?}
-		super.extractRenderState(graphics, mouseX, mouseY, a);
+		// Nothing under the open list of folders lights up or shows its tooltip.
+		boolean menuOpen = this.folderMenu != null;
+		super.extractRenderState(graphics, menuOpen ? -1 : mouseX, menuOpen ? -1 : mouseY, a);
 		int left = this.left();
 		int top = this.top();
 		graphics.centeredText(this.font, this.title, this.width / 2, top - 12, 0xFFFFFFFF);
@@ -294,9 +325,44 @@ public final class WaypointEditScreen extends Screen {
 		if (current != null) {
 			graphics.text(this.font, Component.literal("· ").append(current.name()), left + this.font.width(colourLabel) + 4, top + 81, 0xFFFFFFFF, true);
 		}
-		this.drawSwatches(graphics, mouseX, mouseY);
+		this.drawSwatches(graphics, menuOpen ? -1 : mouseX, menuOpen ? -1 : mouseY);
 		this.drawPreview(graphics);
+		FolderMenu menu = this.folderMenu;
+		if (menu != null) {
+			// Over everything drawn so far, text included.
+			//? if >=1.21.6 {
+			graphics.nextStratum();
+			menu.draw(graphics, mouseX, mouseY);
+			//?} else {
+			/*graphics.flush();
+			var pose = graphics.pose();
+			pose.pushPose();
+			pose.translate(0, 0, 400);
+			menu.draw(graphics, mouseX, mouseY);
+			pose.popPose();
+			*///?}
+		}
 	}
+
+	// The mouse wheel had only the one axis on 1.20.1.
+	@Override
+	//? if >=1.21 {
+	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+		if (this.folderMenu != null) {
+			this.folderMenu.scroll(scrollY);
+			return true;
+		}
+		return super.mouseScrolled(x, y, scrollX, scrollY);
+	}
+	//?} else {
+	/*public boolean mouseScrolled(double x, double y, double scrollY) {
+		if (this.folderMenu != null) {
+			this.folderMenu.scroll(scrollY);
+			return true;
+		}
+		return super.mouseScrolled(x, y, scrollY);
+	}
+	*///?}
 
 	/**
 	 * The colours as flat swatches on a dark panel, the hovered one ringed in grey and the picked
@@ -467,6 +533,10 @@ public final class WaypointEditScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (this.folderMenu != null) {
+			this.clickFolderMenu(event.x(), event.y(), event.button());
+			return true;
+		}
 		return this.clicked(event.x(), event.y(), event.button()) || super.mouseClicked(event, doubleClick);
 	}
 
@@ -480,9 +550,32 @@ public final class WaypointEditScreen extends Screen {
 		this.dragging = 0;
 		return super.mouseReleased(event);
 	}
+
+	// Escape closes the open list of folders, and the screen only after that.
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		if (this.folderMenu != null && event.key() == InputConstants.KEY_ESCAPE) {
+			this.folderMenu = null;
+			return true;
+		}
+		return super.keyPressed(event);
+	}
 	//?} else {
 	/*@Override
+	public boolean keyPressed(int key, int scancode, int modifiers) {
+		if (this.folderMenu != null && key == InputConstants.KEY_ESCAPE) {
+			this.folderMenu = null;
+			return true;
+		}
+		return super.keyPressed(key, scancode, modifiers);
+	}
+
+	@Override
 	public boolean mouseClicked(double x, double y, int button) {
+		if (this.folderMenu != null) {
+			this.clickFolderMenu(x, y, button);
+			return true;
+		}
 		return this.clicked(x, y, button) || super.mouseClicked(x, y, button);
 	}
 
@@ -523,6 +616,16 @@ public final class WaypointEditScreen extends Screen {
 		}
 		this.dragBar(this.dragging, x);
 		return true;
+	}
+
+	/** The open list of folders, or null. For tests. */
+	public @Nullable FolderMenu folderMenu() {
+		return this.folderMenu;
+	}
+
+	/** The button that opens the list of folders. For tests. */
+	public @Nullable Button folderButton() {
+		return this.folderButton;
 	}
 
 	/** The waypoint being edited. For tests. */

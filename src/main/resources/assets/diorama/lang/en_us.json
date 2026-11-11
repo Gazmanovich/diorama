@@ -374,7 +374,7 @@
 	"diorama.folder.taken": "There's already a folder with that name",
 	"diorama.folder.empty": "No waypoints in this folder yet",
 	"diorama.waypoint.folder_caption": "Folder",
-	"diorama.waypoint.folder_tooltip": "The folder this waypoint is in. Click to move it to the next one; make folders in the waypoint list.",
+	"diorama.waypoint.folder_tooltip": "The folder this waypoint is in. Click to pick another; make folders in the waypoint list.",
 	"diorama.settings.icon_size": "Icon size",
 	"diorama.settings.icon_size.tooltip": "How big players and mobs are drawn on the minimap and the map.",
 	"diorama.folder.rename": "Rename",

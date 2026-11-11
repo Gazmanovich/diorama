@@ -333,7 +333,7 @@
 	"diorama.folder.taken": "その名前のフォルダーはすでに存在します",
 	"diorama.folder.empty": "このフォルダーにはまだウェイポイントがありません",
 	"diorama.waypoint.folder_caption": "フォルダー",
-	"diorama.waypoint.folder_tooltip": "このウェイポイントが含まれているフォルダーです。クリックすると次のフォルダーへ移動します。ウェイポイント一覧内でフォルダーを作成できます。",
+	"diorama.waypoint.folder_tooltip": "このウェイポイントが含まれているフォルダーです。クリックすると別のフォルダーを選べます。ウェイポイント一覧内でフォルダーを作成できます。",
 	"diorama.settings.icon_size": "アイコンサイズ",
 	"diorama.settings.icon_size.tooltip": "マップ／ミニマップ上のプレイヤーやモブのアイコンの大きさ。",
 	"diorama.folder.rename": "改名",

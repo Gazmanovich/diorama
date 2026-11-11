@@ -334,7 +334,7 @@
     "diorama.folder.taken": "Папка з такой назвай існуе",
     "diorama.folder.empty": "Няма ўказальнікаў ў гэтай папцы",
     "diorama.waypoint.folder_caption": "Папка",
-    "diorama.waypoint.folder_tooltip": "Папка гэтага ўказальніка. Націсніце, каб перамясціць яго ў наступную; папкі ствараюцца ў спісе ўказальнікаў.",
+    "diorama.waypoint.folder_tooltip": "Папка гэтага ўказальніка. Націсніце, каб выбраць іншую; папкі ствараюцца ў спісе ўказальнікаў.",
     "diorama.settings.icon_size": "Памер іконак",
     "diorama.settings.icon_size.tooltip": "Якімі вялізнымі гульцы і мобы адмалёўваюцца на мапах.",
     "diorama.folder.rename": "Перайменаваць",
