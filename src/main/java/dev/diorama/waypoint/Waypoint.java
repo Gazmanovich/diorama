@@ -102,10 +102,11 @@ public final class Waypoint {
 	 * A copy of this waypoint for a dimension where one block is {@code divider} of this one's, as a
 	 * portal would take the player: the Overworld's waypoints stand in the Nether at an eighth of
 	 * their x and z. The height stays, as in Xaero's Minimap. Faded, so it doesn't pass for one of
-	 * that dimension's own.
+	 * that dimension's own. Made in {@code reuse} when given: a new waypoint costs a random UUID,
+	 * several microseconds, and the maps and the world ask for the copies every frame.
 	 */
-	Waypoint scaled(double divider) {
-		Waypoint copy = new Waypoint();
+	Waypoint scaled(double divider, @org.jspecify.annotations.Nullable Waypoint reuse) {
+		Waypoint copy = reuse != null ? reuse : new Waypoint();
 		copy.id = this.id;
 		copy.name = this.name;
 		copy.initials = this.initials;

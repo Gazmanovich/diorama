@@ -91,6 +91,8 @@ public final class WaypointListScreen extends Screen {
 	private @Nullable Button teleport;
 	private @Nullable Button delete;
 	private final MapPiece piece = new MapPiece(88, 56, 12);
+	/** Where a row's waypoint stands in this dimension, when shown here too: made again in place for each row. */
+	private final Waypoint spotHere = new Waypoint();
 	/** The sample pin on the empty list's piece of map. */
 	private final Waypoint sample = new Waypoint("Home", 0, 0, 0, "", Waypoint.PALETTE[2]);
 	private @Nullable EditBox search;
@@ -601,7 +603,7 @@ public final class WaypointListScreen extends Screen {
 				if (viewer != null && store != null && store.showsIn(here, waypoint.dimension)) {
 					// Shown here too: how far its spot here is.
 					double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
-					detail = Math.round(waypoint.scaled(divider).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
+					detail = Math.round(waypoint.scaled(divider, this.spotHere).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
 				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;

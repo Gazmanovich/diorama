@@ -21,6 +21,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +81,9 @@ public final class WaypointStore {
 	private final Set<ShownIn> shownIn = new LinkedHashSet<>();
 	/** Each dimension's coordinate scale, once known: 8 for the Nether, where a block is eight of the Overworld's. */
 	private final Map<String, Double> scales = new HashMap<>();
+
+	/** The copies {@link #shownIn} made last for each dimension, by the waypoint each stands in for, to be made again in place. */
+	private final Map<String, Map<Waypoint, Waypoint>> copies = new HashMap<>();
 
 	/** {@code from}'s waypoints shown in {@code in}. */
 	private record ShownIn(String in, String from) {
@@ -211,13 +215,24 @@ public final class WaypointStore {
 	 */
 	public List<Waypoint> shownIn(String dimension) {
 		List<Waypoint> out = this.in(dimension);
+		// Asked every frame for the player's own dimension, which notes its scale while they're in it.
+		double scale = this.coordinateScale(dimension);
+		Map<Waypoint, Waypoint> previous = this.copies.getOrDefault(dimension, Map.of());
+		Map<Waypoint, Waypoint> made = new IdentityHashMap<>();
 		for (ShownIn pair : this.shownIn) {
 			if (pair.in().equals(dimension)) {
-				double divider = this.coordinateScale(dimension) / this.coordinateScale(pair.from());
+				double divider = scale / this.coordinateScale(pair.from());
 				for (Waypoint waypoint : this.in(pair.from())) {
-					out.add(waypoint.scaled(divider));
+					Waypoint copy = waypoint.scaled(divider, previous.get(waypoint));
+					made.put(waypoint, copy);
+					out.add(copy);
 				}
 			}
+		}
+		if (made.isEmpty()) {
+			this.copies.remove(dimension);
+		} else {
+			this.copies.put(dimension, made);
 		}
 		return out;
 	}
