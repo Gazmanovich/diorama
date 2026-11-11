@@ -338,6 +338,11 @@ public final class ClientWebMap {
 		return json.append("]}").toString();
 	}
 
+	/** The page always gets this many zoom levels where the map has them: as many as maps had up to 0.9.0. */
+	private static final int PAGE_LEVELS = 6;
+	/** A level with this few tiles shows the whole map in a screen or so; see {@link #tiles}. */
+	private static final int FEW_TILES = 4;
+
 	/** The map's tiles at each zoom with when each was last written, as {@code "zoomLevels":n,"versions":true,"tiles":[...]}}. */
 	private static String tiles(TileStore store) {
 		synchronized (LIST_LOCK) {
@@ -347,15 +352,24 @@ public final class ClientWebMap {
 			}
 			StringBuilder[] levels = new StringBuilder[TileKey.MAX_LOD + 1];
 			int zoomLevels = 1;
+			// The page zooms out to a quarter of its coarsest level. The map's own levels go on far
+			// past where all of it is a few tiles across, and each one after that would only show it
+			// smaller: the page gets them up to there, as the shared map's makes them (WebMap), and
+			// at least the six it got before the full map zoomed further out.
+			int enough = TileKey.MAX_LOD;
 			for (int lod = 0; lod <= TileKey.MAX_LOD; lod++) {
 				StringBuilder level = levels[lod] = new StringBuilder();
-				for (Map.Entry<TileKey, Long> tile : store.savedTimes(lod).entrySet()) {
+				Map<TileKey, Long> saved = store.savedTimes(lod);
+				if (lod >= PAGE_LEVELS - 1 && lod < enough && saved.size() <= FEW_TILES) {
+					enough = lod;
+				}
+				for (Map.Entry<TileKey, Long> tile : saved.entrySet()) {
 					if (level.length() > 0) {
 						level.append(',');
 					}
 					level.append(tile.getKey().tileU()).append(',').append(tile.getKey().tileV()).append(',').append(tile.getValue());
 				}
-				if (level.length() > 0) {
+				if (level.length() > 0 && lod <= enough) {
 					zoomLevels = lod + 1;
 				}
 			}

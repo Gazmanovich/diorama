@@ -56,6 +56,12 @@ public interface TestInput {
 	/** Releases Shift held with {@link #holdShift}. */
 	void releaseShift();
 
+	/** Presses the left Ctrl key and keeps it held: the game reads it as held, and gets its press. */
+	void holdControl();
+
+	/** Releases Ctrl held with {@link #holdControl}. */
+	void releaseControl();
+
 	/** Types the characters, as the keyboard would send them to the focused text field. */
 	void typeChars(String chars);
 
