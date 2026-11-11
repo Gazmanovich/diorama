@@ -17,8 +17,11 @@ public final class ExportFog implements ImageExport.Finish {
 	private static final float NOISE_PERIOD = 512;
 	private static final float COS_PITCH = 0.643F;
 	private static final int LAYERS = 8;
-	private static final float FOG_HEIGHT = 10;
-	private static final float BLUR_UNITS = 7;
+	/** Which of the map's fogs: over the sky view, the smoke under a roof, or the dark around a cave slice. */
+	public enum Look {
+		FOG, SMOKE, CAVE
+	}
+
 	private static final float NO_FOG_KNOWN = 0.95F;
 	/** How dark the side of a bank away from the sun gets, as fog.fsh's FOG_SHADOW. */
 	private static final float FOG_SHADOW = 0.7F;
@@ -32,6 +35,10 @@ public final class ExportFog implements ImageExport.Finish {
 	private static float[] noiseG;
 	private static float[] noiseB;
 
+	/** As fog.fsh's fogHeight and blurUnits: cave fog hugs the ground with a tight edge. */
+	private final float fogHeight;
+	private final float blurUnits;
+	private final boolean cave;
 	private final int lod;
 	/** Map units per export pixel. */
 	private final double unitsPerPixel;
@@ -52,7 +59,11 @@ public final class ExportFog implements ImageExport.Finish {
 	private final int background;
 	private final float[] moonlit;
 
-	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, boolean smoke, float night) {
+	private ExportFog(int lod, float[] known, int maskW, int maskH, double originU, double originV, float texel, int steps, float fraction, Look look, float night) {
+		boolean smoke = look == Look.SMOKE;
+		this.cave = look == Look.CAVE;
+		this.fogHeight = this.cave ? 4 : 10;
+		this.blurUnits = this.cave ? 2.5F : 7;
 		this.lod = lod;
 		this.unitsPerPixel = (double) (1 << lod) / Projection.PIXELS_PER_UNIT;
 		this.known = known;
@@ -65,10 +76,10 @@ public final class ExportFog implements ImageExport.Finish {
 		this.scaleSteps = steps;
 		this.scaleFraction = fraction;
 		this.fogScale = (float) Math.pow(2, steps + fraction);
-		this.lit = smoke ? new float[] {0.26F, 0.22F, 0.21F} : new float[] {0.97F, 0.97F, 0.99F};
-		this.shade = smoke ? new float[] {0.07F, 0.055F, 0.055F} : new float[] {0.48F, 0.55F, 0.67F};
+		this.lit = this.cave ? new float[] {0.24F, 0.26F, 0.33F} : smoke ? new float[] {0.26F, 0.22F, 0.21F} : new float[] {0.97F, 0.97F, 0.99F};
+		this.shade = this.cave ? new float[] {0.035F, 0.04F, 0.055F} : smoke ? new float[] {0.07F, 0.055F, 0.055F} : new float[] {0.48F, 0.55F, 0.67F};
 		// What the map draws behind its tiles, dimmed at night as the map dims it.
-		this.background = NightLook.darken(smoke ? 0xFF29211F : 0xFF8C99AB, night) & 0xFFFFFF;
+		this.background = NightLook.darken(this.cave ? 0xFF0C0E12 : smoke ? 0xFF29211F : 0xFF8C99AB, night) & 0xFFFFFF;
 		// The fog's colour at night, as fog.fsh's moonlit.
 		this.moonlit = NightLook.darken(new float[] {1, 1, 1}, night);
 	}
@@ -79,6 +90,11 @@ public final class ExportFog implements ImageExport.Finish {
 	 * {@code night} into the night as the map draws it ({@link NightLook}).
 	 */
 	public static ExportFog build(TileStore store, ImageExport.Area area, boolean smoke, float night) {
+		return build(ImageExport.Tiles.of(store), area, smoke ? Look.SMOKE : Look.FOG, night);
+	}
+
+	/** The same over any tiles, with the fog the map draws over that view. */
+	public static ExportFog build(ImageExport.Tiles tiles, ImageExport.Area area, Look look, float night) {
 		loadNoise();
 		int lod = area.lod();
 		double pixelsPerUnit = Projection.PIXELS_PER_UNIT / (double) (1 << lod);
@@ -89,7 +105,7 @@ public final class ExportFog implements ImageExport.Finish {
 		float fraction = (float) Math.floor((scaleLog - steps) * 16) / 16;
 		// About four export pixels per texel, as on screen, and never under the 2 units the screen stops at.
 		float texel = (float) Math.max(2, 1 << lod);
-		double margin = 64 + 24 * Math.pow(2, steps + 1);
+		double margin = margin(lod);
 		double span = Math.max(area.width(), area.height()) / pixelsPerUnit + 2 * margin;
 		while (span / texel > MAX_MASK) {
 			texel *= 2;
@@ -113,10 +129,11 @@ public final class ExportFog implements ImageExport.Finish {
 		int tile = Projection.TILE_PIXELS;
 		for (long tv = Math.floorDiv(py0, tile); tv <= Math.floorDiv(py1 - 1, tile); tv++) {
 			for (long tu = Math.floorDiv(px0, tile); tu <= Math.floorDiv(px1 - 1, tile); tu++) {
-				int[] pixels = store.read(new TileKey(TileKey.SURFACE, (int) tu, (int) tv, lod));
-				if (pixels == null) {
+				TileStore.Saved saved = tiles.tile((int) tu, (int) tv, lod);
+				if (saved == null) {
 					continue;
 				}
+				int[] pixels = saved.pixels();
 				for (int y = 0; y < tile; y++) {
 					long gy = tv * tile + y;
 					if (gy < py0 || gy >= py1) {
@@ -138,12 +155,20 @@ public final class ExportFog implements ImageExport.Finish {
 			// Kept to bytes, like the mask texture.
 			sum[i] = Math.round(Math.min(1, sum[i] / perTexel) * 255) / 255F;
 		}
-		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, smoke, night);
-		if (MapStyle.get().roundedFog() && texel < 16) {
+		ExportFog fog = new ExportFog(lod, sum, maskW, maskH, originU, originV, texel, steps, fraction, look, night);
+		// Caves keep the sharp mask, as on the map: rounding would erode narrow explored tunnels away.
+		if (look != Look.CAVE && MapStyle.get().roundedFog() && texel < 16) {
 			fog.roundOff(Math.max(1, Math.round(10 / texel)));
 		}
 		fog.markReach();
 		return fog;
+	}
+
+	/** How far past an area saved at a level, in map units, the fog reads the map. */
+	public static double margin(int lod) {
+		double zoom = Projection.PIXELS_PER_UNIT / (double) (1 << lod) / 2;
+		int steps = (int) Math.floor(Math.min(7.99, Math.log(Math.max(1, MapViewport.DETAILED_ZOOM / zoom)) / Math.log(2)));
+		return 64 + 24 * Math.pow(2, steps + 1);
 	}
 
 	private static synchronized void loadNoise() {
@@ -207,8 +232,8 @@ public final class ExportFog implements ImageExport.Finish {
 	 * {@code MapViewport.markReach}.
 	 */
 	private void markReach() {
-		double blur = 1.9 * Math.max(BLUR_UNITS * 2.4 / this.texel, 1);
-		double layerShift = FOG_HEIGHT * COS_PITCH / this.texel;
+		double blur = 1.9 * Math.max(this.blurUnits * (this.cave ? 1 : 2.4) / this.texel, 1);
+		double layerShift = this.fogHeight * COS_PITCH / this.texel;
 		double sun = 9.0 * (1 << (this.scaleSteps + 1)) / this.texel;
 		double slack = 1.5;
 		int west = (int) Math.ceil(Math.max(blur, sun) + slack);
@@ -282,7 +307,7 @@ public final class ExportFog implements ImageExport.Finish {
 		float toSunU = -9 * this.fogScale;
 		float toSunV = -3.6F * this.fogScale;
 		for (int i = 0; i < LAYERS; i++) {
-			float h = FOG_HEIGHT * (1 - (i + 0.5F + jitter * 0.6F) / LAYERS);
+			float h = this.fogHeight * (1 - (i + 0.5F + jitter * 0.6F) / LAYERS);
 			double gv = v + h * COS_PITCH;
 			float th = this.thickness(u, gv, p);
 			float a = smoothstep(h - 1.4F, h + 1.4F, th);
@@ -292,8 +317,8 @@ public final class ExportFog implements ImageExport.Finish {
 			double probeU = u + toSunU;
 			double probeV = gv + toSunV;
 			float toward = this.thicknessAt(probeU, probeV, p.clear ? 1 : this.knownAt(probeU, probeV, p), p);
-			float occlusion = clamp((toward - th) / FOG_HEIGHT * 2.2F);
-			float light = clamp(0.2F + 0.7F * (h / FOG_HEIGHT) + 0.3F - occlusion * FOG_SHADOW);
+			float occlusion = clamp((toward - th) / this.fogHeight * 2.2F);
+			float light = clamp(0.2F + 0.7F * (h / this.fogHeight) + 0.3F - occlusion * FOG_SHADOW);
 			float layerAlpha = a * 0.45F;
 			r += (1 - alpha) * layerAlpha * mix(this.shade[0], this.lit[0], light);
 			g += (1 - alpha) * layerAlpha * mix(this.shade[1], this.lit[1], light);
@@ -312,9 +337,11 @@ public final class ExportFog implements ImageExport.Finish {
 		alpha += (1 - alpha) * floorFog;
 
 		// Only the alpha, as the shader does: the colour it divides by alpha later stays as it was.
-		alpha *= 1 - 0.85F * smoothstep(0.45F, 0.95F, soft);
+		// Caves use the sharp mask, so narrow tunnels stay clear.
+		float knownHere = this.knownAt(u, v, p);
+		alpha *= 1 - 0.85F * smoothstep(0.45F, 0.95F, this.cave ? knownHere : soft);
 
-		float empty = 1 - smoothstep(0.3F, 0.85F, this.knownAt(u, v, p));
+		float empty = 1 - smoothstep(0.3F, 0.85F, knownHere);
 		float coverR;
 		float coverG;
 		float coverB;
@@ -395,7 +422,11 @@ public final class ExportFog implements ImageExport.Finish {
 		if (p.deep) {
 			return 0;
 		}
-		return 0.5F * this.knownBlur(u, v, BLUR_UNITS) + 0.5F * this.knownBlur(u, v, BLUR_UNITS * 2.4F);
+		if (this.cave) {
+			// One tight blur, as MapViewport.writeSoft does for caves.
+			return this.knownBlur(u, v, this.blurUnits);
+		}
+		return 0.5F * this.knownBlur(u, v, this.blurUnits) + 0.5F * this.knownBlur(u, v, this.blurUnits * 2.4F);
 	}
 
 	private static float noiseLayer(double nu, double nv) {
@@ -431,11 +462,11 @@ public final class ExportFog implements ImageExport.Finish {
 		return mix(fine, noiseLayer(cu, cv), this.scaleFraction);
 	}
 
-	private static float thicknessFrom(float known, float n) {
+	private float thicknessFrom(float known, float n) {
 		float unknown = 1 - known;
 		float edge = smoothstep(0, 0.35F, unknown);
 		float amount = smoothstep(0.12F, 0.75F, unknown + (n - 0.5F) * 1.5F * edge);
-		return FOG_HEIGHT * amount * (0.45F + 0.75F * n);
+		return this.fogHeight * amount * (0.45F + 0.75F * n);
 	}
 
 	private float thicknessAt(double u, double v, float known, Pixel p) {

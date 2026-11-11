@@ -74,6 +74,7 @@ public final class MinimapHud implements HudElement {
 	private int fadingLayer;
 	private long fadeStart = -1;
 	private final DrawingOverlay drawings = new DrawingOverlay();
+	private final WorldBorderOverlay worldBorder = new WorldBorderOverlay();
 	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
 	private int shownLayer;
 	private boolean showing;
@@ -241,6 +242,9 @@ public final class MinimapHud implements HudElement {
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
 			() -> session.lights().draw(graphics, view, partialTick, shownOpacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
 		session.crafts().draw(graphics, view, partialTick, opacity);
+		if (settings.worldBorder == Settings.WorldBorderShown.ALWAYS) {
+			this.worldBorder.draw(graphics, font, view, mc.level, viewer);
+		}
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
 			this.drawings.draw(graphics, font, view, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);

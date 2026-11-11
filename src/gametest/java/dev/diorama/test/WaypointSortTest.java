@@ -171,7 +171,11 @@ final class WaypointSortTest {
 	}
 
 	private static void expect(ClientGameTestContext context, List<String> wrong, String what, String... names) {
-		List<String> shown = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).shown().stream().map(w -> w.name).toList());
+		// The folder's own rows: a search also lists what it finds in other folders, after these.
+		List<String> shown = context.computeOnClient(mc -> {
+			WaypointListScreen list = (WaypointListScreen) mc.gui.screen();
+			return list.shown().stream().limit(list.shownInFolder()).map(w -> w.name).toList();
+		});
 		if (!shown.equals(List.of(names))) {
 			wrong.add(what + " showed " + shown);
 		}

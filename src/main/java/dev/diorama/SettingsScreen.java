@@ -147,6 +147,7 @@ public final class SettingsScreen extends Screen {
 		// The map in a browser; beside Drawings, so the tab doesn't grow.
 		overlays.choice("web_map", Settings.WebMap.values(), () -> s.webMap, v -> s.webMap = v);
 		overlays.lastTwoSideBySide();
+		overlays.choice("world_border", Settings.WorldBorderShown.values(), () -> s.worldBorder, v -> s.worldBorder = v);
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);
