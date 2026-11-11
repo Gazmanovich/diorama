@@ -128,6 +128,24 @@ final class ShimInput implements TestInput {
 	}
 
 	@Override
+	public void holdControl() {
+		ShimThreading.checkOnTestThread("holdControl");
+		if (HeldKeys.hold(InputConstants.KEY_LCONTROL)) {
+			InputConstants.Key key = keyboardKey(InputConstants.KEY_LCONTROL);
+			context.runOnClient(minecraft -> key(minecraft, key, InputConstants.PRESS));
+		}
+	}
+
+	@Override
+	public void releaseControl() {
+		ShimThreading.checkOnTestThread("releaseControl");
+		if (HeldKeys.release(InputConstants.KEY_LCONTROL)) {
+			InputConstants.Key key = keyboardKey(InputConstants.KEY_LCONTROL);
+			context.runOnClient(minecraft -> key(minecraft, key, InputConstants.RELEASE));
+		}
+	}
+
+	@Override
 	public void typeChars(String chars) {
 		ShimThreading.checkOnTestThread("typeChars");
 		context.runOnClient(minecraft -> chars.codePoints().forEach(c -> {
