@@ -22,7 +22,12 @@ public final class ShareClient {
 		if (data.length == 0) {
 			return;
 		}
-		if (data[0] != ShareProtocol.SETTINGS) {
+		if (data[0] == ShareProtocol.LOCKS) {
+			ServerLocks locks = ServerLocks.decode(data);
+			if (locks != null) {
+				dev.diorama.ServerRules.onLocks(locks);
+			}
+		} else if (data[0] != ShareProtocol.SETTINGS) {
 			try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.ByteArrayInputStream(data))) {
 				SharedChunks.receive(in.readUnsignedByte(), in);
 			} catch (java.io.IOException | RuntimeException e) {

@@ -543,7 +543,7 @@ public final class MapSession {
 		int playerChunkX = viewer == null ? 0 : viewer.blockPosition().getX() >> 4;
 		int playerChunkZ = viewer == null ? 0 : viewer.blockPosition().getZ() >> 4;
 		long now = System.currentTimeMillis();
-		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER);
+		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER, this.map.roofless());
 		String dimension = this.level.dimension().identifier().toString();
 		// Under fog of war only what the player has seen shows, and these aren't that.
 		WaypointStore pins = fog ? null : WaypointStore.get();
