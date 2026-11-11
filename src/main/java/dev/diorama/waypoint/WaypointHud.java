@@ -68,26 +68,33 @@ public final class WaypointHud implements HudElement {
 			}
 			float sx = screen[0];
 			float sy = screen[1];
-			if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
+			double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+			Settings.WaypointLabels labels = Settings.get().waypointLabels;
+			String text = null;
+			if (labels != Settings.WaypointLabels.NONE) {
+				text = Math.round(distance) + " m";
+				boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
+				if (labels == Settings.WaypointLabels.ALWAYS || labels == Settings.WaypointLabels.AUTO && (nearCrosshair || distance < NAME_DISTANCE)) {
+					text = waypoint.shownName() + " · " + text;
+				}
+			}
+			int w = text == null ? 0 : font.width(text);
+			// It stays until the pin and the text under it have both left the screen: big text is
+			// wider than the pin, and hangs further below the spot.
+			float side = Math.max(margin, (w / 2.0F + 2) * textScale);
+			float below = Math.max(margin, Pins.SHADOW * scale + 10 * textScale);
+			if (sx < -side || sy < -below || sx > width + side || sy > height + margin) {
 				continue;
 			}
-			double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 			// Keep the world anchor fractional: snapping it to GUI pixels makes markers jump
 			// by several framebuffer pixels at larger GUI scales. Move the entire marker together.
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(sx, sy);
 			try {
 				Pins.standing(graphics, waypoint, 0, 0, Pins.LARGE, scale);
-				Settings.WaypointLabels labels = Settings.get().waypointLabels;
-				if (labels == Settings.WaypointLabels.NONE) {
+				if (text == null) {
 					continue;
 				}
-				String text = Math.round(distance) + " m";
-				boolean nearCrosshair = Math.hypot(sx - width / 2, sy - height / 2) < NAME_RADIUS;
-				if (labels == Settings.WaypointLabels.ALWAYS || labels == Settings.WaypointLabels.AUTO && (nearCrosshair || distance < NAME_DISTANCE)) {
-					text = waypoint.shownName() + " · " + text;
-				}
-				int w = font.width(text);
 				graphics.pose().translate(-w * textScale / 2.0F, textScale + Pins.SHADOW * scale);
 				graphics.pose().scale(textScale);
 				graphics.fill(-2, -1, w + 2, 9, 0x80000000);

@@ -141,7 +141,7 @@ public final class Settings {
 	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
 	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4. In the world
 	 * the name and distance under a pin follow its size: the game's own text size at
-	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller in step with the pin ({@code Pins.textScale}).
+	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller as the pin is drawn ({@code Pins.textScale}).
 	 */
 	public int waypointMinimapSize = DEFAULT_WAYPOINT_SIZE;
 	public int waypointMapSize = DEFAULT_WAYPOINT_SIZE;

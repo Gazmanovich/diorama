@@ -24,15 +24,20 @@ final class WaypointTextSizeTest {
 	/** Colours no other pin or block uses, to find each pin's head by. */
 	private static final int NEAR = 0xFF00FF;
 	private static final int FAR = 0x00FFFF;
-	/** A GUI scale, then World sizes: the default, which the slider only shows rounded, and every step the slider has there. */
+	/**
+	 * A GUI scale, then pairs of a World size and the screen pixels to a font pixel its text has to
+	 * be: first the default, which is the game's own text size, then every step the slider has
+	 * there. The step the slider shows for the default (50, 67 and 50) has to look like the default,
+	 * or moving the slider and putting it back would leave the text another size.
+	 */
 	private static final int[][] SIZES = {
-		{2, 60, 50, 100, 150, 200},
-		{3, 60, 33, 67, 100, 133, 167, 200},
-		{4, 60, 25, 50, 75, 100, 125, 150, 175, 200}
+		{2, 60, 2, 50, 2, 100, 4, 150, 6, 200, 8},
+		{3, 60, 3, 33, 2, 67, 3, 100, 5, 133, 6, 167, 8, 200, 9},
+		{4, 60, 4, 25, 2, 50, 4, 75, 6, 100, 8, 125, 10, 150, 12, 175, 14, 200, 16}
 	};
-
-	/** How many pixels of a pin's head are its own colour, across; measured on the first pin. */
+	/** How many pixels of a pin's head are its own colour, across, and how many pin pixels its text starts below them; measured on the first pin. */
 	private static int headPixels = -1;
+	private static int gapPixels = Integer.MIN_VALUE;
 
 	private WaypointTextSizeTest() {
 	}
@@ -69,17 +74,13 @@ final class WaypointTextSizeTest {
 		for (int[] row : SIZES) {
 			int gui = row[0];
 			DioramaClientTest.setGuiScale(context, gui);
-			for (int i = 1; i < row.length; i++) {
+			for (int i = 1; i < row.length; i += 2) {
 				int size = row[i];
+				int text = row[i + 1];
 				context.runOnClient(mc -> Settings.get().waypointWorldSize = size);
 				context.waitTicks(4);
 				BufferedImage shot = read(context.takeScreenshot("label-size-gui" + gui + "-" + size));
-				// Screen pixels to a pixel of pin, and to a pixel of text: the game's own text size at the default 60%.
 				int pin = Math.max(1, Math.round(size * gui / 100.0F));
-				int text = Math.max(1, Math.round(size * gui / 60.0F));
-				if (size == 60 && text != gui) {
-					throw new AssertionError("At the default size the text should be the game's own, " + gui + " screen pixels, not " + text);
-				}
 				check(shot, NEAR, pin, text, "the near waypoint at " + size + "% on GUI scale " + gui);
 				check(shot, FAR, pin, text, "the far waypoint at " + size + "% on GUI scale " + gui);
 			}
@@ -122,11 +123,22 @@ final class WaypointTextSizeTest {
 		if (across != headPixels * pin) {
 			throw new AssertionError("The pin of " + what + " is " + across + " screen pixels across its colour, not " + headPixels + " pixels of " + pin);
 		}
-		// The text is under the pin, no wider than "Mine · 30 m": white on the box's dark.
+		// The text is under the pin, no wider than "Mine · 36 m": white on the box's dark.
 		int middle = (head[0] + head[2]) / 2;
-		int[] letters = extent(shot, 0xFFFFFF, middle - 34 * text, head[3], middle + 34 * text, head[3] + 24 * pin + 12 * text);
-		if (letters[2] < 0 || letters[3] - letters[1] + 1 != 7 * text) {
+		int[] letters = extent(shot, 0xFFFFFF, middle - 30 * text, head[3], middle + 30 * text, head[3] + 24 * pin + 12 * text);
+		// The spot isn't on a whole pixel, so the letters can catch one more row of screen pixels.
+		int high = letters[3] - letters[1] + 1;
+		if (letters[2] < 0 || high < 7 * text || high > 7 * text + 1) {
 			throw new AssertionError("The text of " + what + " covers " + Arrays.toString(letters) + ", which isn't 7 pixels of " + text + " high");
+		}
+		// It starts one of its own pixels into its box, which hangs a fixed number of pin pixels under
+		// the head, and it's centred under the pin. The spot isn't on a whole pixel and the first pin is small to measure by, so it can be a pin pixel off.
+		int gap = letters[1] - head[3] - text;
+		if (gapPixels == Integer.MIN_VALUE) {
+			gapPixels = Math.round(gap / (float) pin);
+		}
+		if (Math.abs(gap - gapPixels * pin) > 1 + pin || Math.abs((letters[0] + letters[2]) / 2 - middle) > 2 * text) {
+			throw new AssertionError("The text of " + what + " covers " + Arrays.toString(letters) + " under a head at " + Arrays.toString(head) + ": not centred " + gapPixels + " pin pixels of " + pin + " and one of its own below it");
 		}
 	}
 
