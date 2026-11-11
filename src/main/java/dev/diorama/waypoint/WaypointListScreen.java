@@ -13,6 +13,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 //? if >=1.21.9 {
 import net.minecraft.client.input.KeyEvent;
@@ -69,8 +70,9 @@ public final class WaypointListScreen extends Screen {
 	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
 	private boolean empty;
 	/**
-	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for a folder of the
-	 * player's own Rename and Delete in red. Delete arms them into one red Click again to delete.
+	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for another
+	 * dimension's folder Show here, or for a folder of the player's own Rename and Delete in red.
+	 * Delete arms them into one red Click again to delete.
 	 */
 	private final List<Button> folderActions = new ArrayList<>();
 	private boolean folderArmed;
@@ -287,6 +289,20 @@ public final class WaypointListScreen extends Screen {
 				this.rebuildWidgets();
 			}
 		}));
+		// Another dimension's waypoints, shown where the player is as well: Xaero's Minimap switches its
+		// waypoint list to another dimension for the same, and shows them at this one's scale.
+		String from = folder.dimension();
+		if (store != null && here != null && from != null && !from.equals(here)) {
+			Button showHere = this.action(CommonComponents.optionStatus(Component.translatable("diorama.folder.show_here"), store.showsIn(here, from)), () -> {
+				WaypointStore current = WaypointStore.get();
+				if (current != null) {
+					current.setShownIn(here, from, !current.showsIn(here, from));
+					this.rebuildWidgets();
+				}
+			});
+			showHere.setTooltip(Tooltip.create(Component.translatable("diorama.folder.show_here.tooltip", Waypoints.dimensionName(from), Waypoints.dimensionName(here))));
+			this.folderActions.add(showHere);
+		}
 		String custom = folder.custom();
 		if (custom != null) {
 			this.folderActions.add(this.action(Component.translatable("diorama.folder.rename"),
@@ -424,7 +440,7 @@ public final class WaypointListScreen extends Screen {
 	 * player's own, is Click again to delete: shown alone across the others once Delete is clicked.
 	 */
 	private void placeFolderButtons() {
-		boolean custom = this.folderActions.size() > 1;
+		boolean custom = this.folder().custom() != null;
 		List<Button> buttons = custom ? this.folderActions.subList(0, this.folderActions.size() - 1) : this.folderActions;
 		int span = -ACTION_GAP;
 		for (Button button : buttons) {
@@ -582,6 +598,11 @@ public final class WaypointListScreen extends Screen {
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
+				if (viewer != null && store != null && store.showsIn(here, waypoint.dimension)) {
+					// Shown here too: how far its spot here is.
+					double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
+					detail = Math.round(waypoint.scaled(divider).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
+				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
 			}

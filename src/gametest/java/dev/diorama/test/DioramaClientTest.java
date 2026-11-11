@@ -188,6 +188,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-preview")) {
 				WaypointPreviewTest.run(context, world);
 			}
+			if (tests.contains("cross-dimension")) {
+				CrossDimensionTest.run(context, world);
+			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
@@ -1158,7 +1161,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Moves to a widget and clicks it with the mouse. */
-	private static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+	static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		moveCursor(context, (widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale);
 		holdFrames(context, 6);
@@ -4970,7 +4973,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	private static void openMapOnPlayer(ClientGameTestContext context) {
+	static void openMapOnPlayer(ClientGameTestContext context) {
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		settle(context, 20);
@@ -5014,7 +5017,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Right-clicks the pin of the waypoint at a position. */
-	private static void rightClickPin(ClientGameTestContext context, int[] pos) {
+	static void rightClickPin(ClientGameTestContext context, int[] pos) {
 		double[] at = context.computeOnClient(mc -> {
 			double scale = mc.getWindow().getGuiScale();
 			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
@@ -5069,7 +5072,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks a line of the map's right-click menu with the mouse, the way a player would. */
-	private static void clickMenu(ClientGameTestContext context, String label) {
+	static void clickMenu(ClientGameTestContext context, String label) {
 		double[] at = context.computeOnClient(mc -> {
 			MapMenu menu = mc.gui.screen() instanceof MapScreen map ? map.menu() : null;
 			if (menu == null) {
@@ -5095,7 +5098,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static int menuFrames;
 
 	/** Moves the cursor, gliding there a frame at a time when GIF frames are wanted. */
-	private static void moveCursor(ClientGameTestContext context, double x, double y) {
+	static void moveCursor(ClientGameTestContext context, double x, double y) {
 		int steps = MENU_GIF ? 10 : 1;
 		double[] from = cursor;
 		for (int i = 1; i <= steps; i++) {
@@ -5109,7 +5112,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(1);
 	}
 
-	private static void menuFrame(ClientGameTestContext context) {
+	static void menuFrame(ClientGameTestContext context) {
 		if (MENU_GIF) {
 			context.takeScreenshot(String.format("map-menu-gif-%03d-%d-%d", menuFrames++, Math.round(cursor[0]), Math.round(cursor[1])));
 		}
@@ -5438,7 +5441,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(3);
 	}
 
-	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
+	static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
 				return button;

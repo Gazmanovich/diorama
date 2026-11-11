@@ -210,7 +210,7 @@ public final class MinimapHud implements HudElement {
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
-			List<Waypoint> near = store.in(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, viewer)).toList();
+			List<Waypoint> near = store.shownIn(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, viewer)).toList();
 			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, near, false), false, null);
 		}
 		Radar.draw(graphics, view, blips, false, true);

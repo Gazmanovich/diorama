@@ -20,11 +20,19 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.dimension.DimensionType;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -64,6 +72,18 @@ public final class WaypointStore {
 	private final List<Waypoint> elsewhere = new ArrayList<>();
 	private final Path foldersFile;
 	private Folders folders = new Folders();
+	/**
+	 * Which dimensions' waypoints the player picked in the waypoint list to show in another
+	 * dimension too. Kept until they leave the world, as Xaero's Minimap keeps the dimension its
+	 * waypoint list was switched to, so nothing about it is saved.
+	 */
+	private final Set<ShownIn> shownIn = new LinkedHashSet<>();
+	/** Each dimension's coordinate scale, once known: 8 for the Nether, where a block is eight of the Overworld's. */
+	private final Map<String, Double> scales = new HashMap<>();
+
+	/** {@code from}'s waypoints shown in {@code in}. */
+	private record ShownIn(String in, String from) {
+	}
 
 	/**
 	 * The player's own folders and which folders are hidden, saved beside the waypoints in
@@ -182,6 +202,83 @@ public final class WaypointStore {
 			out.add(this.withVisibility(waystone));
 		}
 		return out;
+	}
+
+	/**
+	 * What a map or the world shows in a dimension: its waypoints ({@link #in}), then those of each
+	 * dimension picked to show there too, as copies at this dimension's coordinates
+	 * ({@link Waypoint#scaled}). A copy's {@link Waypoint#source} is the waypoint to act on.
+	 */
+	public List<Waypoint> shownIn(String dimension) {
+		List<Waypoint> out = this.in(dimension);
+		for (ShownIn pair : this.shownIn) {
+			if (pair.in().equals(dimension)) {
+				double divider = this.coordinateScale(dimension) / this.coordinateScale(pair.from());
+				for (Waypoint waypoint : this.in(pair.from())) {
+					out.add(waypoint.scaled(divider));
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Whether {@code from}'s waypoints are shown in {@code in} too. */
+	public boolean showsIn(String in, String from) {
+		return this.shownIn.contains(new ShownIn(in, from));
+	}
+
+	/** Shows {@code from}'s waypoints in {@code in} too, or stops. */
+	public void setShownIn(String in, String from, boolean shown) {
+		if (shown) {
+			this.shownIn.add(new ShownIn(in, from));
+		} else {
+			this.shownIn.remove(new ShownIn(in, from));
+		}
+	}
+
+	/**
+	 * A dimension's coordinate scale, as its dimension type gives it: the player's own dimension's
+	 * from its level, another's from the singleplayer server, or from the dimension type of the
+	 * same name, which the server sends and which the game's dimensions and most mods' have. 1 for
+	 * one that can't be found, which leaves its waypoints where they are.
+	 */
+	public double coordinateScale(String dimension) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level != null && mc.level.dimension().identifier().toString().equals(dimension)) {
+			double scale = mc.level.dimensionType().coordinateScale();
+			this.scales.put(dimension, scale);
+			return scale;
+		}
+		Double known = this.scales.get(dimension);
+		if (known == null) {
+			known = lookUpScale(mc, dimension);
+			this.scales.put(dimension, known);
+		}
+		return known;
+	}
+
+	private static double lookUpScale(Minecraft mc, String dimension) {
+		var server = mc.getSingleplayerServer();
+		if (server != null) {
+			for (ServerLevel level : server.getAllLevels()) {
+				if (level.dimension().identifier().toString().equals(dimension)) {
+					return level.dimensionType().coordinateScale();
+				}
+			}
+		}
+		if (mc.level != null) {
+			//? if >=1.21.2 {
+			Registry<DimensionType> types = mc.level.registryAccess().lookupOrThrow(Registries.DIMENSION_TYPE);
+			//?} else {
+			/*Registry<DimensionType> types = mc.level.registryAccess().registryOrThrow(Registries.DIMENSION_TYPE);
+			*///?}
+			for (Map.Entry<ResourceKey<DimensionType>, DimensionType> type : types.entrySet()) {
+				if (type.getKey().identifier().toString().equals(dimension)) {
+					return type.getValue().coordinateScale();
+				}
+			}
+		}
+		return 1;
 	}
 
 	/** The known waystones in every dimension, which sit in the Waystones folder. */

@@ -498,7 +498,7 @@ public final class MapScreen extends Screen {
 			hovered = Radar.under(this.blips, mouseX, mouseY);
 		}
 		WaypointStore store = WaypointStore.get();
-		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.in(this.dimension()));
+		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.shownIn(this.dimension()));
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Radar.draw(graphics, view, this.blips, true, true);
@@ -839,7 +839,7 @@ public final class MapScreen extends Screen {
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
 			if (pin != null && pin.waypoint().editable()) {
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint(), false));
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
 			} else if (pin != null) {
 				// A waystone can't be edited here: its menu instead.
 				this.openMenu(x, y);
@@ -984,10 +984,16 @@ public final class MapScreen extends Screen {
 		return items;
 	}
 
-	private List<MapMenu.Item> waypointItems(Waypoint waypoint) {
+	/**
+	 * A pin's menu. For another dimension's waypoint shown on this map, the name, position and
+	 * copied coordinates are the pin's, here; everything else acts on the waypoint itself, so
+	 * Teleport takes the player to it in its own dimension, as Xaero's Minimap does.
+	 */
+	private List<MapMenu.Item> waypointItems(Waypoint shown) {
+		Waypoint waypoint = shown.source();
 		List<MapMenu.Item> items = new ArrayList<>();
-		items.add(MapMenu.Item.title(Component.literal(waypoint.shownName())));
-		items.add(MapMenu.Item.info(this.where(waypoint.x, waypoint.y, waypoint.z)));
+		items.add(MapMenu.Item.title(Component.literal(shown.shownName())));
+		items.add(MapMenu.Item.info(this.where(shown.x, shown.y, shown.z)));
 		if (waypoint.editable()) {
 			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
@@ -996,7 +1002,7 @@ public final class MapScreen extends Screen {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
 		}));
-		items.add(this.copyItem(waypoint.x + " " + waypoint.y + " " + waypoint.z));
+		items.add(this.copyItem(shown.x + " " + shown.y + " " + shown.z));
 		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
