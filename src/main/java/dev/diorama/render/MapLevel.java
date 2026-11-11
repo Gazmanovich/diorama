@@ -105,7 +105,8 @@ public final class MapLevel implements ChunkSource {
 	private final @Nullable Path folder;
 	/**
 	 * Only shows what's saved in {@link #folder}, for a dimension the player isn't in: tiles load off
-	 * the disk as overview tiles do, nothing is baked, and nothing here writes to the folder.
+	 * the disk as overview tiles do, nothing is baked, and nothing here writes to the folder but
+	 * {@link TileStore}, filling in overview levels an older version left out.
 	 */
 	private final boolean savedOnly;
 	/**

@@ -76,6 +76,8 @@ public final class TileStore {
 	private static final long RETRY_DELAY_SECONDS = 30;
 	/** Overview tiles are rebuilt this long after the first tile under them is written. */
 	private static final long OVERVIEW_DELAY_SECONDS = 2;
+	/** The coarsest overview level maps had before the fullscreen map zoomed further out (0.9.0 and older). */
+	private static final int OLD_MAX_LOD = 5;
 
 	/** The only thread that writes tiles. */
 	private static final ScheduledThreadPoolExecutor WRITER = new ScheduledThreadPoolExecutor(1, task -> {
@@ -143,6 +145,7 @@ public final class TileStore {
 
 	public TileStore(Path folder) {
 		this.folder = folder;
+		WRITER.execute(this::extendOverviews);
 	}
 
 	public void onOverviewChanged(Consumer<TileKey> listener) {
@@ -219,39 +222,74 @@ public final class TileStore {
 			Set<TileKey> level = levels.pollFirstEntry().getValue();
 			Set<TileKey> above = new HashSet<>();
 			for (TileKey key : level) {
-				Saved shrunk = this.shrinkChildren(key);
-				if (shrunk == null) {
-					continue;
-				}
-				Tile tile = new Tile(shrunk.pixels(), null, this.shrinkChunks(key), shrunk.blockLight());
-				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
-				synchronized (this.io) {
-					synchronized (this) {
-						this.cache.put(key, tile);
-						// Pending until written, like a bake.
-						this.unwritten.put(key, tile);
-					}
-				}
-				boolean saved = this.store(key, tile);
-				synchronized (this) {
-					if (this.unwritten.get(key) == tile) {
-						if (saved) {
-							this.unwritten.remove(key);
-						} else if (!this.closed) {
-							WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
-						}
-					}
-				}
-				this.overviewChanged.accept(key);
-				if (key.lod() < TileKey.MAX_LOD) {
+				if (this.rebuild(key) && key.lod() < TileKey.MAX_LOD) {
 					above.add(key.parent());
-				}
-				synchronized (this) {
-					this.trimCache();
 				}
 			}
 			if (!above.isEmpty()) {
 				levels.computeIfAbsent(above.iterator().next().lod(), lod -> new HashSet<>()).addAll(above);
+			}
+		}
+	}
+
+	/** Makes one overview tile from its children and writes it; false if it has none. Writer thread. */
+	private boolean rebuild(TileKey key) {
+		Saved shrunk = this.shrinkChildren(key);
+		if (shrunk == null) {
+			return false;
+		}
+		Tile tile = new Tile(shrunk.pixels(), null, this.shrinkChunks(key), shrunk.blockLight());
+		// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
+		synchronized (this.io) {
+			synchronized (this) {
+				this.cache.put(key, tile);
+				// Pending until written, like a bake.
+				this.unwritten.put(key, tile);
+			}
+		}
+		boolean saved = this.store(key, tile);
+		synchronized (this) {
+			if (this.unwritten.get(key) == tile) {
+				if (saved) {
+					this.unwritten.remove(key);
+				} else if (!this.closed) {
+					WRITER.schedule(() -> this.write(key), RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+				}
+			}
+		}
+		this.overviewChanged.accept(key);
+		synchronized (this) {
+			this.trimCache();
+		}
+		return true;
+	}
+
+	/**
+	 * Builds the overview levels above {@link #OLD_MAX_LOD} for a map saved before they existed, a
+	 * level at a time from that one up, so zooming all the way out shows the whole of an old map and
+	 * not fog. A tile whose children are no newer is left alone, which is every tile from the second
+	 * time on. Stops when the store closes; the next one opened on the folder goes on from there.
+	 * Writer thread.
+	 */
+	private void extendOverviews() {
+		for (int lod = OLD_MAX_LOD; lod < TileKey.MAX_LOD; lod++) {
+			Set<TileKey> stale = new HashSet<>();
+			for (TileKey key : this.saved(lod)) {
+				Path child = this.file(key);
+				Path parent = this.file(key.parent());
+				try {
+					if (!Files.isRegularFile(parent) || Files.isRegularFile(child) && Files.getLastModifiedTime(parent).compareTo(Files.getLastModifiedTime(child)) < 0) {
+						stale.add(key.parent());
+					}
+				} catch (IOException e) {
+					// Can't tell: leave it as it is.
+				}
+			}
+			for (TileKey key : stale) {
+				if (this.closed) {
+					return;
+				}
+				this.rebuild(key);
 			}
 		}
 	}
@@ -506,6 +544,44 @@ public final class TileStore {
 			}
 		}
 		return spots;
+	}
+
+	/** For tests: where the tiles are saved. */
+	public Path folder() {
+		return this.folder;
+	}
+
+	/**
+	 * For tests: makes the map look like one saved before overview levels above {@link #OLD_MAX_LOD}
+	 * existed, on disk too, then builds them as opening the map does. Waits for the writer.
+	 */
+	public void rebuildHighOverviews() throws InterruptedException {
+		Future<?> done = WRITER.submit(() -> {
+			for (int lod = OLD_MAX_LOD + 1; lod <= TileKey.MAX_LOD; lod++) {
+				for (TileKey key : this.saved(lod)) {
+					synchronized (this.io) {
+						synchronized (this) {
+							this.cache.remove(key);
+							this.unwritten.remove(key);
+						}
+						try {
+							Files.deleteIfExists(this.file(key));
+						} catch (IOException e) {
+							throw new java.io.UncheckedIOException(e);
+						}
+					}
+				}
+			}
+			if (!this.saved(OLD_MAX_LOD + 1).isEmpty()) {
+				throw new IllegalStateException("Overview tiles above level " + OLD_MAX_LOD + " are still there");
+			}
+			this.extendOverviews();
+		});
+		try {
+			done.get();
+		} catch (ExecutionException e) {
+			throw new IllegalStateException(e.getCause());
+		}
 	}
 
 	/** For tests: makes an overview tile look like one saved before chunks were kept, on disk too. */

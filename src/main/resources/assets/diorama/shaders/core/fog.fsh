@@ -86,8 +86,8 @@ layout(location = 0) in vec2 maskUv;
 *///?}
 // rg: noise offset in eighths of the coarser noise period, in the top three bits of each; r's low
 // five bits: how see-through the fog is, in 31sts (0 is opaque); b: cave flag (128), fog scale steps
-// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), the fast
-// quality flag (4) and the smoke flag (1).
+// (bits 4-6) and sixteenths of a step (bits 0-3); a: mask texel size code (bits 4-7), eight more
+// fog scale steps (8), the fast quality flag (4) and the smoke flag (1).
 //? if >=26.3 {
 layout(location = 1) in vec4 params;
 
@@ -247,14 +247,16 @@ void main() {
     float night = mod(offsetBytes.g, 32.0) / 31.0;
     float alphaCode = floor(params.a * 255.0 + 0.5);
     unitsPerUv = MASK_TEXELS * 2.0 * exp2(floor(alphaCode / 16.0));
-    // In the low nibble: 4 for Fast, 1 for smoke, 2 into the half-resolution layer (FogLayer).
+    // In the low nibble: 8 for eight more scale steps, 4 for Fast, 1 for smoke, 2 into the
+    // half-resolution layer (FogLayer).
     fast = mod(floor(mod(alphaCode, 16.0) / 4.0), 2.0) >= 1.0;
     bool layer = mod(floor(mod(alphaCode, 16.0) / 2.0), 2.0) >= 1.0;
     bool smoke = mod(alphaCode, 2.0) >= 1.0;
     float fogCode = floor(params.b * 255.0 + 0.5);
     bool cave = fogCode >= 128.0;
     fogCode = mod(fogCode, 128.0);
-    scaleSteps = floor(fogCode / 16.0);
+    // Eight more steps from the alpha byte, for the full map zoomed out past what three bits hold.
+    scaleSteps = floor(fogCode / 16.0) + (mod(alphaCode, 16.0) >= 8.0 ? 8.0 : 0.0);
     scaleFraction = mod(fogCode, 16.0) / 16.0;
     fogScale = exp2(scaleSteps + scaleFraction);
     // MapViewport.fogReach repeats how far the reads below can reach (these sizes, the blur taps,
