@@ -66,6 +66,18 @@ final class WaypointSortTest {
 		click(context, DOWN);
 		expect(context, wrong, "name", "Apple Orchard", "beacon", "Home", "Iron Farm", "Zed's Tower", "Mine");
 		context.takeScreenshot("sort-04-name");
+		// Hiding a waypoint moves it down among the hidden ones, still selected; showing it puts it back.
+		Waypoint home = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.name.equals("Home")).findFirst().orElseThrow());
+		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(home));
+		DioramaClientTest.clickAtGui(context, row[0], row[1]);
+		clickOnRow(context, "Hide", home);
+		expect(context, wrong, "name with Home hidden", "Apple Orchard", "beacon", "Iron Farm", "Zed's Tower", "Home", "Mine");
+		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selected()) != home) {
+			wrong.add("Home wasn't selected any more after hiding it");
+		}
+		context.takeScreenshot("sort-04b-name-home-hidden");
+		clickOnRow(context, "Show", home);
+		expect(context, wrong, "name with Home shown again", "Apple Orchard", "beacon", "Home", "Iron Farm", "Zed's Tower", "Mine");
 		click(context, "Name");
 		expect(context, wrong, "initials", "beacon", "Home", "Iron Farm", "Zed's Tower", "Apple Orchard", "Mine");
 		context.takeScreenshot("sort-05-initials");
@@ -150,6 +162,20 @@ final class WaypointSortTest {
 
 	private static void click(ClientGameTestContext context, String label) {
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), label)));
+		context.waitTicks(2);
+	}
+
+	/** Clicks the selected row's button with this label, not the folder bar's of the same name. */
+	private static void clickOnRow(ClientGameTestContext context, String label, Waypoint waypoint) {
+		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> {
+			int[] row = ((WaypointListScreen) mc.gui.screen()).rowCentre(waypoint);
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof Button button && button.visible && button.getMessage().getString().equals(label) && row != null && Math.abs(button.getY() + 10 - row[1]) <= 4) {
+					return button;
+				}
+			}
+			throw new AssertionError("No " + label + " button on " + waypoint.name + "'s row");
+		}));
 		context.waitTicks(2);
 	}
 

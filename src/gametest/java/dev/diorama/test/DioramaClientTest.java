@@ -5407,7 +5407,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks the left mouse button at a point given in GUI pixels. */
-	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+	static void clickAtGui(ClientGameTestContext context, double x, double y) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		context.getInput().setCursorPos(x * scale, y * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);

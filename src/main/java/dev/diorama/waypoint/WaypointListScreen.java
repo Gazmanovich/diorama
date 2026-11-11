@@ -365,8 +365,7 @@ public final class WaypointListScreen extends Screen {
 	/** Steps to the next sort order or reverses the direction, and sorts the folder again from the top. */
 	private void changeSort(boolean nextOrder) {
 		WaypointStore store = WaypointStore.get();
-		Entity viewer = MapSession.viewer();
-		if (store == null || viewer == null || this.minecraft.level == null) {
+		if (store == null) {
 			return;
 		}
 		if (nextOrder) {
@@ -376,10 +375,18 @@ public final class WaypointListScreen extends Screen {
 			store.setSort(store.sort(), !store.sortReversed());
 		}
 		this.labelSort(store);
-		String here = this.minecraft.level.dimension().identifier().toString();
-		this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+		this.resort(store);
 		this.scroll = 0;
 		this.filter();
+	}
+
+	/** Sorts the folder's waypoints again, after the order or something it goes by changed. */
+	private void resort(WaypointStore store) {
+		Entity viewer = MapSession.viewer();
+		if (viewer != null && this.minecraft.level != null) {
+			String here = this.minecraft.level.dimension().identifier().toString();
+			this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+		}
 	}
 
 	/**
@@ -967,10 +974,20 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store != null) {
-			store.setVisible(waypoint, !waypoint.visible);
+		if (store == null) {
+			return;
 		}
-		this.placeRowButtons();
+		store.setVisible(waypoint, !waypoint.visible);
+		// Hidden waypoints go last, as in Xaero's: the row moves, and the list follows it so the row
+		// and its buttons stay in view.
+		this.resort(store);
+		this.filter();
+		int index = this.rows.indexOf(waypoint);
+		if (index >= 0 && index < this.scroll) {
+			this.scrollTo(index);
+		} else if (index >= this.scroll + this.visibleRows) {
+			this.scrollTo(index - this.visibleRows + 1);
+		}
 	}
 
 	private void delete(@Nullable Waypoint waypoint) {
