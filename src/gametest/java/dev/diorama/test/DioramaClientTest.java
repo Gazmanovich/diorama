@@ -369,6 +369,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("real-server")) {
 			ShareTest.realServer(context);
 		}
+		if (tests.contains("portal-plugin")) {
+			PortalPinsTest.pluginPortals(context);
+		}
 		if (tests.contains("server-locks")) {
 			ServerLocksTest.run(context);
 		}
