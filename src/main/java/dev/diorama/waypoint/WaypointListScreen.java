@@ -362,7 +362,7 @@ public final class WaypointListScreen extends Screen {
 		this.setInitialFocus(box);
 	}
 
-	/** Steps to the next sort order, or reverses this one, and sorts the folder again from the top. */
+	/** Steps to the next sort order or reverses the direction, and sorts the folder again from the top. */
 	private void changeSort(boolean nextOrder) {
 		WaypointStore store = WaypointStore.get();
 		Entity viewer = MapSession.viewer();
@@ -370,7 +370,8 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 		if (nextOrder) {
-			store.setSort(store.sort().next(), false);
+			// The direction stays as it was, as Xaero's keeps Reversed Sort Order apart from Sort By.
+			store.setSort(store.sort().next(), store.sortReversed());
 		} else {
 			store.setSort(store.sort(), !store.sortReversed());
 		}
