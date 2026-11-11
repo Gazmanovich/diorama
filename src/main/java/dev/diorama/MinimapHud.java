@@ -323,33 +323,35 @@ public final class MinimapHud implements HudElement {
 	/**
 	 * Where the minimap goes on a {@code width} by {@code height} screen: its x, y and size. It
 	 * shrinks so it and its lines fit the screen and, placed low beside the hotbar, so it stays
-	 * beside it instead of growing over the hearts or hunger bar ({@code avoidHotbar}). Placed at
-	 * the top, it moves down below the rows of status effect icons it would be over. Whatever the
-	 * window or GUI scale did since it was placed, it ends up on screen.
+	 * beside it instead of growing over the hearts or hunger bar ({@code avoidHotbar}). It stays
+	 * below the rows of status effect icons it would be over: placed at the top it moves down,
+	 * placed at the bottom it grows up only to them. Whatever the window or GUI scale did since it
+	 * was placed, it ends up on screen.
 	 */
 	static int[] place(Anchor anchor, int wanted, boolean avoidHotbar, int width, int height, int infoHeight, int[] effects) {
 		// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
 		int fitted = Math.min(wanted, width - 2 * MARGIN - 4);
 		if (!anchor.top()) {
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);
-			// It grows up and in from the edges it's placed by, so from beside the hotbar it stops at it.
-			int besideHotbar = width / 2 - HOTBAR_HALF_WIDTH - MARGIN - 4;
-			if (avoidHotbar && !anchor.centered() && anchor.dy() < HOTBAR_HEIGHT && anchor.dx() <= besideHotbar) {
-				fitted = Math.min(fitted, besideHotbar - anchor.dx());
+			// It grows up and in from the edges it's placed by, so from beside the hotbar it stops
+			// at it: in its corner always, as it always has, and elsewhere where it fits beside it.
+			// Put any nearer, it's the player's choice to have it over the hotbar.
+			int besideHotbar = width / 2 - HOTBAR_HALF_WIDTH - MARGIN - 4 - anchor.dx();
+			if (avoidHotbar && !anchor.centered() && anchor.dy() < HOTBAR_HEIGHT && (besideHotbar >= SMALLEST || anchor.dx() == MARGIN)) {
+				fitted = Math.min(fitted, besideHotbar);
 			}
 		}
 		int size = Math.max(SMALLEST, fitted);
+		// Below each row of icons it reaches under; it can only get smaller from here, and further from them.
 		int top = MARGIN;
-		if (anchor.top()) {
-			// Below each row of icons it reaches under; it can only get smaller from here, and further from them.
-			int right = x(anchor, size, width) + size + 2;
-			if (right > width - EFFECT_WIDTH * effects[1]) {
-				top = MARGIN + 2 * EFFECT_ROW;
-			} else if (right > width - EFFECT_WIDTH * effects[0]) {
-				top = MARGIN + EFFECT_ROW;
-			}
-			size = Math.max(SMALLEST, Math.min(size, height - top - infoHeight - MARGIN - 4));
+		int right = x(anchor, size, width) + size + 2;
+		if (right > width - EFFECT_WIDTH * effects[1]) {
+			top = MARGIN + 2 * EFFECT_ROW;
+		} else if (right > width - EFFECT_WIDTH * effects[0]) {
+			top = MARGIN + EFFECT_ROW;
 		}
+		int room = anchor.top() ? height - top - infoHeight - MARGIN - 4 : height - anchor.dy() - infoHeight - top;
+		size = Math.max(SMALLEST, Math.min(size, room));
 		int y = anchor.top() ? anchor.dy() : height - anchor.dy() - infoHeight - size;
 		y = Math.max(top, Math.min(y, height - MARGIN - infoHeight - size));
 		return new int[] {x(anchor, size, width), y, size};

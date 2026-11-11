@@ -99,8 +99,8 @@ final class MinimapPositionTest {
 			checked++;
 		}
 		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
-		world.getServer().runCommand("effect give @a speed 600 0 true");
-		world.getServer().runCommand("effect give @a weakness 600 0 true");
+		world.getServer().runCommand("effect give @a speed 600 0");
+		world.getServer().runCommand("effect give @a weakness 600 0");
 		context.waitTicks(10);
 		for (Settings.Corner corner : Settings.Corner.values()) {
 			loadOldFile(context, corner, 96);
@@ -202,12 +202,21 @@ final class MinimapPositionTest {
 		dragCentreTo(context, size[0] / 2.0, size[1] / 3.0);
 		context.getInput().pressKey(InputConstants.KEY_ESCAPE);
 		context.waitTicks(3);
-		context.runOnClient(mc -> {
-			Settings s = Settings.get();
-			if (!(mc.gui.screen() instanceof SettingsScreen) || s.minimapCorner != Settings.Corner.TOP_RIGHT || s.minimapOffsetX != MARGIN || s.minimapOffsetY != MARGIN) {
-				throw new AssertionError("Esc should go back to the settings with the minimap where it was, got " + mc.gui.screen() + " " + s.minimapCorner + " " + s.minimapOffsetX + "," + s.minimapOffsetY);
-			}
-		});
+		expectBack(context, true, "Esc");
+		// The same with Cancel.
+		DioramaClientTest.click(context, "Position: ");
+		expectPositionScreen(context, "Clicking Position after Esc");
+		dragCentreTo(context, size[0] / 2.0, size[1] / 3.0);
+		DioramaClientTest.click(context, "Cancel");
+		expectBack(context, true, "Cancel");
+		// And when the screen goes some other way, as when the player dies while it's open.
+		DioramaClientTest.click(context, "Position: ");
+		expectPositionScreen(context, "Clicking Position after Cancel");
+		dragCentreTo(context, size[0] / 2.0, size[1] / 3.0);
+		context.setScreen(() -> null);
+		expectBack(context, false, "Closing the screen without Done");
+		context.setScreen(() -> new SettingsScreen(null));
+		context.waitTicks(3);
 		DioramaClientTest.click(context, "Position: ");
 		expectPositionScreen(context, "Clicking Position again");
 
@@ -234,13 +243,14 @@ final class MinimapPositionTest {
 		});
 		context.takeScreenshot("minimap-position-05-left-edge");
 
-		// Down past the bottom edge, a third of the way across: kept by the bottom edge.
+		// Down past the bottom edge, a third of the way across: kept by the bottom edge. It's
+		// reaching over the hotbar there, as the player put it, so it keeps its size.
 		dragCentreTo(context, size[0] * 0.3, size[1] + 40);
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			int[] box = shown(mc, "at the bottom edge");
 			int bottom = box[1] + box[3];
-			if (bottom != size[1] - MARGIN || s.minimapOffsetY != MARGIN || s.minimapCorner != Settings.Corner.BOTTOM_LEFT) {
+			if (bottom != size[1] - MARGIN || box[2] != 96 || s.minimapOffsetY != MARGIN || s.minimapCorner != Settings.Corner.BOTTOM_LEFT) {
 				throw new AssertionError("Dragged past the bottom edge, the minimap is at " + Arrays.toString(box) + " (bottom " + bottom + "), kept as " + s.minimapCorner + " " + s.minimapOffsetX + "," + s.minimapOffsetY);
 			}
 		});
@@ -264,6 +274,13 @@ final class MinimapPositionTest {
 			throw new AssertionError("C again should put the minimap back by the left edge");
 		}
 
+		// The Corner button: from a place of its own to the top-right corner, then on to the top left.
+		DioramaClientTest.click(context, "Corner: Custom");
+		expectCorner(context, Settings.Corner.TOP_RIGHT, "Corner: Top right");
+		DioramaClientTest.click(context, "Corner: Top right");
+		expectCorner(context, Settings.Corner.TOP_LEFT, "Corner: Top left");
+		context.takeScreenshot("minimap-position-07-corner-top-left");
+
 		// Its place for the rest: 40 in from the right edge, a third of the way down. Done keeps it.
 		dragCentreTo(context, size[0] - 40 - 48, size[1] / 3.0);
 		int[] placed = context.computeOnClient(mc -> new int[] {Settings.get().minimapOffsetX, Settings.get().minimapOffsetY, Settings.get().minimapCorner.ordinal()});
@@ -282,6 +299,38 @@ final class MinimapPositionTest {
 		});
 		context.waitTicks(3);
 		context.takeScreenshot("minimap-position-09-settings-custom");
+	}
+
+	/** Back in the top-right corner, where the screen opened with it, on the settings screen or in the game. */
+	private static void expectBack(ClientGameTestContext context, boolean toSettings, String what) {
+		context.waitTicks(3);
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			boolean screen = toSettings ? mc.gui.screen() instanceof SettingsScreen : mc.gui.screen() == null;
+			if (!screen || s.minimapCorner != Settings.Corner.TOP_RIGHT || s.minimapOffsetX != MARGIN || s.minimapOffsetY != MARGIN || s.minimapCentered) {
+				throw new AssertionError(what + " should leave the minimap where it was, got " + mc.gui.screen() + " " + s.minimapCorner + " " + s.minimapOffsetX + "," + s.minimapOffsetY);
+			}
+		});
+	}
+
+	private static void expectCorner(ClientGameTestContext context, Settings.Corner corner, String label) {
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			int[] box = shown(mc, "in the " + corner + " corner");
+			boolean right = corner == Settings.Corner.TOP_RIGHT;
+			int x = right ? mc.getWindow().getGuiScaledWidth() - MARGIN - box[2] : MARGIN;
+			if (s.minimapCorner != corner || s.minimapOffsetX != MARGIN || s.minimapOffsetY != MARGIN || s.minimapCentered || box[0] != x || box[1] != MARGIN) {
+				throw new AssertionError("The Corner button should put the minimap in the " + corner + " corner, got " + Arrays.toString(box) + " kept as " + s.minimapCorner + " " + s.minimapOffsetX + "," + s.minimapOffsetY);
+			}
+			boolean labelled = false;
+			java.util.List<net.minecraft.client.gui.components.events.GuiEventListener> children = new java.util.ArrayList<>(mc.gui.screen().children());
+			for (var child : children) {
+				labelled |= child instanceof net.minecraft.client.gui.components.AbstractWidget widget && widget.getMessage().getString().equals(label);
+			}
+			if (!labelled) {
+				throw new AssertionError("The Corner button should say " + label);
+			}
+		});
 	}
 
 	private static void expectPositionScreen(ClientGameTestContext context, String what) {
@@ -354,8 +403,8 @@ final class MinimapPositionTest {
 
 		// Effect icons: the minimap at the top moves below the rows it would be over, and only those.
 		context.runOnClient(mc -> Settings.get().minimapOffsetY = MARGIN);
-		world.getServer().runCommand("effect give @a speed 600 0 true");
-		world.getServer().runCommand("effect give @a weakness 600 0 true");
+		world.getServer().runCommand("effect give @a speed 600 0");
+		world.getServer().runCommand("effect give @a weakness 600 0");
 		context.waitTicks(10);
 		// One icon in each row reaches 25 in from the right; 40 in, the minimap is beside them.
 		expectTop(context, MARGIN, "40 in from the right with one icon in each row");
@@ -367,8 +416,8 @@ final class MinimapPositionTest {
 		context.takeScreenshot("minimap-position-16-effects-corner");
 		// Three beneficial icons reach 75 in: under that row only.
 		context.runOnClient(mc -> Settings.get().minimapOffsetX = kept[0]);
-		world.getServer().runCommand("effect give @a haste 600 0 true");
-		world.getServer().runCommand("effect give @a strength 600 0 true");
+		world.getServer().runCommand("effect give @a haste 600 0");
+		world.getServer().runCommand("effect give @a strength 600 0");
 		context.waitTicks(10);
 		expectTop(context, MARGIN + 26, "40 in from the right under three beneficial icons");
 		context.takeScreenshot("minimap-position-17-effects-long-row");
@@ -378,11 +427,31 @@ final class MinimapPositionTest {
 		expectTop(context, MARGIN, "centered, away from three beneficial icons");
 		context.takeScreenshot("minimap-position-18-effects-centered");
 		for (String effect : new String[] {"jump_boost", "regeneration", "resistance", "fire_resistance", "water_breathing", "night_vision", "absorption"}) {
-			world.getServer().runCommand("effect give @a " + effect + " 600 0 true");
+			world.getServer().runCommand("effect give @a " + effect + " 600 0");
 		}
 		context.waitTicks(10);
 		expectTop(context, MARGIN + 26, "centered under ten beneficial icons");
 		context.takeScreenshot("minimap-position-19-effects-centered-reaching");
+		// Kept by the bottom-right corner, 80 up, enlarged: it grows up only as far as the icons.
+		world.getServer().runCommand("effect give @a weakness 600 0");
+		context.runOnClient(mc -> {
+			Settings s = Settings.get();
+			s.minimapCentered = false;
+			s.minimapCorner = Settings.Corner.BOTTOM_RIGHT;
+			s.minimapOffsetX = MARGIN;
+			s.minimapOffsetY = 80;
+		});
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(10);
+		context.runOnClient(mc -> {
+			int[] box = shown(mc, "enlarged from the bottom under effects");
+			int height = mc.getWindow().getGuiScaledHeight();
+			if (box[1] < MARGIN + 52 || box[1] + box[3] != height - 80 || box[2] <= 96) {
+				throw new AssertionError("Enlarged from 80 above the bottom, the minimap should grow up to below the effect icons, got " + Arrays.toString(box));
+			}
+		});
+		context.takeScreenshot("minimap-position-20-effects-enlarged-from-bottom");
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
 		world.getServer().runCommand("effect clear @a");
 		context.runOnClient(mc -> Settings.get().minimapCentered = false);
 	}

@@ -32,6 +32,8 @@ public final class MinimapPositionScreen extends Screen {
 	private final int startX;
 	private final int startY;
 	private final boolean startCentered;
+	/** Done was pressed; the screen going any other way, by Esc or by dying or leaving, puts the minimap back. */
+	private boolean kept;
 	private boolean dragging;
 	/** Where the minimap's top-left is from the mouse while it's held. */
 	private int grabX;
@@ -92,24 +94,28 @@ public final class MinimapPositionScreen extends Screen {
 	}
 
 	private void done() {
+		this.kept = true;
 		Settings.get().save();
 		this.minecraft.gui.setScreen(this.parent);
 	}
 
-	/** Esc and Cancel: back where it was. */
+	/** Esc and Cancel. */
 	@Override
 	public void onClose() {
-		Settings s = Settings.get();
-		s.minimapCorner = this.startCorner;
-		s.minimapOffsetX = this.startX;
-		s.minimapOffsetY = this.startY;
-		s.minimapCentered = this.startCentered;
 		this.minecraft.gui.setScreen(this.parent);
 	}
 
+	/** Gone without Done, it's back where it was, as Xaero's Minimap drops a place that wasn't confirmed. */
 	@Override
 	public void removed() {
 		MinimapHud.holdSize(0);
+		if (!this.kept) {
+			Settings s = Settings.get();
+			s.minimapCorner = this.startCorner;
+			s.minimapOffsetX = this.startX;
+			s.minimapOffsetY = this.startY;
+			s.minimapCentered = this.startCentered;
+		}
 	}
 
 	// The world shows behind it, with the minimap on it; without a world there's nothing to move.
