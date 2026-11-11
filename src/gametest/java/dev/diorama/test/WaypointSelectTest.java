@@ -166,7 +166,10 @@ final class WaypointSelectTest {
 		click(context, spots.get(9), false, false);
 		click(context, spots.get(11), true, false);
 		clickRowButton(context, "Delete");
-		DioramaClientTest.typeInto(context, 0, "Spot 12");
+		// Typed without a click on the search box, which would put Delete back by itself.
+		context.runOnClient(mc -> mc.gui.screen().setFocused(DioramaClientTest.editBoxes(mc.gui.screen()).get(0)));
+		context.getInput().typeChars("Spot 12");
+		context.waitTicks(2);
 		expect(context, wrong, "a search that leaves one selected row", List.of("Spot 12"));
 		if (rowButtons(context).stream().anyMatch(label -> label.startsWith("Click again"))) {
 			wrong.add("Delete stayed armed after the search changed the selection: " + rowButtons(context));
