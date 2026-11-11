@@ -59,9 +59,9 @@ final class ClientWebMapTest {
 		context.waitFor(mc -> mc.player.onGround() && mc.player.blockPosition().getX() == 8, 600);
 		DioramaClientTest.settle(context, 40);
 
-		// A taken port: the web map takes the next one.
+		// A taken port, on the address the web map listens on (the loopback address is ::1 on some loaders): it takes the next one.
 		int port;
-		try (ServerSocket taken = new ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+		try (ServerSocket taken = new ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
 			int first = taken.getLocalPort();
 			context.runOnClient(mc -> {
 				Settings.get().webMapPort = first;
