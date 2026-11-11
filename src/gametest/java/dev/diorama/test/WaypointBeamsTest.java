@@ -17,6 +17,7 @@ import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -100,8 +101,15 @@ final class WaypointBeamsTest {
 
 		// From close by a beam fades, and is gone at the waypoint; looking up one, it narrows into the sky.
 		for (int away : new int[] {20, 8, 5, 2}) {
-			// On whatever is there, a tree's top if it comes to that: never inside one.
-			String spot = "tp @a " + (home.x + 0.5) + " " + (surface(context, home.x, home.z + away) + 1) + " " + (home.z + away + 0.5) + " 180 ";
+			// On the ground, a step aside if a trunk stands there.
+			int x = home.x;
+			for (int aside : new int[] {0, 1, -1, 2, -2}) {
+				if (clear(context, home.x + aside, home.z + away)) {
+					x = home.x + aside;
+					break;
+				}
+			}
+			String spot = "tp @a " + (x + 0.5) + " " + (ground(context, x, home.z + away) + 1) + " " + (home.z + away + 0.5) + " 180 ";
 			world.getServer().runCommand(spot + "0");
 			context.waitTicks(220);
 			context.takeScreenshot("beams-near-" + away);
@@ -166,9 +174,27 @@ final class WaypointBeamsTest {
 		}
 	}
 
-	/** A waypoint on top of whatever stands at (x, z). */
+	/** A waypoint on the ground at (x, z), under any tree. */
 	private static Waypoint on(ClientGameTestContext context, String name, int x, int z, int color) {
-		return new Waypoint(name, x, surface(context, x, z), z, OVERWORLD, color);
+		return new Waypoint(name, x, ground(context, x, z) + 1, z, OVERWORLD, color);
+	}
+
+	/** The height of the ground at (x, z), which has to be loaded: the highest block that isn't part of a tree. */
+	private static int ground(ClientGameTestContext context, int x, int z) {
+		return context.computeOnClient(mc -> {
+			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z) - 1, z);
+			while (mc.level.getBlockState(pos).isAir() || mc.level.getBlockState(pos).is(BlockTags.LEAVES) || mc.level.getBlockState(pos).is(BlockTags.LOGS)) {
+				pos.move(0, -1, 0);
+			}
+			return pos.getY();
+		});
+	}
+
+	/** Whether a player can stand on the ground at (x, z): no trunk there. */
+	private static boolean clear(ClientGameTestContext context, int x, int z) {
+		int ground = ground(context, x, z);
+		return context.computeOnClient(mc -> !mc.level.getBlockState(new BlockPos(x, ground + 1, z)).is(BlockTags.LOGS)
+			&& !mc.level.getBlockState(new BlockPos(x, ground + 2, z)).is(BlockTags.LOGS));
 	}
 
 	/** The height of the highest block at (x, z), which has to be loaded. */
