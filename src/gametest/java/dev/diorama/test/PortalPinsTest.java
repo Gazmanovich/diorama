@@ -64,6 +64,9 @@ final class PortalPinsTest {
 		expectName(context, Waypoint.Kind.END_PORTAL, "Portal", "End portal blocks without a frame");
 		world.getServer().runCommand("fill " + (ex - 1) + " " + y + " " + (ez - 1) + " " + (ex + 3) + " " + y + " " + (ez + 3) + " end_portal_frame[eye=true] replace air");
 		expectName(context, Waypoint.Kind.END_PORTAL, "End Portal", "the frame going up around them");
+		if (context.computeOnClient(mc -> WaypointStore.open(WorldKey.current()).all().stream().noneMatch(w -> w.kind == Waypoint.Kind.END_PORTAL && w.name.equals("End Portal")))) {
+			throw new AssertionError("The pin's new name isn't in the file");
+		}
 		world.getServer().runCommand("setblock " + (ex + 20) + " " + y + " " + ez + " end_gateway");
 		expectPins(context, Waypoint.Kind.END_GATEWAY, 1, "a gateway");
 		expectName(context, Waypoint.Kind.END_GATEWAY, "Portal", "a gateway without its bedrock");
