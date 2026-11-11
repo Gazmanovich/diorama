@@ -84,6 +84,7 @@ public final class SettingsScreen extends Screen {
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
 		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
 		minimap.toggle("legible_caves", () -> s.legibleCaves, v -> s.legibleCaves = v);
+		minimap.toggle("enlarge_toggle", () -> s.minimapEnlargeToggle, v -> s.minimapEnlargeToggle = v);
 		minimap.open("position", MinimapPositionScreen.placeName(), () -> this.minecraft.gui.setScreen(new MinimapPositionScreen(this)));
 		minimap.choice("game_time", Settings.GameTime.values(), () -> s.gameTime, v -> s.gameTime = v);
 		// Beside Position, so the tab doesn't grow.

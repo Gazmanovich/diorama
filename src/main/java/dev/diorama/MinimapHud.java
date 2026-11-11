@@ -114,8 +114,8 @@ public final class MinimapHud implements HudElement {
 			this.holdStart = -1;
 			return;
 		}
-		// Held, the enlarge key shows it bigger, growing away from the edges it's placed by.
-		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
+		// The enlarge key shows it bigger, growing away from the edges it's placed by.
+		int size = DioramaClient.minimapEnlarged() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
 		int[] bounds = this.draw(graphics, partialTick, Anchor.of(settings), effectIcons ? effectCounts(mc.player) : NO_EFFECTS, size);
 		shown = new int[] {bounds[4], bounds[5], bounds[6], bounds[7]};
 	}

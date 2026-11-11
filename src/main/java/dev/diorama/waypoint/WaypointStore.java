@@ -90,13 +90,17 @@ public final class WaypointStore {
 	}
 
 	/**
-	 * The player's own folders and which folders are hidden, saved beside the waypoints in
-	 * {@code folders.json}. Every dimension has a folder of its own without being listed here.
+	 * The player's own folders, which folders are hidden and the waypoint list's sort order, saved
+	 * beside the waypoints in {@code folders.json}. Every dimension has a folder of its own without
+	 * being listed here.
 	 */
 	private static final class Folders {
 		List<String> custom = new ArrayList<>();
 		/** Folder keys, as {@link #folderKey} makes them. */
 		Set<String> hidden = new LinkedHashSet<>();
+		/** A {@link WaypointSort} by name; none is Distance. Every folder of the world is sorted the same, as Xaero's sorts every set. */
+		@Nullable String sort;
+		boolean sortReversed;
 	}
 
 	private WaypointStore(String worldKey) {
@@ -427,6 +431,23 @@ public final class WaypointStore {
 		}
 	}
 
+	/** The order the waypoint list shows this world's folders in. */
+	public WaypointSort sort() {
+		return WaypointSort.named(this.folders.sort);
+	}
+
+	public boolean sortReversed() {
+		return this.folders.sortReversed;
+	}
+
+	public void setSort(WaypointSort sort, boolean reversed) {
+		if (sort != this.sort() || reversed != this.folders.sortReversed) {
+			this.folders.sort = sort.name();
+			this.folders.sortReversed = reversed;
+			this.saveFolders();
+		}
+	}
+
 	/** Whether a waypoint shows on the maps and in the world: it's visible and its folder isn't hidden. */
 	public boolean shown(Waypoint waypoint) {
 		return waypoint.visible && !this.folderHidden(this.folderKey(waypoint));
@@ -602,6 +623,8 @@ public final class WaypointStore {
 				if (read.hidden != null) {
 					clean.hidden.addAll(read.hidden);
 				}
+				clean.sort = read.sort;
+				clean.sortReversed = read.sortReversed;
 				this.folders = clean;
 			}
 		} catch (Exception e) {
