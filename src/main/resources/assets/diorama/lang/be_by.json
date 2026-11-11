@@ -393,5 +393,12 @@
     "diorama.maps.waypoints": "%s указальнікаў",
     "diorama.maps.made": "зроблена %s",
     "diorama.maps.none": "Няма мап",
-    "diorama.maps.not_saved": "Не атрымалася захаваць спіс мап; глядзіце журнал гульні"
+    "diorama.maps.not_saved": "Не атрымалася захаваць спіс мап; глядзіце журнал гульні",
+    "diorama.settings.map_off": "Map off in dimensions",
+    "diorama.settings.map_off.tooltip": "Pick dimensions where Diorama is off: no minimap, no map, no waypoints in the world, and nothing is mapped there. For dimensions that are about finding your way without a map.",
+    "diorama.settings.map_off.none": "None",
+    "diorama.map_off.about": "In a ticked dimension Diorama is off: no minimap, no map, no waypoints in the world, and nothing is mapped there.",
+    "diorama.map_off.here": "Diorama is off in this dimension. Change it in Map settings: Look, Map off in dimensions.",
+    "diorama.map_off.here_server": "This server turns Diorama off in this dimension.",
+    "diorama.map_off.here_file": "Diorama is off in this dimension, set in config/diorama-server.properties."
 }

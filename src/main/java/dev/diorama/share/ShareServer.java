@@ -107,6 +107,12 @@ public final class ShareServer {
 		}
 	}
 
+	/** Whether this server's settings turn the map off in a level's dimension. */
+	public static boolean mapOff(ServerLevel level) {
+		Locked locks = locked;
+		return locks != null && locks.server == level.getServer() && locks.locks.mapOffDimensions().contains(level.dimension().identifier().toString());
+	}
+
 	public static void stopped(MinecraftServer server) {
 		Locked locks = locked;
 		if (locks != null && locks.server == server) {
@@ -413,7 +419,8 @@ public final class ShareServer {
 	private @Nullable ServerLevel levelOf(Session session, String dimension) {
 		ServerLevel level = (ServerLevel) session.player.level();
 		// Under a roof the map's view is a cave view, and caves stay each player's own.
-		return level.dimension().identifier().toString().equals(dimension) && !level.dimensionType().hasCeiling() ? level : null;
+		// And where the server turns the map off, there's none to share.
+		return level.dimension().identifier().toString().equals(dimension) && !level.dimensionType().hasCeiling() && !mapOff(level) ? level : null;
 	}
 
 	private RegionTables tables(ServerLevel level) {
