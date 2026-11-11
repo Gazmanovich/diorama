@@ -164,6 +164,9 @@ public final class SettingsScreen extends Screen {
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],
 			i -> distances[i] == 0 ? Component.translatable("diorama.settings.waypoint_distance.any") : Component.literal(distances[i] + " m"));
+		// Beside the distance, which decides how far off a beam shows too; and the tab has no room for another row.
+		waypoints.choice("waypoint_beams", Settings.Beams.values(), () -> s.waypointBeams, v -> s.waypointBeams = v);
+		waypoints.lastTwoSideBySide();
 		int[] pinSizes = Pins.sizes();
 		waypoints.heading("waypoint_size");
 		waypoints.slider("waypoint_size_minimap", nearestIndex(pinSizes, s.waypointMinimapSize), pinSizes.length, i -> s.waypointMinimapSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));

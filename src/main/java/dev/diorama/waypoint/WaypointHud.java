@@ -19,13 +19,16 @@ import net.minecraft.world.phys.Vec3;
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
  * a pin standing on its spot, with the distance under it, so it shows through terrain at any range. The name appears when it
  * is near the crosshair or close by, which keeps a screen full of waypoints readable. The World size
- * setting sizes the pin and the text together.
+ * setting sizes the pin and the text together. Under the pins go the beams ({@link WaypointBeams})
+ * of the waypoints the beam setting picks.
  */
 public final class WaypointHud implements HudElement {
 	/** Within this many GUI pixels of the crosshair a waypoint shows its name. */
 	private static final float NAME_RADIUS = 40;
 	/** Within this many blocks a waypoint always shows its name. */
 	private static final double NAME_DISTANCE = 48;
+
+	private final WaypointBeams beams = new WaypointBeams();
 
 	@Override
 	//? if >=1.21 {
@@ -55,6 +58,27 @@ public final class WaypointHud implements HudElement {
 		float textScale = Pins.textScale(Settings.get().waypointWorldSize);
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
 		float margin = 28 * Math.max(1, scale);
+		Settings.Beams beamsShown = Settings.get().waypointBeams;
+		if (beamsShown != Settings.Beams.OFF) {
+			// Under every pin and label, so a beam never covers one. A pin shows through the land; its
+			// beam only where nothing stands in front of it.
+			float z = 0;
+			//? if <1.21.6 {
+			/*// Drawn straight away here, at the depth the pins are given.
+			z = graphics.pose().last().pose().m32();
+			*///?}
+			this.beams.begin(mc.level, eye, width, height, z);
+			try {
+				for (Waypoint waypoint : waypoints) {
+					if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
+						this.beams.add(waypoint);
+					}
+				}
+				this.beams.draw(graphics);
+			} finally {
+				this.beams.end();
+			}
+		}
 		for (Waypoint waypoint : waypoints) {
 			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, viewer)) {
 				continue;
