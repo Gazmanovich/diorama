@@ -389,5 +389,12 @@
     "diorama.maps.waypoints": "%s точек",
     "diorama.maps.made": "создана %s",
     "diorama.maps.none": "Нет карт",
-    "diorama.maps.not_saved": "Не удалось сохранить список карт; см. лог игры"
+    "diorama.maps.not_saved": "Не удалось сохранить список карт; см. лог игры",
+    "diorama.settings.map_off": "Карта выключена в измерениях",
+    "diorama.settings.map_off.tooltip": "Выберите измерения, где Diorama выключена: нет мини-карты, карты и меток в мире, и местность там не наносится на карту. Для измерений, где нужно искать дорогу без карты.",
+    "diorama.settings.map_off.none": "Нет",
+    "diorama.map_off.about": "В отмеченном измерении Diorama выключена: нет мини-карты, карты и меток в мире, и местность там не наносится на карту.",
+    "diorama.map_off.here": "Diorama выключена в этом измерении. Изменить: Настройки карты, Вид, Карта выключена в измерениях.",
+    "diorama.map_off.here_server": "Этот сервер выключает Diorama в этом измерении.",
+    "diorama.map_off.here_file": "Diorama выключена в этом измерении в файле config/diorama-server.properties."
 }

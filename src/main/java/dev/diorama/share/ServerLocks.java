@@ -12,7 +12,9 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.Properties;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -25,13 +27,15 @@ import org.jspecify.annotations.Nullable;
  * @param caveMapsAllowed false: no cave slices, only the view from the sky
  * @param caveFogOfWar true: cave slices show only blocks the player has seen, as "Fog of war always" does
  * @param radarAllowed false: no players or mobs on the minimap or the map
+ * @param mapOffDimensions the IDs of the dimensions with no map at all, as {@code minecraft:the_nether}
  */
-public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean radarAllowed) {
-	public static final ServerLocks NONE = new ServerLocks(true, false, true);
+public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean radarAllowed, Set<String> mapOffDimensions) {
+	public static final ServerLocks NONE = new ServerLocks(true, false, true, Set.of());
 
 	private static final String CAVE_MAPS = "cave-maps-allowed";
 	private static final String CAVE_FOG = "cave-fog-of-war";
 	private static final String RADAR = "radar-allowed";
+	private static final String MAP_OFF = "map-off-dimensions";
 
 	/** Each setting: its key, what it means, its default. */
 	private static final String[][] SETTINGS = {
@@ -47,6 +51,11 @@ public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean
 		{RADAR, """
 			# false: no players or mobs on the minimap or the map.
 			""", "true"},
+		{MAP_OFF, """
+			# Dimensions where Diorama is off: no minimap, no map, no waypoints in the world, and
+			# nothing is mapped there. Dimension IDs separated by commas, for example
+			# minecraft:the_nether,somemod:maze. Empty: the map works in every dimension.
+			""", ""},
 	};
 
 	/** Whether this locks anything at all. */
@@ -95,7 +104,23 @@ public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean
 		return new ServerLocks(
 			flag(properties, CAVE_MAPS, NONE.caveMapsAllowed, where),
 			flag(properties, CAVE_FOG, NONE.caveFogOfWar, where),
-			flag(properties, RADAR, NONE.radarAllowed, where));
+			flag(properties, RADAR, NONE.radarAllowed, where),
+			dimensions(properties.getProperty(MAP_OFF, "")));
+	}
+
+	/**
+	 * The dimension IDs in a list separated by commas, as Xaero's writes its lists of dimensions.
+	 * An ID without a namespace is Minecraft's, as the game reads it.
+	 */
+	public static Set<String> dimensions(String list) {
+		Set<String> dimensions = new LinkedHashSet<>();
+		for (String part : list.split(",")) {
+			String id = part.trim().toLowerCase(java.util.Locale.ROOT);
+			if (!id.isEmpty()) {
+				dimensions.add(id.indexOf(':') < 0 ? "minecraft:" + id : id);
+			}
+		}
+		return java.util.Collections.unmodifiableSet(dimensions);
 	}
 
 	private static boolean flag(Properties properties, String key, boolean otherwise, String where) {
@@ -120,7 +145,8 @@ public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean
 		ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 		try (DataOutputStream out = new DataOutputStream(bytes)) {
 			out.writeByte(ShareProtocol.LOCKS);
-			out.writeUTF(CAVE_MAPS + "=" + this.caveMapsAllowed + "\n" + CAVE_FOG + "=" + this.caveFogOfWar + "\n" + RADAR + "=" + this.radarAllowed + "\n");
+			out.writeUTF(CAVE_MAPS + "=" + this.caveMapsAllowed + "\n" + CAVE_FOG + "=" + this.caveFogOfWar + "\n" + RADAR + "=" + this.radarAllowed + "\n"
+				+ MAP_OFF + "=" + String.join(",", this.mapOffDimensions) + "\n");
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
