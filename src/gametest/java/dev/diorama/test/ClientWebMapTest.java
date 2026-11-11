@@ -118,7 +118,12 @@ final class ClientWebMapTest {
 			throw new AssertionError("map.json doesn't list the player's tile " + tileU + "," + tileV);
 		}
 		int[] own = context.computeOnClient(mc -> MapSession.get().map().savedMap()).read(new TileKey(TileKey.SURFACE, tileU, tileV));
-		HttpResponse<byte[]> tile = getBytes(http, port, "/minecraft_overworld/0/" + tileU + "_" + tileV + ".jpg?v=1");
+		Matcher named = Pattern.compile("\"folder\":\"(minecraft_overworld-[0-9a-f]+)\"").matcher(map);
+		if (!named.find()) {
+			throw new AssertionError("map.json names no folder for the overworld's map: " + map.substring(0, Math.min(400, map.length())));
+		}
+		String folder = "/" + named.group(1);
+		HttpResponse<byte[]> tile = getBytes(http, port, folder + "/0/" + tileU + "_" + tileV + ".jpg?v=1");
 		if (own == null || tile.statusCode() != 200 || !tile.headers().firstValue("Content-Type").orElse("").equals("image/jpeg")) {
 			throw new AssertionError("The player's tile: " + tile.statusCode() + (own == null ? ", and the map has none" : ""));
 		}
@@ -150,16 +155,24 @@ final class ClientWebMapTest {
 			throw new UncheckedIOException(e);
 		}
 		// Zoomed out, and nothing outside the map.
-		if (getBytes(http, port, "/minecraft_overworld/3/" + Math.floorDiv(tileU, 8) + "_" + Math.floorDiv(tileV, 8) + ".jpg").statusCode() != 200) {
+		if (getBytes(http, port, folder + "/3/" + Math.floorDiv(tileU, 8) + "_" + Math.floorDiv(tileV, 8) + ".jpg").statusCode() != 200) {
 			throw new AssertionError("No zoomed-out tile over the player");
 		}
-		for (String path : new String[] {"/minecraft_overworld/0/9999_9999.jpg", "/minecraft_the_nether/0/" + tileU + "_" + tileV + ".jpg", "/../config.json", "/minecraft_overworld/0/x.jpg", "/minecraft_overworld/9/0_0.jpg"}) {
+		// The same tile asked for as another map's (another world, or the address from before these named the map).
+		for (String path : new String[] {folder + "/0/9999_9999.jpg", "/minecraft_overworld/0/" + tileU + "_" + tileV + ".jpg", folder + "0/0/" + tileU + "_" + tileV + ".jpg",
+			"/minecraft_the_nether/0/" + tileU + "_" + tileV + ".jpg", "/../config.json", folder + "/0/x.jpg", folder + "/9/0_0.jpg"}) {
 			int code = getBytes(http, port, path).statusCode();
 			if (code != 404) {
 				throw new AssertionError(path + " answered " + code);
 			}
 		}
-		browser(port, out.resolve("page-before.png"));
+		// For this computer only, a request under another name is turned away: a page from elsewhere
+		// that points its own name at 127.0.0.1.
+		if (!status(port, "localhost:" + port, "/player.json").contains(" 200") || !status(port, "evil.example:" + port, "/player.json").contains(" 403")
+			|| !status(port, "evil.example", "/map.json").contains(" 403")) {
+			throw new AssertionError("Asked as localhost: " + status(port, "localhost:" + port, "/player.json") + "; as evil.example: " + status(port, "evil.example:" + port, "/player.json"));
+		}
+		int[] east = browser(port, out.resolve("page-before.png"));
 
 		// The player moves: so does the place the page is given.
 		int there = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, 72, -40));
@@ -175,7 +188,12 @@ final class ClientWebMapTest {
 			throw new AssertionError("A player looking north has heading " + after[5]);
 		}
 		DioramaClientTest.settle(context, 40);
-		browser(port, out.resolve("page-after.png"));
+		int[] north = browser(port, out.resolve("page-after.png"));
+		// The page turned the arrow with the player: it's longer than it is wide, so lying along the
+		// picture looking east and standing up looking north.
+		if (east != null && north != null && (east[0] <= east[1] || north[1] <= north[0])) {
+			throw new AssertionError("The page's arrow is " + east[0] + " by " + east[1] + " pixels for a player looking east and " + north[0] + " by " + north[1] + " looking north");
+		}
 
 		// For every device on the network: the same port, on every address.
 		int served = port;
@@ -187,7 +205,28 @@ final class ClientWebMapTest {
 		if (ClientWebMap.servingPort() != served || get(http, served, "/map.json").statusCode() != 200) {
 			throw new AssertionError("The web map isn't serving on " + served + " for the network");
 		}
-		Diorama.LOGGER.info("web-map-client: for the network at {}", ClientWebMap.address());
+		String network = ClientWebMap.address();
+		Diorama.LOGGER.info("web-map-client: for the network at {}", network);
+		if (network.contains("localhost")) {
+			Diorama.LOGGER.warn("web-map-client: this machine has no network address, so the page wasn't asked for over one");
+		} else {
+			// At this machine's own address on its network, as another device there asks for it.
+			if (send(http, network + "map.json").statusCode() != 200) {
+				throw new AssertionError("For the network, " + network + " doesn't answer");
+			}
+			// And for this computer only, that address is closed again.
+			context.runOnClient(mc -> Settings.get().webMap = Settings.WebMap.THIS_COMPUTER);
+			context.waitTicks(3);
+			if (ClientWebMap.servingPort() != served || get(http, served, "/map.json").statusCode() != 200) {
+				throw new AssertionError("Back to this computer only, the web map isn't on " + served);
+			}
+			try {
+				send(http, network + "map.json");
+				throw new AssertionError("For this computer only, " + network + " still answers");
+			} catch (UncheckedIOException e) {
+				// Refused.
+			}
+		}
 		// Off: nothing listens any more.
 		context.runOnClient(mc -> Settings.get().webMap = Settings.WebMap.OFF);
 		context.waitTicks(3);
@@ -219,8 +258,24 @@ final class ClientWebMapTest {
 		return values;
 	}
 
-	/** Photographs the page in Chromium, where the machine has one. */
-	private static void browser(int port, Path file) {
+	/** The status line a request with this Host header gets. */
+	private static String status(int port, String host, String path) {
+		try (java.net.Socket socket = new java.net.Socket("127.0.0.1", port)) {
+			socket.setSoTimeout(10_000);
+			socket.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+			String line = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII)).readLine();
+			return String.valueOf(line);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	/**
+	 * Photographs the page in Chromium, where the machine has one, and checks the picture: the map
+	 * drawn over much of it, and the player's arrow in the middle, where Follow keeps it. Returns
+	 * how wide and how tall the arrow's blue is, in pixels, or null on a machine with no Chromium.
+	 */
+	private static int @org.jspecify.annotations.Nullable [] browser(int port, Path file) {
 		for (String name : new String[] {"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "/snap/bin/chromium"}) {
 			try {
 				Process process = new ProcessBuilder(name, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,800",
@@ -228,11 +283,10 @@ final class ClientWebMapTest {
 					.redirectErrorStream(true).redirectOutput(file.resolveSibling(file.getFileName() + ".log").toFile()).start();
 				if (!process.waitFor(180, TimeUnit.SECONDS)) {
 					process.destroyForcibly();
-					Diorama.LOGGER.warn("web-map-client: {} didn't finish photographing the page", name);
-					return;
+					throw new AssertionError(name + " didn't finish photographing the page");
 				}
-				Diorama.LOGGER.info("web-map-client: {} photographed the page into {} (exit {}, {})", name, file, process.exitValue(), Files.exists(file) ? "written" : "no file");
-				return;
+				Diorama.LOGGER.info("web-map-client: {} photographed the page into {} (exit {})", name, file, process.exitValue());
+				return arrow(file);
 			} catch (IOException e) {
 				// Not this one.
 			} catch (InterruptedException e) {
@@ -240,11 +294,65 @@ final class ClientWebMapTest {
 			}
 		}
 		Diorama.LOGGER.warn("web-map-client: no Chromium on this machine, so no picture of the page");
+		return null;
+	}
+
+	/** Checks a picture of the page, and returns how wide and how tall the arrow's blue is. */
+	private static int[] arrow(Path file) {
+		BufferedImage shot;
+		try {
+			shot = Files.exists(file) ? ImageIO.read(file.toFile()) : null;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		if (shot == null) {
+			throw new AssertionError("Chromium left no picture of the page at " + file);
+		}
+		int drawn = 0;
+		for (int y = 0; y < shot.getHeight(); y += 4) {
+			for (int x = 0; x < shot.getWidth(); x += 4) {
+				int rgb = shot.getRGB(x, y);
+				// Not the page's background (#15171c) or a panel over it.
+				if ((rgb >> 16 & 0xFF) > 0x40 || (rgb >> 8 & 0xFF) > 0x40 || (rgb & 0xFF) > 0x40) {
+					drawn++;
+				}
+			}
+		}
+		int sampled = (shot.getWidth() / 4) * (shot.getHeight() / 4);
+		// The arrow's own colour (#3fa9f5), which no ground has, around the middle of the page.
+		int midX = shot.getWidth() / 2;
+		int midY = shot.getHeight() / 2;
+		int minX = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int minY = Integer.MAX_VALUE;
+		int maxY = Integer.MIN_VALUE;
+		int blue = 0;
+		for (int y = midY - 20; y <= midY + 20; y++) {
+			for (int x = midX - 20; x <= midX + 20; x++) {
+				int rgb = shot.getRGB(x, y);
+				if (Math.abs((rgb >> 16 & 0xFF) - 0x3F) < 24 && Math.abs((rgb >> 8 & 0xFF) - 0xA9) < 24 && Math.abs((rgb & 0xFF) - 0xF5) < 24) {
+					minX = Math.min(minX, x);
+					maxX = Math.max(maxX, x);
+					minY = Math.min(minY, y);
+					maxY = Math.max(maxY, y);
+					blue++;
+				}
+			}
+		}
+		Diorama.LOGGER.info("web-map-client: {}: map over {} of {} sampled pixels, {} arrow pixels in the middle", file.getFileName(), drawn, sampled, blue);
+		if (drawn < sampled / 5 || blue < 40) {
+			throw new AssertionError("The page in " + file + " shows the map over " + drawn + " of " + sampled + " sampled pixels and " + blue + " pixels of the player's arrow in the middle");
+		}
+		return new int[] {maxX - minX + 1, maxY - minY + 1};
 	}
 
 	private static HttpResponse<String> get(HttpClient http, int port, String path) {
+		return send(http, "http://127.0.0.1:" + port + path);
+	}
+
+	private static HttpResponse<String> send(HttpClient http, String address) {
 		try {
-			return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).build(), HttpResponse.BodyHandlers.ofString());
+			return http.send(HttpRequest.newBuilder(URI.create(address)).timeout(java.time.Duration.ofSeconds(20)).build(), HttpResponse.BodyHandlers.ofString());
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		} catch (InterruptedException e) {

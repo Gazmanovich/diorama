@@ -145,6 +145,11 @@ public final class TileStore {
 		this.folder = folder;
 	}
 
+	/** Where the tiles are saved: one folder for each map of each dimension of each world. */
+	public Path folder() {
+		return this.folder;
+	}
+
 	public void onOverviewChanged(Consumer<TileKey> listener) {
 		this.overviewChanged = listener;
 	}

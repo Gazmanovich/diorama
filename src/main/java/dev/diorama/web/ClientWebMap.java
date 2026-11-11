@@ -53,6 +53,8 @@ public final class ClientWebMap {
 	/** Whether this world's chat has been told the address. */
 	private static boolean announced;
 	private static volatile @Nullable Live live;
+	/** Whether only this computer's browsers are served ({@link Settings.WebMap#THIS_COMPUTER}). */
+	private static volatile boolean thisComputerOnly;
 	private static byte @Nullable [] page;
 	private static final Object LIST_LOCK = new Object();
 	private static @Nullable TileStore listedStore;
@@ -113,6 +115,7 @@ public final class ClientWebMap {
 
 	private static void start() {
 		String bind = mode == Settings.WebMap.THIS_COMPUTER ? "127.0.0.1" : "";
+		thisComputerOnly = mode == Settings.WebMap.THIS_COMPUTER;
 		try {
 			for (int i = 0; i < PORT_TRIES && http == null && port + i <= 65535; i++) {
 				try {
@@ -208,7 +211,11 @@ public final class ClientWebMap {
 		String player = String.format(Locale.ROOT, "{\"dimension\":\"%s\",\"name\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"u\":%.3f,\"v\":%.3f,\"heading\":%.4f,\"color\":\"#%06x\"}",
 			escape(dimension), escape(viewer.getName().getString()), viewer.getX(), viewer.getY(), viewer.getZ(),
 			Projection.u(viewer.getX(), viewer.getZ()), Projection.v(viewer.getX(), viewer.getY(), viewer.getZ()), heading, Settings.get().arrowRgb());
-		return new Live(store, dimension, dimension.replace(':', '_').replace('/', '_'), Projection.sin(), Projection.cos(), facing, player);
+		// The pictures' addresses name the map they're of, by the folder it's saved in: a browser keeps a
+		// picture under its address, and the same tile of another world or another map of this
+		// dimension must not be taken for it.
+		String folder = dimension.replace(':', '_').replace('/', '_') + "-" + Integer.toHexString(store.folder().toAbsolutePath().normalize().toString().hashCode());
+		return new Live(store, dimension, folder, Projection.sin(), Projection.cos(), facing, player);
 	}
 
 	private static String escape(String text) {
@@ -231,6 +238,12 @@ public final class ClientWebMap {
 			String method = exchange.getRequestMethod();
 			if (!method.equals("GET") && !method.equals("HEAD")) {
 				WebServer.send(exchange, 405, "text/plain", null);
+				return;
+			}
+			// For this computer only: a page from elsewhere can point a name of its own at 127.0.0.1 and
+			// have the browser ask here under that name. Only what was asked for as this computer is answered.
+			if (thisComputerOnly && !thisComputer(exchange.getRequestHeaders().getFirst("Host"))) {
+				WebServer.send(exchange, 403, "text/plain", null);
 				return;
 			}
 			boolean head = method.equals("HEAD");
@@ -260,6 +273,21 @@ public final class ClientWebMap {
 		} finally {
 			exchange.close();
 		}
+	}
+
+	/** Whether a request's Host names this computer itself: localhost or a loopback address, with any port. */
+	private static boolean thisComputer(@Nullable String host) {
+		if (host == null) {
+			return false;
+		}
+		String name = host.trim().toLowerCase(Locale.ROOT);
+		if (name.startsWith("[")) {
+			int end = name.indexOf(']');
+			name = end < 0 ? name : name.substring(0, end + 1);
+		} else if (name.lastIndexOf(':') >= 0) {
+			name = name.substring(0, name.lastIndexOf(':'));
+		}
+		return name.equals("localhost") || name.equals("127.0.0.1") || name.equals("[::1]");
 	}
 
 	private static byte @Nullable [] page() throws IOException {
