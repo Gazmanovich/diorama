@@ -38,6 +38,7 @@
 	"diorama.waypoints.empty_map": "或右鍵點擊地圖並選擇 %s。",
 	"diorama.waypoints.search": "搜尋路徑點",
 	"diorama.waypoints.no_match": "沒有符合的路徑點",
+	"diorama.waypoints.other_folders": "其他資料夾中",
 	"diorama.waypoints.edit": "編輯",
 	"diorama.waypoints.hide": "隱藏",
 	"diorama.waypoints.show": "顯示",

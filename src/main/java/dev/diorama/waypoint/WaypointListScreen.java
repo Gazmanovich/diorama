@@ -26,7 +26,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * The waypoints of one folder, in vanilla's in-world list. Every dimension has a folder of its own,
  * made for it; the player can add folders of their own, rename and delete them, and hide any folder
- * from the maps. The folder bar picks the folder, a search box filters its waypoints by name, and
+ * from the maps. The folder bar picks the folder, a search box filters its waypoints by name and
+ * finds the ones in every other folder too, under a heading of their own, and
  * beside it are the sort order with its direction, New folder and New waypoint. Clicking a row selects it and shows
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
  * which asks for a second click in place. Double-clicking a row edits it. With no waypoints in
@@ -74,8 +75,16 @@ public final class WaypointListScreen extends Screen {
 	private boolean folderArmed;
 	/** Every waypoint in the folder shown, in the sort order. */
 	private final List<Waypoint> all = new ArrayList<>();
-	/** The ones the search lets through, still in the sort order. */
+	/** Every waypoint in the other folders, in the sort order: a search looks through them too. */
+	private final List<Waypoint> others = new ArrayList<>();
+	/** The ones the search lets through, still in the sort order: the folder's, then the other folders'. */
 	private final List<Waypoint> rows = new ArrayList<>();
+	/**
+	 * Where in {@link #rows} the other folders' waypoints start, or -1 with none. They go under a
+	 * heading that takes a line of the list, so the list has a line more than it has rows, and
+	 * {@link #scroll} counts lines.
+	 */
+	private int otherStart = -1;
 	/** The search box's frame, as wide as the sort and New buttons beside it leave room for. */
 	private int searchWidth;
 	/**
@@ -213,28 +222,29 @@ public final class WaypointListScreen extends Screen {
 	@Override
 	protected void init() {
 		this.all.clear();
+		this.others.clear();
 		WaypointStore store = WaypointStore.get();
 		Entity viewer = MapSession.viewer();
 		String here = this.minecraft.level == null ? null : this.minecraft.level.dimension().identifier().toString();
 		this.collectFolders(store, here);
 		if (store != null && viewer != null && here != null) {
 			String key = this.folder().key();
-			for (Waypoint waypoint : key.equals(WaypointStore.WAYSTONES_KEY) ? store.waystones() : store.all()) {
-				if (store.folderKey(waypoint).equals(key)) {
-					this.all.add(waypoint);
+			for (List<Waypoint> list : List.of(store.all(), store.waystones())) {
+				for (Waypoint waypoint : list) {
+					(store.folderKey(waypoint).equals(key) ? this.all : this.others).add(waypoint);
 				}
 			}
-			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
+			this.resort(store);
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
 		this.hadWaystones = store != null && !store.waystones().isEmpty();
 		this.folderArmed = false;
 		this.folderActions.clear();
-		if (this.selected != null && !this.all.contains(this.selected)) {
+		if (this.selected != null && !this.all.contains(this.selected) && !this.others.contains(this.selected)) {
 			// A waystone is a new object each time the server sends it: find it again by its id.
 			UUID id = this.selected.id;
-			this.selected = this.all.stream().filter(w -> w.id.equals(id)).findFirst().orElse(null);
+			this.selected = java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> w.id.equals(id)).findFirst().orElse(null);
 		}
 		if (!this.xaeroRead) {
 			this.xaeroRead = true;
@@ -402,12 +412,14 @@ public final class WaypointListScreen extends Screen {
 		this.filter();
 	}
 
-	/** Sorts the folder's waypoints again, after the order or something it goes by changed. */
+	/** Sorts the folder's waypoints and the other folders' again, after the order or something it goes by changed. */
 	private void resort(WaypointStore store) {
 		Entity viewer = MapSession.viewer();
 		if (viewer != null && this.minecraft.level != null) {
 			String here = this.minecraft.level.dimension().identifier().toString();
-			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
+			java.util.Comparator<Waypoint> order = store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w));
+			this.all.sort(order);
+			this.others.sort(order);
 		}
 	}
 
@@ -463,13 +475,35 @@ public final class WaypointListScreen extends Screen {
 		}
 	}
 
-	/** Shows the waypoints whose name has the search text in it, any case, and lays the rows out again. */
+	/**
+	 * Shows the waypoints the search text finds, any case, and lays the rows out again: those with it
+	 * in their name, and everything in a folder with it in the folder's name. With nothing typed
+	 * that's the folder shown. With something typed the other folders are searched as well, and
+	 * what's found there goes after this folder's, so a waypoint is found without knowing which
+	 * folder it's in. Xaero's Minimap's filter looks only through the set it's showing.
+	 */
 	private void filter() {
-		String query = this.search != null ? this.search.getValue().trim().toLowerCase(Locale.ROOT) : "";
+		String query = this.query();
 		this.rows.clear();
+		this.otherStart = -1;
+		WaypointStore store = WaypointStore.get();
+		boolean whole = !query.isEmpty() && this.folder().name().getString().toLowerCase(Locale.ROOT).contains(query);
 		for (Waypoint waypoint : this.all) {
-			if (query.isEmpty() || waypoint.shownName().toLowerCase(Locale.ROOT).contains(query)) {
+			if (query.isEmpty() || whole || waypoint.shownName().toLowerCase(Locale.ROOT).contains(query)) {
 				this.rows.add(waypoint);
+			}
+		}
+		if (!query.isEmpty() && store != null) {
+			int start = this.rows.size();
+			java.util.Map<String, Boolean> named = new java.util.HashMap<>();
+			for (Waypoint waypoint : this.others) {
+				boolean inNamed = named.computeIfAbsent(store.folderKey(waypoint), key -> this.folderName(key).toLowerCase(Locale.ROOT).contains(query));
+				if (inNamed || waypoint.shownName().toLowerCase(Locale.ROOT).contains(query)) {
+					this.rows.add(waypoint);
+				}
+			}
+			if (this.rows.size() > start) {
+				this.otherStart = start;
 			}
 		}
 		if (this.selected != null && !this.rows.contains(this.selected)) {
@@ -478,8 +512,40 @@ public final class WaypointListScreen extends Screen {
 		this.scrollTo(this.scroll);
 	}
 
+	private String query() {
+		return this.search != null ? this.search.getValue().trim().toLowerCase(Locale.ROOT) : "";
+	}
+
+	/** The name of the folder with this key, or nothing for one the bar doesn't have. */
+	private String folderName(String key) {
+		for (Folder folder : this.folders) {
+			if (folder.key().equals(key)) {
+				return folder.name().getString();
+			}
+		}
+		return "";
+	}
+
+	/** How many lines the list has: its rows, and the other folders' heading when a search found some there. */
+	private int lines() {
+		return this.rows.size() + (this.otherStart >= 0 ? 1 : 0);
+	}
+
+	/** The line a row is on. */
+	private int lineOf(int row) {
+		return this.otherStart >= 0 && row >= this.otherStart ? row + 1 : row;
+	}
+
+	/** The row on a line, or -1 for the heading's. */
+	private int rowOn(int line) {
+		if (this.otherStart < 0 || line < this.otherStart) {
+			return line;
+		}
+		return line == this.otherStart ? -1 : line - 1;
+	}
+
 	private int maxScroll() {
-		return Math.max(0, this.rows.size() - this.visibleRows);
+		return Math.max(0, this.lines() - this.visibleRows);
 	}
 
 	private void scrollTo(int scroll) {
@@ -499,7 +565,8 @@ public final class WaypointListScreen extends Screen {
 	 * A waystone's row has only Hide or Show and Teleport.
 	 */
 	private void placeRowButtons() {
-		int index = this.selected == null ? -1 : this.rows.indexOf(this.selected) - this.scroll;
+		int row = this.selected == null ? -1 : this.rows.indexOf(this.selected);
+		int index = row < 0 ? -1 : this.lineOf(row) - this.scroll;
 		boolean shown = index >= 0 && index < this.visibleRows;
 		Button visibility = this.visibility;
 		if (shown && visibility != null) {
@@ -620,10 +687,10 @@ public final class WaypointListScreen extends Screen {
 			return -1;
 		}
 		int index = (int) ((y - LIST_TOP - 2) / PITCH);
-		if (index < 0 || index >= this.visibleRows || this.scroll + index >= this.rows.size() || y >= this.rowY(index) + ROW) {
+		if (index < 0 || index >= this.visibleRows || this.scroll + index >= this.lines() || y >= this.rowY(index) + ROW) {
 			return -1;
 		}
-		return this.scroll + index;
+		return this.rowOn(this.scroll + index);
 	}
 
 	//? if >=1.21 {
@@ -680,17 +747,30 @@ public final class WaypointListScreen extends Screen {
 		ScreenArt.list(graphics, 0, LIST_TOP, this.width, this.listBottom);
 		Entity viewer = MapSession.viewer();
 		if (this.rows.isEmpty()) {
-			graphics.centeredText(this.font, Component.translatable(this.all.isEmpty() ? "diorama.folder.empty" : "diorama.waypoints.no_match"), cx, LIST_TOP + 20, HINT);
+			graphics.centeredText(this.font, Component.translatable(this.all.isEmpty() && this.query().isEmpty() ? "diorama.folder.empty" : "diorama.waypoints.no_match"), cx, LIST_TOP + 20, HINT);
 		}
 		String here = this.minecraft.level == null ? "" : this.minecraft.level.dimension().identifier().toString();
 		// Names start clear of the widest badge showing: initials of three or four letters widen it.
 		int textLeft = TEXT_LEFT;
-		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
-			textLeft = Math.max(textLeft, (int) Math.ceil(badgeX(this.rows.get(this.scroll + i)) + Pins.badgeWidth(this.rows.get(this.scroll + i), Pins.LARGE) / 2.0F) + 2);
+		for (int i = 0; i < this.visibleRows && this.scroll + i < this.lines(); i++) {
+			int row = this.rowOn(this.scroll + i);
+			if (row >= 0) {
+				textLeft = Math.max(textLeft, (int) Math.ceil(badgeX(this.rows.get(row)) + Pins.badgeWidth(this.rows.get(row), Pins.LARGE) / 2.0F) + 2);
+			}
 		}
-		for (int i = 0; i < this.visibleRows && this.scroll + i < this.rows.size(); i++) {
-			Waypoint waypoint = this.rows.get(this.scroll + i);
+		for (int i = 0; i < this.visibleRows && this.scroll + i < this.lines(); i++) {
+			int row = this.rowOn(this.scroll + i);
 			int y = this.rowY(i);
+			if (row < 0) {
+				// What the search found in the other folders goes under this, each row saying which folder.
+				graphics.centeredText(this.font, Component.translatable("diorama.waypoints.other_folders"), cx, y + 8, HINT);
+				graphics.fill(left, y + ROW - 3, right, y + ROW - 2, 0xFF606060);
+				continue;
+			}
+			Waypoint waypoint = this.rows.get(row);
+			boolean other = this.otherStart >= 0 && row >= this.otherStart;
+			// A row from another folder is dimmed when that folder is hidden, not when this one is.
+			boolean inHidden = other ? store != null && store.folderHidden(store.folderKey(waypoint)) : folderHidden;
 			boolean selected = waypoint == this.selected;
 			if (selected) {
 				ScreenArt.selection(graphics, left, y, right, y + ROW);
@@ -700,7 +780,7 @@ public final class WaypointListScreen extends Screen {
 			int room = right - (selected ? this.actionsWidth() + 4 : 6) - (left + textLeft);
 			String full = waypoint.shownName();
 			String name = this.fit(full, room);
-			graphics.text(this.font, name, left + textLeft, y + 4, waypoint.visible && !folderHidden ? 0xFFFFFFFF : HIDDEN, true);
+			graphics.text(this.font, name, left + textLeft, y + 4, waypoint.visible && !inHidden ? 0xFFFFFFFF : HIDDEN, true);
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
@@ -711,6 +791,13 @@ public final class WaypointListScreen extends Screen {
 				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
+			}
+			// Its folder, unless that's its dimension's own and the dimension is named already.
+			if (other && store != null) {
+				String key = store.folderKey(waypoint);
+				if (waypoint.dimension.equals(here) || !key.equals(WaypointStore.dimensionKey(waypoint.dimension))) {
+					detail = this.folderName(key) + " · " + detail;
+				}
 			}
 			if (!waypoint.visible) {
 				detail += "  ·  " + Component.translatable("diorama.waypoint.hidden").getString();
@@ -739,7 +826,7 @@ public final class WaypointListScreen extends Screen {
 	/** The scrollbar: its x, the handle's height and how far down the track it sits. */
 	private int[] scrollbar() {
 		int track = this.listBottom - LIST_TOP;
-		int handle = Math.max(ScreenArt.SCROLLER_MIN, Math.min(track - 8, track * this.visibleRows / Math.max(1, this.rows.size())));
+		int handle = Math.max(ScreenArt.SCROLLER_MIN, Math.min(track - 8, track * this.visibleRows / Math.max(1, this.lines())));
 		int top = this.maxScroll() == 0 ? 0 : (track - handle) * this.scroll / this.maxScroll();
 		return new int[] {this.width / 2 + LIST_WIDTH / 2 + 4, handle, top};
 	}
@@ -1000,7 +1087,8 @@ public final class WaypointListScreen extends Screen {
 			this.waystoneChanges = changes;
 			WaypointStore store = WaypointStore.get();
 			boolean hasWaystones = store != null && !store.waystones().isEmpty();
-			if (hasWaystones != this.hadWaystones || WaypointStore.WAYSTONES_KEY.equals(this.folderKey)) {
+			// A search may have waystones among its rows whatever the folder.
+			if (hasWaystones != this.hadWaystones || WaypointStore.WAYSTONES_KEY.equals(this.folderKey) || !this.query().isEmpty()) {
 				this.rebuildWidgets();
 			}
 		}
@@ -1042,6 +1130,7 @@ public final class WaypointListScreen extends Screen {
 		this.resort(store);
 		this.filter();
 		int index = this.rows.indexOf(waypoint);
+		index = index < 0 ? -1 : this.lineOf(index);
 		if (index >= 0 && index < this.scroll) {
 			this.scrollTo(index);
 		} else if (index >= this.scroll + this.visibleRows) {
@@ -1089,14 +1178,20 @@ public final class WaypointListScreen extends Screen {
 		return this.folders.isEmpty() ? "" : this.folder().name().getString();
 	}
 
-	/** The rows the search lets through, in the sort order. For tests. */
+	/** How many of {@link #shown} are the folder's own; the rest were found in other folders. For tests. */
+	public int shownInFolder() {
+		return this.otherStart < 0 ? this.rows.size() : this.otherStart;
+	}
+
+	/** The rows the search lets through, in the sort order: the folder's, then the other folders'. For tests. */
 	public List<Waypoint> shown() {
 		return List.copyOf(this.rows);
 	}
 
 	/** The middle of a waypoint's name on screen, or null when its row is scrolled out of view. For tests. */
 	public int @Nullable [] rowCentre(Waypoint waypoint) {
-		int index = this.rows.indexOf(waypoint) - this.scroll;
+		int row = this.rows.indexOf(waypoint);
+		int index = row < 0 ? -1 : this.lineOf(row) - this.scroll;
 		if (index < 0 || index >= this.visibleRows) {
 			return null;
 		}
