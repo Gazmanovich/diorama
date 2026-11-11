@@ -240,12 +240,21 @@ public final class WaypointEditScreen extends Screen {
 		}
 		this.folderMenu = new FolderMenu(this.font, entries, this.folder, button.getX(), button.getY(), button.getY() + button.getHeight(),
 			button.getWidth(), this.height);
+		// The button keeps the keyboard's focus while the list is open, and its tooltip would cover the list.
+		button.setTooltip(null);
+	}
+
+	private void closeFolderMenu() {
+		this.folderMenu = null;
+		if (this.folderButton != null) {
+			this.folderButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.waypoint.folder_tooltip")));
+		}
 	}
 
 	/** A click while the list of folders is open: on a folder it picks that folder, anywhere else it only closes the list. */
 	private void clickFolderMenu(double x, double y, int button) {
 		FolderMenu menu = this.folderMenu;
-		this.folderMenu = null;
+		this.closeFolderMenu();
 		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
 	}
 
@@ -256,12 +265,12 @@ public final class WaypointEditScreen extends Screen {
 	private void keyFolderMenu(int key) {
 		FolderMenu menu = this.folderMenu;
 		if (menu == null || key == InputConstants.KEY_ESCAPE) {
-			this.folderMenu = null;
+			this.closeFolderMenu();
 			return;
 		}
 		FolderMenu.Entry picked = menu.keyPressed(key);
 		if (picked != null) {
-			this.folderMenu = null;
+			this.closeFolderMenu();
 			this.pickFolder(picked);
 		}
 	}
