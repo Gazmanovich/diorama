@@ -38,6 +38,7 @@
 	"diorama.waypoints.empty_map": "或右键点击地图并选择 %s。",
 	"diorama.waypoints.search": "搜索路径点",
 	"diorama.waypoints.no_match": "没有匹配的路径点",
+	"diorama.waypoints.other_folders": "其他文件夹中",
 	"diorama.waypoints.edit": "编辑",
 	"diorama.waypoints.hide": "隐藏",
 	"diorama.waypoints.show": "显示",

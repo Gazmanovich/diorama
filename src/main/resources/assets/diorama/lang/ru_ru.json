@@ -38,6 +38,7 @@
     "diorama.waypoints.empty_map": "или нажмите правой кнопкой мыши по карте и выберите %s.",
     "diorama.waypoints.search": "Поиск точек",
     "diorama.waypoints.no_match": "Совпадений не найдено",
+    "diorama.waypoints.other_folders": "В других папках",
     "diorama.waypoints.edit": "Изменить",
     "diorama.waypoints.hide": "Скрыть",
     "diorama.waypoints.show": "Показать",

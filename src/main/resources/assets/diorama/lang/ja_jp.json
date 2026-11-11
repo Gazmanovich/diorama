@@ -38,6 +38,7 @@
 	"diorama.waypoints.empty_map": "マップを右クリックして「%s」を選択してください。",
 	"diorama.waypoints.search": "ウェイポイントを検索",
 	"diorama.waypoints.no_match": "一致するウェイポイントはありません",
+	"diorama.waypoints.other_folders": "他のフォルダー",
 	"diorama.waypoints.edit": "編集",
 	"diorama.waypoints.hide": "隠す",
 	"diorama.waypoints.show": "表示する",
