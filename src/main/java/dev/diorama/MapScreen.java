@@ -266,8 +266,10 @@ public final class MapScreen extends Screen {
 		if (maps == null || connection == null || this.minecraft.level == null) {
 			return List.of();
 		}
+		// Not the ones with the map off: what was mapped there before stays out of sight too.
 		List<String> saved = maps.saved(this.minecraft.level.dimension().identifier().toString(),
-			connection.levels().stream().map(level -> level.identifier().toString()).toList());
+			connection.levels().stream().map(level -> level.identifier().toString()).toList())
+			.stream().filter(dimension -> !ServerRules.mapOff(dimension)).toList();
 		// The one shown stays a stop even if nothing is left in it, or there'd be no way off it.
 		if (this.otherDimension == null || saved.contains(this.otherDimension)) {
 			return saved;

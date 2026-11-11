@@ -383,5 +383,12 @@
 	"diorama.maps.waypoints": "%s 个路径点",
 	"diorama.maps.made": "创建于 %s",
 	"diorama.maps.none": "没有地图",
-	"diorama.maps.not_saved": "无法保存地图列表；请查看游戏日志"
+	"diorama.maps.not_saved": "无法保存地图列表；请查看游戏日志",
+	"diorama.settings.map_off": "关闭地图的维度",
+	"diorama.settings.map_off.tooltip": "选择关闭 Diorama 的维度：没有小地图、地图和世界中的路径点，也不会记录那里的地形。适合需要不靠地图找路的维度。",
+	"diorama.settings.map_off.none": "无",
+	"diorama.map_off.about": "在勾选的维度中 Diorama 会关闭：没有小地图、地图和世界中的路径点，也不会记录那里的地形。",
+	"diorama.map_off.here": "Diorama 在此维度已关闭。可在地图设置的“外观”中更改“关闭地图的维度”。",
+	"diorama.map_off.here_server": "此服务器在此维度关闭了 Diorama。",
+	"diorama.map_off.here_file": "Diorama 在此维度已关闭，由 config/diorama-server.properties 设置。"
 }
