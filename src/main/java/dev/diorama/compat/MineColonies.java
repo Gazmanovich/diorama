@@ -63,7 +63,11 @@ public final class MineColonies {
 	private static Method hasPermission;
 	private static Object mapBorder;
 
+	/** Looks in a row that failed inside MineColonies or on what it gave: this many, and the class stays off. */
+	private static final int FAILED_LOOKS = 30;
+
 	private static int ticks;
+	private static int failedLooks;
 	/** The colony each chunk was last seen to belong to and shown for, by dimension, then chunk. */
 	private static final Map<ResourceKey<Level>, Map<Long, Integer>> handed = new HashMap<>();
 
@@ -130,11 +134,16 @@ public final class MineColonies {
 		}
 		try {
 			look(mc);
-		} catch (InvocationTargetException e) {
-			// MineColonies itself threw, as it can while the singleplayer server changes its
-			// claims under this read: the next look reads them again.
+			failedLooks = 0;
+		} catch (InvocationTargetException | RuntimeException e) {
+			// MineColonies threw, or its list did while this went through it: in singleplayer the
+			// list is the server's own, and the server can change it under this read. The next
+			// look reads it again; only a look that keeps failing is a MineColonies this can't read.
 			Diorama.LOGGER.debug("MineColonies couldn't give its colonies' land", e);
-		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			if (++failedLooks >= FAILED_LOOKS) {
+				fail(e);
+			}
+		} catch (ReflectiveOperationException | LinkageError e) {
 			fail(e);
 		}
 	}
@@ -174,14 +183,19 @@ public final class MineColonies {
 			hand(dimension, known, chunk.getKey(), colony);
 		}
 		// Chunks handed over before and not seen now: unclaimed on 1.21.1, where every claim is
-		// seen. On 1.20.1 they're out of sight and stay as they were while their colony shows.
+		// seen. On 1.20.1 they're out of sight and stay their colony's while it shows, which
+		// takes them back if another claims mod held them and let go.
 		for (Iterator<Map.Entry<Long, Integer>> it = known.entrySet().iterator(); it.hasNext(); ) {
 			Map.Entry<Long, Integer> chunk = it.next();
-			if (!seen.containsKey(chunk.getKey())
-				&& (claimData != null || !shown.computeIfAbsent(chunk.getValue(), id -> shows(manager, id, dimension, mc.player)))) {
-				long at = chunk.getKey();
+			if (seen.containsKey(chunk.getKey())) {
+				continue;
+			}
+			long at = chunk.getKey();
+			if (claimData != null || !shown.computeIfAbsent(chunk.getValue(), id -> shows(manager, id, dimension, mc.player))) {
 				Claims.updated(dimension, (int) (at >> 32), (int) at, Colony.class, null, false);
 				it.remove();
+			} else {
+				claim(dimension, (int) (at >> 32), (int) at, chunk.getValue());
 			}
 		}
 	}
@@ -200,11 +214,15 @@ public final class MineColonies {
 			}
 			return;
 		}
+		claim(dimension, x, z, colony);
+		known.put(at, colony);
+	}
+
+	private static void claim(ResourceKey<Level> dimension, int x, int z, int colony) {
 		Claims.Owner now = Claims.owner(dimension, x, z);
 		if (now == null || now instanceof Colony other && other.id() != colony) {
 			Claims.updated(dimension, x, z, Colony.class, new Colony(dimension, colony), false);
 		}
-		known.put(at, colony);
 	}
 
 	private static long key(int chunkX, int chunkZ) {

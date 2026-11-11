@@ -5061,6 +5061,35 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		int r = reach;
 		Diorama.LOGGER.info("MineColonies colony: {}, reaching {} chunks from its middle, {} chunks in all", colony, reach, chunks);
+		// The same land MineColonies' server gives the colony, chunk for chunk.
+		Set<Long> owned = world.getServer().computeOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object manager = managers.getMethod("getInstance").invoke(null);
+				java.lang.reflect.Method colonyAt = managers.getMethod("getIColony", net.minecraft.world.level.Level.class, BlockPos.class);
+				Set<Long> found = new java.util.HashSet<>();
+				for (int x = -12; x <= 12; x++) {
+					for (int z = -12; z <= 12; z++) {
+						if (colonyAt.invoke(manager, server.overworld(), new BlockPos(cx + x * 16, y, cz + z * 16)) != null) {
+							found.add((long) x << 32 | z & 0xFFFFFFFFL);
+						}
+					}
+				}
+				return found;
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't ask MineColonies' colony manager whose each chunk is", e);
+			}
+		});
+		for (int x = -12; x <= 12; x++) {
+			for (int z = -12; z <= 12; z++) {
+				if (owned.contains((long) x << 32 | z & 0xFFFFFFFFL) != (claimAt(context, chunkX + x, chunkZ + z) != null)) {
+					throw new AssertionError("The map and MineColonies disagree about the chunk " + x + ", " + z + " from the colony's middle: MineColonies has " + owned.size() + " chunks, the map " + chunks);
+				}
+			}
+		}
+		if (owned.size() < 9) {
+			throw new AssertionError("MineColonies gave the colony only " + owned.size() + " chunks");
+		}
 		if (reach < 1 || reach > 4 || claimAt(context, chunkX - reach, chunkZ) == null || claimAt(context, chunkX - reach - 1, chunkZ) != null
 			|| claimAt(context, chunkX, chunkZ + reach) == null || claimAt(context, chunkX, chunkZ + reach + 1) != null) {
 			throw new AssertionError("The colony's land isn't the block of chunks round its middle: it reaches " + reach + " chunks east, " + chunks + " chunks in all");
