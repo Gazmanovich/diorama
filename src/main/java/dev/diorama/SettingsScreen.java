@@ -84,11 +84,9 @@ public final class SettingsScreen extends Screen {
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
 		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
 		minimap.toggle("legible_caves", () -> s.legibleCaves, v -> s.legibleCaves = v);
-		Settings.Corner[] corners = Settings.Corner.values();
-		minimap.cycle("corner", () -> s.minimapCorner.ordinal(), corners.length, i -> s.minimapCorner = corners[i],
-			i -> Component.translatable("diorama.settings.corner." + corners[i].name().toLowerCase(Locale.ROOT)));
+		minimap.open("position", MinimapPositionScreen.placeName(), () -> this.minecraft.gui.setScreen(new MinimapPositionScreen(this)));
 		minimap.choice("game_time", Settings.GameTime.values(), () -> s.gameTime, v -> s.gameTime = v);
-		// Beside Corner, so the tab doesn't grow.
+		// Beside Position, so the tab doesn't grow.
 		minimap.lastTwoSideBySide();
 		int sizes = (Settings.MAX_SIZE - Settings.MIN_SIZE) / Settings.SIZE_STEP + 1;
 		minimap.slider("size", (s.minimapSize - Settings.MIN_SIZE) / Settings.SIZE_STEP, sizes,
