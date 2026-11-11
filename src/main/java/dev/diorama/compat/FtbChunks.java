@@ -156,7 +156,7 @@ public final class FtbChunks {
 			ResourceKey<Level> key = (ResourceKey<Level>) dimensionKey.get(dimension);
 			UUID team = (UUID) taskTeam.get(task);
 			Team owner = team == null || team.equals(NO_TEAM) ? null : new Team(team);
-			Claims.updated(key, chunkX.getInt(chunk), chunkZ.getInt(chunk), owner, chunkForceLoaded.getBoolean(chunk));
+			Claims.updated(key, chunkX.getInt(chunk), chunkZ.getInt(chunk), Team.class, owner, chunkForceLoaded.getBoolean(chunk));
 		} catch (InvocationTargetException e) {
 			// FTB Chunks itself threw: skip this update, as it would have.
 			Diorama.LOGGER.debug("FTB Chunks couldn't give a chunk's claim", e);

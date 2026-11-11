@@ -239,7 +239,7 @@ public final class OpenPartiesAndClaims {
 			for (Area chunk : chunksChanged) {
 				if (!dimensionsChanged.contains(chunk.dimension()) && !regionsChanged.contains(new Area(chunk.dimension(), chunk.x() >> 5, chunk.z() >> 5))) {
 					Object state = claimAt.invoke(manager, chunk.dimension(), chunk.x(), chunk.z());
-					Claims.updated(key(chunk.dimension()), chunk.x(), chunk.z(), owner(state, chunk.dimension()), false);
+					Claims.updated(key(chunk.dimension()), chunk.x(), chunk.z(), Owner.class, owner(state, chunk.dimension()), false);
 				}
 			}
 		} catch (InvocationTargetException e) {
@@ -257,7 +257,7 @@ public final class OpenPartiesAndClaims {
 
 	/** Every claim in a dimension, Diorama's old ones forgotten first; {@code dimension} null when it has none. */
 	private static void readDimension(Object id, @Nullable Object dimension) throws ReflectiveOperationException {
-		Claims.forget(key(id));
+		Claims.forget(key(id), Owner.class);
 		if (dimension == null) {
 			return;
 		}
@@ -275,7 +275,7 @@ public final class OpenPartiesAndClaims {
 		for (int i = 0; i < REGION_SIZE; i++) {
 			for (int j = 0; j < REGION_SIZE; j++) {
 				Object state = region == null ? null : regionClaim.invoke(region, i, j);
-				Claims.updated(key, x << 5 | i, z << 5 | j, owner(state, id), false);
+				Claims.updated(key, x << 5 | i, z << 5 | j, Owner.class, owner(state, id), false);
 			}
 		}
 	}

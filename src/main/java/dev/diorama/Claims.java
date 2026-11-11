@@ -94,9 +94,10 @@ public final class Claims {
 
 	/**
 	 * A chunk's owner as its claims mod has it now, null for no one, and whether it's force
-	 * loaded. Like FTB Chunks, an owner that can't be looked up owns nothing.
+	 * loaded. Like FTB Chunks, an owner that can't be looked up owns nothing. {@code source} is the
+	 * claims mod's kind of owner: a mod's "no one" leaves another mod's claim alone, in a game with both.
 	 */
-	public static void updated(ResourceKey<Level> dimension, int chunkX, int chunkZ, @Nullable Owner owner, boolean forceLoaded) {
+	public static void updated(ResourceKey<Level> dimension, int chunkX, int chunkZ, Class<? extends Owner> source, @Nullable Owner owner, boolean forceLoaded) {
 		Claim plain = owner == null ? null : owners.get(owner);
 		if (plain == null && owner != null) {
 			Optional<Claim> found = owner.look();
@@ -117,6 +118,9 @@ public final class Claims {
 			regions.put(region, chunks);
 		}
 		int i = index(chunkX, chunkZ);
+		if (claim == null && chunks[i] != null && chunks[i].owner().getClass() != source) {
+			return;
+		}
 		if (!Objects.equals(chunks[i], claim)) {
 			chunks[i] = claim;
 			changed.computeIfAbsent(dimension, d -> new HashSet<>()).add(region);
@@ -235,11 +239,20 @@ public final class Claims {
 		return true;
 	}
 
-	/** Forgets every claim in a dimension, for its claims mod to hand them all over again. */
-	public static void forget(ResourceKey<Level> dimension) {
-		Map<Region, Claim[]> regions = known.remove(dimension);
-		if (regions != null && !regions.isEmpty()) {
-			changed.computeIfAbsent(dimension, d -> new HashSet<>()).addAll(regions.keySet());
+	/** Forgets one claims mod's claims in a dimension, {@code source} its kind of owner, for it to hand them all over again. */
+	public static void forget(ResourceKey<Level> dimension, Class<? extends Owner> source) {
+		Map<Region, Claim[]> regions = known.get(dimension);
+		if (regions == null) {
+			return;
+		}
+		for (Map.Entry<Region, Claim[]> region : regions.entrySet()) {
+			Claim[] chunks = region.getValue();
+			for (int i = 0; i < chunks.length; i++) {
+				if (chunks[i] != null && chunks[i].owner().getClass() == source) {
+					chunks[i] = null;
+					changed.computeIfAbsent(dimension, d -> new HashSet<>()).add(region.getKey());
+				}
+			}
 		}
 	}
 

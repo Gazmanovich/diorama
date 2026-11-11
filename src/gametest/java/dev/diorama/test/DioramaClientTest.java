@@ -4885,8 +4885,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("opac-claims-05-minimap");
 
 		// Forgotten, as on joining a server, they're read again from Open Parties and Claims.
-		context.runOnClient(mc -> Claims.clear());
+		context.runOnClient(mc -> {
+			Claims.resetSlowestTick();
+			Claims.clear();
+		});
 		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX + 4, playerChunkZ) != null, 200);
+		Diorama.LOGGER.info("Open Parties and Claims claims read again in {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
 
 		// Unclaiming takes the tint away.
 		opacRequest(context, "requestAreaUnclaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
