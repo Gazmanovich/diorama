@@ -117,7 +117,8 @@ final class FarZoomTest {
 		} catch (InterruptedException e) {
 			throw new AssertionError(e);
 		}
-		Diorama.LOGGER.info("far-zoom: levels 6 to {} of an old map built in {} s", TileKey.MAX_LOD, (System.nanoTime() - start) / 1_000_000_000.0);
+		Diorama.LOGGER.info("far-zoom: levels 6 to {} of an old map built in {} s; on disk, levels 1 to 5 take {} KB and levels 6 to {} take {} KB",
+			TileKey.MAX_LOD, (System.nanoTime() - start) / 1_000_000_000.0, kilobytes(folder, 1, 5), TileKey.MAX_LOD, kilobytes(folder, 6, TileKey.MAX_LOD));
 		for (int lod = 6; lod <= TileKey.MAX_LOD; lod++) {
 			int after = store.saved(lod).size();
 			if (after != before[lod] || after == 0) {
@@ -214,6 +215,25 @@ final class FarZoomTest {
 				Files.copy(from, to);
 			}
 		}
+	}
+
+	/** How much disk the overview tiles of levels {@code from} to {@code to} take. */
+	private static long kilobytes(Path folder, int from, int to) {
+		long bytes = 0;
+		for (int lod = from; lod <= to; lod++) {
+			Path dir = folder.resolve("lod" + lod);
+			if (!Files.isDirectory(dir)) {
+				continue;
+			}
+			try (java.util.stream.Stream<Path> files = Files.list(dir)) {
+				for (Path file : files.toList()) {
+					bytes += Files.size(file);
+				}
+			} catch (IOException e) {
+				throw new AssertionError(e);
+			}
+		}
+		return bytes / 1024;
 	}
 
 	private static void catchUp(TileStore store) {
