@@ -62,9 +62,21 @@ public final class Settings {
 	/** In GUI pixels. Saved as a number; files from before it was a slider say SMALL, MEDIUM or LARGE. */
 	@JsonAdapter(SizeAdapter.class)
 	public int minimapSize = 96;
+	/** The corner whose edges the minimap is placed by, the nearest to where it was put. */
 	public Corner minimapCorner = Corner.TOP_RIGHT;
+	/**
+	 * How far in from that corner's edges the minimap sits, in GUI pixels: from the side edge to
+	 * the map, and from the top edge to the map or from the bottom edge to the lines under it.
+	 * Files from before the position screen leave them where every corner put it.
+	 */
+	public int minimapOffsetX = MinimapHud.MARGIN;
+	public int minimapOffsetY = MinimapHud.MARGIN;
+	/** Midway across the top or bottom of the screen, as Xaero's Minimap's Centered; {@link #minimapOffsetX} waits for when it isn't. */
+	public boolean minimapCentered = false;
 	/** The minimap's size while the enlarge key is held, in percent of {@link #minimapSize}. */
 	public int minimapEnlarged = 200;
+	/** The enlarge key switches the enlarged size on and off instead of being held (Xaero's "Toggled Enlarged Minimap"). */
+	public boolean minimapEnlargeToggle = false;
 	/** One of {@link #ZOOMS}. Saved as the value, so adding a step doesn't move anyone's zoom. */
 	public double minimapPixelsPerBlock = 2;
 	/** Files from before {@link #minimapPixelsPerBlock} say this instead, a place in the steps as they were. Read once. */
@@ -380,6 +392,8 @@ public final class Settings {
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;
 		}
+		settings.minimapOffsetX = Math.max(MinimapHud.MARGIN, settings.minimapOffsetX);
+		settings.minimapOffsetY = Math.max(MinimapHud.MARGIN, settings.minimapOffsetY);
 		if (settings.dayNight == null) {
 			settings.dayNight = DayNight.FOLLOW;
 		}

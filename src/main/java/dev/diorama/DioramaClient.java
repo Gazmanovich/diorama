@@ -40,14 +40,26 @@ public final class DioramaClient {
 	public static final KeyMapping ZOOM_OUT = new KeyMapping("key.diorama.zoom_out", InputConstants.KEY_MINUS, CATEGORY);
 	public static final KeyMapping SETTINGS = new KeyMapping("key.diorama.settings", InputConstants.UNKNOWN.getValue(), CATEGORY);
 	public static final KeyMapping TOGGLE_MINIMAP = new KeyMapping("key.diorama.toggle_minimap", InputConstants.UNKNOWN.getValue(), CATEGORY);
-	/** Held, the minimap shows at its enlarged size. Unbound to start with: zoom mods and others claim the free letters. */
+	/**
+	 * Held, the minimap shows at its enlarged size; with {@link Settings#minimapEnlargeToggle}, each press
+	 * switches it. Unbound to start with: zoom mods and others claim the free letters.
+	 */
 	public static final KeyMapping ENLARGE_MINIMAP = new KeyMapping("key.diorama.enlarge_minimap", InputConstants.UNKNOWN.getValue(), CATEGORY);
 	/** Works on the map, as its dimension button does; unbound, like Xaero's World Map's. */
 	public static final KeyMapping TOGGLE_DIMENSION = new KeyMapping("key.diorama.toggle_dimension", InputConstants.UNKNOWN.getValue(), CATEGORY);
 	/** Every key binding, for the loader to register. */
 	public static final List<KeyMapping> KEY_MAPPINGS = List.of(OPEN_MAP, NEW_WAYPOINT, WAYPOINT_LIST, ZOOM_IN, ZOOM_OUT, SETTINGS, TOGGLE_MINIMAP, ENLARGE_MINIMAP, TOGGLE_DIMENSION);
 
+	/** Switched by the enlarge key while {@link Settings#minimapEnlargeToggle} is on; off outside a world, as Xaero's, or with the setting off. */
+	private static boolean enlargeToggled;
+	private static boolean enlargeWasDown;
+
 	private DioramaClient() {
+	}
+
+	/** Whether the minimap shows at its enlarged size: the enlarge key held, or switched on. */
+	public static boolean minimapEnlarged() {
+		return Settings.get().minimapEnlargeToggle ? enlargeToggled : ENLARGE_MINIMAP.isDown();
 	}
 
 	private static void changeZoom(int step) {
@@ -108,6 +120,19 @@ public final class DioramaClient {
 			Settings s = Settings.get();
 			s.minimap = !s.minimap;
 			s.save();
+		}
+		// Presses are taken with the setting off too, so ones made while holding don't count once it goes on.
+		// Held past the key repeat delay the key keeps clicking: only a press that starts it counts.
+		boolean pressed = false;
+		while (ENLARGE_MINIMAP.consumeClick()) {
+			pressed = true;
+		}
+		if (pressed && !enlargeWasDown) {
+			enlargeToggled = !enlargeToggled;
+		}
+		enlargeWasDown = ENLARGE_MINIMAP.isDown();
+		if (mc.level == null || !Settings.get().minimapEnlargeToggle) {
+			enlargeToggled = false;
 		}
 		while (WAYPOINT_LIST.consumeClick()) {
 			if (mc.gui.screen() == null && mc.level != null) {
