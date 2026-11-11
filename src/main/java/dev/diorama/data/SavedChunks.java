@@ -199,10 +199,11 @@ public final class SavedChunks implements ChunkSave {
 
 	/**
 	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, so the
-	 * files list them. A chunk it keeps loaded past the client's view, such as one Distant Horizons
-	 * had it generate near the player, is otherwise only written by the next autosave, and while it
-	 * waits the map shows a ring of fog with the land beyond it filled in. Xaero's World Map does
-	 * the same before it reads the save. A server with time to spare has written most of them already.
+	 * files list them: at this listing, or the next if its disk writes are still going. The server
+	 * writes those in time it has to spare and at its autosave; a busy one, such as one Distant
+	 * Horizons has generating chunks near the player, leaves them unwritten for minutes, and the map
+	 * showed a ring of fog round the player with the land beyond it filled in. Xaero's World Map does
+	 * the same before it reads the save.
 	 */
 	private void saveHeldChunks() {
 		try {
