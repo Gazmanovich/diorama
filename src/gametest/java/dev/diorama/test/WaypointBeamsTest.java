@@ -82,18 +82,21 @@ final class WaypointBeamsTest {
 		expect(all, onDeath, death, true, "all, the death marker");
 		expect(all, onHome, home, true, "all, the ordinary waypoint");
 
-		// A hidden waypoint has no beam, and neither has one past the distance limit.
-		context.runOnClient(mc -> {
-			home.visible = false;
-			Settings.get().waypointDistance = 64;
-		});
+		// A waypoint past the distance limit has no beam, one inside it has, and a temporary one keeps
+		// its beam at any distance, as it keeps its pin. Home is about 85 blocks off.
+		context.runOnClient(mc -> Settings.get().waypointDistance = 64);
 		BufferedImage limited = shot(context, Settings.Beams.ALL, "beams-day-limited");
-		expect(limited, onHome, home, false, "all, a hidden waypoint");
-		expect(limited, onCamp, camp, true, "all with a distance limit, the temporary waypoint");
+		expect(limited, onHome, home, false, "all and a distance of 64, the ordinary waypoint past it");
+		expect(limited, onDeath, death, true, "all and a distance of 64, the death marker");
+		context.runOnClient(mc -> Settings.get().waypointDistance = 128);
+		expect(shot(context, Settings.Beams.ALL, "beams-day-limit-128"), onHome, home, true, "all and a distance of 128, the ordinary waypoint inside it");
+		// A hidden waypoint has none.
 		context.runOnClient(mc -> {
-			home.visible = true;
 			Settings.get().waypointDistance = 0;
+			home.visible = false;
 		});
+		expect(shot(context, Settings.Beams.ALL, "beams-day-hidden"), onHome, home, false, "all, a hidden waypoint");
+		context.runOnClient(mc -> home.visible = true);
 
 		// From close by a beam fades, and is gone at the waypoint; looking up one, it narrows into the sky.
 		for (int away : new int[] {20, 8, 5, 2}) {
@@ -102,10 +105,12 @@ final class WaypointBeamsTest {
 			world.getServer().runCommand(spot + "0");
 			context.waitTicks(220);
 			context.takeScreenshot("beams-near-" + away);
-			if (away == 8) {
-				world.getServer().runCommand(spot + "-55");
+			if (away == 20) {
+				// Looking nearly straight up it: the beam still shows, right to where it leaves the screen.
+				world.getServer().runCommand(spot + "-80");
 				context.waitTicks(220);
-				context.takeScreenshot("beams-look-up");
+				BufferedImage up = shot(context, Settings.Beams.ALL, "beams-look-up");
+				expect(up, points(context, home, up, 160), home, true, "looking up, the ordinary waypoint");
 			}
 		}
 
@@ -179,8 +184,13 @@ final class WaypointBeamsTest {
 
 	/** Where on a screenshot the points 8 to 40 blocks above a waypoint's spot are, those that are on it. */
 	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot) {
+		return points(context, waypoint, shot, 40);
+	}
+
+	/** The same up to {@code highest} blocks above it, for a view up the beam. */
+	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int highest) {
 		List<int[]> points = new ArrayList<>();
-		for (int up = 8; up <= 40; up += 4) {
+		for (int up = 8; up <= highest; up += 4) {
 			double y = waypoint.y + 1.0 + up;
 			float[] screen = context.computeOnClient(mc -> WorldProjection.project(waypoint.x + 0.5, y, waypoint.z + 0.5, shot.getWidth(), shot.getHeight()));
 			if (screen != null && screen[0] >= 0 && screen[1] >= 0 && screen[0] < shot.getWidth() && screen[1] < shot.getHeight()) {

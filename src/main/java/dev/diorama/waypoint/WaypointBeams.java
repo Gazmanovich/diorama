@@ -21,6 +21,8 @@ import org.jspecify.annotations.Nullable;
 public final class WaypointBeams {
 	/** How far above its waypoint a beam reaches, in blocks. */
 	static final int HEIGHT = 256;
+	/** Its top this many blocks fade out. */
+	private static final int TIP = 64;
 	/**
 	 * Widths in blocks: the beam, and the dark edge around it that keeps a pale beam readable against
 	 * clouds and snow, as the pins' outlines do. A beacon's beam is 0.4 wide.
@@ -39,14 +41,19 @@ public final class WaypointBeams {
 	private static final double DIM_FROM = 256;
 	private static final double DIM_TO = 2048;
 	private static final float FAR_ALPHA = 0.7F;
+	/** How far past the screen's edges a beam is still drawn, in GUI pixels: room for its width. */
+	private static final float MARGIN = 96;
 	/** Nearer the camera's plane than this a point can't be projected; the same as {@link WorldProjection#project}. */
 	private static final float NEAR = 0.05F;
-	/** The texture's edge: soft sides across, and the fade at the top of the beam down it. */
+	/** The texture's edge: soft sides across, and clear to solid down it for the beam's tip. */
 	private static final int TEXTURE = 8;
 	private static final float[] ACROSS = {0, 0.4F, 1, 1, 1, 1, 0.4F, 0};
 	/** How much wider than a beam its quad is, for those soft sides. */
 	private static final float SOFT = 1.6F;
-	private static final float[] DOWN = {0, 0.5F, 1, 1, 1, 1, 1, 1};
+	private static final float[] DOWN = {0, 1, 1, 1, 1, 1, 1, 1};
+	/** Where down the texture a beam is clear, the middle of its first row, and where it's solid, the middle of its second. */
+	private static final float CLEAR_V = 0.5F / TEXTURE;
+	private static final float SOLID_V = 1.5F / TEXTURE;
 
 	private static @Nullable MapTexture texture;
 
@@ -82,46 +89,6 @@ public final class WaypointBeams {
 		if (ground <= GONE) {
 			return;
 		}
-		if (!WorldProjection.clip(dx, dy, dz, this.base) || !WorldProjection.clip(dx, dy + HEIGHT, dz, this.top)) {
-			return;
-		}
-		// Cut the beam where it passes behind the camera, as the game cuts anything it draws.
-		float baseV = 1;
-		float topV = 0;
-		if (this.base.w < NEAR && this.top.w < NEAR) {
-			return;
-		}
-		if (this.base.w < NEAR) {
-			float t = (NEAR - this.base.w) / (this.top.w - this.base.w);
-			this.base.lerp(this.top, t);
-			baseV = 1 - t;
-		} else if (this.top.w < NEAR) {
-			float t = (NEAR - this.top.w) / (this.base.w - this.top.w);
-			this.top.lerp(this.base, t);
-			topV = t;
-		}
-		float ax = (this.base.x / this.base.w + 1) / 2 * width;
-		float ay = (1 - this.base.y / this.base.w) / 2 * height;
-		float bx = (this.top.x / this.top.w + 1) / 2 * width;
-		float by = (1 - this.top.y / this.top.w) / 2 * height;
-		// One block at the camera's plane distance 1 is this many GUI pixels.
-		float perBlock = WorldProjection.focal() * height / 2;
-		float gui = (float) Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
-		float reach = Math.min(width, Math.max(EDGE_MIN / gui, EDGE * perBlock / Math.min(this.base.w, this.top.w))) / 2 * SOFT;
-		if (Math.max(ax, bx) < -reach || Math.min(ax, bx) > width + reach || Math.max(ay, by) < -reach || Math.min(ay, by) > height + reach) {
-			return;
-		}
-		float length = (float) Math.hypot(ax - bx, ay - by);
-		if (length < 0.5F) {
-			// Seen end on, from right under or over it.
-			return;
-		}
-		// Along the beam on screen from its top to its base, and to the left of that.
-		float ex = (ax - bx) / length;
-		float ey = (ay - by) / length;
-		float lx = -ey;
-		float ly = ex;
-
 		double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 		float near = (float) Math.min(1, (ground - GONE) / (FULL - GONE));
 		float far = 1 - (1 - FAR_ALPHA) * (float) Math.max(0, Math.min(1, (distance - DIM_FROM) / (DIM_TO - DIM_FROM)));
@@ -129,11 +96,99 @@ public final class WaypointBeams {
 		int saved = waypoint.color >>> 24 == 0 ? 0xFF : waypoint.color >>> 24;
 		float strength = near * (2 - near) * far * saved / 255.0F;
 		int rgb = waypoint.color & 0xFFFFFF;
-		// A column's width on screen falls off as one over its distance, which is a straight taper.
-		this.quad(ax, ay, bx, by, lx, ly, half(EDGE, EDGE_MIN, perBlock, this.base.w, gui, width), half(EDGE, EDGE_MIN, perBlock, this.top.w, gui, width),
-			baseV, topV, z, alpha(EDGE_ALPHA * strength) << 24 | edgeColor(rgb));
-		this.quad(ax, ay, bx, by, lx, ly, half(CORE, CORE_MIN, perBlock, this.base.w, gui, width), half(CORE, CORE_MIN, perBlock, this.top.w, gui, width),
-			baseV, topV, z, alpha(CORE_ALPHA * strength) << 24 | coreColor(rgb));
+		int edge = alpha(EDGE_ALPHA * strength) << 24 | edgeColor(rgb);
+		int core = alpha(CORE_ALPHA * strength) << 24 | coreColor(rgb);
+		// The fading tip is its own piece. A quad's texture runs evenly along it on screen, and seen
+		// from below nearly all of a beam's length on screen is its lowest few blocks: one piece would
+		// spread the fade down over what the player sees of it.
+		this.piece(dx, dy, dz, 0, HEIGHT - TIP, SOLID_V, SOLID_V, width, height, z, edge, core);
+		this.piece(dx, dy, dz, HEIGHT - TIP, HEIGHT, SOLID_V, CLEAR_V, width, height, z, edge, core);
+	}
+
+	/** The beam between two heights above its foot, with the texture row at each end. */
+	private void piece(double dx, double dy, double dz, double from, double to, float baseV, float topV, float width, float height, float z, int edge, int core) {
+		if (!WorldProjection.clip(dx, dy + from, dz, this.base) || !WorldProjection.clip(dx, dy + to, dz, this.top)) {
+			return;
+		}
+		// Cut the beam where it passes behind the camera, as the game cuts anything it draws.
+		if (this.base.w < NEAR && this.top.w < NEAR) {
+			return;
+		}
+		if (this.base.w < NEAR) {
+			float t = (NEAR - this.base.w) / (this.top.w - this.base.w);
+			this.base.lerp(this.top, t);
+			baseV += (topV - baseV) * t;
+		} else if (this.top.w < NEAR) {
+			float t = (NEAR - this.top.w) / (this.base.w - this.top.w);
+			this.top.lerp(this.base, t);
+			topV += (baseV - topV) * t;
+		}
+		float ax = (this.base.x / this.base.w + 1) / 2 * width;
+		float ay = (1 - this.base.y / this.base.w) / 2 * height;
+		float bx = (this.top.x / this.top.w + 1) / 2 * width;
+		float by = (1 - this.top.y / this.top.w) / 2 * height;
+		// The part of it on screen, as how far along from the top (0) to the base (1): an end cut at
+		// the camera's plane lies thousands of pixels off, and is as many wide.
+		float s0 = 0;
+		float s1 = 1;
+		for (int side = 0; side < 4; side++) {
+			// Inside is where p + d * s is at least zero: past the left edge, the right, the top, the bottom.
+			float p = side == 0 ? bx + MARGIN : side == 1 ? width + MARGIN - bx : side == 2 ? by + MARGIN : height + MARGIN - by;
+			float d = side == 0 ? ax - bx : side == 1 ? bx - ax : side == 2 ? ay - by : by - ay;
+			if (d == 0) {
+				if (p < 0) {
+					return;
+				}
+			} else if (d > 0) {
+				s0 = Math.max(s0, -p / d);
+			} else {
+				s1 = Math.min(s1, -p / d);
+			}
+		}
+		float length = (float) Math.hypot(ax - bx, ay - by);
+		if (s0 >= s1 || length * (s1 - s0) < 0.5F) {
+			// Off the screen, or seen end on from right under or over it.
+			return;
+		}
+		// Along the beam on screen from its top to its base, and to the left of that.
+		float lx = -(ay - by) / length;
+		float ly = (ax - bx) / length;
+		// GUI pixels a block covers at each end: one block at the camera's plane distance 1 is perBlock.
+		// A column's width on screen falls off as one over its distance, which is a straight taper along it.
+		float perBlock = WorldProjection.focal() * height / 2;
+		float topScale = perBlock / this.top.w;
+		float baseScale = perBlock / this.base.w;
+		float gui = (float) Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
+		float first = topScale + (baseScale - topScale) * s0;
+		float last = topScale + (baseScale - topScale) * s1;
+		float taper = Math.max(first, last) / Math.min(first, last);
+		// A quad much wider at one end than the other bends its texture, so a beam seen from below
+		// goes in several, each drawn as two halves that meet on the beam's middle line.
+		int steps = taper < 1.02F ? 1 : taper < 2 ? 2 : taper < 6 ? 4 : 8;
+		for (int layer = 0; layer < 2; layer++) {
+			float blocks = layer == 0 ? EDGE : CORE;
+			float least = (layer == 0 ? EDGE_MIN : CORE_MIN) / gui;
+			int argb = layer == 0 ? edge : core;
+			for (int i = 0; i < steps; i++) {
+				float sa = s0 + (s1 - s0) * i / steps;
+				float sb = s0 + (s1 - s0) * (i + 1) / steps;
+				float tx = bx + (ax - bx) * sa;
+				float ty = by + (ay - by) * sa;
+				float ux = bx + (ax - bx) * sb;
+				float uy = by + (ay - by) * sb;
+				float th = Math.max(least, blocks * (topScale + (baseScale - topScale) * sa)) / 2 * SOFT;
+				float uh = Math.max(least, blocks * (topScale + (baseScale - topScale) * sb)) / 2 * SOFT;
+				float tv = topV + (baseV - topV) * sa;
+				float uv = topV + (baseV - topV) * sb;
+				// Counter-clockwise from the top left, the order MapCanvas draws.
+				if (steps == 1) {
+					this.quad(tx + lx * th, ty + ly * th, ux + lx * uh, uy + ly * uh, ux - lx * uh, uy - ly * uh, tx - lx * th, ty - ly * th, 0, 1, tv, uv, z, argb);
+				} else {
+					this.quad(tx + lx * th, ty + ly * th, ux + lx * uh, uy + ly * uh, ux, uy, tx, ty, 0, 0.5F, tv, uv, z, argb);
+					this.quad(tx, ty, ux, uy, ux - lx * uh, uy - ly * uh, tx - lx * th, ty - ly * th, 0.5F, 1, tv, uv, z, argb);
+				}
+			}
+		}
 	}
 
 	/** Draws what was added since {@link #begin}. */
@@ -154,11 +209,6 @@ public final class WaypointBeams {
 		MapCanvas.of(graphics).rects(texture, Sampling.CLAMP_LINEAR, this.xyz, this.uvs, this.colors, this.quads);
 	}
 
-	/** Half of what a column {@code blocks} wide is drawn at, in GUI pixels, at clip distance {@code w}. */
-	private static float half(float blocks, float minPixels, float perBlock, float w, float gui, float width) {
-		return Math.min(width, Math.max(minPixels / gui, blocks * perBlock / w)) / 2 * SOFT;
-	}
-
 	private static int alpha(float alpha) {
 		return Math.max(0, Math.min(255, Math.round(alpha * 255)));
 	}
@@ -176,7 +226,8 @@ public final class WaypointBeams {
 		return (rgb >> 16 & 0xFF) / 4 << 16 | (rgb >> 8 & 0xFF) / 4 << 8 | (rgb & 0xFF) / 4;
 	}
 
-	private void quad(float ax, float ay, float bx, float by, float lx, float ly, float baseHalf, float topHalf, float baseV, float topV, float z, int argb) {
+	/** A quad by its corners, top left, base left, base right, top right, with the texture's columns at its sides and rows at its ends. */
+	private void quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, float leftU, float rightU, float topV, float baseV, float z, int argb) {
 		if (this.quads == this.colors.length) {
 			int n = this.quads * 2;
 			this.xyz = Arrays.copyOf(this.xyz, n * 12);
@@ -185,11 +236,10 @@ public final class WaypointBeams {
 		}
 		int p = this.quads * 12;
 		int t = this.quads * 8;
-		// Counter-clockwise from the top left, the order MapCanvas draws: top left, base left, base right, top right.
-		this.corner(p, t, bx + lx * topHalf, by + ly * topHalf, z, 0, topV);
-		this.corner(p + 3, t + 2, ax + lx * baseHalf, ay + ly * baseHalf, z, 0, baseV);
-		this.corner(p + 6, t + 4, ax - lx * baseHalf, ay - ly * baseHalf, z, 1, baseV);
-		this.corner(p + 9, t + 6, bx - lx * topHalf, by - ly * topHalf, z, 1, topV);
+		this.corner(p, t, x0, y0, z, leftU, topV);
+		this.corner(p + 3, t + 2, x1, y1, z, leftU, baseV);
+		this.corner(p + 6, t + 4, x2, y2, z, rightU, baseV);
+		this.corner(p + 9, t + 6, x3, y3, z, rightU, topV);
 		this.colors[this.quads++] = argb;
 	}
 
