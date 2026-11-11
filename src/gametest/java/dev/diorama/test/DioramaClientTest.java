@@ -4912,6 +4912,33 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX + 4, playerChunkZ) != null, 200);
 		Diorama.LOGGER.info("Open Parties and Claims claims read again in {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
 
+		// What a big server costs: 400 regions with 64 claims each, 50 owners, made on the server
+		// and sent to the client, then all read again as on joining.
+		int bigX = (cx >> 9) - 30;
+		int bigZ = cz >> 9;
+		int lastX = (bigX + 19) << 5 | 28;
+		int lastZ = (bigZ + 19) << 5 | 28;
+		context.runOnClient(mc -> Claims.resetSlowestTick());
+		long sent = System.nanoTime();
+		opacBigServer(world, bigX, bigZ, true);
+		context.waitFor(mc -> Claims.get().at(lastX, lastZ) != null, 2400);
+		long arrived = (System.nanoTime() - sent) / 1_000_000;
+		String arrivalParts = context.computeOnClient(mc -> Claims.slowestTickParts());
+		long arrival = context.computeOnClient(mc -> Claims.resetSlowestTick());
+		long[] reads = new long[3];
+		for (int k = 0; k < reads.length; k++) {
+			context.runOnClient(mc -> {
+				Claims.resetSlowestTick();
+				Claims.clear();
+			});
+			context.waitFor(mc -> Claims.get().at(lastX, lastZ) != null, 200);
+			reads[k] = context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000;
+		}
+		Diorama.LOGGER.info("Open Parties and Claims big server: 25600 claims in 400 regions on the map {} ms after claiming, slowest tick while they arrived {} us ({}), all read again in {} us",
+			arrived, arrival / 1000, arrivalParts, java.util.Arrays.toString(reads));
+		opacBigServer(world, bigX, bigZ, false);
+		context.waitFor(mc -> Claims.get().at(lastX, lastZ) == null, 2400);
+
 		// Unclaiming takes the tint away.
 		opacRequest(context, "requestAreaUnclaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
 		long unclaimed = System.nanoTime();
@@ -4927,6 +4954,39 @@ public class DioramaClientTest implements FabricClientGameTest {
 		opacRequest(context, "requestAreaUnclaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
 		context.waitFor(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) == null, 600);
 		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	/** Claims (or unclaims) 64 chunks in each of 20 by 20 regions from {@code regionX, regionZ}, for 50 owners, through Open Parties and Claims' server API. */
+	private static void opacBigServer(TestSingleplayerContext world, int regionX, int regionZ, boolean claim) {
+		world.getServer().runOnServer(server -> {
+			try {
+				Object api = Class.forName("xaero.pac.common.server.api.OpenPACServerAPI").getMethod("get", net.minecraft.server.MinecraftServer.class).invoke(null, server);
+				Object manager = api.getClass().getMethod("getServerClaimsManager").invoke(api);
+				Class<?> claims = Class.forName("xaero.pac.common.server.claims.api.IServerClaimsManagerAPI");
+				net.minecraft.resources.Identifier overworld = net.minecraft.world.level.Level.OVERWORLD.identifier();
+				java.lang.reflect.Method method = claim
+					? claims.getMethod("claim", net.minecraft.resources.Identifier.class, UUID.class, int.class, int.class, int.class, boolean.class)
+					: claims.getMethod("unclaim", net.minecraft.resources.Identifier.class, int.class, int.class);
+				for (int rx = 0; rx < 20; rx++) {
+					for (int rz = 0; rz < 20; rz++) {
+						UUID owner = new UUID(0x0DAC, (rx * 20 + rz) % 50 + 2);
+						for (int i = 0; i < 8; i++) {
+							for (int j = 0; j < 8; j++) {
+								int x = (regionX + rx) << 5 | (i * 4);
+								int z = (regionZ + rz) << 5 | (j * 4);
+								if (claim) {
+									method.invoke(manager, overworld, owner, -1, x, z, false);
+								} else {
+									method.invoke(manager, overworld, x, z);
+								}
+							}
+						}
+					}
+				}
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't change claims through Open Parties and Claims' server API", e);
+			}
+		});
 	}
 
 	/** Waits up to 30 s for a claim request to reach the map. */

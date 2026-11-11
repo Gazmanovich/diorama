@@ -7,9 +7,11 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -233,7 +235,7 @@ public final class OpenPartiesAndClaims {
 			for (Area region : regionsChanged) {
 				if (!dimensionsChanged.contains(region.dimension())) {
 					Object dimension = dimensionOf.invoke(manager, region.dimension());
-					readRegion(region.dimension(), region.x(), region.z(), dimension == null ? null : regionOf.invoke(dimension, region.x(), region.z()));
+					readRegion(region.dimension(), region.x(), region.z(), dimension == null ? null : regionOf.invoke(dimension, region.x(), region.z()), false);
 				}
 			}
 			for (Area chunk : chunksChanged) {
@@ -264,18 +266,31 @@ public final class OpenPartiesAndClaims {
 		try (Stream<?> regions = (Stream<?>) regionStream.invoke(dimension)) {
 			for (Iterator<?> it = regions.iterator(); it.hasNext(); ) {
 				Object region = it.next();
-				readRegion(id, (int) regionX.invoke(region), (int) regionZ.invoke(region), region);
+				readRegion(id, (int) regionX.invoke(region), (int) regionZ.invoke(region), region, true);
 			}
 		}
 	}
 
-	/** Every chunk of a region, as unclaimed where {@code region} is null. */
-	private static void readRegion(Object id, int x, int z, @Nullable Object region) throws ReflectiveOperationException {
+	/** A region's chunks, as unclaimed where {@code region} is null; {@code forgotten} when its old claims already are. */
+	private static void readRegion(Object id, int x, int z, @Nullable Object region, boolean forgotten) throws ReflectiveOperationException {
 		ResourceKey<Level> key = key(id);
+		// Open Parties and Claims keeps one claim object per kind of claim, so a region has few.
+		Map<Object, Owner> owners = new IdentityHashMap<>();
 		for (int i = 0; i < REGION_SIZE; i++) {
 			for (int j = 0; j < REGION_SIZE; j++) {
 				Object state = region == null ? null : regionClaim.invoke(region, i, j);
-				Claims.updated(key, x << 5 | i, z << 5 | j, Owner.class, owner(state, id), false);
+				if (state == null && forgotten) {
+					continue;
+				}
+				Owner owner = null;
+				if (state != null) {
+					owner = owners.get(state);
+					if (owner == null) {
+						owner = owner(state, id);
+						owners.put(state, owner);
+					}
+				}
+				Claims.updated(key, x << 5 | i, z << 5 | j, Owner.class, owner, false);
 			}
 		}
 	}
