@@ -144,6 +144,7 @@ public final class SettingsScreen extends Screen {
 			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
 		}
 		overlays.choice("drawings", Settings.DrawingsShown.values(), () -> s.drawings, v -> s.drawings = v);
+		overlays.choice("world_border", Settings.WorldBorderShown.values(), () -> s.worldBorder, v -> s.worldBorder = v);
 
 		SettingsTab waypoints = new SettingsTab("diorama.settings.waypoints");
 		waypoints.toggle("waypoints_map", () -> s.waypointsOnMap, v -> s.waypointsOnMap = v);

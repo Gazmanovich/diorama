@@ -203,6 +203,16 @@ public final class Settings {
 		ALWAYS
 	}
 
+	/** Where the game's world border shows; see {@link WorldBorderOverlay}. */
+	public WorldBorderShown worldBorder = WorldBorderShown.ALWAYS;
+
+	/** Where the world border shows: nowhere, on the fullscreen map, or on the minimap too. */
+	public enum WorldBorderShown {
+		OFF,
+		FULLSCREEN,
+		ALWAYS
+	}
+
 	public enum Quality {
 		FANCY,
 		FAST
@@ -421,6 +431,9 @@ public final class Settings {
 		}
 		if (settings.drawings == null) {
 			settings.drawings = DrawingsShown.ALWAYS;
+		}
+		if (settings.worldBorder == null) {
+			settings.worldBorder = WorldBorderShown.ALWAYS;
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
