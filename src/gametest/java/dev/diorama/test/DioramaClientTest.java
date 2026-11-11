@@ -140,6 +140,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
 			}
+			if (tests.contains("minimap-text-size")) {
+				MinimapTextSizeTest.run(context, world);
+			}
 			if (tests.contains("waypoint-size")) {
 				WaypointSizeTest.photos(context, world);
 			}
@@ -6705,6 +6708,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(2);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(5);
+	}
+
+	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
+	static void clickAlong(ClientGameTestContext context, String label, double along) {
+		clickAt(context, label, along);
 	}
 
 	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
