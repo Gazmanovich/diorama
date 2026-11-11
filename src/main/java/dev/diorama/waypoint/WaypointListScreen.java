@@ -31,7 +31,10 @@ import org.jspecify.annotations.Nullable;
  * finds the ones in every other folder too, under a heading of their own, and
  * beside it are the sort order with its direction, New folder and New waypoint. Clicking a row selects it and shows
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
- * which asks for a second click in place. Double-clicking a row edits it. With no waypoints in
+ * which asks for a second click in place. Double-clicking a row edits it. A Ctrl click adds a row to
+ * the selection and a Shift click the rows up to it, as in Xaero's Minimap's list; several rows have
+ * Move, which sends them all to a folder picked from a list, hide or show, and delete. A grey line
+ * under the list says so. With no waypoints in
  * this dimension, a pin standing on a piece of the map shows what one is and how to add one.
  * When Xaero's Minimap has waypoints for this world that aren't here yet, a button imports them.
  */
@@ -79,6 +82,8 @@ public final class WaypointListScreen extends Screen {
 	 * doesn't show which there are. Drawn over the screen, which hands it the clicks while it's open.
 	 */
 	private @Nullable FolderMenu folderMenu;
+	/** The open list of folders was opened by Move: a pick moves the selected rows there, and shows no other folder. */
+	private boolean menuMoves;
 	private boolean folderArmed;
 	/** Every waypoint in the folder shown, in the sort order. */
 	private final List<Waypoint> all = new ArrayList<>();
@@ -118,6 +123,21 @@ public final class WaypointListScreen extends Screen {
 	private final Waypoint sample = new Waypoint("Home", 0, 0, 0, "", Waypoint.PALETTE[2]);
 	private @Nullable EditBox search;
 	private @Nullable Waypoint selected;
+	/**
+	 * The rows selected together with Ctrl or Shift, {@link #selected} among them: it's the one
+	 * clicked last, and has their buttons. Empty while one row or none is selected.
+	 */
+	private final java.util.Set<Waypoint> marked = new java.util.LinkedHashSet<>();
+	/** The row a Shift click selects from: the last one clicked without Shift. */
+	private @Nullable Waypoint anchor;
+	/**
+	 * Whether the click being handled came with Ctrl (Cmd on macOS, as the game reads it for its own
+	 * shortcuts) or Shift held.
+	 */
+	private boolean controlClick;
+	private boolean shiftClick;
+	/** Move, which only several rows have: one row's folder is picked in its editor. */
+	private @Nullable Button move;
 	/** The selected row's Delete was clicked once: its buttons are one Click again to delete. */
 	private boolean armed;
 	private @Nullable Button visibility;
@@ -159,6 +179,7 @@ public final class WaypointListScreen extends Screen {
 	void showFolder(String key) {
 		this.folderKey = key;
 		this.selected = null;
+		this.marked.clear();
 		this.scroll = 0;
 	}
 
@@ -203,6 +224,7 @@ public final class WaypointListScreen extends Screen {
 		if (this.folderKey == null || this.folders.stream().noneMatch(f -> f.key().equals(this.folderKey))) {
 			this.folderKey = here != null ? WaypointStore.dimensionKey(here) : this.folders.get(0).key();
 			this.selected = null;
+			this.marked.clear();
 		}
 	}
 
@@ -232,6 +254,7 @@ public final class WaypointListScreen extends Screen {
 				store != null && store.folderHidden(folder.key())));
 		}
 		int left = folderNameLeft(this.width / 2 - LIST_WIDTH / 2);
+		this.menuMoves = false;
 		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, FOLDER_NAME_WIDTH, this.height);
 	}
 
@@ -263,11 +286,81 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	private void pickFolder(FolderMenu.@Nullable Entry picked) {
+		if (this.menuMoves) {
+			if (picked != null) {
+				this.moveTo(picked.key());
+			}
+			return;
+		}
 		if (picked != null && !picked.key().equals(this.folderKey)) {
 			this.showFolder(picked.key());
 			this.rebuildWidgets();
 		}
 	}
+
+	/** The selected rows that can be moved and deleted: all but waystones. */
+	private List<Waypoint> movable() {
+		return this.marked.stream().filter(Waypoint::editable).toList();
+	}
+
+	/**
+	 * Opens the folders the selected rows can go to under Move: first their dimension's own, then
+	 * the player's. Rows from several dimensions each go back to their own dimension's.
+	 */
+	private void openMoveMenu() {
+		Button button = this.move;
+		WaypointStore store = WaypointStore.get();
+		List<Waypoint> moving = this.movable();
+		if (button == null || store == null || moving.isEmpty()) {
+			return;
+		}
+		java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+		for (Waypoint waypoint : store.all()) {
+			counts.merge(store.folderKey(waypoint), 1, Integer::sum);
+		}
+		String dimension = moving.get(0).dimension;
+		boolean oneDimension = moving.stream().allMatch(w -> w.dimension.equals(dimension));
+		String in = store.folderKey(moving.get(0));
+		boolean oneFolder = moving.stream().allMatch(w -> store.folderKey(w).equals(in));
+		List<FolderMenu.Entry> entries = new ArrayList<>();
+		String current = null;
+		if (oneDimension) {
+			String key = WaypointStore.dimensionKey(dimension);
+			entries.add(new FolderMenu.Entry("", Waypoints.dimensionName(dimension).getString(), counts.getOrDefault(key, 0), store.folderHidden(key)));
+			current = oneFolder && in.equals(key) ? "" : null;
+		} else {
+			entries.add(new FolderMenu.Entry("", Component.translatable("diorama.folder.own_dimensions").getString(), -1, false));
+		}
+		for (String name : store.customFolders()) {
+			String key = WaypointStore.customKey(name);
+			entries.add(new FolderMenu.Entry(name, name, counts.getOrDefault(key, 0), store.folderHidden(key)));
+			if (oneFolder && in.equals(key)) {
+				current = name;
+			}
+		}
+		int width = 150;
+		int x = Math.max(2, Math.min(button.getX(), this.width - width - 2));
+		this.menuMoves = true;
+		this.folderMenu = new FolderMenu(this.font, entries, current, x, button.getY(), button.getY() + button.getHeight(), width, this.height);
+	}
+
+	/** Moves the selected rows to one of the player's folders, or with an empty name back to their dimensions' own. */
+	private void moveTo(String folder) {
+		WaypointStore store = WaypointStore.get();
+		if (store == null) {
+			return;
+		}
+		for (Waypoint waypoint : this.movable()) {
+			waypoint.folder = folder;
+		}
+		store.changed();
+		this.selected = null;
+		this.marked.clear();
+		this.rebuildWidgets();
+	}
+
+	/** macOS, where the game's own shortcuts use Cmd for Ctrl, and a Ctrl click is a right click. */
+	private static final boolean MAC = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
 
 	private void stepFolder(int step) {
 		int index = this.folders.indexOf(this.folder());
@@ -308,6 +401,12 @@ public final class WaypointListScreen extends Screen {
 			UUID id = this.selected.id;
 			this.selected = java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> w.id.equals(id)).findFirst().orElse(null);
 		}
+		if (!this.marked.isEmpty()) {
+			java.util.Set<UUID> ids = new java.util.HashSet<>();
+			this.marked.forEach(w -> ids.add(w.id));
+			this.marked.clear();
+			java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> ids.contains(w.id)).forEach(this.marked::add);
+		}
 		if (!this.xaeroRead) {
 			this.xaeroRead = true;
 			this.xaero = XaeroImport.find();
@@ -317,7 +416,7 @@ public final class WaypointListScreen extends Screen {
 		int left = cx - LIST_WIDTH / 2;
 
 		// The footer: Done alone, and the import button above it when Xaero's has something new.
-		int footer = this.height - 28;
+		int footer = this.height - 26;
 		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> this.onClose()).bounds(cx - 100, footer, 200, 20).build());
 		int above = footer;
 		Button importButton = this.importButton(store);
@@ -336,7 +435,7 @@ public final class WaypointListScreen extends Screen {
 			above -= 12;
 			this.importedY = above;
 		}
-		this.listBottom = above - (above == footer ? 10 : 6);
+		this.listBottom = above - 12;
 
 		if (this.empty) {
 			// The empty list: the piece of map, the headline and hints, then New waypoint under them.
@@ -348,6 +447,8 @@ public final class WaypointListScreen extends Screen {
 			this.sortOrder = null;
 			this.sortDirection = null;
 			this.actions.clear();
+			this.marked.clear();
+			this.move = null;
 			this.visibility = null;
 			this.confirm = null;
 			return;
@@ -434,6 +535,8 @@ public final class WaypointListScreen extends Screen {
 		this.actions.clear();
 		this.edit = this.action(Component.translatable("diorama.waypoints.edit"), () -> this.edit(this.selected));
 		this.actions.add(this.edit);
+		this.move = this.action(Component.translatable("diorama.waypoints.move"), this::openMoveMenu);
+		this.actions.add(this.move);
 		this.visibility = this.action(Component.translatable("diorama.waypoints.hide"), () -> this.toggleVisible(this.selected));
 		this.actions.add(this.visibility);
 		this.teleport = null;
@@ -568,8 +671,20 @@ public final class WaypointListScreen extends Screen {
 				this.otherStart = start;
 			}
 		}
+		// A row the search no longer shows leaves the selection; the buttons go to the last one left.
+		// Fewer rows selected than Delete was clicked for: it's asked again.
+		if (this.marked.retainAll(new java.util.HashSet<>(this.rows))) {
+			this.armed = false;
+		}
 		if (this.selected != null && !this.rows.contains(this.selected)) {
-			this.select(null);
+			this.selected = null;
+			for (Waypoint waypoint : this.marked) {
+				this.selected = waypoint;
+			}
+			this.armed = false;
+		}
+		if (this.marked.size() < 2) {
+			this.marked.clear();
 		}
 		this.scrollTo(this.scroll);
 	}
@@ -617,6 +732,7 @@ public final class WaypointListScreen extends Screen {
 
 	private void select(@Nullable Waypoint waypoint) {
 		this.selected = waypoint;
+		this.marked.clear();
 		this.armed = false;
 		this.placeRowButtons();
 	}
@@ -624,15 +740,19 @@ public final class WaypointListScreen extends Screen {
 	/**
 	 * The selected row's buttons, right-aligned inside it: Edit, Hide or Show, Teleport, then
 	 * Delete in red. Once Delete is clicked they become one red Click again to delete across them.
-	 * A waystone's row has only Hide or Show and Teleport.
+	 * A waystone's row has only Hide or Show and Teleport. Several rows have Move, Hide or Show and
+	 * Delete, on the row clicked last.
 	 */
 	private void placeRowButtons() {
 		int row = this.selected == null ? -1 : this.rows.indexOf(this.selected);
 		int index = row < 0 ? -1 : this.lineOf(row) - this.scroll;
 		boolean shown = index >= 0 && index < this.visibleRows;
 		Button visibility = this.visibility;
+		boolean several = this.marked.size() > 1;
 		if (shown && visibility != null) {
-			Component label = Component.translatable(this.selected.visible ? "diorama.waypoints.hide" : "diorama.waypoints.show");
+			// Several rows: Hide while any of them shows, as Xaero's Disable/Enable goes by the selection.
+			boolean hide = several ? this.marked.stream().anyMatch(w -> w.visible) : this.selected.visible;
+			Component label = Component.translatable(hide ? "diorama.waypoints.hide" : "diorama.waypoints.show");
 			visibility.setMessage(label);
 			visibility.setWidth(width(this.font.width(label)));
 		}
@@ -653,17 +773,23 @@ public final class WaypointListScreen extends Screen {
 			}
 		}
 		Button teleport = this.teleport;
-		if (shown && teleport != null) {
+		if (shown && teleport != null && buttons.contains(teleport)) {
 			teleport.active = !this.armed && Waypoints.canTeleport(this.selected.dimension);
 		}
 		Button confirm = this.confirm;
 		if (confirm != null) {
 			show(confirm, shown && this.armed);
+			// Several rows: it says how many go, and is as wide as that takes.
+			Component ask = several
+				? Component.translatable("diorama.waypoints.delete_many", this.movable().size()).withStyle(ChatFormatting.RED)
+				: Component.translatable("diorama.menu.delete_confirm").withStyle(ChatFormatting.RED);
+			confirm.setMessage(ask);
+			int wide = several ? Math.max(span, this.font.width(ask) + 10) : span;
 			//? if >=1.21 {
-			confirm.setRectangle(span, 20, right - span, y);
+			confirm.setRectangle(wide, 20, right - wide, y);
 			//?} else {
-			/*confirm.setWidth(span);
-			confirm.setPosition(right - span, y);
+			/*confirm.setWidth(wide);
+			confirm.setPosition(right - wide, y);
 			*///?}
 		}
 	}
@@ -712,14 +838,27 @@ public final class WaypointListScreen extends Screen {
 		return Math.max(32, label + 10);
 	}
 
-	/** The buttons the selected row has: all of them, or for a waystone all but Edit and Delete. */
+	/**
+	 * The buttons the selected row has: all but Move, and for a waystone not Edit and Delete either.
+	 * Several rows have Move, Hide or Show and Delete; Move and Delete only with a row among them
+	 * that isn't a waystone.
+	 */
 	private List<Button> rowActions() {
-		if (this.selected == null || this.selected.editable()) {
-			return this.actions;
-		}
 		List<Button> buttons = new ArrayList<>(this.actions);
-		buttons.remove(this.edit);
-		buttons.remove(this.delete);
+		if (this.marked.size() > 1) {
+			buttons.remove(this.edit);
+			buttons.remove(this.teleport);
+			if (this.movable().isEmpty()) {
+				buttons.remove(this.move);
+				buttons.remove(this.delete);
+			}
+			return buttons;
+		}
+		buttons.remove(this.move);
+		if (this.selected != null && !this.selected.editable()) {
+			buttons.remove(this.edit);
+			buttons.remove(this.delete);
+		}
 		return buttons;
 	}
 
@@ -728,6 +867,11 @@ public final class WaypointListScreen extends Screen {
 		int span = 0;
 		for (Button button : this.rowActions()) {
 			span += button.getWidth() + ACTION_GAP;
+		}
+		// Click again to delete, for several rows, can be wider than the buttons it stands in for.
+		Button confirm = this.confirm;
+		if (this.armed && confirm != null) {
+			span = Math.max(span, confirm.getWidth() + ACTION_GAP);
 		}
 		return span;
 	}
@@ -840,7 +984,7 @@ public final class WaypointListScreen extends Screen {
 			// A row from another folder is dimmed when that folder is hidden, not when this one is.
 			boolean inHidden = other ? store != null && store.folderHidden(store.folderKey(waypoint)) : folderHidden;
 			boolean selected = waypoint == this.selected;
-			if (selected) {
+			if (selected || this.marked.contains(waypoint)) {
 				ScreenArt.selection(graphics, left, y, right, y + ROW);
 			}
 			Pins.badge(graphics, waypoint, left + badgeX(waypoint), y + 12.5F, Pins.LARGE);
@@ -889,6 +1033,9 @@ public final class WaypointListScreen extends Screen {
 		if (this.imported != null) {
 			graphics.centeredText(this.font, this.imported, cx, this.importedY, 0xFFA0E0A0);
 		}
+		// Under the list, like the line under the map: nothing else says several rows can be selected.
+		String hint = Component.translatable("diorama.waypoints.select_hint", MAC ? "Cmd" : "Ctrl").getString();
+		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.listBottom + 2, HINT);
 	}
 
 	/** The scrollbar: its x, the handle's height and how far down the track it sits. */
@@ -1030,6 +1177,14 @@ public final class WaypointListScreen extends Screen {
 			this.clickFolderMenu(event.x(), event.y(), event.button());
 			return true;
 		}
+		// What came with the click, and what's held now: a click made by a test brings no modifiers.
+		net.minecraft.client.Minecraft held = net.minecraft.client.Minecraft.getInstance();
+		this.shiftClick = event.hasShiftDown() || held.hasShiftDown();
+		//? if >=1.21.11 {
+		this.controlClick = event.hasControlDownWithQuirk() || !MAC && held.hasControlDown();
+		//?} else {
+		/*this.controlClick = event.hasControlDown() || !MAC && held.hasControlDown();
+		*///?}
 		this.disarmUnless(event.x(), event.y());
 		if (!usedByList(event.button()) && DioramaClient.NEW_WAYPOINT.matchesMouse(event)) {
 			this.newWaypointPressed = true;
@@ -1075,6 +1230,8 @@ public final class WaypointListScreen extends Screen {
 			this.clickFolderMenu(x, y, button);
 			return true;
 		}
+		this.shiftClick = Screen.hasShiftDown();
+		this.controlClick = Screen.hasControlDown();
 		this.disarmUnless(x, y);
 		if (!usedByList(button) && DioramaClient.NEW_WAYPOINT.matchesMouse(button)) {
 			this.newWaypointPressed = true;
@@ -1148,12 +1305,57 @@ public final class WaypointListScreen extends Screen {
 		this.lastClicked = waypoint;
 		this.lastClick = now;
 		this.setFocused(null);
+		boolean shift = this.shiftClick;
+		if (shift || this.controlClick) {
+			this.lastClicked = null;
+			this.selectMore(waypoint, row, shift);
+			return true;
+		}
+		this.anchor = waypoint;
 		if (twice) {
 			this.edit(waypoint);
-		} else if (waypoint != this.selected) {
+		} else if (waypoint != this.selected || !this.marked.isEmpty()) {
+			// A plain click leaves this row alone selected, also when it was one of several.
 			this.select(waypoint);
 		}
 		return true;
+	}
+
+	/**
+	 * A Shift or Ctrl click on a row, as in Xaero's Minimap's list and any file list: Shift selects
+	 * the rows from the last one clicked without it to this one, Ctrl adds this row to the
+	 * selection or takes it out. The buttons go to the row clicked.
+	 */
+	private void selectMore(Waypoint waypoint, int row, boolean shift) {
+		this.armed = false;
+		int from = shift && this.anchor != null ? this.rows.indexOf(this.anchor) : -1;
+		if (from >= 0) {
+			this.marked.clear();
+			for (int i = Math.min(from, row); i <= Math.max(from, row); i++) {
+				this.marked.add(this.rows.get(i));
+			}
+			this.selected = waypoint;
+		} else if (waypoint == this.selected || this.marked.contains(waypoint)) {
+			this.anchor = waypoint;
+			this.marked.remove(waypoint);
+			if (waypoint == this.selected) {
+				this.selected = null;
+				for (Waypoint left : this.marked) {
+					this.selected = left;
+				}
+			}
+		} else {
+			this.anchor = waypoint;
+			if (this.selected != null) {
+				this.marked.add(this.selected);
+			}
+			this.marked.add(waypoint);
+			this.selected = waypoint;
+		}
+		if (this.marked.size() < 2) {
+			this.marked.clear();
+		}
+		this.placeRowButtons();
 	}
 
 	/** Moves the list with the scrollbar handle while it's held. */
@@ -1220,7 +1422,16 @@ public final class WaypointListScreen extends Screen {
 		if (store == null) {
 			return;
 		}
-		store.setVisible(waypoint, !waypoint.visible);
+		if (this.marked.size() > 1) {
+			boolean hide = this.marked.stream().anyMatch(w -> w.visible);
+			for (Waypoint each : List.copyOf(this.marked)) {
+				if (each.visible == hide) {
+					store.setVisible(each, !hide);
+				}
+			}
+		} else {
+			store.setVisible(waypoint, !waypoint.visible);
+		}
 		// Hidden waypoints go last, as in Xaero's: the row moves, and the list follows it so the row
 		// and its buttons stay in view.
 		this.resort(store);
@@ -1236,10 +1447,13 @@ public final class WaypointListScreen extends Screen {
 
 	private void delete(@Nullable Waypoint waypoint) {
 		WaypointStore store = WaypointStore.get();
-		if (store != null && waypoint != null) {
+		if (store != null && this.marked.size() > 1) {
+			this.movable().forEach(store::remove);
+		} else if (store != null && waypoint != null) {
 			store.remove(waypoint);
 		}
 		this.selected = null;
+		this.marked.clear();
 		this.armed = false;
 		this.rebuildWidgets();
 	}
@@ -1299,6 +1513,11 @@ public final class WaypointListScreen extends Screen {
 	/** The waypoint whose row is selected, or null. For tests. */
 	public @Nullable Waypoint selected() {
 		return this.selected;
+	}
+
+	/** Every selected row's waypoint, in the order selected. For tests. */
+	public List<Waypoint> selection() {
+		return !this.marked.isEmpty() ? List.copyOf(this.marked) : this.selected == null ? List.of() : List.of(this.selected);
 	}
 
 	/** The name of the folder shown. For tests. */
