@@ -1551,8 +1551,12 @@ public final class MapScreen extends Screen {
 		return lines;
 	}
 
-	/** Who owns the chunk under the mouse: a square of their colour, then their name. */
+	/** Who owns the chunk under the mouse: a square of their colour, then their name, or the claim's own title. */
 	private static Component claimLine(Claims.Claim claim) {
+		if (claim.titled()) {
+			return Component.literal("■ ").withStyle(s -> s.withColor(claim.rgb()))
+				.append(Component.literal(claim.name()).withStyle(ChatFormatting.GRAY));
+		}
 		Component owner = claim.name().isEmpty() ? Component.translatable("diorama.map.claim.unnamed") : Component.literal(claim.name());
 		Component line = Component.literal("■ ").withStyle(s -> s.withColor(claim.rgb()))
 			.append(Component.translatable("diorama.map.claim", owner).withStyle(ChatFormatting.GRAY));

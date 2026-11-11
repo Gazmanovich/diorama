@@ -169,7 +169,7 @@ public final class Settings {
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
-	/** Where FTB Chunks' land claims show, when it's installed. */
+	/** Where land claims from FTB Chunks or Open Parties and Claims show, when one is installed. */
 	public ClaimsShown claims = ClaimsShown.ALWAYS;
 
 	/** Where land claims show: nowhere, on the fullscreen map, or on the minimap too. */

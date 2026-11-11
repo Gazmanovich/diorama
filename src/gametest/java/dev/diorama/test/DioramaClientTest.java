@@ -266,6 +266,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("ftb-claims")) {
 				ftbClaims(context, world);
 			}
+			if (tests.contains("opac-claims")) {
+				opacClaims(context, world);
+			}
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
 			}
@@ -4646,7 +4649,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		Diorama.LOGGER.info("FTB claims reached the map's claims {} ms after the commands", (System.nanoTime() - claimed) / 1_000_000);
 		Claims.Claim own = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 1, playerChunkZ + 1));
 		Claims.Claim server = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ));
-		if (own == null || server == null || own.team().equals(server.team()) || server.rgb() != 0xE04040 || !"Spawn".equals(server.name())) {
+		if (own == null || server == null || own.owner().equals(server.owner()) || server.rgb() != 0xE04040 || !"Spawn".equals(server.name())) {
 			throw new AssertionError("Expected the player's claim and Spawn's red claim: " + own + ", " + server);
 		}
 		if (context.computeOnClient(mc -> Claims.get().at(playerChunkX - 2, playerChunkZ)) != null) {
@@ -4776,6 +4779,185 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Couldn't look up FTB Teams' teams", e);
 			}
 			throw new AssertionError("No FTB team named " + name);
+		});
+	}
+
+	/**
+	 * Land claims from Open Parties and Claims, with it installed (opt-in: DIORAMA_TESTS=opac-claims).
+	 * The player claims the chunks round them and marks the middle one for force loading, and claims
+	 * two chunks to the east as server claims, through Open Parties and Claims' own client API, as
+	 * Xaero's World Map does. The map tints each claim in its colour on the ground it covers and
+	 * names it on hover, the minimap shows them, and unclaiming takes the tint away.
+	 */
+	private static void opacClaims(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.available())) {
+			throw new AssertionError("DIORAMA_TESTS=opac-claims needs Open Parties and Claims installed");
+		}
+		// The middle of a chunk, on an open patch far from anything placed before.
+		int cx = 1808 + 8;
+		int cz = -1792 + 8;
+		int x0 = cx - 56;
+		int z0 = cz - 40;
+		int x1 = cx + 88;
+		int z1 = cz + 40;
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		int y = Math.max(72, world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz)));
+		for (int x = x0; x <= x1; x += 16) {
+			for (int z = z0; z <= z1; z += 16) {
+				int xe = Math.min(x1, x + 15);
+				int ze = Math.min(z1, z + 15);
+				world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + xe + " " + (y + 60) + " " + ze + " air");
+				world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + z + " " + xe + " " + (y - 1) + " " + ze + " grass_block");
+			}
+		}
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+
+		int playerChunkX = cx >> 4;
+		int playerChunkZ = cz >> 4;
+		opacLogResults(context);
+		// One request at a time: Open Parties and Claims turns a request down while another is under way.
+		long claimed = System.nanoTime();
+		opacRequest(context, "requestAreaClaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
+		opacWait(context, "the player's claim", mc -> Claims.get().at(playerChunkX - 1, playerChunkZ - 1) != null);
+		Diorama.LOGGER.info("Open Parties and Claims claims reached the map's claims {} ms after the request", (System.nanoTime() - claimed) / 1_000_000);
+		opacRequest(context, "requestAreaForceload", playerChunkX, playerChunkZ, playerChunkX, playerChunkZ, true, false);
+		opacWait(context, "the force loaded middle", mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX, playerChunkZ).forceLoaded());
+		opacRequest(context, "requestAreaClaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
+		opacWait(context, "the server claim", mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) != null);
+		Claims.Claim own = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 1, playerChunkZ + 1));
+		Claims.Claim middle = context.computeOnClient(mc -> Claims.get().at(playerChunkX, playerChunkZ));
+		Claims.Claim server = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ));
+		String player = context.computeOnClient(mc -> mc.player.getName().getString());
+		Diorama.LOGGER.info("Open Parties and Claims claims: own {}, middle {}, server's {}", own, middle, server);
+		if (own == null || server == null || own.owner().equals(server.owner()) || !own.titled() || !own.name().contains(player) || own.forceLoaded()
+			|| !middle.name().contains(player) || middle.name().equals(own.name()) || server.name().contains(player)) {
+			throw new AssertionError("Expected the player's claim, its force loaded middle and a server claim: " + own + ", " + middle + ", " + server);
+		}
+		if (context.computeOnClient(mc -> Claims.get().at(playerChunkX - 2, playerChunkZ)) != null) {
+			throw new AssertionError("A chunk outside the claims shows as claimed");
+		}
+		settle(context, 40);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, true, "the ground under the player");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "the server claim's ground");
+		assertClaimTint(context, cx + 36 + 0.5, y, cz + 0.5, false, "the ground between the claims");
+		assertClaimTint(context, cx + 0.5, y, cz - 28 + 0.5, false, "the ground north of the claim");
+
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS))), 200);
+		settle(context, 20);
+		context.takeScreenshot("opac-claims-01-map");
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("opac-claims-02-map-zoom-1");
+		// Hovering a claimed spot names it, as Open Parties and Claims does: the player's, then the server's.
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 10);
+		double[] spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover");
+		spot = mapPoint(context, 0, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-force-loaded");
+		spot = mapPoint(context, 64, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-server");
+		// Turned off, the claims go.
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> !Claims.get().isEmpty())) {
+			throw new AssertionError("Claims still known with the setting off");
+		}
+		context.takeScreenshot("opac-claims-04-off");
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.ALWAYS);
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null, 600);
+		context.setScreen(() -> null);
+		context.waitTicks(20);
+		context.takeScreenshot("opac-claims-05-minimap");
+
+		// Forgotten, as on joining a server, they're read again from Open Parties and Claims.
+		context.runOnClient(mc -> Claims.clear());
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX + 4, playerChunkZ) != null, 200);
+
+		// Unclaiming takes the tint away.
+		opacRequest(context, "requestAreaUnclaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
+		long unclaimed = System.nanoTime();
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) == null, 600);
+		Diorama.LOGGER.info("Open Parties and Claims unclaim reached the map's claims {} ms after the request", (System.nanoTime() - unclaimed) / 1_000_000);
+		settle(context, 20);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, false, "the ground under the player after unclaiming");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "the server claim's ground after the player unclaimed");
+		openMapOnPlayer(context);
+		context.waitTicks(40);
+		context.takeScreenshot("opac-claims-06-unclaimed");
+		context.setScreen(() -> null);
+		opacRequest(context, "requestAreaUnclaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
+		context.waitFor(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) == null, 600);
+		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	/** Waits up to 30 s for a claim request to reach the map. */
+	private static void opacWait(ClientGameTestContext context, String what, java.util.function.Predicate<net.minecraft.client.Minecraft> reached) {
+		for (int tick = 0; !context.computeOnClient(reached::test); tick++) {
+			if (tick > 600) {
+				throw new AssertionError("Open Parties and Claims' " + what + " didn't reach the map (its answers are in the log)");
+			}
+			context.waitTick();
+		}
+	}
+
+	/** Logs Open Parties and Claims' answer to each claim request, so a refused one says why. */
+	private static void opacLogResults(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			try {
+				Object api = Class.forName("xaero.pac.client.api.OpenPACClientAPI").getMethod("get").invoke(null);
+				Object manager = api.getClass().getMethod("getClaimsManager").invoke(api);
+				Object tracker = Class.forName("xaero.pac.client.claims.api.IClientClaimsManagerAPI").getMethod("getClaimResultTracker").invoke(manager);
+				Class<?> listener = Class.forName("xaero.pac.client.claims.tracker.result.api.IClaimsManagerClaimResultListenerAPI");
+				Object proxy = java.lang.reflect.Proxy.newProxyInstance(listener.getClassLoader(), new Class<?>[] {listener}, (p, method, args) -> {
+					if (method.getName().equals("onClaimResult")) {
+						StringBuilder types = new StringBuilder();
+						try {
+							for (Object type : (Iterable<?>) args[0].getClass().getMethod("getResultTypesIterable").invoke(args[0])) {
+								types.append(type).append(' ');
+							}
+						} catch (ReflectiveOperationException e) {
+							types.append(args[0]);
+						}
+						Diorama.LOGGER.info("Open Parties and Claims answered a claim request: {}", types);
+					}
+					return method.getName().equals("equals") ? p == args[0] : method.getName().equals("hashCode") ? System.identityHashCode(p) : null;
+				});
+				Class.forName("xaero.pac.client.claims.tracker.result.api.IClaimsManagerClaimResultTrackerAPI").getMethod("register", listener).invoke(tracker, proxy);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't listen to Open Parties and Claims' answers", e);
+			}
+		});
+	}
+
+	/** Calls one of the claim requests Open Parties and Claims' client API has had since 1.20.1, on the client. */
+	private static void opacRequest(ClientGameTestContext context, String request, Object... args) {
+		context.runOnClient(mc -> {
+			try {
+				Object api = Class.forName("xaero.pac.client.api.OpenPACClientAPI").getMethod("get").invoke(null);
+				Object manager = api.getClass().getMethod("getClaimsManager").invoke(api);
+				Class<?>[] types = new Class<?>[args.length];
+				for (int i = 0; i < args.length; i++) {
+					types[i] = args[i] instanceof Integer ? int.class : boolean.class;
+				}
+				Class.forName("xaero.pac.client.claims.api.IClientClaimsManagerAPI").getMethod(request, types).invoke(manager, args);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't ask Open Parties and Claims to " + request, e);
+			}
 		});
 	}
 
