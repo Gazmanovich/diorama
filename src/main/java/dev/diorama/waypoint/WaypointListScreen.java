@@ -224,7 +224,7 @@ public final class WaypointListScreen extends Screen {
 					this.all.add(waypoint);
 				}
 			}
-			this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
@@ -407,8 +407,23 @@ public final class WaypointListScreen extends Screen {
 		Entity viewer = MapSession.viewer();
 		if (viewer != null && this.minecraft.level != null) {
 			String here = this.minecraft.level.dimension().identifier().toString();
-			this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
 		}
+	}
+
+	/**
+	 * How far the player is from a waypoint: from its own spot in their dimension, or from where it
+	 * stands here when its dimension is shown here too. NaN for another dimension's.
+	 */
+	private double distance(WaypointStore store, String here, Entity viewer, Waypoint waypoint) {
+		if (waypoint.dimension.equals(here)) {
+			return waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
+		}
+		if (!store.showsIn(here, waypoint.dimension)) {
+			return Double.NaN;
+		}
+		double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
+		return waypoint.scaled(divider, this.spotHere).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
 	}
 
 	/** The sort order's name on its button, and on both buttons a tooltip saying what comes first. */
@@ -689,10 +704,10 @@ public final class WaypointListScreen extends Screen {
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
-				if (viewer != null && store != null && store.showsIn(here, waypoint.dimension)) {
+				double distance = viewer == null || store == null ? Double.NaN : this.distance(store, here, viewer, waypoint);
+				if (!Double.isNaN(distance)) {
 					// Shown here too: how far its spot here is.
-					double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
-					detail = Math.round(waypoint.scaled(divider, this.spotHere).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
+					detail = Math.round(distance) + " m · " + detail;
 				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;

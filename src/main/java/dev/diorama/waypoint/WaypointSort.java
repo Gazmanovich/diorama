@@ -2,6 +2,7 @@ package dev.diorama.waypoint;
 
 import java.util.Comparator;
 import java.util.Locale;
+import java.util.function.ToDoubleFunction;
 
 /**
  * The orders the waypoint list can sort a folder in, as Xaero's Minimap's Sort By offers them,
@@ -9,7 +10,10 @@ import java.util.Locale;
  * disabled ones, and waypoints that tie are in name order. Saved for each world with the folders.
  */
 public enum WaypointSort {
-	/** Nearest first. Waypoints in another dimension than the player's go after them, by name. */
+	/**
+	 * Nearest first. Waypoints in another dimension than the player's go after them, by name,
+	 * unless that dimension is shown here too: they have a spot here to be near or far.
+	 */
 	DISTANCE("distance"),
 	NAME("name"),
 	/** By the letters on the pin; pins showing an icon go after the lettered ones, grouped by icon. */
@@ -50,14 +54,17 @@ public enum WaypointSort {
 		return DISTANCE;
 	}
 
-	/** The order for a player at (x, y, z) in dimension {@code here}. */
-	public Comparator<Waypoint> comparator(boolean reversed, String here, double x, double y, double z) {
+	/** The order, with {@code distance} how far the player is from a waypoint, NaN for one with no spot in their dimension. */
+	public Comparator<Waypoint> comparator(boolean reversed, ToDoubleFunction<Waypoint> distance) {
 		Comparator<Waypoint> byName = Comparator.comparing(WaypointSort::nameKey);
 		Comparator<Waypoint> order = switch (this) {
 			case DISTANCE -> {
-				Comparator<Waypoint> nearest = Comparator.comparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(x, y, z) : 0);
+				Comparator<Waypoint> nearest = Comparator.comparingDouble(w -> {
+					double d = distance.applyAsDouble(w);
+					return Double.isNaN(d) ? 0 : d;
+				});
 				// Another dimension's waypoints have no distance to go by: they stay after this one's.
-				yield Comparator.<Waypoint, Boolean>comparing(w -> !w.dimension.equals(here)).thenComparing(reversed ? nearest.reversed() : nearest);
+				yield Comparator.<Waypoint, Boolean>comparing(w -> Double.isNaN(distance.applyAsDouble(w))).thenComparing(reversed ? nearest.reversed() : nearest);
 			}
 			case NAME -> reversed ? byName.reversed() : byName;
 			case INITIALS -> {
