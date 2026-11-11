@@ -1,0 +1,14 @@
+# Open Parties and Claims 0.33.0 (0.24.4 on 1.21.6, its newest there), for the opac-claims section.
+# On Fabric it needs Forge Config API Port. One line per jar: <node> <url>.
+26.3 https://cdn.modrinth.com/data/gF3BGWvG/versions/KBCCg0os/open-parties-and-claims-fabric-26.3-0.33.0.jar
+26.3 https://cdn.modrinth.com/data/ohNO6lps/versions/JpKvrr9J/ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar
+1.21.11 https://cdn.modrinth.com/data/gF3BGWvG/versions/X0LMxmt1/open-parties-and-claims-fabric-1.21.11-0.33.0.jar
+1.21.11 https://cdn.modrinth.com/data/ohNO6lps/versions/uXrWPsCu/ForgeConfigAPIPort-v21.11.1-mc1.21.11-Fabric.jar
+1.21.6 https://cdn.modrinth.com/data/gF3BGWvG/versions/rpM2QUQl/open-parties-and-claims-fabric-1.21.6-0.24.4.jar
+1.21.6 https://cdn.modrinth.com/data/ohNO6lps/versions/9IqKMm2N/ForgeConfigAPIPort-v21.6.4-1.21.6-Fabric.jar
+1.21.1 https://cdn.modrinth.com/data/gF3BGWvG/versions/4XHYA7yQ/open-parties-and-claims-fabric-1.21.1-0.33.0.jar
+1.21.1 https://cdn.modrinth.com/data/ohNO6lps/versions/N5qzq0XV/ForgeConfigAPIPort-v21.1.6-1.21.1-Fabric.jar
+1.20.1 https://cdn.modrinth.com/data/gF3BGWvG/versions/vhlyXP4C/open-parties-and-claims-fabric-1.20.1-0.33.0.jar
+1.20.1 https://cdn.modrinth.com/data/ohNO6lps/versions/HvR3IdRE/ForgeConfigAPIPort-v8.0.3-1.20.1-Fabric.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/gF3BGWvG/versions/yWmXD7GW/open-parties-and-claims-neoforge-1.21.1-0.33.0.jar
+1.20.1-forge https://cdn.modrinth.com/data/gF3BGWvG/versions/Ec8wDd9H/open-parties-and-claims-forge-1.20.1-0.33.0.jar
