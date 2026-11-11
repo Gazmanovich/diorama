@@ -122,7 +122,8 @@ public final class ShareServer {
 
 	/**
 	 * A player whose client has Diorama's channel joined, or said it has the channel. Server thread.
-	 * Tells them the settings, which also tells their Diorama this server has Diorama.
+	 * Tells them the settings it locks, if any, and on a dedicated server what it shares, which also
+	 * tells their Diorama this server has Diorama.
 	 */
 	public static void listening(ServerPlayer player) {
 		Locked locks = locked;
