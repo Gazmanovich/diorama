@@ -65,7 +65,7 @@ public final class WaypointHud implements HudElement {
 			/*// Drawn straight away here, at the depth the pins are given.
 			z = graphics.pose().last().pose().m32();
 			*///?}
-			this.beams.begin(mc.level, viewer, eye, width, height, z);
+			this.beams.begin(mc.level, eye, width, height, z);
 			for (Waypoint waypoint : waypoints) {
 				if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
 					this.beams.add(waypoint);

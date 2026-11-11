@@ -130,6 +130,13 @@ final class WaypointBeamsTest {
 		BufferedImage wall = shot(context, Settings.Beams.ALL, "beams-wall");
 		expect(wall, points(context, home, wall, 3, 7, 1), home, false, "behind a wall, the foot of the beam");
 		expect(wall, points(context, home, wall, 12, 22, 2), home, true, "behind a wall, the beam above it");
+		// A bridge two blocks thick across the view hides only the stretch behind it.
+		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "air");
+		fill(world, home.x - 4, floor + 5, home.z + 10, home.x + 4, floor + 6, home.z + 10, "stone");
+		context.waitTicks(220);
+		BufferedImage bridge = shot(context, Settings.Beams.ALL, "beams-bridge");
+		expect(bridge, points(context, home, bridge, 6, 9, 1), home, false, "behind a bridge, the stretch of beam it covers");
+		expect(bridge, points(context, home, bridge, 12, 22, 2), home, true, "behind a bridge, the beam above it");
 		// Glass lets it through.
 		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "glass");
 		context.waitTicks(220);
