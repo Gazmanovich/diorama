@@ -17,7 +17,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * Death markers that clean up after themselves (opt-in: {@code death-pins}, issues #271 and #274):
  * a death pin shows the date and time of the death, stays while the player is further than 4
  * blocks, goes once they're back within 4, and stays put during its first 5 seconds, while it's
- * hidden, and with the setting off.
+ * hidden, while a screen is open, and with the setting off.
  */
 final class DeathPinsTest {
 	private DeathPinsTest() {
@@ -70,23 +70,30 @@ final class DeathPinsTest {
 		context.waitTicks(40);
 		expectKept(context, death, "hidden, 2 blocks away");
 
-		// Shown again, 2 blocks off: it goes.
+		// Shown again, 2 blocks off, but with the waypoint list open: it waits for the list to close.
+		context.setScreen(() -> new WaypointListScreen(null));
 		context.runOnClient(mc -> {
 			death.visible = true;
 			WaypointStore.get().changed();
 		});
+		context.waitTicks(40);
+		expectKept(context, death, "2 blocks away with the waypoint list open");
+		// Then it goes.
+		context.setScreen(() -> null);
 		context.waitFor(mc -> !WaypointStore.get().all().contains(death), 40);
 		standAt(context, world, death, 7, 90);
 		context.waitTicks(20);
 		context.takeScreenshot("death-pins-3-reached");
 
-		// A new pin is left alone for 5 seconds, even with the player on it.
+		// A new pin is left alone for 5 seconds, even with the player on it. Its clock starts again
+		// here, so a slow respawn doesn't use up the 5 seconds.
 		Waypoint fresh = die(context, world, home.offset(40, 0, 0));
+		context.runOnClient(mc -> fresh.created = System.currentTimeMillis());
 		standAt(context, world, fresh, 1, 90);
 		context.waitTicks(10);
 		long age = context.computeOnClient(mc -> System.currentTimeMillis() - fresh.created);
 		if (age >= 5000) {
-			throw new AssertionError("Respawning took " + age + " ms, too long to check the first 5 seconds");
+			throw new AssertionError("Standing on the pin took " + age + " ms, too long to check the first 5 seconds");
 		}
 		expectKept(context, fresh, "1 block away, " + age + " ms old");
 		context.waitFor(mc -> !WaypointStore.get().all().contains(fresh), 200);

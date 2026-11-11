@@ -170,8 +170,9 @@ public final class Waypoints {
 	 */
 	public static void watchDeaths(Minecraft mc) {
 		LocalPlayer player = mc.player;
-		// While the death screen is up, the player still stands where they died.
-		if (player == null || !player.isAlive() || !Settings.get().removeReachedDeaths) {
+		// While the death screen is up, the player still stands where they died. With any screen open
+		// it waits, so a pin doesn't go from under its editor or the waypoint list.
+		if (player == null || !player.isAlive() || mc.gui.screen() != null || !Settings.get().removeReachedDeaths) {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
