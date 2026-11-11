@@ -552,6 +552,8 @@ public final class WaypointEditScreen extends Screen {
 		}
 		Waypoint shown = new Waypoint(this.typedName(), x, y, z, this.waypoint.dimension, this.color);
 		shown.kind = this.waypoint.kind;
+		// A death pin's name shows when it died.
+		shown.created = this.waypoint.created;
 		String initials = this.initials.getValue().trim();
 		shown.initials = initials.isEmpty() ? shown.initials : initials;
 		return shown;
