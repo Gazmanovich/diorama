@@ -263,17 +263,21 @@ final class WaypointPreviewTest {
 	private record Share(double green, double red, double gold, double fog) {
 	}
 
-	/** The preview panel, right of the form, from the editor's own layout. */
+	/**
+	 * The piece of map in the preview panel, right of the form, from the editor's own layout. The
+	 * panel is 80 by 82 and see-through around the piece, so its margins take the colour of the
+	 * world behind the screen: counted, grass behind the editor read as green on a Nether piece.
+	 */
 	private static Share share(ClientGameTestContext context, BufferedImage shot) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		int guiWidth = context.computeOnClient(mc -> mc.getWindow().getGuiScaledWidth());
 		int guiHeight = context.computeOnClient(mc -> mc.getWindow().getGuiScaledHeight());
 		int left = guiWidth / 2 - 146 + 212;
 		int top = guiHeight / 2 - 92 + 16;
-		int x0 = (int) (left * scale);
-		int x1 = (int) ((left + 80) * scale);
-		int y0 = (int) (top * scale);
-		int y1 = (int) ((top + 82) * scale);
+		int x0 = (int) ((left + 8) * scale);
+		int x1 = (int) ((left + 72) * scale);
+		int y0 = (int) ((top + 28) * scale);
+		int y1 = (int) ((top + 78) * scale);
 		int green = 0;
 		int red = 0;
 		int gold = 0;
