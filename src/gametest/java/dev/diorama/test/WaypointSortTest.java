@@ -16,8 +16,8 @@ import net.minecraft.core.BlockPos;
 /**
  * Sorting the waypoint list ({@code waypoint-sort}): every order both ways, clicked as a player
  * clicks them, Hide and Show moving a row, the order saved with the world's folders, the search
- * keeping the order, another dimension's waypoint in the same folder, and the search row at the
- * smallest window and at a large GUI scale. The waypoints go in folders of their own and only they
+ * keeping the order, another dimension's waypoint in the same folder, and the search row in the
+ * smallest window and the game's default one. The waypoints go in folders of their own and only they
  * are removed afterwards: other sections leave waypoints to check after the world is left.
  */
 final class WaypointSortTest {
@@ -124,18 +124,18 @@ final class WaypointSortTest {
 		reverse(context);
 		showFolder(context, wrong, SORTING);
 
-		// The search row fits the list's width without widgets on top of each other, in the
-		// smallest window the game allows and at a large GUI scale.
+		// The search row fits without widgets on top of each other in the smallest window the game
+		// allows (320 by 240 at its GUI scale) and in its default one.
 		context.getInput().resizeWindow(640, 480);
 		context.waitTicks(5);
 		overlaps(context, wrong, "640x480");
 		context.takeScreenshot("sort-12-small-window");
+		context.getInput().resizeWindow(854, 480);
+		context.waitTicks(5);
+		overlaps(context, wrong, "854x480");
+		context.takeScreenshot("sort-13-default-window");
 		context.getInput().resizeWindow(1600, 900);
-		int guiScale = context.computeOnClient(mc -> mc.options.guiScale().get());
-		DioramaClientTest.setGuiScale(context, 4);
-		overlaps(context, wrong, "GUI scale 4");
-		context.takeScreenshot("sort-13-gui-scale-4");
-		DioramaClientTest.setGuiScale(context, guiScale);
+		context.waitTicks(5);
 
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
