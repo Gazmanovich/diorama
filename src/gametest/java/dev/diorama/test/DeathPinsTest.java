@@ -146,11 +146,8 @@ final class DeathPinsTest {
 	/** Stands the player {@code blocks} east of a pin on the ground, facing it (west). */
 	private static void standAt(ClientGameTestContext context, TestSingleplayerContext world, Waypoint pin, int blocks, float yaw) {
 		world.getServer().runCommand("tp @a " + (pin.x + blocks + 0.5) + " " + pin.y + " " + (pin.z + 0.5) + " " + yaw + " 20");
-		context.waitTicks(2);
-		double away = context.computeOnClient(mc -> pin.distanceTo(mc.player.getX(), mc.player.getY(), mc.player.getZ()));
-		if (Math.abs(away - blocks) > 1.5) {
-			throw new AssertionError("Standing " + away + " blocks from the pin instead of " + blocks);
-		}
+		// The client takes a moment to hear of the teleport, longer on older versions.
+		context.waitFor(mc -> Math.abs(pin.distanceTo(mc.player.getX(), mc.player.getY(), mc.player.getZ()) - blocks) <= 1.5, 100);
 	}
 
 	private static void expectKept(ClientGameTestContext context, Waypoint pin, String where) {
