@@ -18,7 +18,8 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
  * a pin standing on its spot, with the distance under it, so it shows through terrain at any range. The name appears when it
- * is near the crosshair or close by, which keeps a screen full of waypoints readable.
+ * is near the crosshair or close by, which keeps a screen full of waypoints readable. The World size
+ * setting sizes the pin and the text together.
  */
 public final class WaypointHud implements HudElement {
 	/** Within this many GUI pixels of the crosshair a waypoint shows its name. */
@@ -51,6 +52,7 @@ public final class WaypointHud implements HudElement {
 		Font font = mc.font;
 		List<Waypoint> waypoints = store.shownIn(mc.level.dimension().identifier().toString());
 		float scale = Pins.scale(Settings.get().waypointWorldSize);
+		float textScale = Pins.textScale(Settings.get().waypointWorldSize);
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
 		float margin = 28 * Math.max(1, scale);
 		for (Waypoint waypoint : waypoints) {
@@ -86,7 +88,8 @@ public final class WaypointHud implements HudElement {
 					text = waypoint.shownName() + " · " + text;
 				}
 				int w = font.width(text);
-				graphics.pose().translate(-w / 2.0F, 1 + Pins.SHADOW * scale);
+				graphics.pose().translate(-w * textScale / 2.0F, textScale + Pins.SHADOW * scale);
+				graphics.pose().scale(textScale);
 				graphics.fill(-2, -1, w + 2, 9, 0x80000000);
 				graphics.text(font, text, 0, 0, 0xFFFFFFFF, false);
 			} finally {

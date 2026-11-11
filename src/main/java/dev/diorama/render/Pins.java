@@ -43,6 +43,15 @@ public final class Pins {
 		return Radar.texel(percent / 100.0F, 1);
 	}
 
+	/**
+	 * What the text under a pin in the world is drawn at for the pin's size setting: the game's own
+	 * text size at the default pin size, and as many times bigger or smaller as the pin is. A whole
+	 * number of screen pixels to a font pixel, so the letters stay sharp.
+	 */
+	public static float textScale(int percent) {
+		return Radar.texel(percent / (float) Settings.DEFAULT_WAYPOINT_SIZE, 1);
+	}
+
 	/** The sizes in percent the settings offer at this GUI scale: every step {@link #scale} can show, so each one looks different. */
 	public static int[] sizes() {
 		int gui = Radar.pixelsPerGuiPixel();
