@@ -194,8 +194,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("cross-dimension")) {
 				CrossDimensionTest.run(context, world);
 			}
+			if (tests.contains("dimensions-off")) {
+				DimensionsOffTest.run(context, world);
+			}
 			if (tests.contains("waypoint-sort")) {
 				WaypointSortTest.run(context, world);
+			}
+			if (tests.contains("web-map-client")) {
+				ClientWebMapTest.run(context, world);
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
@@ -371,6 +377,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("server-locks")) {
 			ServerLocksTest.run(context);
+		}
+		if (tests.contains("dimensions-off-file")) {
+			DimensionsOffTest.file(context);
+		}
+		if (tests.contains("dimensions-off-server")) {
+			DimensionsOffTest.server(context);
 		}
 		if (tests.contains("server-locks-old-server")) {
 			ServerLocksTest.oldServer(context);

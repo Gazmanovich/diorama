@@ -413,7 +413,8 @@ final class MapPiece {
 	 */
 	private @Nullable MapLevel savedMap(String dimension) {
 		Maps maps = Maps.get();
-		if (maps == null) {
+		// Nor where the map is off: what was mapped there before stays out of sight.
+		if (maps == null || ServerRules.mapOff(dimension)) {
 			this.closeSaved();
 			return null;
 		}
