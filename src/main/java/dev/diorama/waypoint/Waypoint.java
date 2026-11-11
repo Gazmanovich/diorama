@@ -176,6 +176,10 @@ public final class Waypoint {
 				if (this.name.equals(Portals.savedName(this.kind))) {
 					return Portals.block(this.kind).getName().getString();
 				}
+				// The Portal icon's name, which every language already has.
+				if (this.name.equals(Portals.PLAIN_NAME)) {
+					return WaypointIconScreen.name(dev.diorama.render.WaypointIcons.PORTAL).getString();
+				}
 			}
 			default -> {
 			}

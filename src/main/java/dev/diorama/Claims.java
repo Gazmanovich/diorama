@@ -1,6 +1,7 @@
 package dev.diorama;
 
 import dev.diorama.compat.FtbChunks;
+import dev.diorama.compat.MineColonies;
 import dev.diorama.compat.OpenPartiesAndClaims;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -15,9 +16,10 @@ import net.minecraft.world.level.Level;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Land claims from FTB Chunks or Open Parties and Claims, for the maps to draw. {@link FtbChunks}
- * and {@link OpenPartiesAndClaims} hand over each chunk's owner as the claims mod takes in the
- * server's updates, in every dimension, from the full list sent on joining onwards. Once a tick,
+ * Land claims from FTB Chunks, Open Parties and Claims or MineColonies, for the maps to draw.
+ * {@link FtbChunks} and {@link OpenPartiesAndClaims} hand over each chunk's owner as the claims mod
+ * takes in the server's updates, in every dimension, from the full list sent on joining onwards;
+ * {@link MineColonies} hands over the land of the colonies the server has sent. Once a tick,
  * changes in the player's dimension make a new {@link Snapshot}, which any thread can read.
  * Everything else here is client thread only.
  */
@@ -38,8 +40,8 @@ public final class Claims {
 	}
 
 	/**
-	 * Whoever owns claimed land, as their claims mod knows them: an FTB team, or one of an Open
-	 * Parties and Claims player's claims. Equal owners own the same claim.
+	 * Whoever owns claimed land, as their claims mod knows them: an FTB team, one of an Open
+	 * Parties and Claims player's claims, or a MineColonies colony. Equal owners own the same claim.
 	 */
 	public interface Owner {
 		/**
@@ -84,7 +86,7 @@ public final class Claims {
 
 	/** Whether there's anything to read claims from, so settings about them are worth showing. */
 	public static boolean supported() {
-		return FtbChunks.available() || OpenPartiesAndClaims.available();
+		return FtbChunks.available() || OpenPartiesAndClaims.available() || MineColonies.available();
 	}
 
 	/** Where a chunk's claim is kept in its region's array. */
@@ -127,6 +129,14 @@ public final class Claims {
 		}
 	}
 
+	/** Whose a chunk is as last handed over, by any claims mod; null for no one's. Client thread. */
+	public static @Nullable Owner owner(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+		Map<Region, Claim[]> regions = known.get(dimension);
+		Claim[] chunks = regions == null ? null : regions.get(new Region(chunkX >> 5, chunkZ >> 5));
+		Claim claim = chunks == null ? null : chunks[index(chunkX, chunkZ)];
+		return claim == null ? null : claim.owner();
+	}
+
 	/** Time spent taking in an update, counted toward this tick's. */
 	public static void spent(long nanos) {
 		tickNanos += nanos;
@@ -137,6 +147,7 @@ public final class Claims {
 	public static void tick(Minecraft mc) {
 		long start = System.nanoTime();
 		OpenPartiesAndClaims.tick();
+		MineColonies.tick(mc);
 		if (++ticks % TEAM_CHECK_TICKS == 0) {
 			checkOwners();
 		}
@@ -263,6 +274,7 @@ public final class Claims {
 		changed.clear();
 		current = NONE;
 		OpenPartiesAndClaims.cleared();
+		MineColonies.cleared();
 	}
 
 	/** For tests: the most time spent on claims in one tick since the last call, in nanoseconds, and starts again. */

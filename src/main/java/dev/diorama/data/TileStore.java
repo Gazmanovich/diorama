@@ -148,6 +148,11 @@ public final class TileStore {
 		WRITER.execute(() -> this.extendOverviews(OLD_MAX_LOD, null));
 	}
 
+	/** Where the tiles are saved: one folder for each map of each dimension of each world. */
+	public Path folder() {
+		return this.folder;
+	}
+
 	public void onOverviewChanged(Consumer<TileKey> listener) {
 		this.overviewChanged = listener;
 	}
@@ -195,7 +200,8 @@ public final class TileStore {
 
 	/** A tile was written: the overview tiles above it are now out of date. */
 	private synchronized void overviewsStale(TileKey key) {
-		if (key.lod() >= TileKey.MAX_LOD) {
+		// Cave slices are only shown close up, so they get no overview tiles.
+		if (key.lod() >= TileKey.MAX_LOD || key.isCave()) {
 			return;
 		}
 		this.staleOverviews.add(key.parent());
@@ -773,6 +779,47 @@ public final class TileStore {
 		return keys;
 	}
 
+	/**
+	 * Every saved tile at an overview level with when its file was last written, in milliseconds;
+	 * one not on disk yet has the time now. For a viewer that fetches a tile again when this changes.
+	 */
+	public Map<TileKey, Long> savedTimes(int lod) {
+		Map<TileKey, Long> times = new HashMap<>();
+		Path dir = lod == 0 ? this.folder : this.folder.resolve("lod" + lod);
+		if (Files.isDirectory(dir)) {
+			// The times come with the listing, without opening each file.
+			try (java.util.stream.Stream<Path> files = Files.find(dir, 1, (file, attributes) -> {
+				String name = file.getFileName().toString();
+				int split = name.indexOf('_');
+				if (!attributes.isRegularFile() || !name.endsWith(".omt") || split < 0) {
+					return false;
+				}
+				try {
+					int u = Integer.parseInt(name.substring(0, split));
+					int v = Integer.parseInt(name.substring(split + 1, name.length() - 4));
+					times.put(new TileKey(TileKey.SURFACE, u, v, lod), attributes.lastModifiedTime().toMillis());
+				} catch (NumberFormatException e) {
+					// Not a tile.
+				}
+				return false;
+			})) {
+				files.forEach(file -> {
+				});
+			} catch (IOException | java.io.UncheckedIOException e) {
+				Diorama.LOGGER.warn("Couldn't list saved tiles in {}", dir, e);
+			}
+		}
+		long now = System.currentTimeMillis();
+		synchronized (this) {
+			for (TileKey key : this.unwritten.keySet()) {
+				if (key.lod() == lod) {
+					times.put(key, now);
+				}
+			}
+		}
+		return times;
+	}
+
 	/** Writes everything pending and waits until it's on disk. Call when leaving the world. */
 	public void close() {
 		if (this.closed) {
@@ -793,7 +840,7 @@ public final class TileStore {
 			}
 			for (Map.Entry<TileKey, Tile> entry : pending.entrySet()) {
 				// Nothing to retry with once the world is closed; store() has logged the failure.
-				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0) {
+				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0 && !entry.getKey().isCave()) {
 					synchronized (this) {
 						this.staleOverviews.add(entry.getKey().parent());
 					}
@@ -877,7 +924,11 @@ public final class TileStore {
 		}
 	}
 
+	/** A saved cave slice's tiles are in a folder named by its cut height, as Xaero's World Map keeps a folder per cave layer. */
 	private Path file(TileKey key) {
+		if (key.isCave()) {
+			return this.folder.resolve(Integer.toString(key.layer())).resolve(key.tileU() + "_" + key.tileV() + ".omt");
+		}
 		Path dir = key.lod() == 0 ? this.folder : this.folder.resolve("lod" + key.lod());
 		return dir.resolve(key.tileU() + "_" + key.tileV() + ".omt");
 	}

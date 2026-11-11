@@ -116,6 +116,12 @@ public final class MapLevel implements ChunkSource {
 	private volatile @Nullable TileStore store;
 	/** The folder {@link #store} saves into; see {@link #storeName()}. */
 	private volatile String storeName = "";
+	/**
+	 * The saved views from on top of the roof as they're baked now, opened with the first one
+	 * baked; see {@link #roofStore}. Render thread.
+	 */
+	private @Nullable TileStore roofStore;
+	private String roofStoreName = "";
 	/** The tiles this map had under another label, until it's redrawn; null if there are none. */
 	private volatile @Nullable MapMemory memory;
 	private volatile boolean fogOfWar;
@@ -410,6 +416,39 @@ public final class MapLevel implements ChunkSource {
 		return new TileLabel(this.roofless(), Math.round(dev.diorama.MapStyle.get().pitchDegrees()), this.roofless() && this.fogOfWar, Projection.facing()).folder();
 	}
 
+	/**
+	 * Whether a cave slice is cut above the roof, as the map shows it to a player standing on top
+	 * of the Nether: the roof's bedrock and what's built on it. Those are the only cave slices
+	 * saved. The sky view there looks from under the roof, so it never shows them, and a slice of
+	 * flat bedrock takes little room on disk. The slices under a roof and in other dimensions
+	 * aren't saved, as there's one for every 4 blocks of height and each is a map of its own.
+	 */
+	private boolean onRoof(TileKey key) {
+		return key.isCave() && this.roofless() && key.layer() > this.roof;
+	}
+
+	/**
+	 * Where a slice from on top of the roof ({@link #onRoof}) is saved, or null for any other tile
+	 * and when this map saves nothing. It's saved as it's baked for a view and merged with what was
+	 * saved, like the sky view, so what the player mapped up there is still on the map after its
+	 * chunks are gone. Slices baked another way (fog of war, the tilt, the facing) have another
+	 * folder; a bake still running for the old one is dropped by its generation. Render thread.
+	 */
+	private @Nullable TileStore roofStore(TileKey key) {
+		if (this.folder == null || this.savedOnly || this.closed || key.lod() != 0 || !this.onRoof(key)) {
+			return null;
+		}
+		String name = TileLabel.onRoof(Math.round(dev.diorama.MapStyle.get().pitchDegrees()), Projection.facing(), this.fogOfWar);
+		if (this.roofStore == null || !name.equals(this.roofStoreName)) {
+			if (this.roofStore != null) {
+				this.roofStore.close();
+			}
+			this.roofStore = new TileStore(this.folder.resolve(name));
+			this.roofStoreName = name;
+		}
+		return this.roofStore;
+	}
+
 	/** Moves to another folder if how tiles are baked changed, and queues everything loaded to be saved there. */
 	private void switchStoreIfNeeded() {
 		if (this.store == null || this.storeName().equals(this.storeName)) {
@@ -489,6 +528,49 @@ public final class MapLevel implements ChunkSource {
 
 	public int chunkCount() {
 		return this.chunks.size();
+	}
+
+	/** The chunks held now, by {@link ChunkSnapshot#key}, at their places in the world: a copy that stays as it is. */
+	public Map<Long, ChunkSnapshot> chunksNow() {
+		return new HashMap<>(this.chunks);
+	}
+
+	/**
+	 * The map units a cave slice cut at {@code layer} can show of the chunks held now, as
+	 * {u0, v0, u1, v1}: every chunk's box from the slice's floor to its lifted top. Null with no chunks.
+	 */
+	public double @Nullable [] sliceBounds(int layer) {
+		double u0 = Double.POSITIVE_INFINITY;
+		double v0 = Double.POSITIVE_INFINITY;
+		double u1 = Double.NEGATIVE_INFINITY;
+		double v1 = Double.NEGATIVE_INFINITY;
+		for (ChunkSnapshot chunk : this.chunks.values()) {
+			double[] box = sliceBox(chunk, layer);
+			u0 = Math.min(u0, box[0]);
+			v0 = Math.min(v0, box[1]);
+			u1 = Math.max(u1, box[2]);
+			v1 = Math.max(v1, box[3]);
+		}
+		return u0 > u1 ? null : new double[] {u0, v0, u1, v1};
+	}
+
+	/** The map units one chunk can show in a cave slice cut at {@code layer}, as {u0, v0, u1, v1}. */
+	public static double[] sliceBox(ChunkSnapshot chunk, int layer) {
+		double top = layer + CaveCut.LIFT + 1;
+		double bottom = layer - TileBaker.CAVE_DEPTH - 1;
+		double u0 = Double.POSITIVE_INFINITY;
+		double v0 = Double.POSITIVE_INFINITY;
+		double u1 = Double.NEGATIVE_INFINITY;
+		double v1 = Double.NEGATIVE_INFINITY;
+		for (int corner = 0; corner < 4; corner++) {
+			double x = chunk.chunkX * 16 + (corner & 1) * 16;
+			double z = chunk.chunkZ * 16 + (corner >> 1) * 16;
+			u0 = Math.min(u0, Projection.u(x, z));
+			u1 = Math.max(u1, Projection.u(x, z));
+			v0 = Math.min(v0, Projection.v(x, top, z));
+			v1 = Math.max(v1, Projection.v(x, bottom, z));
+		}
+		return new double[] {u0, v0, u1, v1};
 	}
 
 	/**
@@ -962,6 +1044,10 @@ public final class MapLevel implements ChunkSource {
 			}
 			return;
 		}
+		TileStore onRoof = this.roofStore(image.key());
+		if (onRoof != null) {
+			onRoof.baked(image);
+		}
 		MapTile tile = this.tiles.get(image.key());
 		if (background && tile == null) {
 			// Baked only to be saved; a map that wants it will bake it again.
@@ -1058,6 +1144,8 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
+		// What the bake merges with: a slice from on top of the roof has saved pixels too, but no spots or block light.
+		TileStore saveTo = key.isCave() ? this.roofStore(key) : store;
 		// As TileBaker decides: under a roof (the Nether) every view is lit as if the roof were
 		// lifted off, cave slices too; elsewhere a cave slice is lit by block light. Fog of war only
 		// changes those two.
@@ -1065,7 +1153,7 @@ public final class MapLevel implements ChunkSource {
 			: key.isCave() ? dev.diorama.render.gpu.GpuBakeCheck.CAVE : dev.diorama.render.gpu.GpuBakeCheck.SKY;
 		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(view, view != dev.diorama.render.gpu.GpuBakeCheck.SKY && fog, overlays != null);
 		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.GPU) {
-			this.bakeOnGpu(key, looks, generation, fog, overlays, store);
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store, saveTo);
 			return;
 		}
 		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK) {
@@ -1075,7 +1163,7 @@ public final class MapLevel implements ChunkSource {
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
-				TileStore.Saved saved = store == null ? null : store.readSaved(key);
+				TileStore.Saved saved = saveTo == null ? null : saveTo.readSaved(key);
 				ChunkSource source = this.sourceFor(store);
 				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays);
 				long spots = System.nanoTime();
@@ -1102,10 +1190,12 @@ public final class MapLevel implements ChunkSource {
 	 * come back here a frame or two later. Always the whole tile, which costs the GPU little.
 	 * Falls back to tracing if the mesher failed or the GPU didn't draw it.
 	 */
-	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
+	private void bakeOnGpu(
+		TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, @Nullable TileStore saveTo
+	) {
 		BAKERS.execute(() -> {
 			try {
-				TileStore.Saved saved = store == null ? null : store.readSaved(key);
+				TileStore.Saved saved = saveTo == null ? null : saveTo.readSaved(key);
 				ChunkSource source = this.sourceFor(store);
 				dev.diorama.bake.GpuMesher.Mesh mesh;
 				try {
@@ -1506,6 +1596,9 @@ public final class MapLevel implements ChunkSource {
 		if (this.store != null) {
 			this.store.close();
 		}
+		if (this.roofStore != null) {
+			this.roofStore.close();
+		}
 		if (this.memory != null) {
 			this.memory.close();
 		}
@@ -1519,7 +1612,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Saves surface bakes that finished since the last update, waiting a moment for the ones still
+	 * Saves the bakes that are kept and finished since the last update, waiting a moment for the ones still
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
@@ -1531,12 +1624,15 @@ public final class MapLevel implements ChunkSource {
 			TileImage image;
 			while ((image = this.finished.poll()) != null) {
 				this.inFlight.remove(image.key());
-				if (!image.key().isCave() && image.key().lod() == 0 && image.generation() == this.generation(image.key())) {
-					store.baked(image);
+				if (image.key().lod() == 0 && image.generation() == this.generation(image.key())) {
+					TileStore saveTo = image.key().isCave() ? this.roofStore(image.key()) : store;
+					if (saveTo != null) {
+						saveTo.baked(image);
+					}
 				}
 			}
-			boolean surfaceBaking = this.inFlight.stream().anyMatch(key -> !key.isCave() && key.lod() == 0);
-			if (!surfaceBaking || System.currentTimeMillis() > deadline) {
+			boolean baking = this.inFlight.stream().anyMatch(key -> key.lod() == 0 && (!key.isCave() || this.onRoof(key)));
+			if (!baking || System.currentTimeMillis() > deadline) {
 				return;
 			}
 			try {
