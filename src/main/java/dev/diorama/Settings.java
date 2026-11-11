@@ -75,6 +75,8 @@ public final class Settings {
 	public boolean minimapCentered = false;
 	/** The minimap's size while the enlarge key is held, in percent of {@link #minimapSize}. */
 	public int minimapEnlarged = 200;
+	/** The enlarge key switches the enlarged size on and off instead of being held (Xaero's "Toggled Enlarged Minimap"). */
+	public boolean minimapEnlargeToggle = false;
 	/** One of {@link #ZOOMS}. Saved as the value, so adding a step doesn't move anyone's zoom. */
 	public double minimapPixelsPerBlock = 2;
 	/** Files from before {@link #minimapPixelsPerBlock} say this instead, a place in the steps as they were. Read once. */

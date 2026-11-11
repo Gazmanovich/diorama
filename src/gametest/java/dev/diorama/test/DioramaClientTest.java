@@ -5554,7 +5554,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
 	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
-	 * to its size.
+	 * to its size. With Toggle enlarging on (#306), one press enlarges it until the next press, through
+	 * a screen opening and closing.
 	 */
 	private static void enlarge(ClientGameTestContext context) {
 		context.setScreen(() -> null);
@@ -5600,7 +5601,44 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 10);
 		context.takeScreenshot("enlarge-06-settings");
 		context.setScreen(() -> null);
+		context.runOnClient(mc -> Settings.get().minimapEnlargeToggle = true);
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 40);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged() && !DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("One press with Toggle enlarging on didn't leave the minimap enlarged");
+		}
+		context.takeScreenshot("enlarge-07-toggled-on");
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 5);
+		context.setScreen(() -> null);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Opening and closing a screen shrank the toggled minimap");
+		}
+		context.takeScreenshot("enlarge-08-toggled-after-screen");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("A second press with Toggle enlarging on didn't shrink the minimap");
+		}
+		context.takeScreenshot("enlarge-09-toggled-off");
+		// Held past the key repeat delay, a keyboard keeps clicking: that's still one press.
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		for (int i = 0; i < 5; i++) {
+			context.runOnClient(mc -> net.minecraft.client.KeyMapping.click(InputConstants.getKey("key.keyboard.z")));
+			context.waitTicks(1);
+		}
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Key repeats while holding the enlarge key switched the toggled minimap back");
+		}
+		context.takeScreenshot("enlarge-10-toggled-held");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
 		context.runOnClient(mc -> {
+			Settings.get().minimapEnlargeToggle = false;
 			Settings.get().minimapEnlarged = saved[0];
 			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
 			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
