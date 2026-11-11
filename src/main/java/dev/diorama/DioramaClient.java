@@ -94,6 +94,7 @@ public final class DioramaClient {
 		Waypoints.watchDeaths(mc);
 		Claims.tick(mc);
 		XaeroNotice.tick(mc);
+		dev.diorama.web.ClientWebMap.tick(mc);
 		while (OPEN_MAP.consumeClick()) {
 			if (mc.gui.screen() == null && mc.level != null && !ServerRules.sayMapOffHere(mc) && ServerRules.minimapAllowed()) {
 				mc.gui.setScreen(new MapScreen());
