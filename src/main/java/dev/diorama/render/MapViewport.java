@@ -965,6 +965,9 @@ public final class MapViewport {
 		}
 	}
 
+	/** One line of the mask as {@link #keepOffMapped} grows it. */
+	private final int[] grownLine = new int[MASK];
+
 	/**
 	 * Grows the known area by {@code radius} texels each way. The fog's soft edge is never narrower
 	 * than a mask texel, and reaches about two into the known side: nothing close up, but zoomed far
@@ -973,7 +976,7 @@ public final class MapViewport {
 	 * for either way.
 	 */
 	private void keepOffMapped(int radius) {
-		int[] known = this.notKnownCounts;
+		int[] known = this.grownLine;
 		for (int pass = 0; pass < 2; pass++) {
 			boolean horizontal = pass == 0;
 			for (int line = 0; line < MASK; line++) {

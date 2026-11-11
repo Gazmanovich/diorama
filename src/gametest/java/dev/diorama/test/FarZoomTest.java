@@ -111,19 +111,46 @@ final class FarZoomTest {
 		for (int lod = 6; lod <= TileKey.MAX_LOD; lod++) {
 			before[lod] = store.saved(lod).size();
 		}
-		start = System.nanoTime();
+		// The oldest kind: its overview tiles don't say which chunks they show either.
 		try {
-			store.rebuildHighOverviews();
+			store.forgetHighOverviews(false);
 		} catch (InterruptedException e) {
 			throw new AssertionError(e);
 		}
-		Diorama.LOGGER.info("far-zoom: levels 6 to {} of an old map built in {} s; on disk, levels 1 to 5 take {} KB and levels 6 to {} take {} KB",
-			TileKey.MAX_LOD, (System.nanoTime() - start) / 1_000_000_000.0, kilobytes(folder, 1, 5), TileKey.MAX_LOD, kilobytes(folder, 6, TileKey.MAX_LOD));
-		for (int lod = 6; lod <= TileKey.MAX_LOD; lod++) {
-			int after = store.saved(lod).size();
-			if (after != before[lod] || after == 0) {
-				throw new AssertionError("An old map got " + after + " tiles at level " + lod + ", expected " + before[lod]);
+		start = System.nanoTime();
+		TileStore reopened = new TileStore(folder);
+		try {
+			context.waitFor(mc -> {
+				for (int lod = 6; lod <= TileKey.MAX_LOD; lod++) {
+					if (reopened.saved(lod).size() != before[lod]) {
+						return false;
+					}
+				}
+				return true;
+			}, 1200);
+		} catch (RuntimeException | AssertionError e) {
+			StringBuilder got = new StringBuilder();
+			for (int lod = 6; lod <= TileKey.MAX_LOD; lod++) {
+				got.append(' ').append(reopened.saved(lod).size()).append('/').append(before[lod]);
 			}
+			throw new AssertionError("Opening an old map didn't build its levels 6 to " + TileKey.MAX_LOD + " in a minute; tiles by level, got/expected:" + got, e);
+		}
+		Diorama.LOGGER.info("far-zoom: levels 6 to {} of an old map built in {} s after opening it; on disk, levels 1 to 5 take {} KB and levels 6 to {} take {} KB",
+			TileKey.MAX_LOD, (System.nanoTime() - start) / 1_000_000_000.0, kilobytes(folder, 1, 5), TileKey.MAX_LOD, kilobytes(folder, 6, TileKey.MAX_LOD));
+		// Land claims drawn on the coarsest tile ask for its chunks, which that map never kept: every
+		// overview tile is then made again from the detailed ones, on closing at the latest.
+		TileKey top = reopened.saved(TileKey.MAX_LOD).iterator().next();
+		if (reopened.chunks(top) != null) {
+			throw new AssertionError("The old map's coarsest tile has chunks before anything asked for them");
+		}
+		start = System.nanoTime();
+		reopened.close();
+		TileStore repaired = new TileStore(folder);
+		boolean chunks = repaired.chunks(top) != null;
+		repaired.close();
+		Diorama.LOGGER.info("far-zoom: the old map's chunks repaired in {} s", (System.nanoTime() - start) / 1_000_000_000.0);
+		if (!chunks) {
+			throw new AssertionError("The old map's coarsest tile still has no chunks after the repair");
 		}
 
 		// Things to read on it: waypoints all over the big stretch and one on each island, and a line round the stretch.
