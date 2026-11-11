@@ -68,12 +68,16 @@ public final class WaypointHud implements HudElement {
 			z = graphics.pose().last().pose().m32();
 			*///?}
 			this.beams.begin(mc.level, eye, width, height, z);
-			for (Waypoint waypoint : waypoints) {
-				if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
-					this.beams.add(waypoint);
+			try {
+				for (Waypoint waypoint : waypoints) {
+					if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
+						this.beams.add(waypoint);
+					}
 				}
+				this.beams.draw(graphics);
+			} finally {
+				this.beams.end();
 			}
-			this.beams.draw(graphics);
 		}
 		for (Waypoint waypoint : waypoints) {
 			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, viewer)) {

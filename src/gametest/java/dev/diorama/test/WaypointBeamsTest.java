@@ -130,13 +130,28 @@ final class WaypointBeamsTest {
 		BufferedImage wall = shot(context, Settings.Beams.ALL, "beams-wall");
 		expect(wall, points(context, home, wall, 3, 7, 1), home, false, "behind a wall, the foot of the beam");
 		expect(wall, points(context, home, wall, 12, 22, 2), home, true, "behind a wall, the beam above it");
-		// A bridge two blocks thick across the view hides only the stretch behind it.
+		// A bridge one block thick across the view hides only the stretch behind it, about 5.2 to 7.7
+		// blocks up the beam: it shows under the bridge and over it.
 		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "air");
-		fill(world, home.x - 4, floor + 5, home.z + 10, home.x + 4, floor + 6, home.z + 10, "stone");
+		fill(world, home.x - 4, floor + 5, home.z + 10, home.x + 4, floor + 5, home.z + 10, "stone");
 		context.waitTicks(220);
 		BufferedImage bridge = shot(context, Settings.Beams.ALL, "beams-bridge");
-		expect(bridge, points(context, home, bridge, 6, 9, 1), home, false, "behind a bridge, the stretch of beam it covers");
-		expect(bridge, points(context, home, bridge, 12, 22, 2), home, true, "behind a bridge, the beam above it");
+		expect(bridge, points(context, home, bridge, 6, 7, 1, 2), home, false, "behind a bridge, the stretch of beam it covers");
+		expect(bridge, points(context, home, bridge, 3, 4, 1, 2), home, true, "behind a bridge, the beam under it");
+		expect(bridge, points(context, home, bridge, 10, 22, 2), home, true, "behind a bridge, the beam above it");
+		fill(world, home.x - 4, floor + 5, home.z + 10, home.x + 4, floor + 5, home.z + 10, "air");
+		// A closed door hides it from the front; a fence doesn't.
+		world.getServer().runCommand("setblock " + home.x + " " + (floor + 1) + " " + (home.z + 19) + " minecraft:iron_door[half=lower,facing=south]");
+		world.getServer().runCommand("setblock " + home.x + " " + (floor + 2) + " " + (home.z + 19) + " minecraft:iron_door[half=upper,facing=south]");
+		context.waitTicks(220);
+		BufferedImage door = shot(context, Settings.Beams.ALL, "beams-door");
+		expect(door, points(context, home, door, 3, 5, 1), home, false, "behind a closed door, the foot of the beam");
+		fill(world, home.x, floor + 1, home.z + 19, home.x, floor + 2, home.z + 19, "air");
+		fill(world, home.x - 1, floor + 1, home.z + 19, home.x + 1, floor + 2, home.z + 19, "oak_fence");
+		context.waitTicks(40);
+		BufferedImage fence = shot(context, Settings.Beams.ALL, "beams-fence");
+		expect(fence, points(context, home, fence, 3, 7, 1), home, true, "behind a fence, the foot of the beam");
+		fill(world, home.x - 1, floor + 1, home.z + 19, home.x + 1, floor + 2, home.z + 19, "air");
 		// Glass lets it through.
 		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "glass");
 		context.waitTicks(220);
@@ -272,6 +287,11 @@ final class WaypointBeamsTest {
 
 	/** The same from {@code lowest} to {@code highest} blocks above the beam's foot, every {@code step}. */
 	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step) {
+		return points(context, waypoint, shot, lowest, highest, step, 3);
+	}
+
+	/** The same, where as few as {@code least} points on screen will do. */
+	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step, int least) {
 		List<int[]> points = new ArrayList<>();
 		for (int up = lowest; up <= highest; up += step) {
 			double y = waypoint.y + 1.0 + up;
@@ -280,7 +300,7 @@ final class WaypointBeamsTest {
 				points.add(new int[] {Math.min(shot.getWidth() - 1, Math.round(screen[0])), Math.min(shot.getHeight() - 1, Math.round(screen[1]))});
 			}
 		}
-		if (points.size() < 3) {
+		if (points.size() < least) {
 			throw new AssertionError("Too little of the beam of " + waypoint.name + " would be on screen: " + points.size() + " points");
 		}
 		return points.toArray(int[][]::new);

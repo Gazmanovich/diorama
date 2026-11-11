@@ -15,6 +15,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
@@ -76,6 +77,12 @@ public final class WaypointBeams {
 	private static final int PER_BLOCK = 4;
 	private static final int PARTS = HEIGHT * PER_BLOCK;
 	private static final float[] CLEAR = new float[0];
+	/** Where {@link #blocking} keeps how much of a block's face its shape covers, seen along x and along z, and how much hides a beam. */
+	private static final int ALONG_X = 2;
+	private static final int ALONG_Z = 3;
+	private static final float COVERS = 0.9F;
+	/** The most blocks one beam may take to look at. */
+	private static final int LOOK_MOST = 12000;
 	/** How long what was seen of a beam is kept, in milliseconds, with the camera moving and still. */
 	private static final long AGAIN_MOVING = 50;
 	private static final long AGAIN_STILL = 500;
@@ -234,13 +241,20 @@ public final class WaypointBeams {
 		double perZ = uz == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / uz);
 		double nextX = ux == 0 ? Double.POSITIVE_INFINITY : (ux > 0 ? x + 1 - this.eye.x : this.eye.x - x) * perX;
 		double nextZ = uz == 0 ? Double.POSITIVE_INFINITY : (uz > 0 ? z + 1 - this.eye.z : this.eye.z - z) * perZ;
+		// Which way the line runs over the ground decides which face of a block it meets.
+		int face = Math.abs(ux) >= Math.abs(uz) ? ALONG_X : ALONG_Z;
+		int floor = this.level.getMinY();
+		int budget = this.blocks - LOOK_MOST;
 		double entered = 0;
-		while (entered < limit && hiddenParts < PARTS) {
+		// Past its budget a look stops, and the beam shows for what wasn't looked at: a camera high over
+		// a waypoint a long way down, with tall glass towers between.
+		while (entered < limit && hiddenParts < PARTS && this.blocks > budget) {
 			// The line crosses this column between these distances over the ground.
 			double near = Math.max(entered, 0.001);
 			double far = Math.max(Math.min(Math.min(nextX, nextZ), limit), near);
-			int top = Math.min(this.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z) - 1, (int) Math.floor(this.eye.y + Math.max(near * high, far * high)));
-			int bottom = (int) Math.floor(this.eye.y + Math.min(near * low, far * low));
+			// Up to the block over the highest that stops movement: snow lies on top of that one.
+			int top = Math.min(this.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z), (int) Math.floor(this.eye.y + Math.max(near * high, far * high)));
+			int bottom = Math.max(floor, (int) Math.floor(this.eye.y + Math.min(near * low, far * low)));
 			for (int y = top; y >= bottom && hiddenParts < PARTS; y--) {
 				this.blocks--;
 				BlockState state = this.level.getBlockState(this.pos.set(x, y, z));
@@ -248,7 +262,7 @@ public final class WaypointBeams {
 					continue;
 				}
 				float[] blocking = this.blocking(state);
-				if (blocking == CLEAR) {
+				if (blocking == CLEAR || blocking[face] < COVERS) {
 					continue;
 				}
 				// Seen from the camera, the block covers the lines of sight between these two slopes,
@@ -288,18 +302,42 @@ public final class WaypointBeams {
 	}
 
 	/**
-	 * How much of its height a block hides what's behind it over, from 0 to 1, or {@link #CLEAR}: by
-	 * the shape that blocks the view, so glass, water and plants are clear, and so is anything narrow,
-	 * a fence or a door, where most of the beam would show past it.
+	 * What of a block hides what's behind it: from where to where up its height (0 to 1), and how much
+	 * of that its shape covers seen along x and along z; or {@link #CLEAR}. By the shape that blocks
+	 * the view, so glass, water and plants are clear. A door covers its whole face seen from the front
+	 * and a sliver from the side; a fence, a quarter. Only what covers nearly all of it hides a beam,
+	 * so a block is all or nothing each way: stairs seen from the side are let through.
 	 */
 	private float[] blocking(BlockState state) {
-		float[] blocking = this.blocking.get(state);
+		boolean fixed = !state.getBlock().hasDynamicShape();
+		float[] blocking = fixed ? this.blocking.get(state) : null;
 		if (blocking == null) {
-			VoxelShape shape = state.getVisualShape(this.level, this.pos, CollisionContext.empty());
-			blocking = shape.isEmpty() || shape.max(Direction.Axis.X) - shape.min(Direction.Axis.X) < 0.9 || shape.max(Direction.Axis.Z) - shape.min(Direction.Axis.Z) < 0.9
-				? CLEAR
-				: new float[] {(float) shape.min(Direction.Axis.Y), (float) Math.min(1, shape.max(Direction.Axis.Y))};
-			this.blocking.put(state, blocking);
+			blocking = CLEAR;
+			try {
+				VoxelShape shape = state.getVisualShape(this.level, this.pos, CollisionContext.empty());
+				// A fence's shape is a solid panel where it joins its neighbours, though it's rails to look at.
+				if (!shape.isEmpty() && !state.is(BlockTags.FENCES) && !state.is(BlockTags.FENCE_GATES)) {
+					double from = Math.max(0, shape.min(Direction.Axis.Y));
+					double to = Math.min(1, shape.max(Direction.Axis.Y));
+					double[] covered = new double[2];
+					shape.forAllBoxes((x1, y1, z1, x2, y2, z2) -> {
+						double tall = Math.min(to, y2) - Math.max(from, y1);
+						if (tall > 0) {
+							covered[0] += (z2 - z1) * tall;
+							covered[1] += (x2 - x1) * tall;
+						}
+					});
+					if (to > from && Math.max(covered[0], covered[1]) >= COVERS * (to - from)) {
+						blocking = new float[] {(float) from, (float) to, (float) Math.min(1, covered[0] / (to - from)), (float) Math.min(1, covered[1] / (to - from))};
+					}
+				}
+			} catch (RuntimeException e) {
+				// Another mod's block that can't say its shape here: let the beam through.
+			}
+			if (fixed) {
+				// A piston's moving block or a shulker box changes shape without changing state: those are asked each time.
+				this.blocking.put(state, blocking);
+			}
 		}
 		return blocking;
 	}
@@ -422,9 +460,13 @@ public final class WaypointBeams {
 		}
 	}
 
+	/** Ends a frame that {@link #begin} started, drawn or not. */
+	void end() {
+		this.level = null;
+	}
+
 	/** Draws what was added since {@link #begin}. */
 	void draw(GuiGraphicsExtractor graphics) {
-		this.level = null;
 		if (this.quads == 0) {
 			return;
 		}
