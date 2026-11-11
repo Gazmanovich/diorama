@@ -21,6 +21,12 @@ import org.jspecify.annotations.Nullable;
  * lists every block in it, and only a section with a portal in its palette is read block by block.
  * Pins are kept with the setting off too, hidden ({@link WaypointStore#hidden}), so turning it on
  * shows the portals the map has already passed.
+ *
+ * <p>A pin is named after its block only when the portal stands as the game builds it: a Nether
+ * portal in obsidian, an End portal in its frame or the End's bedrock fountain, a gateway between
+ * bedrock. Server plugins such as AdvancedPortals make portals to anywhere out of the same blocks in
+ * frames of their own, and "End Portal" on a hub's server selector is wrong; those are named
+ * {@link #PLAIN_NAME}. The client can't know where one leads, so it doesn't guess further.
  */
 public final class Portals {
 	/**
@@ -34,8 +40,14 @@ public final class Portals {
 	private static final int END_COLOR = 0xFF12A594;
 	private static final Predicate<BlockState> PORTAL = Portals::isPortal;
 
-	/** One kind of portal in a chunk, at a block of it near the middle. */
-	public record Spot(Waypoint.Kind kind, int x, int y, int z) {
+	/** The name saved for a portal that isn't built the game's way, shown as the portal icon's name. */
+	static final String PLAIN_NAME = "Portal";
+
+	/**
+	 * One kind of portal in a chunk, at a block of it near the middle. {@code framed}: one of them
+	 * stands as the game builds it (see {@link Portals}).
+	 */
+	public record Spot(Waypoint.Kind kind, int x, int y, int z, boolean framed) {
 	}
 
 	private Portals() {
@@ -62,6 +74,8 @@ public final class Portals {
 	 */
 	public static List<Spot> find(ChunkSnapshot chunk, int roof) {
 		List<Map<Waypoint.Kind, List<int[]>>> blocks = null;
+		// Per side of the roof, the kinds with a portal built the game's way.
+		List<java.util.Set<Waypoint.Kind>> framed = List.of(java.util.EnumSet.noneOf(Waypoint.Kind.class), java.util.EnumSet.noneOf(Waypoint.Kind.class));
 		for (int i = 0; i < chunk.sectionCount(); i++) {
 			PalettedContainer<BlockState> section = chunk.section(i);
 			if (section == null || !section.maybeHas(PORTAL)) {
@@ -77,6 +91,9 @@ public final class Portals {
 								blocks = List.of(new EnumMap<>(Waypoint.Kind.class), new EnumMap<>(Waypoint.Kind.class));
 							}
 							int side = roof != ChunkSource.NO_ROOF && baseY + y >= roof ? 1 : 0;
+							if (!framed.get(side).contains(kind) && framed(chunk, kind, x, baseY + y, z)) {
+								framed.get(side).add(kind);
+							}
 							blocks.get(side).computeIfAbsent(kind, k -> new ArrayList<>()).add(new int[] {(chunk.chunkX << 4) + x, baseY + y, (chunk.chunkZ << 4) + z});
 						}
 					}
@@ -87,13 +104,58 @@ public final class Portals {
 			return List.of();
 		}
 		List<Spot> spots = new ArrayList<>();
-		for (Map<Waypoint.Kind, List<int[]>> side : blocks) {
-			for (Map.Entry<Waypoint.Kind, List<int[]>> entry : side.entrySet()) {
+		for (int side = 0; side < 2; side++) {
+			for (Map.Entry<Waypoint.Kind, List<int[]>> entry : blocks.get(side).entrySet()) {
 				int[] middle = entry.getValue().get(entry.getValue().size() / 2);
-				spots.add(new Spot(entry.getKey(), middle[0], middle[1], middle[2]));
+				spots.add(new Spot(entry.getKey(), middle[0], middle[1], middle[2], framed.get(side).contains(entry.getKey())));
 			}
 		}
 		return spots;
+	}
+
+	/**
+	 * Whether a portal block has beside it what the game puts there, looking no further than its
+	 * chunk. That's enough: every lit Nether portal block has the frame's obsidian at the top or the
+	 * bottom of its own column, and an End portal is three blocks wide (five in the End's fountain),
+	 * so the part of one in any chunk has its outer edge there too.
+	 */
+	private static boolean framed(ChunkSnapshot chunk, Waypoint.Kind kind, int x, int y, int z) {
+		return switch (kind) {
+			case NETHER_PORTAL -> {
+				int top = y;
+				while (block(chunk, x, top + 1, z) == Blocks.NETHER_PORTAL) {
+					top++;
+				}
+				int bottom = y;
+				while (block(chunk, x, bottom - 1, z) == Blocks.NETHER_PORTAL) {
+					bottom--;
+				}
+				yield block(chunk, x, top + 1, z) == Blocks.OBSIDIAN || block(chunk, x, bottom - 1, z) == Blocks.OBSIDIAN;
+			}
+			case END_PORTAL -> endFrame(block(chunk, x - 1, y, z)) || endFrame(block(chunk, x + 1, y, z))
+				|| endFrame(block(chunk, x, y, z - 1)) || endFrame(block(chunk, x, y, z + 1));
+			// The game's gateways, around the End's main island and out on the far ones, are capped with bedrock.
+			default -> block(chunk, x, y + 1, z) == Blocks.BEDROCK || block(chunk, x, y - 1, z) == Blocks.BEDROCK;
+		};
+	}
+
+	/** A stronghold's frame, or the bedrock around and inside the End's fountain. */
+	private static boolean endFrame(@Nullable Block block) {
+		return block == Blocks.END_PORTAL_FRAME || block == Blocks.BEDROCK;
+	}
+
+	/** The block at a place in the chunk, {@code x} and {@code z} within it; null outside it. */
+	private static @Nullable Block block(ChunkSnapshot chunk, int x, int y, int z) {
+		int index = (y >> 4) - chunk.minSectionY;
+		if (x < 0 || x > 15 || z < 0 || z > 15 || index < 0 || index >= chunk.sectionCount()) {
+			return null;
+		}
+		PalettedContainer<BlockState> section = chunk.section(index);
+		if (section != null) {
+			return section.get(x, y & 15, z).getBlock();
+		}
+		BlockState uniform = chunk.uniformSection(index);
+		return uniform == null ? null : uniform.getBlock();
 	}
 
 	/**
@@ -103,20 +165,38 @@ public final class Portals {
 	 * moved is theirs, and stays.
 	 */
 	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store, ChunkSource around) {
-		add(find(chunk, around.roof()), dimension, store, around.roof());
+		int roof = around.roof();
+		List<Spot> spots = find(chunk, roof);
+		add(spots, dimension, store, roof);
+		boolean renamed = false;
 		for (Waypoint pin : store.withHidden(dimension)) {
-			if (pin.kind.isPortal() && !pin.edited && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ && !onPortal(pin, chunk)) {
+			if (!pin.kind.isPortal() || pin.edited || pin.x >> 4 != chunk.chunkX || pin.z >> 4 != chunk.chunkZ) {
+				continue;
+			}
+			if (onPortal(pin, chunk)) {
+				// Its name follows the portal: one pinned before frames counted, or whose frame changed.
+				for (Spot spot : spots) {
+					boolean sameSide = roof == ChunkSource.NO_ROOF || (pin.y >= roof) == (spot.y() >= roof);
+					if (spot.kind() == pin.kind && sameSide && !pin.name.equals(savedName(spot)) && automatic(pin)) {
+						pin.name = savedName(spot);
+						renamed = true;
+					}
+				}
+			} else {
 				store.forget(pin);
 				int reach = (SAME_PORTAL + 15) >> 4;
 				for (int dx = -reach; dx <= reach; dx++) {
 					for (int dz = -reach; dz <= reach; dz++) {
 						ChunkSnapshot near = around.chunk(chunk.chunkX + dx, chunk.chunkZ + dz);
 						if (near != null) {
-							add(find(near, around.roof()), dimension, store, around.roof());
+							add(find(near, roof), dimension, store, roof);
 						}
 					}
 				}
 			}
+		}
+		if (renamed) {
+			store.changed();
 		}
 	}
 
@@ -148,7 +228,7 @@ public final class Portals {
 			}
 			if (!pinned) {
 				int color = spot.kind() == Waypoint.Kind.NETHER_PORTAL ? NETHER_COLOR : END_COLOR;
-				Waypoint pin = new Waypoint(savedName(spot.kind()), spot.x(), spot.y(), spot.z(), dimension, color);
+				Waypoint pin = new Waypoint(savedName(spot), spot.x(), spot.y(), spot.z(), dimension, color);
 				pin.kind = spot.kind();
 				pin.icon = WaypointIcons.PORTAL;
 				known.add(pin);
@@ -166,5 +246,14 @@ public final class Portals {
 	/** The block's English name, which a new pin is saved under (see {@link Waypoint#BED_NAME}). */
 	static String savedName(Waypoint.Kind kind) {
 		return kind == Waypoint.Kind.NETHER_PORTAL ? "Nether Portal" : kind == Waypoint.Kind.END_PORTAL ? "End Portal" : "End Gateway";
+	}
+
+	private static String savedName(Spot spot) {
+		return spot.framed() ? savedName(spot.kind()) : PLAIN_NAME;
+	}
+
+	/** Whether the pin still has a name it was given here, which {@link Waypoint#shownName} translates. */
+	private static boolean automatic(Waypoint pin) {
+		return pin.name.equals(PLAIN_NAME) || pin.name.equals(savedName(pin.kind));
 	}
 }
