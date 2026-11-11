@@ -137,12 +137,12 @@ final class MinimapTextSizeTest {
 		});
 	}
 
-	/** The box around every pixel of exactly this colour inside a part of a screenshot: x0, y0, x1, y1. */
+	/** The box around every pixel of this colour inside a part of a screenshot: x0, y0, x1, y1. */
 	private static int[] extent(BufferedImage shot, int rgb, int left, int top, int right, int bottom) {
 		int[] box = {Integer.MAX_VALUE, Integer.MAX_VALUE, -1, -1};
 		for (int y = Math.max(0, top); y < Math.min(shot.getHeight(), bottom); y++) {
 			for (int x = Math.max(0, left); x < Math.min(shot.getWidth(), right); x++) {
-				if ((shot.getRGB(x, y) & 0xFFFFFF) == rgb) {
+				if (close(shot.getRGB(x, y), rgb)) {
 					box[0] = Math.min(box[0], x);
 					box[1] = Math.min(box[1], y);
 					box[2] = Math.max(box[2], x);
@@ -151,6 +151,11 @@ final class MinimapTextSizeTest {
 			}
 		}
 		return box;
+	}
+
+	/** Before 1.21.6 the game draws text a shade off the colour it's given. */
+	private static boolean close(int argb, int rgb) {
+		return Math.abs((argb >> 16 & 0xFF) - (rgb >> 16 & 0xFF)) <= 4 && Math.abs((argb >> 8 & 0xFF) - (rgb >> 8 & 0xFF)) <= 4 && Math.abs((argb & 0xFF) - (rgb & 0xFF)) <= 4;
 	}
 
 	private static BufferedImage read(Path file) {
