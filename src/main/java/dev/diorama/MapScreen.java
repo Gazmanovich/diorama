@@ -230,7 +230,7 @@ public final class MapScreen extends Screen {
 		}
 		this.export = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
 			this.menu = null;
-			this.minecraft.gui.setScreen(new ExportScreen(this, this.centerU, this.centerV, this.zoom, this.width, this.height));
+			this.minecraft.gui.setScreen(new ExportScreen(this, this.centerU, this.centerV, this.zoom, this.layer, this.width, this.height));
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.export.title")).build());
 		this.zoomIn = this.addRenderableWidget(Button.builder(Component.literal("+"), b -> this.zoomButton(ZOOM_BUTTON_STEPS))
 			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.zoom_in")).build());
@@ -409,9 +409,10 @@ public final class MapScreen extends Screen {
 		int x = this.width - (caves ? 56 : 26);
 		int y = this.height - 90;
 		this.drawButton.setPosition(x, y - 26);
-		// Only the sky view is saved, so only it can be exported; not while drawing on it.
+		// The sky view is exported from what's saved, a cave slice from the chunks the map holds; not
+		// while drawing on it.
 		MapSession session = MapSession.get();
-		this.export.visible = !caves && !this.draw.active() && this.otherDimension == null && session != null && session.map().savedMap() != null;
+		this.export.visible = !this.draw.active() && this.otherDimension == null && session != null && (caves || session.map().savedMap() != null);
 		this.export.setPosition(x, y - 48);
 		this.zoomIn.setPosition(x, y);
 		this.zoomOut.setPosition(x, y + 22);

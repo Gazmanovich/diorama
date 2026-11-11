@@ -491,6 +491,30 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
+	 * The map units a cave slice cut at {@code layer} can show of the chunks held now, as
+	 * {u0, v0, u1, v1}: every chunk's box from the slice's floor to its lifted top. Null with no chunks.
+	 */
+	public double @Nullable [] sliceBounds(int layer) {
+		double top = layer + CaveCut.LIFT + 1;
+		double bottom = layer - TileBaker.CAVE_DEPTH - 1;
+		double u0 = Double.POSITIVE_INFINITY;
+		double v0 = Double.POSITIVE_INFINITY;
+		double u1 = Double.NEGATIVE_INFINITY;
+		double v1 = Double.NEGATIVE_INFINITY;
+		for (ChunkSnapshot chunk : this.chunks.values()) {
+			for (int corner = 0; corner < 4; corner++) {
+				double x = chunk.chunkX * 16 + (corner & 1) * 16;
+				double z = chunk.chunkZ * 16 + (corner >> 1) * 16;
+				u0 = Math.min(u0, Projection.u(x, z));
+				u1 = Math.max(u1, Projection.u(x, z));
+				v0 = Math.min(v0, Projection.v(x, top, z));
+				v1 = Math.max(v1, Projection.v(x, bottom, z));
+			}
+		}
+		return u0 > u1 ? null : new double[] {u0, v0, u1, v1};
+	}
+
+	/**
 	 * Stores a fresh snapshot and marks the parts of tiles that can look different because of it.
 	 *
 	 * @param changed the blocks that changed, as {x0, y0, z0, x1, y1, z1} inclusive plus a last
