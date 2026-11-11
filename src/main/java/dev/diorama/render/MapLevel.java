@@ -490,6 +490,11 @@ public final class MapLevel implements ChunkSource {
 		return this.chunks.size();
 	}
 
+	/** The chunks held now, by {@link ChunkSnapshot#key}, at their places in the world: a copy that stays as it is. */
+	public Map<Long, ChunkSnapshot> chunksNow() {
+		return new HashMap<>(this.chunks);
+	}
+
 	/**
 	 * The map units a cave slice cut at {@code layer} can show of the chunks held now, as
 	 * {u0, v0, u1, v1}: every chunk's box from the slice's floor to its lifted top. Null with no chunks.

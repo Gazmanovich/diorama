@@ -73,7 +73,12 @@ public final class MapExport {
 		if (looks == null) {
 			return false;
 		}
-		return start(() -> new CaveSliceTiles(level, layer, looks), area, ExportFog.Look.CAVE, 0, drawings);
+		if (running != null) {
+			return false;
+		}
+		// Made here, on the render thread: the slice as it is now.
+		CaveSliceTiles tiles = new CaveSliceTiles(level, layer, looks);
+		return start(() -> tiles, area, ExportFog.Look.CAVE, 0, drawings);
 	}
 
 	/** Makes an export's tiles on its own thread, where waiting is fine. */

@@ -1,15 +1,21 @@
 package dev.diorama.render;
 
+import dev.diorama.Facing;
+import dev.diorama.MapStyle;
 import dev.diorama.Projection;
+import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.Looks;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
+import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.ImageExport;
+import dev.diorama.data.SeenBlocks;
 import dev.diorama.data.TileStore;
 import java.lang.ref.SoftReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -23,14 +29,21 @@ import org.jspecify.annotations.Nullable;
  * the chunks it holds, so an export draws them the same way, from those chunks, for as much of the
  * slice as they cover. Traced on the CPU at full quality whatever the map's settings, on a few
  * quiet threads of its own.
+ *
+ * <p>The image is the slice as it was when this was made: the chunks held then are kept, so
+ * leaving the world partway doesn't empty the rest of it. Turning the map or changing its look
+ * partway moves every pixel, and stops the export instead.
  */
 public final class CaveSliceTiles implements ImageExport.Tiles {
 	private static final int[] EMPTY = new int[0];
 
-	private final MapLevel level;
+	private final ChunkSource source;
 	private final int layer;
 	private final Looks looks;
 	private final boolean fogOfWar;
+	/** How the map was turned and drawn when the export began. */
+	private final Facing facing = Projection.facing();
+	private final MapStyle style = MapStyle.get();
 	/** The map units the level's chunks can show at this slice, {u0, v0, u1, v1}; null with no chunks. */
 	private final double @Nullable [] bounds;
 	/**
@@ -39,12 +52,58 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 	 */
 	private final ConcurrentHashMap<Long, SoftReference<int[]>> drawn = new ConcurrentHashMap<>();
 
+	/** On the render thread, so the chunks, the bounds and the facing are of one moment. */
 	public CaveSliceTiles(MapLevel level, int layer, Looks looks) {
-		this.level = level;
 		this.layer = layer;
 		this.looks = looks;
 		this.fogOfWar = level.fogOfWar();
 		this.bounds = level.sliceBounds(layer);
+		Map<Long, ChunkSnapshot> chunks = level.chunksNow();
+		Facing facing = this.facing;
+		int minY = level.minY();
+		int maxY = level.maxY();
+		int topY = level.topY();
+		int roof = level.roof();
+		boolean depthCaves = level.depthCaves();
+		SeenBlocks seen = level.seen();
+		// As MapLevel answers a bake, from the chunks and the facing kept here.
+		this.source = new ChunkSource() {
+			@Override
+			public @Nullable ChunkSnapshot chunk(int chunkX, int chunkZ) {
+				ChunkSnapshot chunk = chunks.get(ChunkSnapshot.key(facing.worldBlockX(chunkX, chunkZ), facing.worldBlockZ(chunkX, chunkZ)));
+				return chunk == null ? null : chunk.turned(facing);
+			}
+
+			@Override
+			public int minY() {
+				return minY;
+			}
+
+			@Override
+			public int maxY() {
+				return maxY;
+			}
+
+			@Override
+			public int topY() {
+				return topY;
+			}
+
+			@Override
+			public int roof() {
+				return roof;
+			}
+
+			@Override
+			public boolean depthCaves() {
+				return depthCaves;
+			}
+
+			@Override
+			public boolean isSeen(int x, int y, int z) {
+				return seen.isSeen(facing.worldBlockX(x, z), y, facing.worldBlockZ(x, z));
+			}
+		};
 	}
 
 	@Override
@@ -64,7 +123,11 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 		SoftReference<int[]> held = this.drawn.get(key);
 		int[] pixels = held == null ? null : held.get();
 		if (pixels == null) {
-			pixels = TileBaker.reference(new TileKey(this.layer, tileU, tileV), this.level, this.looks, this.fogOfWar, null, null);
+			pixels = TileBaker.reference(new TileKey(this.layer, tileU, tileV), this.source, this.looks, this.fogOfWar, null, null);
+			// A bake reads the map's facing and angle as they are now: one traced across a change is wrong.
+			if (Projection.facing() != this.facing || !MapStyle.get().equals(this.style)) {
+				throw new IllegalStateException("the map was turned or its look changed while the image was being saved");
+			}
 			boolean empty = true;
 			for (int i = 0; i < pixels.length && empty; i++) {
 				empty = (pixels[i] >>> 24) == 0;
@@ -143,7 +206,9 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 		try {
 			List<Future<?>> waiting = new ArrayList<>();
 			for (int[] tile : tiles) {
-				waiting.add(pool.submit(() -> this.pixels(tile[0], tile[1], 0)));
+				// Nothing returned: a future would hold its tile's pixels, and only the soft cache may.
+				Runnable draw = () -> this.pixels(tile[0], tile[1], 0);
+				waiting.add(pool.submit(draw));
 			}
 			for (int i = 0; i < waiting.size(); i++) {
 				waiting.get(i).get();
