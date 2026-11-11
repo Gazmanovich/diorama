@@ -590,11 +590,6 @@ public final class TileStore {
 		return spots;
 	}
 
-	/** For tests: where the tiles are saved. */
-	public Path folder() {
-		return this.folder;
-	}
-
 	/**
 	 * For tests: makes the map look like one saved before overview levels above {@link #OLD_MAX_LOD}
 	 * existed, on disk too, and with {@code chunks} false like one from before overview tiles kept
