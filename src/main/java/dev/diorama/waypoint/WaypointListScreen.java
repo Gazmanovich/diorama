@@ -66,8 +66,9 @@ public final class WaypointListScreen extends Screen {
 	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
 	private boolean empty;
 	/**
-	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for a folder of the
-	 * player's own Rename and Delete in red. Delete arms them into one red Click again to delete.
+	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for another
+	 * dimension's folder Show here, or for a folder of the player's own Rename and Delete in red.
+	 * Delete arms them into one red Click again to delete.
 	 */
 	private final List<Button> folderActions = new ArrayList<>();
 	private boolean folderArmed;
@@ -95,6 +96,8 @@ public final class WaypointListScreen extends Screen {
 	private @Nullable Button teleport;
 	private @Nullable Button delete;
 	private final MapPiece piece = new MapPiece(88, 56, 12);
+	/** Where a row's waypoint stands in this dimension, when shown here too: made again in place for each row. */
+	private final Waypoint spotHere = new Waypoint();
 	/** The sample pin on the empty list's piece of map. */
 	private final Waypoint sample = new Waypoint("Home", 0, 0, 0, "", Waypoint.PALETTE[2]);
 	private @Nullable EditBox search;
@@ -221,7 +224,7 @@ public final class WaypointListScreen extends Screen {
 					this.all.add(waypoint);
 				}
 			}
-			this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
@@ -292,6 +295,20 @@ public final class WaypointListScreen extends Screen {
 				this.rebuildWidgets();
 			}
 		}));
+		// Another dimension's waypoints, shown where the player is as well: Xaero's Minimap switches its
+		// waypoint list to another dimension for the same, and shows them at this one's scale.
+		String from = folder.dimension();
+		if (store != null && here != null && from != null && !from.equals(here)) {
+			Button showHere = this.action(CommonComponents.optionStatus(Component.translatable("diorama.folder.show_here"), store.showsIn(here, from)), () -> {
+				WaypointStore current = WaypointStore.get();
+				if (current != null) {
+					current.setShownIn(here, from, !current.showsIn(here, from));
+					this.rebuildWidgets();
+				}
+			});
+			showHere.setTooltip(Tooltip.create(Component.translatable("diorama.folder.show_here.tooltip", Waypoints.dimensionName(from), Waypoints.dimensionName(here))));
+			this.folderActions.add(showHere);
+		}
 		String custom = folder.custom();
 		if (custom != null) {
 			this.folderActions.add(this.action(Component.translatable("diorama.folder.rename"),
@@ -390,8 +407,23 @@ public final class WaypointListScreen extends Screen {
 		Entity viewer = MapSession.viewer();
 		if (viewer != null && this.minecraft.level != null) {
 			String here = this.minecraft.level.dimension().identifier().toString();
-			this.all.sort(store.sort().comparator(store.sortReversed(), here, viewer.getX(), viewer.getY(), viewer.getZ()));
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
 		}
+	}
+
+	/**
+	 * How far the player is from a waypoint: from its own spot in their dimension, or from where it
+	 * stands here when its dimension is shown here too. NaN for another dimension's.
+	 */
+	private double distance(WaypointStore store, String here, Entity viewer, Waypoint waypoint) {
+		if (waypoint.dimension.equals(here)) {
+			return waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
+		}
+		if (!store.showsIn(here, waypoint.dimension)) {
+			return Double.NaN;
+		}
+		double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
+		return waypoint.scaled(divider, this.spotHere).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
 	}
 
 	/** The sort order's name on its button, and on both buttons a tooltip saying what comes first. */
@@ -512,7 +544,7 @@ public final class WaypointListScreen extends Screen {
 	 * player's own, is Click again to delete: shown alone across the others once Delete is clicked.
 	 */
 	private void placeFolderButtons() {
-		boolean custom = this.folderActions.size() > 1;
+		boolean custom = this.folder().custom() != null;
 		List<Button> buttons = custom ? this.folderActions.subList(0, this.folderActions.size() - 1) : this.folderActions;
 		int span = -ACTION_GAP;
 		for (Button button : buttons) {
@@ -672,6 +704,11 @@ public final class WaypointListScreen extends Screen {
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
+				double distance = viewer == null || store == null ? Double.NaN : this.distance(store, here, viewer, waypoint);
+				if (!Double.isNaN(distance)) {
+					// Shown here too: how far its spot here is.
+					detail = Math.round(distance) + " m · " + detail;
+				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
 			}

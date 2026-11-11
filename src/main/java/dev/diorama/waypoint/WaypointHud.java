@@ -49,7 +49,7 @@ public final class WaypointHud implements HudElement {
 		float width = graphics.guiWidth();
 		float height = graphics.guiHeight();
 		Font font = mc.font;
-		List<Waypoint> waypoints = store.in(mc.level.dimension().identifier().toString());
+		List<Waypoint> waypoints = store.shownIn(mc.level.dimension().identifier().toString());
 		float scale = Pins.scale(Settings.get().waypointWorldSize);
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
 		float margin = 28 * Math.max(1, scale);
