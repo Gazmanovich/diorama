@@ -39,7 +39,8 @@ public final class TextSize {
 	}
 
 	private static int first(int gui) {
-		return Math.max(1, Math.round(Settings.MIN_TEXT_SIZE * gui / 100.0F));
+		// Rounded up, so no step is under the smallest size a settings file keeps.
+		return Math.max(1, (Settings.MIN_TEXT_SIZE * gui + 99) / 100);
 	}
 
 	/**

@@ -21,6 +21,8 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
 final class MinimapTextSizeTest {
 	/** The N's own red, which nothing else on the minimap uses. */
 	private static final int NORTH = 0xFF6B6B;
+	/** The game time's colour once a bed would work. */
+	private static final int BED_TIME = 0x9CC4FF;
 	private static final int[][] SIZES = {
 		{1, 100, 200, 300, 400},
 		{2, 50, 100, 150, 200},
@@ -32,7 +34,8 @@ final class MinimapTextSizeTest {
 	}
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
-		world.getServer().runCommand("time set noon");
+		// At night, when the game time is drawn in a blue nothing else on the screen has.
+		world.getServer().runCommand("time set midnight");
 		world.getServer().runCommand("weather clear");
 		int guiScale = context.computeOnClient(mc -> mc.options.guiScale().get());
 		Settings.GameTime gameTime = context.computeOnClient(mc -> Settings.get().gameTime);
@@ -44,9 +47,11 @@ final class MinimapTextSizeTest {
 			settings.compass = true;
 			settings.coordinates = true;
 			settings.biome = true;
-			settings.gameTime = Settings.GameTime.DAY_24H;
+			settings.gameTime = Settings.GameTime.ONLY_24H;
 			settings.minimapSize = 128;
 		});
+		// Before 1.21.2 the client only works out that it's dark when the minimap asks for the time.
+		context.waitFor(mc -> mc.level.isDarkOutside(), 400);
 		// Big enough for a GUI scale of 4, which a smaller window clamps to 3. Long enough for the commands' chat lines to fade.
 		context.getInput().resizeWindow(1920, 1080);
 		context.waitTicks(220);
@@ -82,6 +87,12 @@ final class MinimapTextSizeTest {
 				if (north[3] - north[1] + 1 != 7 * pixels || north[2] - north[0] + 1 != 5 * pixels || north[1] != box[1] * gui + pixels) {
 					throw new AssertionError("At " + size + "% on GUI scale " + gui + " the N covers " + Arrays.toString(north) + ", which isn't " + pixels + " screen pixels to a pixel from the minimap's top at " + box[1] * gui);
 				}
+				// The time is the third line: digits seven font pixels high, two lines of ten below the first, which starts four GUI pixels under the minimap.
+				int[] time = extent(shot, BED_TIME, 0, (box[1] + box[2]) * gui, shot.getWidth(), shot.getHeight());
+				int top = (box[1] + box[2] + 4) * gui + 20 * pixels;
+				if (time[1] != top || time[3] - time[1] + 1 != 7 * pixels || time[2] != (box[0] + box[2]) * gui - pixels - 1) {
+					throw new AssertionError("At " + size + "% on GUI scale " + gui + " the time covers " + Arrays.toString(time) + ", which isn't " + pixels + " screen pixels to a pixel from " + top + " down, ending at the minimap's right edge at " + (box[0] + box[2]) * gui);
+				}
 			}
 		}
 		// The biggest text on a round minimap in the bottom left, where the lines grow up from the edge.
@@ -91,6 +102,10 @@ final class MinimapTextSizeTest {
 		});
 		context.waitTicks(4);
 		context.takeScreenshot("text-size-round-bottom-left");
+		int[] low = context.computeOnClient(mc -> new int[] {MinimapHud.shown()[0], MinimapHud.shown()[1], MinimapHud.shown()[3], mc.getWindow().getGuiScaledHeight()});
+		if (low[0] != MinimapHud.MARGIN || low[1] + low[2] != low[3] - MinimapHud.MARGIN) {
+			throw new AssertionError("In the bottom left with the biggest text the minimap is at " + low[0] + ", " + low[1] + " and " + low[2] + " high with its lines, on a screen " + low[3] + " high");
+		}
 		context.runOnClient(mc -> {
 			Settings.get().minimapShape = Settings.Shape.SQUARE;
 			Settings.get().minimapCorner = Settings.Corner.TOP_RIGHT;
@@ -124,6 +139,7 @@ final class MinimapTextSizeTest {
 			context.takeScreenshot("text-size-hud-" + window[0] + "x" + window[1]);
 		}
 
+		world.getServer().runCommand("time set noon");
 		DioramaClientTest.setGuiScale(context, guiScale);
 		context.getInput().resizeWindow(1600, 900);
 		context.waitTicks(10);

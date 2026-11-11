@@ -268,7 +268,8 @@ public final class MinimapHud implements HudElement {
 		for (InfoLine line : info) {
 			float w = font.width(line.text()) * text;
 			// A line wider than the minimap grows away from the screen edge the minimap is placed by; it stays on screen while it fits.
-			float tx = anchor.centered() ? x + (size - w) / 2 : anchor.right() ? x + size - w : x;
+			// Centred on a whole GUI pixel, rounded down as the game's own text size always was.
+			float tx = anchor.centered() ? x + (float) Math.floor((size - w) / 2) : anchor.right() ? x + size - w : x;
 			tx = TextSize.snap(Math.max(1, Math.min(tx, graphics.guiWidth() - 1 - w)));
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(tx, textY);
