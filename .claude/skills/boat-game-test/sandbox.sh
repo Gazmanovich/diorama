@@ -68,18 +68,58 @@ if [ -n "${DIORAMA_REAL_SERVER:-}" ]; then
 	rm -rf ~/real-servers/$node/console-*.log ~/real-servers/$node/world
 fi
 
-run=versions/$node/build/run/clientGameTest
-rm -rf "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps
+# Other mods' release jars beside Diorama: boat_run.py --mods leaves ~/mods.tgz, holding jars and
+# urls.txt (name, tab, URL) for the ones to download. How they load depends on the node, and
+# mods.init.gradle.kts says why.
+task=runClientGameTest
+dev=versions/$node/build/run/clientGameTest
+run=$dev
+with_mods=()
+mods=~/test-mods
+rm -rf "$mods"
+if [ -e ~/mods.tgz ]; then
+	mkdir -p "$mods" ~/mod-cache && tar xzf ~/mods.tgz -C "$mods" || exit 1
+	while IFS=$'\t' read -r name url; do
+		# A download stays on the VM for its next runs.
+		cached=~/mod-cache/$(printf %s "$url" | sha1sum | cut -c1-12)-$name
+		if [ ! -s "$cached" ]; then
+			curl -sSfL --retry 3 -o "$cached.part" "$url" && mv "$cached.part" "$cached" || exit 1
+		fi
+		cp "$cached" "$mods/$name" || exit 1
+	done < "$mods/urls.txt"
+	rm "$mods/urls.txt"
+	mark "other mods: $(ls "$mods" | tr '\n' ' ')"
+	case "$node" in
+		*-neoforge) ;;
+		*-forge) with_mods=(-I .claude/skills/boat-game-test/mods.init.gradle.kts) ;;
+		1.*)
+			with_mods=(-I .claude/skills/boat-game-test/mods.init.gradle.kts)
+			task=runProductionClientGameTest
+			run=versions/$node/build/run-production
+			# The development run gets this from stonecutter.gradle.kts.
+			export DIORAMA_GPU_BAKE=${DIORAMA_GPU_BAKE:-0} ;;
+		*) with_mods=(-I .claude/skills/boat-game-test/mods.init.gradle.kts) ;;
+	esac
+	export DIORAMA_TEST_MODS=$mods
+fi
+rm -rf "$dev/screenshots" "$dev/crash-reports" "$dev/logs" "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps
 # The game starts from the folder the snapshot left (its settings, options and map folders), on a
 # warm VM an earlier run left too: otherwise a test that stopped partway leaves the settings it
 # changed, and the next run's tests start from them. The first run on a VM keeps a copy to go back to.
 pristine=~/run-pristine/$node
 if [ -d "$pristine" ]; then
-	rsync -a --delete "$pristine/" "$run/" || exit 1
-	mark "game folder reset to this VM's first run ($(du -sh "$run" | cut -f1))"
+	rsync -a --delete "$pristine/" "$dev/" || exit 1
+	mark "game folder reset to this VM's first run ($(du -sh "$dev" | cut -f1))"
 else
-	mkdir -p "$run" "$pristine" && rsync -a "$run/" "$pristine/" || exit 1
+	mkdir -p "$dev" "$pristine" && rsync -a "$dev/" "$pristine/" || exit 1
 	mark "game folder kept to reset to on the next run ($(du -sh "$pristine" | cut -f1))"
+fi
+if [ "$run" != "$dev" ]; then
+	# The production run has a game folder of its own, which starts empty every time.
+	rm -rf "$run" && mkdir -p "$run" || exit 1
+elif [ -e ~/mods.tgz ] && [ ${#with_mods[@]} = 0 ]; then
+	# NeoForge. The reset above takes them out again before the next run.
+	mkdir -p "$run/mods" && cp "$mods"/*.jar "$run/mods/" || exit 1
 fi
 start=$(date +%s)
 # A game that stops writing its log for HANG_DUMP_SECONDS (default 180) is probably stuck: its
@@ -114,13 +154,13 @@ watch_hang() {
 }
 watch_hang &
 watcher=$!
-mark "running :$node:runClientGameTest (tests: $tests)"
+mark "running :$node:$task (tests: $tests)"
 # 90 min at most; boat_run.py passes TEST_SECONDS, what its own deadline leaves after setup. The
 # configuration cache skips configuring the build when a VM runs the same node again (about 15 s);
 # its problems are only warnings, so a build that can't use it still runs.
 timeout --kill-after=60 "${TEST_SECONDS:-5400}" xvfb-run -a -s '-screen 0 1920x1080x24' \
 	bash ./gradlew --no-daemon --console=plain --configuration-cache --configuration-cache-problems=warn \
-	":$node:runClientGameTest" 2>&1 | stamp > ~/gradle.log
+	"${with_mods[@]}" ":$node:$task" 2>&1 | stamp > ~/gradle.log
 code=${PIPESTATUS[0]}
 kill $watcher 2>/dev/null
 mark "gradle finished"
