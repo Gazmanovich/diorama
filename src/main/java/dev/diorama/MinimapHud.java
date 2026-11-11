@@ -32,16 +32,25 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
 
 /**
- * The minimap, centred on the player, in the corner the settings pick, square or round. Compass
- * letters sit on its edges, and coordinates, the biome and the game time sit on the side away from
- * the screen edge.
+ * The minimap, centred on the player, square or round, where the settings put it: some way in from
+ * the edges of one corner of the screen, or midway across the top or bottom (see
+ * {@link MinimapPositionScreen}). Compass letters sit on its edges, and coordinates, the biome and
+ * the game time sit under it, on the side towards the screen edge.
  */
 public final class MinimapHud implements HudElement {
-	private static final int MARGIN = 6;
+	/** How far in from the screen edges the minimap stays, and where a corner puts it. */
+	public static final int MARGIN = 6;
 	/** Half the hotbar's width; hearts and hunger sit in the same columns just above it. */
 	private static final int HOTBAR_HALF_WIDTH = 91;
+	/** How far up from the screen's bottom the hotbar and the bars over it reach, armour included. */
+	private static final int HOTBAR_HEIGHT = 50;
+	/** Each status effect icon's width, and the height of a row of them, as the game draws them. */
+	private static final int EFFECT_WIDTH = 25;
+	private static final int EFFECT_ROW = 26;
+	private static final int[] NO_EFFECTS = {0, 0};
 	private static final int SMALLEST = 64;
 	/**
 	 * Longest the minimap keeps showing the old slice while the new one bakes. A tile takes about
@@ -54,6 +63,10 @@ public final class MinimapHud implements HudElement {
 	private static final int BED_TIME_COLOR = 0xFF9CC4FF;
 	/** Whether the game's effect icon drawing ran to the end since the minimap last looked (see EffectIconsMixin). */
 	private static boolean effectIconsDrawn;
+	/** Where the HUD minimap was last drawn: x, y, size, and its height with its lines. Null when it wasn't. */
+	private static int @Nullable [] shown;
+	/** A size the position screen keeps the minimap at while it's dragged, or 0. */
+	private static int heldSize;
 
 	private final MapViewport viewport = new MapViewport();
 	/** The slice being faded out, under the one fading in. */
@@ -81,13 +94,16 @@ public final class MinimapHud implements HudElement {
 		// Taken whether or not the minimap draws, so a frame with no icons can't reuse an old answer.
 		boolean effectIcons = effectIconsDrawn;
 		effectIconsDrawn = false;
+		shown = null;
+		// The position screen shows it over the world, even switched off, to be put in place.
+		boolean placing = screen instanceof MinimapPositionScreen;
 		//? if >=26.2 {
-		if (!settings.minimap || mc.gui.hud.isHidden()
+		if (!placing && (!settings.minimap || mc.gui.hud.isHidden()
 		//?} else {
-		/*if (!settings.minimap || mc.options.hideGui
+		/*if (!placing && (!settings.minimap || mc.options.hideGui
 		*///?}
 			|| screen != null && !(screen instanceof ChatScreen) || Cobblemon.inBattle()
-			|| debugScreenOpen(mc) || !this.canDraw(mc)) {
+			|| debugScreenOpen(mc)) || !this.canDraw(mc)) {
 			// Not drawn under any screen but chat, the way Xaero's Minimap and JourneyMap do it:
 			// screens fill the middle and other mods put theirs in the corners too, like the item
 			// lists JEI, REI and EMI put beside inventories. The settings screen draws its own copy,
@@ -98,12 +114,34 @@ public final class MinimapHud implements HudElement {
 			this.holdStart = -1;
 			return;
 		}
-		Settings.Corner corner = settings.minimapCorner;
-		boolean right = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT;
-		boolean top = corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT;
-		// Held, the enlarge key shows it bigger, in the same corner.
+		// Held, the enlarge key shows it bigger, growing away from the edges it's placed by.
 		int size = DioramaClient.ENLARGE_MINIMAP.isDown() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
-		this.draw(graphics, partialTick, right, top, top && effectIcons ? this.effectRows(mc.player, right) : 0, size);
+		int[] bounds = this.draw(graphics, partialTick, Anchor.of(settings), effectIcons ? effectCounts(mc.player) : NO_EFFECTS, size);
+		shown = new int[] {bounds[4], bounds[5], bounds[6], bounds[7]};
+	}
+
+	/** Where the HUD minimap was drawn this frame: x, y, size, and its height with its lines. Null when it wasn't. */
+	public static int @Nullable [] shown() {
+		return shown;
+	}
+
+	/** Keeps the minimap at this size, or with 0 lets it fit itself again: the position screen holds it while it's dragged. */
+	static void holdSize(int size) {
+		heldSize = size;
+	}
+
+	/**
+	 * Which edges the minimap is placed by and how far in from them, in GUI pixels: from the side
+	 * edge to the map, and from the top edge to the map or from the bottom edge to the lines under
+	 * it. Centered, it sits midway across, and {@code dx} is kept for when it isn't.
+	 */
+	record Anchor(boolean right, boolean top, boolean centered, int dx, int dy) {
+		static Anchor of(Settings settings) {
+			Settings.Corner corner = settings.minimapCorner;
+			return new Anchor(corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.BOTTOM_RIGHT,
+				corner == Settings.Corner.TOP_RIGHT || corner == Settings.Corner.TOP_LEFT,
+				settings.minimapCentered, settings.minimapOffsetX, settings.minimapOffsetY);
+		}
 	}
 
 	/**
@@ -118,7 +156,7 @@ public final class MinimapHud implements HudElement {
 		}
 		Settings settings = Settings.get();
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
-		int[] bounds = this.draw(graphics, partialTick, true, top, 0, settings.minimapSize);
+		int[] bounds = this.draw(graphics, partialTick, new Anchor(true, top, false, MARGIN, MARGIN), NO_EFFECTS, settings.minimapSize);
 		if (!settings.minimap) {
 			//? if <1.21.6 {
 			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
@@ -166,10 +204,12 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/**
-	 * Draws the minimap {@code wanted} pixels wide or less, in a corner, {@code effects} pixels lower
-	 * for status effect icons. Returns what it covers, x0, y0, x1, y1, then the map's own x, y and size.
+	 * Draws the minimap {@code wanted} pixels wide or less where {@code anchor} puts it, below the
+	 * status effect icons it would be over ({@code effects} is how many of each kind, see
+	 * {@link #effectCounts}). Returns what it covers, x0, y0, x1, y1, then the map's own x, y and
+	 * size, and its height with the lines under it.
 	 */
-	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects, int wanted) {
+	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, Anchor anchor, int[] effects, int wanted) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
 		Entity viewer = MapSession.viewer();
@@ -178,9 +218,10 @@ public final class MinimapHud implements HudElement {
 		Font font = mc.font;
 		List<InfoLine> info = this.infoLines(settings, viewer, mc);
 		int infoHeight = info.size() * 10;
-		int size = this.fit(wanted, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
-		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
-		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
+		int[] placed = place(anchor, heldSize > 0 ? heldSize : wanted, heldSize <= 0, graphics.guiWidth(), graphics.guiHeight(), infoHeight, effects);
+		int x = placed[0];
+		int y = placed[1];
+		int size = placed[2];
 		int wantedLayer = settings.autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), wantedLayer), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
@@ -223,13 +264,13 @@ public final class MinimapHud implements HudElement {
 		int textRight = x + size + 2;
 		for (InfoLine line : info) {
 			int w = font.width(line.text());
-			int tx = right ? x + size - w : x;
+			int tx = anchor.centered() ? x + (size - w) / 2 : anchor.right() ? x + size - w : x;
 			graphics.text(font, line.text(), tx, textY, line.color(), true);
 			left = Math.min(left, tx - 1);
 			textRight = Math.max(textRight, tx + w + 1);
 			textY += 10;
 		}
-		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY, x, y, size};
+		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY, x, y, size, size + infoHeight};
 	}
 
 	/**
@@ -280,20 +321,44 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/**
-	 * Shrinks the minimap so it and its info lines stay on screen and, in a bottom corner, beside
-	 * the hotbar instead of over the hearts or hunger bar.
+	 * Where the minimap goes on a {@code width} by {@code height} screen: its x, y and size. It
+	 * shrinks so it and its lines fit the screen and, placed low beside the hotbar, so it stays
+	 * beside it instead of growing over the hearts or hunger bar ({@code avoidHotbar}). Placed at
+	 * the top, it moves down below the rows of status effect icons it would be over. Whatever the
+	 * window or GUI scale did since it was placed, it ends up on screen.
 	 */
-	private int fit(int size, int width, int height, boolean top, int effects, int infoHeight) {
-		int fitted = size;
-		if (top) {
-			fitted = Math.min(fitted, height - MARGIN - effects - infoHeight - MARGIN - 4);
-			// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
-			fitted = Math.min(fitted, width - 2 * MARGIN - 4);
-		} else {
-			fitted = Math.min(fitted, width / 2 - HOTBAR_HALF_WIDTH - 2 * MARGIN - 4);
+	static int[] place(Anchor anchor, int wanted, boolean avoidHotbar, int width, int height, int infoHeight, int[] effects) {
+		// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
+		int fitted = Math.min(wanted, width - 2 * MARGIN - 4);
+		if (!anchor.top()) {
 			fitted = Math.min(fitted, height - infoHeight - 2 * MARGIN);
+			// It grows up and in from the edges it's placed by, so from beside the hotbar it stops at it.
+			int besideHotbar = width / 2 - HOTBAR_HALF_WIDTH - MARGIN - 4;
+			if (avoidHotbar && !anchor.centered() && anchor.dy() < HOTBAR_HEIGHT && anchor.dx() <= besideHotbar) {
+				fitted = Math.min(fitted, besideHotbar - anchor.dx());
+			}
 		}
-		return Math.max(SMALLEST, Math.min(size, fitted));
+		int size = Math.max(SMALLEST, fitted);
+		int top = MARGIN;
+		if (anchor.top()) {
+			// Below each row of icons it reaches under; it can only get smaller from here, and further from them.
+			int right = x(anchor, size, width) + size + 2;
+			if (right > width - EFFECT_WIDTH * effects[1]) {
+				top = MARGIN + 2 * EFFECT_ROW;
+			} else if (right > width - EFFECT_WIDTH * effects[0]) {
+				top = MARGIN + EFFECT_ROW;
+			}
+			size = Math.max(SMALLEST, Math.min(size, height - top - infoHeight - MARGIN - 4));
+		}
+		int y = anchor.top() ? anchor.dy() : height - anchor.dy() - infoHeight - size;
+		y = Math.max(top, Math.min(y, height - MARGIN - infoHeight - size));
+		return new int[] {x(anchor, size, width), y, size};
+	}
+
+	/** The map's left edge at this size, kept on screen. */
+	private static int x(Anchor anchor, int size, int width) {
+		int x = anchor.centered() ? (width - size) / 2 : anchor.right() ? width - anchor.dx() - size : anchor.dx();
+		return Math.max(MARGIN, Math.min(x, width - MARGIN - size));
 	}
 
 	/** Letters on the frame. The map always faces north, so they never move. */
@@ -365,25 +430,23 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/**
-	 * Vanilla draws status effect icons in the top-right corner; move the minimap below them. Only
-	 * asked when the game did draw them: a mod that moves or hides them leaves the corner free.
+	 * How many status effect icons vanilla draws in each of its rows in the top-right corner,
+	 * beneficial then harmful, each row from the right edge in. Only asked when the game did draw
+	 * them: a mod that moves or hides them leaves the corner free.
 	 */
-	private int effectRows(LocalPlayer player, boolean right) {
-		if (!right) {
-			return 0;
-		}
-		boolean beneficial = false;
-		boolean harmful = false;
+	private static int[] effectCounts(LocalPlayer player) {
+		int beneficial = 0;
+		int harmful = 0;
 		for (MobEffectInstance effect : player.getActiveEffects()) {
 			if (!effect.showIcon()) {
 				continue;
 			}
 			if (effect.getEffect().value().isBeneficial()) {
-				beneficial = true;
+				beneficial++;
 			} else {
-				harmful = true;
+				harmful++;
 			}
 		}
-		return harmful ? 52 : beneficial ? 26 : 0;
+		return new int[] {beneficial, harmful};
 	}
 }
