@@ -44,6 +44,23 @@ final class WebTiles {
 	 * or deletes it if none are known. Returns the bytes written, 0 for none.
 	 */
 	static long write(Path file, int[] abgr) throws IOException {
+		BufferedImage image = image(abgr);
+		return image != null ? writeJpeg(file, image) : delete(file);
+	}
+
+	/** The same tile as a JPEG in memory, for a map that keeps no pictures of its own; null if no pixel is known. */
+	static byte @Nullable [] jpeg(int[] abgr) throws IOException {
+		BufferedImage image = image(abgr);
+		if (image == null) {
+			return null;
+		}
+		java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(1 << 16);
+		encode(bytes, image);
+		return bytes.toByteArray();
+	}
+
+	/** The tracer's pixels over the background, or null if none are known. */
+	private static @Nullable BufferedImage image(int[] abgr) {
 		BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
 		boolean any = false;
 		int[] row = new int[SIZE];
@@ -56,7 +73,7 @@ final class WebTiles {
 			}
 			image.setRGB(0, y, SIZE, 1, row, 0, SIZE);
 		}
-		return any ? writeJpeg(file, image) : delete(file);
+		return any ? image : null;
 	}
 
 	/** A pixel's colour over the background, as 0xRRGGBB. */
@@ -122,12 +139,21 @@ final class WebTiles {
 	private static long writeJpeg(Path file, BufferedImage image) throws IOException {
 		Files.createDirectories(file.getParent());
 		Path part = file.resolveSibling(file.getFileName() + ".part");
+		try (OutputStream raw = Files.newOutputStream(part)) {
+			encode(raw, image);
+		}
+		long size = Files.size(part);
+		Files.move(part, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		return size;
+	}
+
+	private static void encode(OutputStream raw, BufferedImage image) throws IOException {
 		Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
 		if (!writers.hasNext()) {
 			throw new IOException("this Java has no JPEG writer");
 		}
 		ImageWriter writer = writers.next();
-		try (OutputStream raw = Files.newOutputStream(part); ImageOutputStream out = ImageIO.createImageOutputStream(raw)) {
+		try (ImageOutputStream out = ImageIO.createImageOutputStream(raw)) {
 			writer.setOutput(out);
 			ImageWriteParam param = writer.getDefaultWriteParam();
 			param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
@@ -147,8 +173,5 @@ final class WebTiles {
 		} finally {
 			writer.dispose();
 		}
-		long size = Files.size(part);
-		Files.move(part, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-		return size;
 	}
 }
