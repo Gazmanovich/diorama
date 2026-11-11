@@ -73,7 +73,7 @@ public final class WorldBorderOverlay {
 		WorldBorder border = level.getWorldBorder();
 		Facing facing = Projection.facing();
 		// Turned space, where the map's u is x: the border is a rectangle there too.
-		//? if >=1.21.9 {
+		//? if >=1.21.11 {
 		// A moving border is where the game draws its wall this frame, between two ticks.
 		float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
 		double minX = border.getMinX(partialTick);
@@ -81,7 +81,7 @@ public final class WorldBorderOverlay {
 		double maxX = border.getMaxX(partialTick);
 		double maxZ = border.getMaxZ(partialTick);
 		//?} else {
-		/*// Before 1.21.9 a moving border goes by the clock, so these are this frame's already.
+		/*// Before 1.21.11 a moving border goes by the clock, so these are this frame's already.
 		double minX = border.getMinX();
 		double minZ = border.getMinZ();
 		double maxX = border.getMaxX();

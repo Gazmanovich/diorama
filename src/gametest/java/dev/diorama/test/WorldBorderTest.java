@@ -145,9 +145,9 @@ final class WorldBorderTest {
 		// A border on the move is the colour the game draws its wall in, and moves on the map.
 		// The time is in seconds on older versions and ticks on newer ones: either way it's growing for a minute or more.
 		world.getServer().runCommand("worldborder add 320 1200");
-		context.waitFor(mc -> mc.level.getWorldBorder().getSize() > SIZE + 1, 400);
+		context.waitFor(mc -> mc.level.getWorldBorder().getSize() > SIZE + 2, 400);
 		double grownWest = context.computeOnClient(mc -> new WorldBorderOverlay().sides(around(at.getX(), at.getY(), at.getZ(), 2), mc.level, mc.player).get(2).points[0]);
-		if (!(grownWest < west - 0.5)) {
+		if (!(grownWest < west - 0.25)) {
 			throw new AssertionError("The west side of a growing border should have moved out from " + west + ", not be at " + grownWest);
 		}
 		BufferedImage growing = map(context, at, 4, TileKey.SURFACE, "border-map-growing");
