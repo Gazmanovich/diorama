@@ -28,6 +28,8 @@
 	.dims button { padding: 8px 12px; color: var(--muted); }
 	.dims button.on { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 	.dims button + button { border-left: 1px solid var(--line); }
+	.follow { padding: 8px 12px; color: var(--muted); }
+	.follow.on { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 	.where { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 	.empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
 	button:focus-visible { outline: 2px solid #7aa7ff; outline-offset: -2px; }
@@ -35,10 +37,10 @@
 </head>
 <body>
 <canvas id="map" aria-label="Map"></canvas>
-<div class="bar"><div class="dims panel" id="dims"></div></div>
+<div class="bar"><div class="dims panel" id="dims"></div><button class="follow panel on" id="follow" hidden aria-pressed="true" title="Keep the map centred on you. Turns off when you move the map.">Follow</button></div>
 <div class="zoom panel"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">&minus;</button></div>
 <div class="where panel" id="where" hidden></div>
-<div class="empty" id="empty">The map is still being drawn. It fills in as the server draws it.</div>
+<div class="empty" id="empty"></div>
 <script>
 "use strict";
 // Behind a proxy at a folder of its own (example.com/map), the page's files are inside that folder.
@@ -50,16 +52,53 @@ let dim = null;          // the dimension shown
 let present = [];        // per zoom, a Map of "u,v" -> the tile's version
 // The view: the map point at the middle of the screen, in map units (a block across), and how many CSS pixels a unit takes.
 let view = { u: 0, v: 0, scale: 1 };
+// The player's own map, served by their game (map.live): where they are, and whether the view stays on them.
+let player = null;       // player.json, or null when the game isn't in a world
+let follow = true;
 
 function tileUnits(z) { return map.tileUnits * (1 << z); }
 
 function load(first) {
 	fetch("map.json", { cache: "no-cache" }).then(r => r.json()).then(json => {
+		const wasLive = map && map.live;
 		map = json;
 		const wanted = dim ? dim.id : (parseHash().dim || "minecraft:overworld");
 		pick(map.dimensions.find(d => d.id === wanted) || map.dimensions[0], first);
 		buildDims();
-	}).catch(() => {}).finally(() => setTimeout(() => load(false), 30000));
+		if (map.live && !wasLive) startPlayer();
+	}).catch(() => {}).finally(() => { clearTimeout(loadTimer); loadTimer = setTimeout(() => load(false), map && map.live ? 3000 : 30000); });
+}
+let loadTimer = 0;
+
+// The player's place, asked for a few times a second while the page shows.
+function startPlayer() {
+	document.getElementById("follow").hidden = false;
+	const ask = () => {
+		if (document.hidden) { setTimeout(ask, 500); return; }
+		fetch("player.json", { cache: "no-store" }).then(r => r.json()).then(json => {
+			const was = player;
+			player = json.dimension ? json : null;
+			// Through a portal, or into a world: the map is another one now.
+			if (player && (!dim || dim.id !== player.dimension)) { clearTimeout(loadTimer); load(false); }
+			if (player && follow && dim && dim.id === player.dimension) { view.u = player.u; view.v = player.v; }
+			if (player && follow) showPlayerWhere();
+			if (player || was) draw();
+		}).catch(() => { if (player) { player = null; draw(); } }).finally(() => setTimeout(ask, 250));
+	};
+	ask();
+}
+function setFollow(on) {
+	follow = on;
+	const b = document.getElementById("follow");
+	b.classList.toggle("on", on);
+	b.setAttribute("aria-pressed", on ? "true" : "false");
+	if (on && player && dim && dim.id === player.dimension) { view.u = player.u; view.v = player.v; showPlayerWhere(); draw(); }
+}
+document.getElementById("follow").onclick = () => setFollow(!follow);
+function showPlayerWhere() {
+	const where = document.getElementById("where");
+	where.hidden = false;
+	where.textContent = "X " + Math.floor(player.x) + "   Y " + Math.floor(player.y) + "   Z " + Math.floor(player.z);
 }
 
 function pick(d, first) {
@@ -72,7 +111,10 @@ function pick(d, first) {
 		for (let i = 0; i < list.length; i += step) m.set(list[i] + "," + list[i + 1], step === 3 ? list[i + 2] : map.updated);
 		return m;
 	}) : [];
-	document.getElementById("empty").style.display = dim && present[0] && present[0].size ? "none" : "flex";
+	const empty = document.getElementById("empty");
+	empty.style.display = dim && present[0] && present[0].size ? "none" : "flex";
+	empty.textContent = !map.live ? "The map is still being drawn. It fills in as the server draws it."
+		: dim ? "Nothing is mapped here yet. The map fills in as you explore." : "No map to show right now. It appears here while you're in a world with a map.";
 	if (first || switched) home(first);
 	draw();
 }
@@ -92,7 +134,8 @@ function home(first) {
 	const median = list => { list.sort((a, b) => a - b); return list[list.length >> 1]; };
 	view.u = us.length ? (median(us) + 0.5) * map.tileUnits : 0;
 	view.v = vs.length ? (median(vs) + 0.5) * map.tileUnits : 0;
-	view.scale = 1;
+	// The player's own map starts closer in: it's for where they are, not for the whole world.
+	view.scale = map.live ? 2 : 1;
 }
 
 function buildDims() {
@@ -259,6 +302,31 @@ function paint() {
 		}
 	}
 	fillState = { wanted: sharp.length, loaded, any };
+	if (player && player.dimension === dim.id) drawPlayer(sx(player.u), sy(player.v), dpr);
+}
+
+// The player's arrow, as the map in the game draws it: pointing where they look, in their colour.
+function drawPlayer(x, y, dpr) {
+	ctx.save();
+	ctx.translate(x, y);
+	ctx.rotate(player.heading);
+	ctx.scale(dpr, dpr);
+	ctx.beginPath();
+	ctx.moveTo(11, 0);
+	ctx.lineTo(-8, 8);
+	ctx.lineTo(-4, 0);
+	ctx.lineTo(-8, -8);
+	ctx.closePath();
+	ctx.lineJoin = "round";
+	ctx.lineWidth = 4;
+	ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
+	ctx.stroke();
+	ctx.fillStyle = player.color || "#3fa9f5";
+	ctx.fill();
+	ctx.lineWidth = 1.25;
+	ctx.strokeStyle = "#ffffff";
+	ctx.stroke();
+	ctx.restore();
 }
 
 // Panning and zooming, by mouse, wheel, touch and keys.
@@ -274,6 +342,7 @@ canvas.addEventListener("pointermove", e => {
 		if (now.n > 1) zoomAt(now.x, now.y, now.d / last.d);
 		view.u -= (now.x - last.x) / view.scale;
 		view.v -= (now.y - last.y) / view.scale;
+		if (follow && map && map.live && (now.x !== last.x || now.y !== last.y)) setFollow(false);
 		draw();
 	}
 	last = now;
@@ -300,6 +369,8 @@ function zoomAt(x, y, factor) {
 	const lim = limits();
 	const scale = Math.max(lim.min, Math.min(lim.max, view.scale * factor));
 	const w = canvas.clientWidth, h = canvas.clientHeight;
+	// Following, the view zooms about the player, who stays in the middle.
+	if (follow && player && map && map.live) { x = w / 2; y = h / 2; }
 	const pu = view.u + (x - w / 2) / view.scale, pv = view.v + (y - h / 2) / view.scale;
 	view.scale = scale;
 	view.u = pu - (x - w / 2) / scale;
@@ -310,7 +381,7 @@ document.getElementById("out").onclick = () => { zoomAt(canvas.clientWidth / 2, 
 addEventListener("keydown", e => {
 	const step = 80 / view.scale;
 	const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-	if (moves[e.key]) { view.u += moves[e.key][0]; view.v += moves[e.key][1]; }
+	if (moves[e.key]) { view.u += moves[e.key][0]; view.v += moves[e.key][1]; if (follow && map && map.live) setFollow(false); }
 	else if (e.key === "+" || e.key === "=") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 2);
 	else if (e.key === "-") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 0.5);
 	else return;
@@ -322,13 +393,17 @@ addEventListener("resize", draw);
 // The block under the pointer. The map looks down at an angle, so a row of the picture runs over
 // many places north to south; the Z shown is where it meets the ground at sea level.
 function showWhere(e) {
-	if (!map || e.pointerType === "touch") return;
+	if (!map || e.pointerType === "touch" || (follow && player)) return;
 	const u = view.u + (e.clientX - canvas.clientWidth / 2) / view.scale;
 	const v = view.v + (e.clientY - canvas.clientHeight / 2) / view.scale;
 	const z = (v + 64 * map.cos) / map.sin;
+	// A map the player turned to face another way: back to the world's X and Z.
+	const turns = map.facing || 0;
+	const wx = turns === 1 ? -z : turns === 2 ? -u : turns === 3 ? z : u;
+	const wz = turns === 1 ? u : turns === 2 ? -z : turns === 3 ? -u : z;
 	const where = document.getElementById("where");
 	where.hidden = false;
-	where.textContent = "X " + Math.floor(u) + "   Z ~" + Math.floor(z);
+	where.textContent = turns % 2 ? "X ~" + Math.floor(wx) + "   Z " + Math.floor(wz) : "X " + Math.floor(wx) + "   Z ~" + Math.floor(wz);
 }
 
 // The view in the address, so a link opens on the same place.
@@ -341,7 +416,8 @@ function parseHash() {
 let hashTimer = 0;
 function saveHashSoon() { clearTimeout(hashTimer); hashTimer = setTimeout(saveHash, 300); }
 function saveHash() {
-	if (!dim) return;
+	// The player's own map opens on the player, not on a place in the address.
+	if (!dim || map.live) return;
 	history.replaceState(null, "", "#dim=" + encodeURIComponent(dim.id) + "&u=" + Math.round(view.u) + "&v=" + Math.round(view.v) + "&s=" + view.scale.toFixed(3));
 }
 

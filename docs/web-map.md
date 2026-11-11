@@ -4,6 +4,8 @@ A server with Diorama can draw its map for a browser: a page anyone can open on 
 
 It's off until you turn it on.
 
+This is the server's map, and it only runs on a dedicated server. For your own map in a browser while you play, in singleplayer too, see [Your map on a second screen](second-screen.md).
+
 ## Turn it on
 
 1. Put Diorama in the server's `mods` folder (Fabric needs Fabric API there too).

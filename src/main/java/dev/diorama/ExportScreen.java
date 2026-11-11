@@ -30,6 +30,9 @@ import org.jspecify.annotations.Nullable;
  * will be saved, and Save image and Cancel along the bottom. In Area mode the box starts inside
  * the view the map had; drag inside it to move it, its edges or corners to resize it, outside it
  * to pan. Whole map boxes everything explored. Cancel and Save go back to the map as it was.
+ *
+ * <p>Opened on a cave slice it saves that slice. Cave slices aren't saved, so the image is drawn
+ * from the chunks the map holds, and Whole map is as much of the slice as they cover.
  */
 public final class ExportScreen extends Screen {
 	private static final int SIDEBAR = 112;
@@ -52,6 +55,8 @@ public final class ExportScreen extends Screen {
 	private static final int PAN = 32;
 
 	private final MapScreen parent;
+	/** The view being saved: {@link TileKey#SURFACE}, or the cut of the cave slice the map was on. */
+	private final int layer;
 	private final MapViewport viewport = new MapViewport();
 	private final DrawingOverlay drawingOverlay = new DrawingOverlay();
 	/** The middle of the preview, in map units, and its zoom in GUI pixels per unit. */
@@ -83,9 +88,10 @@ public final class ExportScreen extends Screen {
 	/** Which detail buttons have the "too big" tooltip, so it's only set again when that changes. */
 	private final boolean[] tooBig = new boolean[4];
 
-	public ExportScreen(MapScreen parent, double centerU, double centerV, double zoom, int width, int height) {
+	public ExportScreen(MapScreen parent, double centerU, double centerV, double zoom, int layer, int width, int height) {
 		super(Component.translatable("diorama.export.title"));
 		this.parent = parent;
+		this.layer = layer;
 		this.zoom = zoom;
 		// The parent's view filled the screen; the preview is the part beside the sidebar and above the footer.
 		this.centerU = centerU + (SIDEBAR / 2.0) / zoom;
@@ -205,15 +211,25 @@ public final class ExportScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		MapSession session = MapSession.get();
-		if (session == null || session.map().savedMap() == null || !ServerRules.minimapAllowed()) {
+		if (session == null || !ServerRules.minimapAllowed() || (this.caves() ? !ServerRules.caveMapsAllowed() : session.map().savedMap() == null)) {
 			this.onClose();
 			return;
 		}
-		if (this.whole && session.map().savedMap() != this.boundsStore) {
+		if (this.whole && !this.caves() && session.map().savedMap() != this.boundsStore) {
 			// The map moved to other saved tiles (another dimension, or the view under the Nether's
 			// roof changed kind): what's explored has to be found again there.
 			this.whole = false;
 			this.showWhole(true);
+		}
+		if (this.whole && this.caves()) {
+			// The slice reaches as far as the chunks the map holds, which come and go while this is open.
+			double[] held = this.sliceBox(session);
+			if (!java.util.Arrays.equals(held, this.explored)) {
+				this.explored = held;
+				if (held != null) {
+					this.fit(held);
+				}
+			}
 		}
 		if (this.whole && this.explored != null && this.finding != null) {
 			// Found just now: fit it into the preview.
@@ -223,7 +239,7 @@ public final class ExportScreen extends Screen {
 		// One view over the whole screen, placed so the preview's middle is (centerU, centerV).
 		double fullU = this.centerU - (SIDEBAR / 2.0) / this.zoom;
 		double fullV = this.centerV + (FOOTER / 2.0) / this.zoom;
-		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, fullU, fullV, this.zoom, TileKey.SURFACE);
+		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, fullU, fullV, this.zoom, this.layer);
 		// The preview shows the image as it will be saved: by day, or at night if asked.
 		this.viewport.night(this.atNight && this.hasNight() ? 1 : 0);
 		this.viewport.draw(graphics, session.map(), view);
@@ -379,11 +395,20 @@ public final class ExportScreen extends Screen {
 			return;
 		}
 		MapSession session = MapSession.get();
+		this.explored = null;
+		this.finding = null;
+		if (session != null && this.caves()) {
+			// Nothing of a cave slice is saved: it's whatever the chunks the map holds show of it.
+			this.explored = this.sliceBox(session);
+			if (this.explored != null) {
+				this.fit(this.explored);
+			}
+			return;
+		}
 		TileStore store = session == null ? null : session.map().savedMap();
 		if (store == null) {
 			return;
 		}
-		this.explored = null;
 		this.boundsStore = store;
 		CompletableFuture<double @Nullable []> found = CompletableFuture.supplyAsync(() -> {
 			try {
@@ -426,10 +451,22 @@ public final class ExportScreen extends Screen {
 		this.zoom = this.fitZoom(box);
 	}
 
-	/** Whether this dimension's sky view has a night to draw: not under a roof, and its time moves. */
+	/** As much of the cave slice as the map's chunks cover now, with Whole map's margin; null with no chunks. */
+	private double @Nullable [] sliceBox(MapSession session) {
+		double[] held = session.map().sliceBounds(this.layer);
+		double m = ImageExport.WHOLE_MAP_MARGIN;
+		return held == null ? null : new double[] {held[0] - m, held[1] - m, held[2] + m, held[3] + m};
+	}
+
+	/** Whether a cave slice is being saved, not the sky view. */
+	private boolean caves() {
+		return this.layer != TileKey.SURFACE;
+	}
+
+	/** Whether this dimension's sky view has a night to draw: not under a roof, and its time moves. A cave has none. */
 	private boolean hasNight() {
 		MapSession session = MapSession.get();
-		return session != null && !session.map().roofless() && this.minecraft.level != null && !this.minecraft.level.dimensionType().hasFixedTime();
+		return session != null && !this.caves() && !session.map().roofless() && this.minecraft.level != null && !this.minecraft.level.dimensionType().hasFixedTime();
 	}
 
 	/** The drawings on this map of this dimension, as the map shows them. */
@@ -445,12 +482,15 @@ public final class ExportScreen extends Screen {
 		double[] box = this.box();
 		MapSession session = MapSession.get();
 		TileStore store = session == null ? null : session.map().savedMap();
-		if (box == null || store == null || this.levels(box).isEmpty()) {
+		if (box == null || session == null || !this.caves() && store == null || this.levels(box).isEmpty()) {
 			return;
 		}
 		ImageExport.Area area = ImageExport.Area.ofUnits(this.lod(box), box[0], box[1], box[2], box[3]);
+		List<Drawing> drawings = this.withDrawings ? this.drawings() : List.of();
 		float night = this.atNight && this.hasNight() ? 1 : 0;
-		if (MapExport.start(store, area, session.map().roofless(), night, this.withDrawings ? this.drawings() : List.of())) {
+		boolean started = this.caves() ? MapExport.startCave(session.map(), this.layer, area, drawings)
+			: MapExport.start(store, area, session.map().roofless(), night, drawings);
+		if (started) {
 			this.onClose();
 		}
 	}

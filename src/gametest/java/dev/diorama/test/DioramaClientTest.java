@@ -203,6 +203,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-search")) {
 				WaypointSearchTest.run(context, world);
 			}
+			if (tests.contains("web-map-client")) {
+				ClientWebMapTest.run(context, world);
+			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
