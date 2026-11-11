@@ -246,7 +246,27 @@ public final class WaypointEditScreen extends Screen {
 	private void clickFolderMenu(double x, double y, int button) {
 		FolderMenu menu = this.folderMenu;
 		this.folderMenu = null;
-		FolderMenu.Entry picked = menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y);
+		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
+	}
+
+	/**
+	 * A key while the list of folders is open goes to the list and nowhere else: Escape closes it,
+	 * and the arrows and Enter pick from it, so the folder can still be picked without the mouse.
+	 */
+	private void keyFolderMenu(int key) {
+		FolderMenu menu = this.folderMenu;
+		if (menu == null || key == InputConstants.KEY_ESCAPE) {
+			this.folderMenu = null;
+			return;
+		}
+		FolderMenu.Entry picked = menu.keyPressed(key);
+		if (picked != null) {
+			this.folderMenu = null;
+			this.pickFolder(picked);
+		}
+	}
+
+	private void pickFolder(FolderMenu.@Nullable Entry picked) {
 		if (picked != null) {
 			this.folder = picked.key();
 			if (this.folderButton != null) {
@@ -554,8 +574,8 @@ public final class WaypointEditScreen extends Screen {
 	// Escape closes the open list of folders, and the screen only after that.
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if (this.folderMenu != null && event.key() == InputConstants.KEY_ESCAPE) {
-			this.folderMenu = null;
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(event.key());
 			return true;
 		}
 		return super.keyPressed(event);
@@ -563,8 +583,8 @@ public final class WaypointEditScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean keyPressed(int key, int scancode, int modifiers) {
-		if (this.folderMenu != null && key == InputConstants.KEY_ESCAPE) {
-			this.folderMenu = null;
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(key);
 			return true;
 		}
 		return super.keyPressed(key, scancode, modifiers);

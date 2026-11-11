@@ -91,6 +91,26 @@ final class FolderEditTest {
 			wrong.add("Save left the waypoint in \"" + cabin.folder + "\"");
 		}
 
+		// Without the mouse: Enter on the Folder button opens the list, the arrows and Enter pick.
+		edit(context, cabin);
+		context.runOnClient(mc -> mc.gui.screen().setFocused(((WaypointEditScreen) mc.gui.screen()).folderButton()));
+		context.getInput().pressKey(InputConstants.KEY_RETURN);
+		context.waitTicks(2);
+		if (menu(context) == null) {
+			wrong.add("Enter on the Folder button didn't open the list of folders");
+		}
+		context.getInput().pressKey(InputConstants.KEY_UP);
+		context.getInput().pressKey(InputConstants.KEY_UP);
+		context.waitTicks(2);
+		context.takeScreenshot("folder-editor-03b-arrow-keys");
+		context.getInput().pressKey(InputConstants.KEY_RETURN);
+		context.waitTicks(2);
+		if (menu(context) != null || !folderButton(context).getMessage().getString().equals("Villages")) {
+			wrong.add("Up twice and Enter from Alex's base left the button saying " + folderButton(context).getMessage().getString());
+		}
+		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Cancel")));
+		context.waitTicks(3);
+
 		// Picked and then cancelled, it stays where it was.
 		edit(context, cabin);
 		DioramaClientTest.clickAt(context, folderButton(context));
