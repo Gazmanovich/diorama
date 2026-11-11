@@ -10,6 +10,7 @@ import dev.diorama.drawing.DrawingOverlay;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
+import dev.diorama.render.TextSize;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointOverlay;
@@ -217,7 +218,9 @@ public final class MinimapHud implements HudElement {
 		Vec3 pos = viewer.getPosition(partialTick);
 		Font font = mc.font;
 		List<InfoLine> info = this.infoLines(settings, viewer, mc);
-		int infoHeight = info.size() * 10;
+		float text = TextSize.scale(settings.minimapTextSize);
+		// Each line is the game's text and a pixel of its shadow, with a pixel between lines.
+		int infoHeight = (int) Math.ceil(info.size() * 10 * text);
 		int[] placed = place(anchor, heldSize > 0 ? heldSize : wanted, heldSize <= 0, graphics.guiWidth(), graphics.guiHeight(), infoHeight, effects);
 		int x = placed[0];
 		int y = placed[1];
@@ -257,20 +260,26 @@ public final class MinimapHud implements HudElement {
 		Radar.draw(graphics, view, blips, false, true);
 		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, Markers.onMap(viewer.getViewYRot(partialTick)), 5);
 		if (settings.compass) {
-			this.compass(graphics, font, x, y, size);
+			this.compass(graphics, font, x, y, size, text);
 		}
-		int textY = y + size + 4;
-		int left = x - 2;
-		int textRight = x + size + 2;
+		float textY = y + size + 4;
+		float left = x - 2;
+		float textRight = x + size + 2;
 		for (InfoLine line : info) {
-			int w = font.width(line.text());
-			int tx = anchor.centered() ? x + (size - w) / 2 : anchor.right() ? x + size - w : x;
-			graphics.text(font, line.text(), tx, textY, line.color(), true);
+			float w = font.width(line.text()) * text;
+			// A line wider than the minimap grows away from the screen edge the minimap is placed by; it stays on screen while it fits.
+			float tx = anchor.centered() ? x + (size - w) / 2 : anchor.right() ? x + size - w : x;
+			tx = TextSize.snap(Math.max(1, Math.min(tx, graphics.guiWidth() - 1 - w)));
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(tx, textY);
+			graphics.pose().scale(text);
+			graphics.text(font, line.text(), 0, 0, line.color(), true);
+			graphics.pose().popMatrix();
 			left = Math.min(left, tx - 1);
 			textRight = Math.max(textRight, tx + w + 1);
-			textY += 10;
+			textY += 10 * text;
 		}
-		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY, x, y, size, size + infoHeight};
+		return new int[] {(int) Math.floor(left), y - 2, (int) Math.ceil(textRight), info.isEmpty() ? y + size + 2 : y + size + 4 + infoHeight, x, y, size, size + infoHeight};
 	}
 
 	/**
@@ -363,22 +372,42 @@ public final class MinimapHud implements HudElement {
 		return Math.max(MARGIN, Math.min(x, width - MARGIN - size));
 	}
 
-	/** Letters on the frame. The map always faces north, so they never move. */
-	private void compass(GuiGraphicsExtractor graphics, Font font, int x, int y, int size) {
-		// The letters by which way the map faces: top, right, bottom, left.
-		int turns = Projection.facing().turns;
-		int[][] at = {{x + size / 2, y + 1}, {x + size - 5, y + size / 2 - 4}, {x + size / 2, y + size - 9}, {x + 5, y + size / 2 - 4}};
+	/** Letters on the frame, by which way the map faces. At another text size each grows in from its edge. */
+	private void compass(GuiGraphicsExtractor graphics, Font font, int x, int y, int size, float text) {
 		String[] letters = {"N", "E", "S", "W"};
+		int turns = Projection.facing().turns;
 		for (int i = 0; i < 4; i++) {
-			int[] place = at[Math.floorMod(i - turns, 4)];
-			this.letter(graphics, font, letters[i], place[0], place[1], i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF);
+			// The letter's box at the game's text size: a pixel around the letter, two on its left.
+			int w = font.width(letters[i]) + 3;
+			int h = 9;
+			// Which edge it sits on: top, right, bottom, left. The box stays against it, centred along it.
+			float bx;
+			float by;
+			switch (Math.floorMod(i - turns, 4)) {
+				case 0 -> {
+					bx = x + size / 2 - (w - 3) / 2 - 2 + w / 2.0F - w * text / 2;
+					by = y;
+				}
+				case 1 -> {
+					bx = x + size - 5 - (w - 3) / 2 - 2 + w - w * text;
+					by = y + size / 2 - 5 + h / 2.0F - h * text / 2;
+				}
+				case 2 -> {
+					bx = x + size / 2 - (w - 3) / 2 - 2 + w / 2.0F - w * text / 2;
+					by = y + size - 10 + h - h * text;
+				}
+				default -> {
+					bx = x + 5 - (w - 3) / 2 - 2;
+					by = y + size / 2 - 5 + h / 2.0F - h * text / 2;
+				}
+			}
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(TextSize.snap(bx), TextSize.snap(by));
+			graphics.pose().scale(text);
+			graphics.fill(0, 0, w, h, 0xA0101418);
+			graphics.text(font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
+			graphics.pose().popMatrix();
 		}
-	}
-
-	private void letter(GuiGraphicsExtractor graphics, Font font, String letter, int cx, int y, int color) {
-		int w = font.width(letter);
-		graphics.fill(cx - w / 2 - 2, y - 1, cx - w / 2 + w + 1, y + 8, 0xA0101418);
-		graphics.text(font, letter, cx - w / 2, y, color, false);
 	}
 
 	private List<InfoLine> infoLines(Settings settings, Entity viewer, Minecraft mc) {
