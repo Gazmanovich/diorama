@@ -1,5 +1,6 @@
 package dev.diorama;
 
+import dev.diorama.share.ServerLocks;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -12,6 +13,9 @@ import net.minecraft.network.chat.Component;
  *   <li>{@link #NO_MINIMAP}: no minimap at all.</li>
  *   <li>{@link #RESET}: clears all of the above.</li>
  * </ul>
+ * A server with Diorama can also lock settings in its {@code diorama-server.properties} (see
+ * {@link ServerLocks}), which it sends as the player joins. Either way the player's own settings
+ * stay as they saved them, and the server's rules end when they leave.
  */
 public final class ServerRules {
 	static final String FAIR_PLAY = "§f§a§i§r§x§a§e§r§o";
@@ -22,6 +26,7 @@ public final class ServerRules {
 	private static boolean fairPlay;
 	private static boolean netherAllowed;
 	private static boolean noMinimap;
+	private static ServerLocks locks = ServerLocks.NONE;
 	/** Player setting: fog of war everywhere, even where the server allows full cave maps. */
 	private static boolean alwaysFogOfWar = Boolean.getBoolean("diorama.fogOfWar");
 
@@ -48,20 +53,46 @@ public final class ServerRules {
 		}
 	}
 
+	/** The settings the server's Diorama locks, as the player joins. */
+	public static void onLocks(ServerLocks server) {
+		locks = server;
+		Diorama.LOGGER.info("The server locks map settings: {}", server);
+	}
+
 	public static void onDisconnect() {
 		fairPlay = false;
 		netherAllowed = false;
 		noMinimap = false;
+		locks = ServerLocks.NONE;
 	}
 
 	/** Whether cave slices in this dimension should only show blocks the player has seen. */
 	public static boolean fogOfWar(boolean nether) {
-		return alwaysFogOfWar || fairPlay && !(nether && netherAllowed);
+		return fogOfWar(nether, nether);
+	}
+
+	/**
+	 * Whether this dimension's cave slices, or its view under a roof ({@code roofed}, as in the
+	 * Nether), should only show blocks the player has seen. With cave maps locked off, the view
+	 * under a roof is the only map of such a dimension, so it stays, as far as the player has seen.
+	 */
+	public static boolean fogOfWar(boolean nether, boolean roofed) {
+		return alwaysFogOfWar || locks.caveFogOfWar() || fairPlay && !(nether && netherAllowed) || roofed && !locks.caveMapsAllowed();
+	}
+
+	/** Whether the server makes cave slices fog of war everywhere, so the player's own setting doesn't count. */
+	public static boolean fogOfWarForced() {
+		return locks.caveFogOfWar() || fairPlay && !netherAllowed;
+	}
+
+	/** Whether the map may show cave slices at all. */
+	public static boolean caveMapsAllowed() {
+		return locks.caveMapsAllowed();
 	}
 
 	/** Whether the map may show other players and mobs. */
 	public static boolean radarAllowed() {
-		return !fairPlay;
+		return !fairPlay && locks.radarAllowed();
 	}
 
 	/** Whether the server allows a minimap or map at all. */

@@ -222,7 +222,7 @@ public final class MinimapHud implements HudElement {
 		int x = placed[0];
 		int y = placed[1];
 		int size = placed[2];
-		int wantedLayer = settings.autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
+		int wantedLayer = settings.autoCaves && ServerRules.caveMapsAllowed() ? session.autoLayer(viewer) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), wantedLayer), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
 		float opacity = settings.opacity();

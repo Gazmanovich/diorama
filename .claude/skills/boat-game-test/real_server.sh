@@ -11,6 +11,8 @@
 #        real_server.sh vanilla-start <node> <name>     the vanilla client joins and stays, for the console to move about
 #        real_server.sh vanilla-stop <node> <name>      it leaves
 # Prints the port on start. The world, the logs and the server's console are in ~/real-servers/<node>/.
+# REAL_SERVER_JAR: a Diorama jar to start "with" instead of the checkout's, such as an older release.
+# REAL_SERVER_DIORAMA_PROPERTIES: written to the server's config/diorama-server.properties on start.
 set -u
 action=$1
 node=$2
@@ -113,13 +115,17 @@ start() {
 		cp "$root/libs/fabric-api.jar" "$root/mods/"
 	fi
 	if [ "$with" = with ]; then
-		local jar
+		local jar=${REAL_SERVER_JAR:-}
 		# The only one: sandbox.sh clears the folder before it builds.
-		jar=$(ls "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
-		[ -n "$jar" ] || { echo "no release jar in versions/$node/build/libs: build it with :$node:assemble" >&2; exit 1; }
+		[ -n "$jar" ] || jar=$(ls "$repo/versions/$node/build/libs/"diorama-*.jar 2>/dev/null | grep -v -e '-sources' -e '-dev' -e '-gametest' -e '-gameshim' | head -1)
+		[ -n "$jar" ] && [ -f "$jar" ] || { echo "no release jar in versions/$node/build/libs (or REAL_SERVER_JAR): build it with :$node:assemble" >&2; exit 1; }
 		cp "$jar" "$root/mods/"
 	fi
 	echo "eula=true" > "$root/eula.txt"
+	if [ -n "${REAL_SERVER_DIORAMA_PROPERTIES:-}" ]; then
+		mkdir -p "$root/config"
+		printf '%b\n' "$REAL_SERVER_DIORAMA_PROPERTIES" > "$root/config/diorama-server.properties"
+	fi
 	# Offline, so the test client's made-up name gets in. Bound to this machine only. No watchdog:
 	# on a VM rendering the client in software the server can stall past its limit. A fixed seed,
 	# so runs see the same land.

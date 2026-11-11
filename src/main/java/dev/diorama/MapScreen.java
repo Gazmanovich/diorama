@@ -189,7 +189,7 @@ public final class MapScreen extends Screen {
 	private int layerOnOpening() {
 		MapSession session = MapSession.get();
 		Entity viewer = MapSession.viewer();
-		return session != null && viewer != null && Settings.get().autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
+		return session != null && viewer != null && Settings.get().autoCaves && ServerRules.caveMapsAllowed() ? session.autoLayer(viewer) : TileKey.SURFACE;
 	}
 
 	@Override
@@ -327,7 +327,7 @@ public final class MapScreen extends Screen {
 			this.closeOtherMap();
 			this.otherMap = new OtherMap(folder, MapStyle.get(), Projection.facing(), MapLevel.saved(folder));
 		}
-		this.otherMap.map().setFogOfWar(ServerRules.fogOfWar(other.equals("minecraft:the_nether")));
+		this.otherMap.map().setFogOfWar(ServerRules.fogOfWar(other.equals("minecraft:the_nether"), this.otherMap.map().roofless()));
 		return this.otherMap.map();
 	}
 
@@ -1203,7 +1203,7 @@ public final class MapScreen extends Screen {
 	/** Between the surface and the slice at the player's feet, as C and the tabs do. */
 	private void toggleCaves() {
 		this.menu = null;
-		if (this.otherDimension != null) {
+		if (this.otherDimension != null || !ServerRules.caveMapsAllowed()) {
 			return;
 		}
 		this.gauge.cancel();
@@ -1219,7 +1219,7 @@ public final class MapScreen extends Screen {
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
-		if (this.otherDimension != null) {
+		if (this.otherDimension != null || !ServerRules.caveMapsAllowed()) {
 			return;
 		}
 		if (this.layer == TileKey.SURFACE) {
@@ -1308,9 +1308,12 @@ public final class MapScreen extends Screen {
 		this.tabsEnd = x;
 	}
 
-	/** How many tabs show: cave slices aren't saved, so another dimension's map has only Surface. */
+	/**
+	 * How many tabs show: cave slices aren't saved, so another dimension's map has only Surface, as
+	 * does a server that turns cave maps off.
+	 */
 	private int tabs() {
-		return this.otherDimension == null ? 2 : 1;
+		return this.otherDimension == null && ServerRules.caveMapsAllowed() ? 2 : 1;
 	}
 
 	/** The tab under a point: 0 Surface, 1 Caves, -1 neither. */
@@ -1712,7 +1715,10 @@ public final class MapScreen extends Screen {
 	 * so climbing past a slice edge doesn't swap a map for fog.
 	 */
 	private void followLayer(MapSession session, Entity viewer) {
-		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves) {
+		if (!ServerRules.caveMapsAllowed()) {
+			this.layer = TileKey.SURFACE;
+		}
+		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves || !ServerRules.caveMapsAllowed()) {
 			this.followHoldStart = -1;
 			return;
 		}

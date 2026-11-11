@@ -55,6 +55,12 @@ public final class ShareProtocol {
 	 * dimension and the round. A refresh's tables are taken together once this comes.
 	 */
 	public static final int TABLES_DONE = 4;
+	/**
+	 * Server to client, as the player joins, when the server locks a map setting: the
+	 * {@link ServerLocks} as one string. Singleplayer's server sends it too, the only message it
+	 * sends. Not tied to {@link #VERSION}: a client takes the keys it knows.
+	 */
+	public static final int LOCKS = 5;
 	/** The most chunks one ask names, so it fits in a message to the server. */
 	public static final int MAX_ASK = 3000;
 	/** The biggest packed chunk sent; one past it is said not to be shared. */
