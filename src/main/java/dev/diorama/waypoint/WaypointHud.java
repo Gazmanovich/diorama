@@ -58,16 +58,17 @@ public final class WaypointHud implements HudElement {
 		float margin = 28 * Math.max(1, scale);
 		Settings.Beams beamsShown = Settings.get().waypointBeams;
 		if (beamsShown != Settings.Beams.OFF) {
-			// Under every pin and label, so a beam never covers one.
+			// Under every pin and label, so a beam never covers one. A pin shows through the land; its
+			// beam only where nothing stands in front of it.
 			float z = 0;
 			//? if <1.21.6 {
 			/*// Drawn straight away here, at the depth the pins are given.
 			z = graphics.pose().last().pose().m32();
 			*///?}
-			this.beams.begin();
+			this.beams.begin(mc.level, viewer, eye, width, height, z);
 			for (Waypoint waypoint : waypoints) {
 				if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
-					this.beams.add(waypoint, eye, width, height, z);
+					this.beams.add(waypoint);
 				}
 			}
 			this.beams.draw(graphics);

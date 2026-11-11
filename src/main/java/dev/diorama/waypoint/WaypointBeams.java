@@ -5,8 +5,15 @@ import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
@@ -15,8 +22,9 @@ import org.jspecify.annotations.Nullable;
  * Beams standing on waypoints in the world, like a beacon's: a pin floating on the screen is hard
  * to place in depth, and a column that narrows with distance shows where to walk. They're drawn on
  * the HUD under the pins, each one the column's outline projected through the game camera, so like
- * the pins they show through terrain, fog and the dark, and past the render distance. All of a
- * frame's beams go to the GPU as one draw.
+ * the pins they show through fog and the dark, and past the render distance. Unlike the pins they
+ * are hidden by blocks in front of them, as a beacon's beam is: only the stretches the camera has
+ * a clear line to are drawn ({@link #look}). All of a frame's beams go to the GPU as one draw.
  */
 public final class WaypointBeams {
 	/** How far above its waypoint a beam reaches, in blocks. */
@@ -57,6 +65,30 @@ public final class WaypointBeams {
 
 	private static @Nullable MapTexture texture;
 
+	/** Lines of sight a frame may try, about three beams' worth; see {@link #add}. */
+	private static final int RAYS = 64;
+	/** How long what was seen of a beam is kept, in milliseconds, with the camera moving and still. */
+	private static final long AGAIN_MOVING = 50;
+	private static final long AGAIN_STILL = 500;
+	/** Points up a beam the line of sight is tried to, and how many times each change between them is halved. */
+	private static final int LOOKS = 12;
+	private static final int NARROWING = 6;
+
+	private final Map<UUID, Sight> sights = new HashMap<>();
+	private ClientLevel level;
+	private Entity viewer;
+	private Vec3 eye = Vec3.ZERO;
+	private float width;
+	private float height;
+	private float z;
+	private long frame;
+	private long now;
+	private int rays;
+	private double reach;
+	/** This beam's place among the frame's, the place the last frame's rays ran out at, and where this frame's did. */
+	private int index;
+	private int resume;
+	private int next;
 	private final Vector4f base = new Vector4f();
 	private final Vector4f top = new Vector4f();
 	private float[] xyz = new float[12 * 32];
@@ -73,20 +105,63 @@ public final class WaypointBeams {
 		};
 	}
 
-	void begin() {
+	/** Starts a frame's beams, seen from {@code eye} by {@code viewer} in a GUI of {@code width} by {@code height}. */
+	void begin(ClientLevel level, Entity viewer, Vec3 eye, float width, float height, float z) {
 		this.quads = 0;
+		this.level = level;
+		this.viewer = viewer;
+		this.eye = eye;
+		this.width = width;
+		this.height = height;
+		this.z = z;
+		this.frame++;
+		this.now = System.nanoTime() / 1_000_000;
+		this.rays = RAYS;
+		this.index = 0;
+		this.resume = this.next;
+		this.next = 0;
+		// Past the loaded chunks there's nothing to hide a beam, and nothing for a ray to do.
+		this.reach = Minecraft.getInstance().options.renderDistance().get() * 16 + 16;
+		if (this.frame % 1200 == 0) {
+			this.sights.values().removeIf(sight -> this.frame - sight.used > 1200);
+		}
 	}
 
 	/**
-	 * Adds the beam of a waypoint, seen from {@code eye} in a GUI of {@code width} by {@code height}.
-	 * Nothing is added when it's off screen or the player is standing at it.
+	 * Adds the beam of a waypoint: the stretches of it the camera has a clear line to. Nothing is
+	 * added when it's off screen or the player is standing at it.
 	 */
-	void add(Waypoint waypoint, Vec3 eye, float width, float height, float z) {
+	void add(Waypoint waypoint) {
+		int index = this.index++;
+		Vec3 eye = this.eye;
 		double dx = waypoint.x + 0.5 - eye.x;
 		double dy = waypoint.y + 1.0 - eye.y;
 		double dz = waypoint.z + 0.5 - eye.z;
 		double ground = Math.sqrt(dx * dx + dz * dz);
 		if (ground <= GONE) {
+			return;
+		}
+		Sight sight = this.sights.get(waypoint.id);
+		// Each frame has rays for so many beams; the rest keep what they last saw, and the next frame
+		// goes on from where this one stopped, so with hundreds of beams each is looked at in turn.
+		if ((sight == null || index >= this.resume && sight.stale(eye, this.now)) && this.rays > 0) {
+			if (sight == null) {
+				sight = new Sight();
+				this.sights.put(waypoint.id, sight);
+			}
+			this.look(sight, dx, dy, dz, ground);
+			sight.at = eye;
+			sight.time = this.now;
+			if (this.rays <= 0) {
+				this.next = index + 1;
+			}
+		}
+		if (sight == null) {
+			// Not looked at yet: it shows once a frame has rays for it.
+			return;
+		}
+		sight.used = this.frame;
+		if (sight.count == 0) {
 			return;
 		}
 		double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -98,11 +173,111 @@ public final class WaypointBeams {
 		int rgb = waypoint.color & 0xFFFFFF;
 		int edge = alpha(EDGE_ALPHA * strength) << 24 | edgeColor(rgb);
 		int core = alpha(CORE_ALPHA * strength) << 24 | coreColor(rgb);
-		// The fading tip is its own piece. A quad's texture runs evenly along it on screen, and seen
-		// from below nearly all of a beam's length on screen is its lowest few blocks: one piece would
-		// spread the fade down over what the player sees of it.
-		this.piece(dx, dy, dz, 0, HEIGHT - TIP, SOLID_V, SOLID_V, width, height, z, edge, core);
-		this.piece(dx, dy, dz, HEIGHT - TIP, HEIGHT, SOLID_V, CLEAR_V, width, height, z, edge, core);
+		int body = HEIGHT - TIP;
+		for (int i = 0; i < sight.count; i++) {
+			float from = sight.spans[i * 2];
+			float to = sight.spans[i * 2 + 1];
+			// The fading tip is its own piece. A quad's texture runs evenly along it on screen, and seen
+			// from below nearly all of a beam's length on screen is its lowest few blocks: one piece would
+			// spread the fade down over what the player sees of it.
+			if (from < body) {
+				this.piece(dx, dy, dz, from, Math.min(to, body), SOLID_V, SOLID_V, this.width, this.height, this.z, edge, core);
+			}
+			if (to > body) {
+				float start = Math.max(from, body);
+				this.piece(dx, dy, dz, start, to, tipV(start), tipV(to), this.width, this.height, this.z, edge, core);
+			}
+		}
+	}
+
+	/** The texture row for a height in the beam's tip. */
+	private static float tipV(float height) {
+		return SOLID_V + (CLEAR_V - SOLID_V) * (height - (HEIGHT - TIP)) / TIP;
+	}
+
+	/**
+	 * Works out which stretches of a beam the camera has a clear line to, as a vanilla beacon's beam
+	 * shows only where no block stands in front of it. The line is tried to points evenly spread up
+	 * the beam by the angle they're seen at, and each change from hidden to seen is then narrowed down.
+	 */
+	private void look(Sight sight, double dx, double dy, double dz, double ground) {
+		double low = Math.atan2(dy, ground);
+		double high = Math.atan2(dy + HEIGHT, ground);
+		sight.count = 0;
+		boolean seen = false;
+		float start = 0;
+		double before = low;
+		for (int i = 0; i <= LOOKS; i++) {
+			double angle = low + (high - low) * i / LOOKS;
+			boolean clear = this.clear(dx, ground * Math.tan(angle), dz);
+			if (clear != seen) {
+				// Somewhere between the last point and this one the beam comes into view or leaves it.
+				double hidden = clear ? before : angle;
+				double shown = clear ? angle : before;
+				for (int step = 0; i > 0 && step < NARROWING; step++) {
+					double middle = (hidden + shown) / 2;
+					if (this.clear(dx, ground * Math.tan(middle), dz)) {
+						shown = middle;
+					} else {
+						hidden = middle;
+					}
+				}
+				float edge = (float) Math.max(0, Math.min(HEIGHT, ground * Math.tan(i > 0 ? shown : low) - dy));
+				if (clear) {
+					start = edge;
+				} else {
+					sight.add(start, edge);
+				}
+				seen = clear;
+			}
+			before = angle;
+		}
+		if (seen) {
+			sight.add(start, HEIGHT);
+		}
+	}
+
+	/** Whether nothing stands between the camera and the point at (dx, dy, dz) from it, as far as chunks are loaded. */
+	private boolean clear(double dx, double dy, double dz) {
+		this.rays--;
+		double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+		double scale = length > this.reach ? this.reach / length : 1;
+		Vec3 to = new Vec3(this.eye.x + dx * scale, this.eye.y + dy * scale, this.eye.z + dz * scale);
+		// What blocks the view, not what blocks the way: glass and water let a beam through.
+		return this.level.clip(new ClipContext(this.eye, to, ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, this.viewer)).getType() == HitResult.Type.MISS;
+	}
+
+	/** What was last seen of one waypoint's beam: the heights above its foot between which it shows, in pairs. */
+	private static final class Sight {
+		float[] spans = new float[8];
+		int count;
+		/** Where the camera was when it was last looked at, and when, in milliseconds. */
+		Vec3 at = Vec3.ZERO;
+		long time;
+		/** The frame it was last drawn in. */
+		long used;
+
+		/**
+		 * Whether to look again: the camera has moved since, or a while has passed in which a block
+		 * may have been placed or broken. Looking costs a dozen or two lines of sight through the
+		 * world, so not on every frame.
+		 */
+		boolean stale(Vec3 eye, long now) {
+			long age = now - this.time;
+			return age >= AGAIN_STILL || age >= AGAIN_MOVING && eye.distanceToSqr(this.at) > 0.01;
+		}
+
+		void add(float from, float to) {
+			if (to - from < 0.05F) {
+				return;
+			}
+			if (this.count * 2 == this.spans.length) {
+				this.spans = Arrays.copyOf(this.spans, this.count * 4);
+			}
+			this.spans[this.count * 2] = from;
+			this.spans[this.count * 2 + 1] = to;
+			this.count++;
+		}
 	}
 
 	/** The beam between two heights above its foot, with the texture row at each end. */

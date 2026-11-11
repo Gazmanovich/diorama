@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.MapSession;
 import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.waypoint.Waypoint;
@@ -18,12 +19,14 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Beams on waypoints in the world (opt-in: {@code waypoint-beams}): which waypoints get one under
- * each choice of the setting, read off the screen where each beam stands, and pictures by day and
- * night, from close by, looking up one, and with a hundred and twenty waypoints.
+ * each choice of the setting, and what hides one (a wall, a roof, the ground over a waypoint, the
+ * Nether's rock) and what doesn't (glass), read off the screen where each beam stands; and pictures
+ * by day and night, from close by, looking up one, and with a hundred and twenty waypoints.
  */
 final class WaypointBeamsTest {
 	private static final String OVERWORLD = "minecraft:overworld";
@@ -99,17 +102,13 @@ final class WaypointBeamsTest {
 		expect(shot(context, Settings.Beams.ALL, "beams-day-hidden"), onHome, home, false, "all, a hidden waypoint");
 		context.runOnClient(mc -> home.visible = true);
 
+		// A clearing from Home towards the player, flat and with no tree over it.
+		int floor = home.y - 1;
+		fill(world, home.x - 4, floor + 1, home.z - 3, home.x + 4, floor + 40, home.z + 26, "air");
+		fill(world, home.x - 4, floor, home.z - 3, home.x + 4, floor, home.z + 26, "grass_block");
 		// From close by a beam fades, and is gone at the waypoint; looking up one, it narrows into the sky.
 		for (int away : new int[] {20, 8, 5, 2}) {
-			// On the ground, a step aside if a trunk stands there.
-			int x = home.x;
-			for (int aside : new int[] {0, 1, -1, 2, -2}) {
-				if (clear(context, home.x + aside, home.z + away)) {
-					x = home.x + aside;
-					break;
-				}
-			}
-			String spot = "tp @a " + (x + 0.5) + " " + (ground(context, x, home.z + away) + 1) + " " + (home.z + away + 0.5) + " 180 ";
+			String spot = "tp @a " + (home.x + 0.5) + " " + (floor + 1) + " " + (home.z + away + 0.5) + " 180 ";
 			world.getServer().runCommand(spot + "0");
 			context.waitTicks(220);
 			context.takeScreenshot("beams-near-" + away);
@@ -118,9 +117,45 @@ final class WaypointBeamsTest {
 				world.getServer().runCommand(spot + "-80");
 				context.waitTicks(220);
 				BufferedImage up = shot(context, Settings.Beams.ALL, "beams-look-up");
-				expect(up, points(context, home, up, 160), home, true, "looking up, the ordinary waypoint");
+				expect(up, points(context, home, up, 24, 160, 4), home, true, "looking up, the ordinary waypoint");
 			}
 		}
+
+		// Blocks in front of a beam hide it, as they hide a beacon's; its pin still shows through them.
+		// The player stands 20 blocks from Home, looking a little up.
+		world.getServer().runCommand("tp @a " + (home.x + 0.5) + " " + (floor + 1) + " " + (home.z + 20.5) + " 180 -15");
+		// A wall six high halfway to it: the beam shows above the wall, from about 9 blocks up it.
+		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "stone");
+		context.waitTicks(220);
+		BufferedImage wall = shot(context, Settings.Beams.ALL, "beams-wall");
+		expect(wall, points(context, home, wall, 3, 7, 1), home, false, "behind a wall, the foot of the beam");
+		expect(wall, points(context, home, wall, 12, 22, 2), home, true, "behind a wall, the beam above it");
+		// Glass lets it through.
+		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "glass");
+		context.waitTicks(220);
+		BufferedImage glass = shot(context, Settings.Beams.ALL, "beams-glass");
+		expect(glass, points(context, home, glass, 3, 7, 1), home, true, "behind glass, the foot of the beam");
+		fill(world, home.x - 4, floor + 1, home.z + 10, home.x + 4, floor + 6, home.z + 10, "air");
+		// Under a roof, as in a cave or a house: no beam at all.
+		world.getServer().runCommand("fill " + (home.x - 2) + " " + (floor + 1) + " " + (home.z + 18) + " " + (home.x + 2) + " " + (floor + 5) + " " + (home.z + 22) + " minecraft:stone hollow");
+		world.getServer().runCommand("setblock " + (home.x + 1) + " " + (floor + 2) + " " + (home.z + 21) + " minecraft:torch");
+		context.waitTicks(220);
+		BufferedImage roof = shot(context, Settings.Beams.ALL, "beams-under-a-roof");
+		expect(roof, points(context, home, roof, 3, 22, 2), home, false, "under a roof, the beam");
+		fill(world, home.x - 2, floor + 1, home.z + 18, home.x + 2, floor + 5, home.z + 22, "air");
+		// A waypoint 30 blocks under the ground: its beam shows from where it comes out of the ground.
+		Waypoint mine = new Waypoint("Mine", home.x + 3, floor - 30, home.z, OVERWORLD, 0xFFF76B15);
+		context.runOnClient(mc -> {
+			home.visible = false;
+			WaypointStore.get().add(mine);
+		});
+		context.waitTicks(220);
+		BufferedImage under = shot(context, Settings.Beams.ALL, "beams-waypoint-underground");
+		expect(under, points(context, mine, under, 34, 50, 2), mine, true, "a waypoint under the ground, the beam above the ground");
+		context.runOnClient(mc -> {
+			home.visible = true;
+			WaypointStore.get().remove(mine);
+		});
 
 		stand(world, at.getX(), at.getY(), at.getZ(), 4);
 		world.getServer().runCommand("time set midnight");
@@ -143,6 +178,9 @@ final class WaypointBeamsTest {
 				store.add(new Waypoint("W" + i, x, at.getY() + random.nextInt(40) - 20, z, OVERWORLD, Waypoint.PALETTE[random.nextInt(Waypoint.PALETTE.length)]));
 			}
 		});
+		// Each frame looks at a few beams, so a hundred take a moment to all be seen.
+		context.runOnClient(mc -> Settings.get().waypointBeams = Settings.Beams.ALL);
+		context.waitTicks(400);
 		shot(context, Settings.Beams.ALL, "beams-clutter-all");
 		shot(context, Settings.Beams.TEMPORARY, "beams-clutter-temporary");
 
@@ -154,6 +192,25 @@ final class WaypointBeamsTest {
 		context.waitTicks(5);
 		context.takeScreenshot("beams-settings");
 		context.setScreen(() -> null);
+
+		// The Nether, in a tunnel under a roof of netherrack: the beam ends at the roof.
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0.5 70 0.5 180 -15");
+		context.waitFor(mc -> mc.level.dimension() == Level.NETHER && MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+		context.waitTicks(40);
+		world.getServer().runCommand("execute in minecraft:the_nether run fill -5 69 -45 5 69 5 minecraft:netherrack");
+		world.getServer().runCommand("execute in minecraft:the_nether run fill -5 70 -45 5 80 5 minecraft:air");
+		world.getServer().runCommand("execute in minecraft:the_nether run fill -5 81 -45 5 83 5 minecraft:netherrack");
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0.5 70 0.5 180 -15");
+		Waypoint portal = new Waypoint("Portal", 0, 69, -30, "minecraft:the_nether", 0xFFF76B15);
+		portal.kind = Waypoint.Kind.TEMPORARY;
+		context.runOnClient(mc -> WaypointStore.get().add(portal));
+		context.waitTicks(220);
+		BufferedImage nether = shot(context, Settings.Beams.TEMPORARY, "beams-nether");
+		expect(nether, points(context, portal, nether, 3, 8, 1), portal, true, "in the Nether, the beam under the roof");
+		expect(nether, points(context, portal, nether, 14, 30, 2), portal, false, "in the Nether, the beam above the roof");
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 180 4");
+		context.waitFor(mc -> mc.level.dimension() == Level.OVERWORLD && MapSession.get() != null, 2400);
+		context.waitTicks(100);
 
 		context.runOnClient(mc -> {
 			Settings.get().waypointBeams = before;
@@ -190,13 +247,6 @@ final class WaypointBeamsTest {
 		});
 	}
 
-	/** Whether a player can stand on the ground at (x, z): no trunk there. */
-	private static boolean clear(ClientGameTestContext context, int x, int z) {
-		int ground = ground(context, x, z);
-		return context.computeOnClient(mc -> !mc.level.getBlockState(new BlockPos(x, ground + 1, z)).is(BlockTags.LOGS)
-			&& !mc.level.getBlockState(new BlockPos(x, ground + 2, z)).is(BlockTags.LOGS));
-	}
-
 	/** The height of the highest block at (x, z), which has to be loaded. */
 	private static int surface(ClientGameTestContext context, int x, int z) {
 		return context.computeOnClient(mc -> mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)) - 1;
@@ -208,25 +258,29 @@ final class WaypointBeamsTest {
 		world.getServer().runCommand("tp @a " + (x + 0.5) + " " + y + " " + (z + 0.5) + " 180 " + pitch);
 	}
 
-	/** Where on a screenshot the points 8 to 40 blocks above a waypoint's spot are, those that are on it. */
+	/** Where on a screenshot points up a waypoint's beam are, above its trees: those that are on it. */
 	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot) {
-		return points(context, waypoint, shot, 40);
+		return points(context, waypoint, shot, 16, 48, 4);
 	}
 
-	/** The same up to {@code highest} blocks above it, for a view up the beam. */
-	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int highest) {
+	/** The same from {@code lowest} to {@code highest} blocks above the beam's foot, every {@code step}. */
+	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step) {
 		List<int[]> points = new ArrayList<>();
-		for (int up = 8; up <= highest; up += 4) {
+		for (int up = lowest; up <= highest; up += step) {
 			double y = waypoint.y + 1.0 + up;
 			float[] screen = context.computeOnClient(mc -> WorldProjection.project(waypoint.x + 0.5, y, waypoint.z + 0.5, shot.getWidth(), shot.getHeight()));
 			if (screen != null && screen[0] >= 0 && screen[1] >= 0 && screen[0] < shot.getWidth() && screen[1] < shot.getHeight()) {
 				points.add(new int[] {Math.min(shot.getWidth() - 1, Math.round(screen[0])), Math.min(shot.getHeight() - 1, Math.round(screen[1]))});
 			}
 		}
-		if (points.size() < 4) {
+		if (points.size() < 3) {
 			throw new AssertionError("Too little of the beam of " + waypoint.name + " would be on screen: " + points.size() + " points");
 		}
 		return points.toArray(int[][]::new);
+	}
+
+	private static void fill(TestSingleplayerContext world, int x0, int y0, int z0, int x1, int y1, int z1, String block) {
+		world.getServer().runCommand("fill " + x0 + " " + y0 + " " + z0 + " " + x1 + " " + y1 + " " + z1 + " minecraft:" + block);
 	}
 
 	/**
