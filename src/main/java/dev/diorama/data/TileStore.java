@@ -804,7 +804,7 @@ public final class TileStore {
 		}
 	}
 
-	/** A cave slice's tiles are in a folder named by its cut height, as Xaero's World Map keeps a folder per cave layer. */
+	/** A saved cave slice's tiles are in a folder named by its cut height, as Xaero's World Map keeps a folder per cave layer. */
 	private Path file(TileKey key) {
 		if (key.isCave()) {
 			return this.folder.resolve(Integer.toString(key.layer())).resolve(key.tileU() + "_" + key.tileV() + ".omt");

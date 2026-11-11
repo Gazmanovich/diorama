@@ -116,11 +116,11 @@ public final class MapLevel implements ChunkSource {
 	/** The folder {@link #store} saves into; see {@link #storeName()}. */
 	private volatile String storeName = "";
 	/**
-	 * Saved cave slices as they're baked now, opened with the first one baked; see {@link #caveStore()}.
-	 * Render thread.
+	 * The saved views from on top of the roof as they're baked now, opened with the first one
+	 * baked; see {@link #roofStore}. Render thread.
 	 */
-	private @Nullable TileStore caveStore;
-	private String caveStoreName = "";
+	private @Nullable TileStore roofStore;
+	private String roofStoreName = "";
 	/** The tiles this map had under another label, until it's redrawn; null if there are none. */
 	private volatile @Nullable MapMemory memory;
 	private volatile boolean fogOfWar;
@@ -229,7 +229,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * The map saved in a folder, to look at from another dimension. Only its sky view is shown, and
+	 * The map saved in a folder, to look at from another dimension. Only the sky view is saved, and
 	 * what kind of view that was is told by the folder: a dimension the player isn't in has no level
 	 * to ask whether it has a roof, and a modded one could. The roof's height doesn't matter here.
 	 */
@@ -416,25 +416,36 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Where cave slices are saved, or null when this map saves nothing. A slice is saved as it's
-	 * baked for a view and merged with what was saved, like the sky view, so what the player mapped
-	 * underground, under the Nether's roof or on top of it is still there after its chunks are gone.
-	 * Slices baked another way (fog of war, the depth look, the tilt, the facing) have another
+	 * Whether a cave slice is cut above the roof, as the map shows it to a player standing on top
+	 * of the Nether: the roof's bedrock and what's built on it. Those are the only cave slices
+	 * saved. The sky view there looks from under the roof, so it never shows them, and a slice of
+	 * flat bedrock takes little room on disk. The slices under a roof and in other dimensions
+	 * aren't saved, as there's one for every 4 blocks of height and each is a map of its own.
+	 */
+	private boolean onRoof(TileKey key) {
+		return key.isCave() && this.roofless() && key.layer() > this.roof;
+	}
+
+	/**
+	 * Where a slice from on top of the roof ({@link #onRoof}) is saved, or null for any other tile
+	 * and when this map saves nothing. It's saved as it's baked for a view and merged with what was
+	 * saved, like the sky view, so what the player mapped up there is still on the map after its
+	 * chunks are gone. Slices baked another way (fog of war, the tilt, the facing) have another
 	 * folder; a bake still running for the old one is dropped by its generation. Render thread.
 	 */
-	private @Nullable TileStore caveStore() {
-		if (this.folder == null || this.savedOnly || this.closed) {
+	private @Nullable TileStore roofStore(TileKey key) {
+		if (this.folder == null || this.savedOnly || this.closed || key.lod() != 0 || !this.onRoof(key)) {
 			return null;
 		}
-		String name = TileLabel.caves(Math.round(dev.diorama.MapStyle.get().pitchDegrees()), Projection.facing(), this.fogOfWar, this.depthCaves && !this.roofless());
-		if (this.caveStore == null || !name.equals(this.caveStoreName)) {
-			if (this.caveStore != null) {
-				this.caveStore.close();
+		String name = TileLabel.onRoof(Math.round(dev.diorama.MapStyle.get().pitchDegrees()), Projection.facing(), this.fogOfWar);
+		if (this.roofStore == null || !name.equals(this.roofStoreName)) {
+			if (this.roofStore != null) {
+				this.roofStore.close();
 			}
-			this.caveStore = new TileStore(this.folder.resolve(name));
-			this.caveStoreName = name;
+			this.roofStore = new TileStore(this.folder.resolve(name));
+			this.roofStoreName = name;
 		}
-		return this.caveStore;
+		return this.roofStore;
 	}
 
 	/** Moves to another folder if how tiles are baked changed, and queues everything loaded to be saved there. */
@@ -989,11 +1000,9 @@ public final class MapLevel implements ChunkSource {
 			}
 			return;
 		}
-		if (image.key().isCave() && image.key().lod() == 0) {
-			TileStore caves = this.caveStore();
-			if (caves != null) {
-				caves.baked(image);
-			}
+		TileStore onRoof = this.roofStore(image.key());
+		if (onRoof != null) {
+			onRoof.baked(image);
 		}
 		MapTile tile = this.tiles.get(image.key());
 		if (background && tile == null) {
@@ -1091,8 +1100,8 @@ public final class MapLevel implements ChunkSource {
 		boolean fog = this.fogOfWar;
 		Overlays overlays = this.overlays;
 		TileStore store = key.isCave() ? null : this.store;
-		// What the bake merges with: a cave slice has saved pixels too, but no spots or block light.
-		TileStore saveTo = key.isCave() ? this.caveStore() : store;
+		// What the bake merges with: a slice from on top of the roof has saved pixels too, but no spots or block light.
+		TileStore saveTo = key.isCave() ? this.roofStore(key) : store;
 		// As TileBaker decides: under a roof (the Nether) every view is lit as if the roof were
 		// lifted off, cave slices too; elsewhere a cave slice is lit by block light. Fog of war only
 		// changes those two.
@@ -1543,8 +1552,8 @@ public final class MapLevel implements ChunkSource {
 		if (this.store != null) {
 			this.store.close();
 		}
-		if (this.caveStore != null) {
-			this.caveStore.close();
+		if (this.roofStore != null) {
+			this.roofStore.close();
 		}
 		if (this.memory != null) {
 			this.memory.close();
@@ -1559,7 +1568,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * Saves bakes that finished since the last update, waiting a moment for the ones still
+	 * Saves the bakes that are kept and finished since the last update, waiting a moment for the ones still
 	 * running: they hold the latest look of their tiles.
 	 */
 	private void saveLastBakes(TileStore store) {
@@ -1572,13 +1581,13 @@ public final class MapLevel implements ChunkSource {
 			while ((image = this.finished.poll()) != null) {
 				this.inFlight.remove(image.key());
 				if (image.key().lod() == 0 && image.generation() == this.generation(image.key())) {
-					TileStore saveTo = image.key().isCave() ? this.caveStore() : store;
+					TileStore saveTo = image.key().isCave() ? this.roofStore(image.key()) : store;
 					if (saveTo != null) {
 						saveTo.baked(image);
 					}
 				}
 			}
-			boolean baking = this.inFlight.stream().anyMatch(key -> key.lod() == 0);
+			boolean baking = this.inFlight.stream().anyMatch(key -> key.lod() == 0 && (!key.isCave() || this.onRoof(key)));
 			if (!baking || System.currentTimeMillis() > deadline) {
 				return;
 			}

@@ -296,8 +296,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("roof-caves")) {
 				RoofCavesTest.run(context, world);
 			}
-			if (tests.contains("cave-return")) {
-				CaveReturnTest.run(context, world);
+			if (tests.contains("nether-roof")) {
+				NetherRoofTest.run(context, world);
 			}
 			if (tests.contains("cave-depth")) {
 				CaveDepthTest.run(context, world);
@@ -318,10 +318,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				waitUntilGenerated(context, world);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("cave-return") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
-				if (tests.contains("cave-return")) {
-					CaveReturnTest.reopened(context, reopened);
+				if (tests.contains("nether-roof")) {
+					NetherRoofTest.reopened(context, reopened);
 				}
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);

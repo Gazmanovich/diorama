@@ -22,13 +22,12 @@ public record TileLabel(boolean underRoof, long pitch, boolean fog, Facing facin
 	private static final String FOG = "fog";
 
 	/**
-	 * The folder cave slices are saved in, beside the sky view's: they look different by the tilt,
-	 * the way the map faces, whether only seen blocks show ({@code fog}) and whether they're drawn
-	 * with the depth look ({@code depth}), so each of those keeps its own. Never a name
-	 * {@link #parse} takes for a sky view.
+	 * The folder the views from on top of a roof are saved in, beside the sky view's: they look
+	 * different by the tilt, the way the map faces and whether only seen blocks show ({@code fog}),
+	 * so each of those keeps its own. Never a name {@link #parse} takes for a sky view.
 	 */
-	public static String caves(long pitch, Facing facing, boolean fog, boolean depth) {
-		return "caves-" + pitch + (facing == Facing.NORTH ? "" : "-" + facing.id()) + (fog ? "-" + FOG : "") + (depth ? "-depth" : "");
+	public static String onRoof(long pitch, Facing facing, boolean fog) {
+		return "on-roof-" + pitch + (facing == Facing.NORTH ? "" : "-" + facing.id()) + (fog ? "-" + FOG : "");
 	}
 
 	public String folder() {
