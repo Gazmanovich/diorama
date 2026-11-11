@@ -26,7 +26,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * The waypoints of one folder, in vanilla's in-world list. Every dimension has a folder of its own,
  * made for it; the player can add folders of their own, rename and delete them, and hide any folder
- * from the maps. The folder bar picks the folder, a search box filters its waypoints by name and
+ * from the maps. The folder bar picks the folder, by its arrows or from the list of every folder that
+ * a click on its name opens; a search box filters its waypoints by name and
  * finds the ones in every other folder too, under a heading of their own, and
  * beside it are the sort order with its direction, New folder and New waypoint. Clicking a row selects it and shows
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
@@ -72,6 +73,12 @@ public final class WaypointListScreen extends Screen {
 	 * Delete arms them into one red Click again to delete.
 	 */
 	private final List<Button> folderActions = new ArrayList<>();
+	/**
+	 * Every folder to pick from, open under the folder's name after a click on it, as Xaero's Minimap
+	 * picks a waypoint set from a dropdown: one click of an arrow per folder is slow with many, and
+	 * doesn't show which there are. Drawn over the screen, which hands it the clicks while it's open.
+	 */
+	private @Nullable FolderMenu folderMenu;
 	private boolean folderArmed;
 	/** Every waypoint in the folder shown, in the sort order. */
 	private final List<Waypoint> all = new ArrayList<>();
@@ -208,6 +215,60 @@ public final class WaypointListScreen extends Screen {
 		return this.folders.get(0);
 	}
 
+	/** Opens the list of every folder under the folder's name, each with how many waypoints it holds. */
+	private void openFolderMenu() {
+		WaypointStore store = WaypointStore.get();
+		java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+		if (store != null) {
+			for (List<Waypoint> list : List.of(store.all(), store.waystones())) {
+				for (Waypoint waypoint : list) {
+					counts.merge(store.folderKey(waypoint), 1, Integer::sum);
+				}
+			}
+		}
+		List<FolderMenu.Entry> entries = new ArrayList<>();
+		for (Folder folder : this.folders) {
+			entries.add(new FolderMenu.Entry(folder.key(), folder.name().getString(), counts.getOrDefault(folder.key(), 0),
+				store != null && store.folderHidden(folder.key())));
+		}
+		int left = folderNameLeft(this.width / 2 - LIST_WIDTH / 2);
+		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, FOLDER_NAME_WIDTH, this.height);
+	}
+
+	/**
+	 * A click while the list of folders is open: on a folder it shows that folder, anywhere else it
+	 * only closes the list, as a click outside a menu does.
+	 */
+	private void clickFolderMenu(double x, double y, int button) {
+		FolderMenu menu = this.folderMenu;
+		this.folderMenu = null;
+		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
+	}
+
+	/**
+	 * A key while the list of folders is open goes to the list and nowhere else, so nothing under
+	 * it is typed into or pressed: Escape closes it, the arrows and Enter pick from it.
+	 */
+	private void keyFolderMenu(int key) {
+		FolderMenu menu = this.folderMenu;
+		if (menu == null || key == InputConstants.KEY_ESCAPE) {
+			this.folderMenu = null;
+			return;
+		}
+		FolderMenu.Entry picked = menu.keyPressed(key);
+		if (picked != null) {
+			this.folderMenu = null;
+			this.pickFolder(picked);
+		}
+	}
+
+	private void pickFolder(FolderMenu.@Nullable Entry picked) {
+		if (picked != null && !picked.key().equals(this.folderKey)) {
+			this.showFolder(picked.key());
+			this.rebuildWidgets();
+		}
+	}
+
 	private void stepFolder(int step) {
 		int index = this.folders.indexOf(this.folder());
 		this.showFolder(this.folders.get(Math.floorMod(index + step, this.folders.size())).key());
@@ -241,6 +302,7 @@ public final class WaypointListScreen extends Screen {
 		this.hadWaystones = store != null && !store.waystones().isEmpty();
 		this.folderArmed = false;
 		this.folderActions.clear();
+		this.folderMenu = null;
 		if (this.selected != null && !this.all.contains(this.selected) && !this.others.contains(this.selected)) {
 			// A waystone is a new object each time the server sends it: find it again by its id.
 			UUID id = this.selected.id;
@@ -702,8 +764,10 @@ public final class WaypointListScreen extends Screen {
 	@Override
 	public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
 		this.drawBackground(graphics, mouseX, mouseY);
-		super.render(graphics, mouseX, mouseY, a);
+		boolean overMenu = this.folderMenu != null && this.folderMenu.contains(mouseX, mouseY);
+		super.render(graphics, overMenu ? -1 : mouseX, overMenu ? -1 : mouseY, a);
 		this.drawSortCaret(graphics);
+		this.drawFolderMenu(graphics, mouseX, mouseY);
 	}
 
 	private void drawBackground(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -733,8 +797,12 @@ public final class WaypointListScreen extends Screen {
 		WaypointStore store = WaypointStore.get();
 		Folder folder = this.folder();
 		boolean folderHidden = store != null && store.folderHidden(folder.key());
-		String label = this.fit(folder.name().getString() + " (" + this.all.size() + ")", nameRight - nameLeft - 8);
+		String label = this.fit(folder.name().getString() + " (" + this.all.size() + ")", nameRight - nameLeft - 28);
 		graphics.centeredText(this.font, Component.literal(label), (nameLeft + nameRight) / 2, FOLDER_Y + 6, folderHidden ? HIDDEN : 0xFFFFFFFF);
+		// A caret at the name's right end: a click on the name opens the list of folders.
+		for (int row = 0; row < 3; row++) {
+			graphics.fill(nameRight - 12 + row, FOLDER_Y + 9 + row, nameRight - 7 - row, FOLDER_Y + 10 + row, DETAIL);
+		}
 		EditBox box = this.search;
 		if (box != null) {
 			ScreenArt.sprite(graphics, box.isFocused() ? ScreenArt.TEXT_FIELD_FOCUSED : ScreenArt.TEXT_FIELD, left, SEARCH_Y, this.searchWidth, 20);
@@ -805,7 +873,7 @@ public final class WaypointListScreen extends Screen {
 			String shownDetail = this.fit(detail, room);
 			graphics.text(this.font, shownDetail, left + textLeft, y + 14, DETAIL, true);
 			boolean overText = mouseX >= left + textLeft && mouseX < left + textLeft + room && mouseY >= y && mouseY < y + ROW;
-			if (overText && (!name.equals(full) || !shownDetail.equals(detail))) {
+			if (overText && this.folderMenu == null && (!name.equals(full) || !shownDetail.equals(detail))) {
 				//? if >=1.21.6 {
 				graphics.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(full), Component.literal(detail)), mouseX, mouseY);
 				//?} else {
@@ -922,6 +990,10 @@ public final class WaypointListScreen extends Screen {
 	//?} else {
 	/*public boolean mouseScrolled(double x, double y, double scrollY) {
 	*///?}
+		if (this.folderMenu != null) {
+			this.folderMenu.scroll(scrollY);
+			return true;
+		}
 		this.scrollTo(this.scroll - (int) Math.signum(scrollY));
 		return true;
 	}
@@ -941,6 +1013,10 @@ public final class WaypointListScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(event.key());
+			return true;
+		}
 		if (DioramaClient.NEW_WAYPOINT.matches(event) && !(this.getFocused() instanceof EditBox)) {
 			this.newWaypointPressed = true;
 			return true;
@@ -950,6 +1026,10 @@ public final class WaypointListScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (this.folderMenu != null) {
+			this.clickFolderMenu(event.x(), event.y(), event.button());
+			return true;
+		}
 		this.disarmUnless(event.x(), event.y());
 		if (!usedByList(event.button()) && DioramaClient.NEW_WAYPOINT.matchesMouse(event)) {
 			this.newWaypointPressed = true;
@@ -978,6 +1058,10 @@ public final class WaypointListScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean keyPressed(int key, int scancode, int modifiers) {
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(key);
+			return true;
+		}
 		if (DioramaClient.NEW_WAYPOINT.matches(key, scancode) && !(this.getFocused() instanceof EditBox)) {
 			this.newWaypointPressed = true;
 			return true;
@@ -987,6 +1071,10 @@ public final class WaypointListScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double x, double y, int button) {
+		if (this.folderMenu != null) {
+			this.clickFolderMenu(x, y, button);
+			return true;
+		}
 		this.disarmUnless(x, y);
 		if (!usedByList(button) && DioramaClient.NEW_WAYPOINT.matchesMouse(button)) {
 			this.newWaypointPressed = true;
@@ -1033,9 +1121,10 @@ public final class WaypointListScreen extends Screen {
 			return false;
 		}
 		int left = this.width / 2 - LIST_WIDTH / 2;
-		// A click on the folder's name steps to the next folder, as its right arrow does.
+		// A click on the folder's name opens the list of folders to pick from.
 		if (x >= folderNameLeft(left) && x < folderNameLeft(left) + FOLDER_NAME_WIDTH && y >= FOLDER_Y && y < FOLDER_Y + 20) {
-			this.stepFolder(1);
+			this.setFocused(null);
+			this.openFolderMenu();
 			return true;
 		}
 		EditBox box = this.search;
@@ -1085,6 +1174,8 @@ public final class WaypointListScreen extends Screen {
 		int changes = Waystones.changes();
 		if (changes != this.waystoneChanges) {
 			this.waystoneChanges = changes;
+			// The open list of folders has the counts from before: closed, to be opened on the new ones.
+			this.folderMenu = null;
 			WaypointStore store = WaypointStore.get();
 			boolean hasWaystones = store != null && !store.waystones().isEmpty();
 			// A search may have waystones among its rows whatever the folder.
@@ -1163,10 +1254,42 @@ public final class WaypointListScreen extends Screen {
 	//? if >=1.21 {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-		super.extractRenderState(graphics, mouseX, mouseY, a);
+		// The buttons under the open list of folders don't light up as the mouse goes over them.
+		boolean overMenu = this.folderMenu != null && this.folderMenu.contains(mouseX, mouseY);
+		super.extractRenderState(graphics, overMenu ? -1 : mouseX, overMenu ? -1 : mouseY, a);
 		this.drawSortCaret(graphics);
+		this.drawFolderMenu(graphics, mouseX, mouseY);
 	}
 	//?}
+
+	/** The open list of folders, over everything drawn so far, text included. */
+	private void drawFolderMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		FolderMenu menu = this.folderMenu;
+		if (menu == null) {
+			return;
+		}
+		//? if >=1.21.6 {
+		graphics.nextStratum();
+		menu.draw(graphics, mouseX, mouseY);
+		//?} else {
+		/*graphics.flush();
+		var pose = graphics.pose();
+		pose.pushPose();
+		pose.translate(0, 0, 400);
+		menu.draw(graphics, mouseX, mouseY);
+		pose.popPose();
+		*///?}
+	}
+
+	/** The open list of folders, or null. For tests. */
+	public @Nullable FolderMenu folderMenu() {
+		return this.folderMenu;
+	}
+
+	/** The middle of the folder's name in the folder bar. For tests. */
+	public int[] folderNameCentre() {
+		return new int[] {folderNameLeft(this.width / 2 - LIST_WIDTH / 2) + FOLDER_NAME_WIDTH / 2, FOLDER_Y + 10};
+	}
 
 	/** The sort direction's button, which has a caret for a label. For tests. */
 	public @Nullable Button sortDirection() {
