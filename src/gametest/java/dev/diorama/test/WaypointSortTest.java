@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.WorldKey;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointSort;
@@ -14,13 +15,14 @@ import net.minecraft.core.BlockPos;
 
 /**
  * Sorting the waypoint list ({@code waypoint-sort}): every order both ways, clicked as a player
- * clicks them, the order kept when the world's waypoints are read again, the search keeping the
- * order, a folder of the player's own with another dimension's waypoint in it, and the search row
- * at the smallest window and at a large GUI scale.
+ * clicks them, Hide and Show moving a row, the order saved with the world's folders, the search
+ * keeping the order, another dimension's waypoint in the same folder, and the search row at the
+ * smallest window and at a large GUI scale. The waypoints go in folders of their own and only they
+ * are removed afterwards: other sections leave waypoints to check after the world is left.
  */
 final class WaypointSortTest {
-	private static final String UP = "▲";
-	private static final String DOWN = "▼";
+	private static final String SORTING = "Sorting";
+	private static final String TRIP = "Trip";
 
 	private WaypointSortTest() {
 	}
@@ -28,46 +30,49 @@ final class WaypointSortTest {
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
-		context.runOnClient(mc -> {
+		List<Waypoint> added = context.computeOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
-			store.all().stream().toList().forEach(store::remove);
 			store.setSort(WaypointSort.DISTANCE, false);
 			String here = mc.level.dimension().identifier().toString();
+			List<Waypoint> made = new ArrayList<>();
 			// Distance from the player, initials, icon, colour: each order puts them differently.
-			add(store, at, here, "Home", "H", "", 10, Waypoint.PALETTE[3]);
-			add(store, at, here, "beacon", "B", "", 40, 0xFF0090FF);
-			add(store, at, here, "Iron Farm", "IF", "", 25, Waypoint.PALETTE[0]);
-			add(store, at, here, "Zed's Tower", "ZT", "", 60, 0xFFFFFFFF);
-			add(store, at, here, "Apple Orchard", "AO", "diorama:farm", 5, Waypoint.PALETTE[1]);
+			store.addFolder(SORTING);
+			made.add(add(store, at, here, SORTING, "Home", "H", "", 10, Waypoint.PALETTE[3]));
+			made.add(add(store, at, here, SORTING, "beacon", "B", "", 40, 0xFF0090FF));
+			made.add(add(store, at, here, SORTING, "Iron Farm", "IF", "", 25, Waypoint.PALETTE[0]));
+			made.add(add(store, at, here, SORTING, "Zed's Tower", "ZT", "", 60, 0xFFFFFFFF));
+			made.add(add(store, at, here, SORTING, "Apple Orchard", "AO", "diorama:farm", 5, Waypoint.PALETTE[1]));
 			// Hidden and nearest of all: last in every order.
-			Waypoint mine = add(store, at, here, "Mine", "M", "", 1, Waypoint.PALETTE[2]);
+			Waypoint mine = add(store, at, here, SORTING, "Mine", "M", "", 1, Waypoint.PALETTE[2]);
 			store.setVisible(mine, false);
-			// A folder of the player's own with a Nether waypoint in it, which has no distance to go by.
-			store.addFolder("Trip");
-			add(store, at, here, "Base", "BA", "", 20, Waypoint.PALETTE[4]).folder = "Trip";
-			add(store, at, here, "Camp", "CA", "", 30, Waypoint.PALETTE[5]).folder = "Trip";
-			add(store, at, "minecraft:the_nether", "Fortress", "F", "", 0, Waypoint.PALETTE[6]).folder = "Trip";
-			store.changed();
+			made.add(mine);
+			// A Nether waypoint in with this dimension's, which has no distance to go by.
+			store.addFolder(TRIP);
+			made.add(add(store, at, here, TRIP, "Base", "BA", "", 20, Waypoint.PALETTE[4]));
+			made.add(add(store, at, here, TRIP, "Camp", "CA", "", 30, Waypoint.PALETTE[5]));
+			made.add(add(store, at, "minecraft:the_nether", TRIP, "Fortress", "F", "", 0, Waypoint.PALETTE[6]));
+			return made;
 		});
 		// Checked at the end, so a failing run still takes every picture.
 		List<String> wrong = new ArrayList<>();
 
 		context.setScreen(() -> new WaypointListScreen(null));
 		context.waitTicks(5);
+		showFolder(context, wrong, SORTING);
 		expect(context, wrong, "distance", "Apple Orchard", "Home", "Iron Farm", "beacon", "Zed's Tower", "Mine");
 		context.takeScreenshot("sort-01-distance");
-		click(context, UP);
+		reverse(context);
 		expect(context, wrong, "distance reversed", "Zed's Tower", "beacon", "Iron Farm", "Home", "Apple Orchard", "Mine");
 		context.takeScreenshot("sort-02-distance-reversed");
 		// The next order keeps the direction.
 		click(context, "Distance");
 		expect(context, wrong, "name reversed", "Zed's Tower", "Iron Farm", "Home", "beacon", "Apple Orchard", "Mine");
 		context.takeScreenshot("sort-03-name-reversed");
-		click(context, DOWN);
+		reverse(context);
 		expect(context, wrong, "name", "Apple Orchard", "beacon", "Home", "Iron Farm", "Zed's Tower", "Mine");
 		context.takeScreenshot("sort-04-name");
 		// Hiding a waypoint moves it down among the hidden ones, still selected; showing it puts it back.
-		Waypoint home = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.name.equals("Home")).findFirst().orElseThrow());
+		Waypoint home = added.get(0);
 		int[] row = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).rowCentre(home));
 		DioramaClientTest.clickAtGui(context, row[0], row[1]);
 		clickOnRow(context, "Hide", home);
@@ -81,13 +86,13 @@ final class WaypointSortTest {
 		click(context, "Name");
 		expect(context, wrong, "initials", "beacon", "Home", "Iron Farm", "Zed's Tower", "Apple Orchard", "Mine");
 		context.takeScreenshot("sort-05-initials");
-		click(context, UP);
+		reverse(context);
 		expect(context, wrong, "initials reversed", "Apple Orchard", "Zed's Tower", "Iron Farm", "Home", "beacon", "Mine");
 		context.takeScreenshot("sort-06-initials-reversed");
 		click(context, "Initials");
 		expect(context, wrong, "colour reversed", "Zed's Tower", "beacon", "Home", "Apple Orchard", "Iron Farm", "Mine");
 		context.takeScreenshot("sort-07-colour-reversed");
-		click(context, DOWN);
+		reverse(context);
 		expect(context, wrong, "colour", "Iron Farm", "Apple Orchard", "Home", "beacon", "Zed's Tower", "Mine");
 		context.takeScreenshot("sort-08-colour");
 		// Hovering either button says what the order is and what comes first.
@@ -95,33 +100,32 @@ final class WaypointSortTest {
 		context.waitTicks(3);
 		context.takeScreenshot("sort-09-tooltip");
 
-		// The order is the world's: read from disk again, the list opens in it.
-		context.setScreen(() -> null);
-		context.runOnClient(mc -> WaypointStore.onLeave());
-		context.setScreen(() -> new WaypointListScreen(null));
-		context.waitTicks(5);
-		expect(context, wrong, "colour after reading the waypoints again", "Iron Farm", "Apple Orchard", "Home", "beacon", "Zed's Tower", "Mine");
+		// The order is saved with the world's folders: the file read afresh has it.
+		String saved = context.computeOnClient(mc -> {
+			WaypointStore read = WaypointStore.open(WorldKey.current());
+			return read.sort() + (read.sortReversed() ? " reversed" : "");
+		});
+		if (!saved.equals("COLOUR")) {
+			wrong.add("folders.json read again has the order " + saved + ", not COLOUR");
+		}
 		// The search keeps the order.
 		DioramaClientTest.typeInto(context, 0, "e");
 		expect(context, wrong, "colour while searching e", "Apple Orchard", "Home", "beacon", "Zed's Tower", "Mine");
 		context.takeScreenshot("sort-10-search");
 		DioramaClientTest.typeInto(context, 0, "");
 
-		// In the player's own folder, the Nether waypoint stays after the near ones either way.
-		click(context, "<");
-		String folder = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).folderName());
-		if (!folder.equals("Trip")) {
-			wrong.add("the folder before the Overworld is " + folder + ", not Trip");
-		}
+		// Another dimension's waypoint stays after this one's either way.
+		showFolder(context, wrong, TRIP);
 		click(context, "Colour");
 		expect(context, wrong, "folder by distance", "Base", "Camp", "Fortress");
-		click(context, UP);
+		reverse(context);
 		expect(context, wrong, "folder by distance reversed", "Camp", "Base", "Fortress");
 		context.takeScreenshot("sort-11-folder-reversed");
-		click(context, ">");
+		reverse(context);
+		showFolder(context, wrong, SORTING);
 
-		// The search row fits the list's width without buttons on top of each other, in the smallest
-		// window the game allows and at a large GUI scale.
+		// The search row fits the list's width without widgets on top of each other, in the
+		// smallest window the game allows and at a large GUI scale.
 		context.getInput().resizeWindow(640, 480);
 		context.waitTicks(5);
 		overlaps(context, wrong, "640x480");
@@ -136,8 +140,9 @@ final class WaypointSortTest {
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
-			store.all().stream().toList().forEach(store::remove);
-			store.deleteFolder("Trip");
+			added.forEach(store::remove);
+			store.deleteFolder(SORTING);
+			store.deleteFolder(TRIP);
 			store.setSort(WaypointSort.DISTANCE, false);
 		});
 		if (!wrong.isEmpty()) {
@@ -145,12 +150,24 @@ final class WaypointSortTest {
 		}
 	}
 
-	private static Waypoint add(WaypointStore store, BlockPos at, String dimension, String name, String initials, String icon, int east, int colour) {
+	private static Waypoint add(WaypointStore store, BlockPos at, String dimension, String folder, String name, String initials, String icon, int east, int colour) {
 		Waypoint waypoint = new Waypoint(name, at.getX() + east, at.getY(), at.getZ(), dimension, colour);
 		waypoint.initials = initials;
 		waypoint.icon = icon;
+		waypoint.folder = folder;
 		store.add(waypoint);
 		return waypoint;
+	}
+
+	/** Steps the folder bar with its right arrow, as a player does, until it shows this folder. */
+	private static void showFolder(ClientGameTestContext context, List<String> wrong, String name) {
+		for (int i = 0; i < 20; i++) {
+			if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).folderName()).equals(name)) {
+				return;
+			}
+			click(context, ">");
+		}
+		wrong.add("the folder bar never got to " + name);
 	}
 
 	private static void expect(ClientGameTestContext context, List<String> wrong, String what, String... names) {
@@ -162,6 +179,12 @@ final class WaypointSortTest {
 
 	private static void click(ClientGameTestContext context, String label) {
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), label)));
+		context.waitTicks(2);
+	}
+
+	/** Clicks the sort direction's button, which has a caret rather than a label. */
+	private static void reverse(ClientGameTestContext context) {
+		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).sortDirection()));
 		context.waitTicks(2);
 	}
 

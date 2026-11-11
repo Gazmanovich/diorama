@@ -77,9 +77,13 @@ public final class WaypointListScreen extends Screen {
 	private final List<Waypoint> rows = new ArrayList<>();
 	/** The search box's frame, as wide as the sort and New buttons beside it leave room for. */
 	private int searchWidth;
-	/** The sort order, which steps to the next one, and its direction, which reverses it. */
+	/**
+	 * The sort order, which steps to the next one, and its direction, which reverses it: a caret on
+	 * it points up for the usual way, down for reversed, like the map's slice buttons.
+	 */
 	private @Nullable Button sortOrder;
 	private @Nullable Button sortDirection;
+	private boolean sortReversed;
 	/**
 	 * The selected row's buttons. They're made with the screen and only moved, shown or hidden, and
 	 * they act on whatever is selected when pressed: a button that has gone from view can keep the
@@ -323,7 +327,8 @@ public final class WaypointListScreen extends Screen {
 		this.addRenderableWidget(Button.builder(newFolder, b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
 			.bounds(x, SEARCH_Y, newFolderWidth, 20).build());
 		x -= 4 + ARROW;
-		this.sortDirection = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.changeSort(false)).bounds(x, SEARCH_Y, ARROW, 20).build());
+		this.sortDirection = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.changeSort(false))
+			.createNarration(n -> Component.translatable(this.sortDirectionKey())).bounds(x, SEARCH_Y, ARROW, 20).build());
 		x -= ACTION_GAP + sortWidth;
 		this.sortOrder = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.changeSort(true)).bounds(x, SEARCH_Y, sortWidth, 20).build());
 		this.labelSort(store);
@@ -389,10 +394,7 @@ public final class WaypointListScreen extends Screen {
 		}
 	}
 
-	/**
-	 * The sort order's name on its button, an arrow on the direction's, up for the usual way and
-	 * down for reversed, and on both a tooltip saying what comes first.
-	 */
+	/** The sort order's name on its button, and on both buttons a tooltip saying what comes first. */
 	private void labelSort(@Nullable WaypointStore store) {
 		Button order = this.sortOrder;
 		Button direction = this.sortDirection;
@@ -403,11 +405,30 @@ public final class WaypointListScreen extends Screen {
 		boolean reversed = store != null && store.sortReversed();
 		Component name = Component.translatable(sort.key());
 		order.setMessage(name);
-		direction.setMessage(Component.literal(reversed ? "\u25BC" : "\u25B2"));
+		this.sortReversed = reversed;
 		Tooltip tooltip = Tooltip.create(Component.translatable("diorama.waypoints.sort", name).append("\n")
 			.append(Component.translatable(sort.directionKey(reversed)).withStyle(ChatFormatting.GRAY)));
 		order.setTooltip(tooltip);
 		direction.setTooltip(tooltip);
+	}
+
+	private String sortDirectionKey() {
+		WaypointStore store = WaypointStore.get();
+		return (store == null ? WaypointSort.DISTANCE : store.sort()).directionKey(this.sortReversed);
+	}
+
+	/** The direction button's caret, drawn over the button as {@code MapScreen} draws its slice buttons'. */
+	private void drawSortCaret(GuiGraphicsExtractor graphics) {
+		Button button = this.sortDirection;
+		if (button == null || !button.visible) {
+			return;
+		}
+		int cx = button.getX() + button.getWidth() / 2;
+		int y = button.getY() + (button.getHeight() - 3) / 2;
+		for (int row = 0; row < 3; row++) {
+			int half = this.sortReversed ? 2 - row : row;
+			graphics.fill(cx - half, y + row, cx + half + 1, y + row + 1, 0xFFFFFFFF);
+		}
 	}
 
 	/** Shows the waypoints whose name has the search text in it, any case, and lays the rows out again. */
@@ -583,6 +604,7 @@ public final class WaypointListScreen extends Screen {
 	public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
 		this.drawBackground(graphics, mouseX, mouseY);
 		super.render(graphics, mouseX, mouseY, a);
+		this.drawSortCaret(graphics);
 	}
 
 	private void drawBackground(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -1005,6 +1027,19 @@ public final class WaypointListScreen extends Screen {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 		}
 		this.minecraft.gui.setScreen(null);
+	}
+
+	//? if >=1.21 {
+	@Override
+	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		super.extractRenderState(graphics, mouseX, mouseY, a);
+		this.drawSortCaret(graphics);
+	}
+	//?}
+
+	/** The sort direction's button, which has a caret for a label. For tests. */
+	public @Nullable Button sortDirection() {
+		return this.sortDirection;
 	}
 
 	/** The waypoint whose row is selected, or null. For tests. */
