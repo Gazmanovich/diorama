@@ -221,6 +221,16 @@ public final class ExportScreen extends Screen {
 			this.whole = false;
 			this.showWhole(true);
 		}
+		if (this.whole && this.caves()) {
+			// The slice reaches as far as the chunks the map holds, which come and go while this is open.
+			double[] held = this.sliceBox(session);
+			if (!java.util.Arrays.equals(held, this.explored)) {
+				this.explored = held;
+				if (held != null) {
+					this.fit(held);
+				}
+			}
+		}
 		if (this.whole && this.explored != null && this.finding != null) {
 			// Found just now: fit it into the preview.
 			this.finding = null;
@@ -389,10 +399,8 @@ public final class ExportScreen extends Screen {
 		this.finding = null;
 		if (session != null && this.caves()) {
 			// Nothing of a cave slice is saved: it's whatever the chunks the map holds show of it.
-			double[] held = session.map().sliceBounds(this.layer);
-			if (held != null) {
-				double m = ImageExport.WHOLE_MAP_MARGIN;
-				this.explored = new double[] {held[0] - m, held[1] - m, held[2] + m, held[3] + m};
+			this.explored = this.sliceBox(session);
+			if (this.explored != null) {
 				this.fit(this.explored);
 			}
 			return;
@@ -441,6 +449,13 @@ public final class ExportScreen extends Screen {
 		this.centerU = (box[0] + box[2]) / 2;
 		this.centerV = (box[1] + box[3]) / 2;
 		this.zoom = this.fitZoom(box);
+	}
+
+	/** As much of the cave slice as the map's chunks cover now, with Whole map's margin; null with no chunks. */
+	private double @Nullable [] sliceBox(MapSession session) {
+		double[] held = session.map().sliceBounds(this.layer);
+		double m = ImageExport.WHOLE_MAP_MARGIN;
+		return held == null ? null : new double[] {held[0] - m, held[1] - m, held[2] + m, held[3] + m};
 	}
 
 	/** Whether a cave slice is being saved, not the sky view. */

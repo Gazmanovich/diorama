@@ -500,23 +500,37 @@ public final class MapLevel implements ChunkSource {
 	 * {u0, v0, u1, v1}: every chunk's box from the slice's floor to its lifted top. Null with no chunks.
 	 */
 	public double @Nullable [] sliceBounds(int layer) {
+		double u0 = Double.POSITIVE_INFINITY;
+		double v0 = Double.POSITIVE_INFINITY;
+		double u1 = Double.NEGATIVE_INFINITY;
+		double v1 = Double.NEGATIVE_INFINITY;
+		for (ChunkSnapshot chunk : this.chunks.values()) {
+			double[] box = sliceBox(chunk, layer);
+			u0 = Math.min(u0, box[0]);
+			v0 = Math.min(v0, box[1]);
+			u1 = Math.max(u1, box[2]);
+			v1 = Math.max(v1, box[3]);
+		}
+		return u0 > u1 ? null : new double[] {u0, v0, u1, v1};
+	}
+
+	/** The map units one chunk can show in a cave slice cut at {@code layer}, as {u0, v0, u1, v1}. */
+	public static double[] sliceBox(ChunkSnapshot chunk, int layer) {
 		double top = layer + CaveCut.LIFT + 1;
 		double bottom = layer - TileBaker.CAVE_DEPTH - 1;
 		double u0 = Double.POSITIVE_INFINITY;
 		double v0 = Double.POSITIVE_INFINITY;
 		double u1 = Double.NEGATIVE_INFINITY;
 		double v1 = Double.NEGATIVE_INFINITY;
-		for (ChunkSnapshot chunk : this.chunks.values()) {
-			for (int corner = 0; corner < 4; corner++) {
-				double x = chunk.chunkX * 16 + (corner & 1) * 16;
-				double z = chunk.chunkZ * 16 + (corner >> 1) * 16;
-				u0 = Math.min(u0, Projection.u(x, z));
-				u1 = Math.max(u1, Projection.u(x, z));
-				v0 = Math.min(v0, Projection.v(x, top, z));
-				v1 = Math.max(v1, Projection.v(x, bottom, z));
-			}
+		for (int corner = 0; corner < 4; corner++) {
+			double x = chunk.chunkX * 16 + (corner & 1) * 16;
+			double z = chunk.chunkZ * 16 + (corner >> 1) * 16;
+			u0 = Math.min(u0, Projection.u(x, z));
+			u1 = Math.max(u1, Projection.u(x, z));
+			v0 = Math.min(v0, Projection.v(x, top, z));
+			v1 = Math.max(v1, Projection.v(x, bottom, z));
 		}
-		return u0 > u1 ? null : new double[] {u0, v0, u1, v1};
+		return new double[] {u0, v0, u1, v1};
 	}
 
 	/**

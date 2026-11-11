@@ -14,8 +14,10 @@ import dev.diorama.data.SeenBlocks;
 import dev.diorama.data.TileStore;
 import java.lang.ref.SoftReference;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -47,6 +49,11 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 	/** The map units the level's chunks can show at this slice, {u0, v0, u1, v1}; null with no chunks. */
 	private final double @Nullable [] bounds;
 	/**
+	 * The tiles a chunk can show in, by {@link #tileKey}. Chunks kept from somewhere far off leave
+	 * empty ground between them and the rest, inside the bounds, which isn't worth tracing.
+	 */
+	private final Set<Long> withChunks = new HashSet<>();
+	/**
 	 * Tiles drawn so far, {@link #EMPTY} for one with nothing in it. Softly held: a big export under
 	 * a small heap draws a tile again rather than run out of memory.
 	 */
@@ -59,6 +66,15 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 		this.fogOfWar = level.fogOfWar();
 		this.bounds = level.sliceBounds(layer);
 		Map<Long, ChunkSnapshot> chunks = level.chunksNow();
+		for (ChunkSnapshot chunk : chunks.values()) {
+			// A unit over, for faces drawn past a block's own square.
+			double[] box = MapLevel.sliceBox(chunk, layer);
+			for (int tv = (int) Math.floor((box[1] - 1) / Projection.TILE_UNITS); tv <= (int) Math.floor((box[3] + 1) / Projection.TILE_UNITS); tv++) {
+				for (int tu = (int) Math.floor((box[0] - 1) / Projection.TILE_UNITS); tu <= (int) Math.floor((box[2] + 1) / Projection.TILE_UNITS); tu++) {
+					this.withChunks.add(tileKey(tu, tv));
+				}
+			}
+		}
 		Facing facing = this.facing;
 		int minY = level.minY();
 		int maxY = level.maxY();
@@ -119,7 +135,7 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 		if (lod > 0) {
 			return this.shrunk(tileU, tileV, lod);
 		}
-		long key = ((long) tileU << 32) | (tileV & 0xFFFFFFFFL);
+		long key = tileKey(tileU, tileV);
 		SoftReference<int[]> held = this.drawn.get(key);
 		int[] pixels = held == null ? null : held.get();
 		if (pixels == null) {
@@ -166,10 +182,17 @@ public final class CaveSliceTiles implements ImageExport.Tiles {
 		return out;
 	}
 
+	private static long tileKey(int tileU, int tileV) {
+		return ((long) tileU << 32) | (tileV & 0xFFFFFFFFL);
+	}
+
 	/** Whether any chunk can show in a tile. Outside them there's nothing to trace. */
 	private boolean inBounds(int tileU, int tileV, int lod) {
 		if (this.bounds == null) {
 			return false;
+		}
+		if (lod == 0) {
+			return this.withChunks.contains(tileKey(tileU, tileV));
 		}
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		return (tileU + 1) * units > this.bounds[0] && tileU * units < this.bounds[2] && (tileV + 1) * units > this.bounds[1] && tileV * units < this.bounds[3];
