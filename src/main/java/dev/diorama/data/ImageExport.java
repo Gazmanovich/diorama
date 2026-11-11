@@ -15,8 +15,8 @@ import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Saves part of the saved surface map as a PNG, from the tiles on disk, one row of tiles at a
- * time, so a map of any size fits in memory.
+ * Saves part of the map as a PNG, one row of tiles at a time, so a map of any size fits in memory:
+ * the sky view from the tiles on disk, or any other {@link Tiles}.
  *
  * <p>Areas are in map pixels at one overview level: at level {@code lod} a pixel covers
  * {@code 2^lod / PIXELS_PER_UNIT} map units, so level 0 is the map's full detail, four pixels per
@@ -155,6 +155,32 @@ public final class ImageExport {
 		return new Area(coarse, minX, minY, (int) width, (int) height).at(lod);
 	}
 
+	/**
+	 * Where an export's tiles come from: the saved sky view, or a view that isn't saved and is drawn
+	 * for the export. Read from several threads at once.
+	 */
+	public interface Tiles {
+		/** The tile at an overview level, or null where nothing is mapped. */
+		TileStore.@Nullable Saved tile(int tileU, int tileV, int lod);
+
+		/**
+		 * Gets {@code area} ready before anything is read, where that takes long, reporting progress
+		 * from 0 to 1.
+		 */
+		default void prepare(Area area, DoubleConsumer progress) {
+		}
+
+		/** The share of an export's time {@link #prepare} takes, 0 to 1, for its progress. */
+		default double prepareShare() {
+			return 0;
+		}
+
+		/** The saved sky view. */
+		static Tiles of(TileStore store) {
+			return (tileU, tileV, lod) -> store.readSaved(new TileKey(TileKey.SURFACE, tileU, tileV, lod));
+		}
+	}
+
 	/** What is done to each row of map pixels before it's saved: a backdrop, the fog. */
 	public interface Finish {
 		/** Leaves unmapped ground see-through. */
@@ -195,6 +221,11 @@ public final class ImageExport {
 	 * ({@link dev.diorama.render.NightLook}), before {@code finish}.
 	 */
 	public static void write(TileStore store, Area area, Path file, Finish finish, float night, DoubleConsumer progress) throws IOException {
+		write(Tiles.of(store), area, file, finish, night, progress);
+	}
+
+	/** The same from any tiles. */
+	public static void write(Tiles source, Area area, Path file, Finish finish, float night, DoubleConsumer progress) throws IOException {
 		int lod = area.lod();
 		long tileV0 = Math.floorDiv(area.y(), TILE);
 		long tileV1 = Math.floorDiv(area.y() + area.height() - 1, TILE);
@@ -210,7 +241,7 @@ public final class ImageExport {
 			png.text("Software", "Diorama");
 			for (long tv = tileV0; tv <= tileV1; tv++) {
 				for (int c = 0; c < columns; c++) {
-					TileStore.Saved saved = store.readSaved(new TileKey(TileKey.SURFACE, (int) (tileU0 + c), (int) tv, lod));
+					TileStore.Saved saved = source.tile((int) (tileU0 + c), (int) tv, lod);
 					tiles[c] = saved == null ? null : saved.pixels();
 					lights[c] = saved == null ? null : saved.blockLight();
 				}
