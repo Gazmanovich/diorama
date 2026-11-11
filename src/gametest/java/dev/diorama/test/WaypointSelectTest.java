@@ -153,6 +153,25 @@ final class WaypointSelectTest {
 		click(context, spots.get(11), true, false);
 		click(context, spots.get(10), false, false);
 		expect(context, wrong, "a plain click after a Shift click", List.of("Spot 11"));
+		// Also on the row that has the buttons: the others must not stay selected behind it.
+		click(context, spots.get(9), false, true);
+		expect(context, wrong, "Ctrl click on Spot 10", List.of("Spot 11", "Spot 10"));
+		click(context, spots.get(9), false, false);
+		expect(context, wrong, "a plain click on the row with the buttons", List.of("Spot 10"));
+		if (!rowButtons(context).contains("Edit") || rowButtons(context).contains("Move")) {
+			wrong.add("one row after a plain click had the buttons " + rowButtons(context));
+		}
+
+		// Delete clicked for three rows, then a search that leaves one of them: it asks again.
+		click(context, spots.get(9), false, false);
+		click(context, spots.get(11), true, false);
+		clickRowButton(context, "Delete");
+		DioramaClientTest.typeInto(context, 0, "Spot 12");
+		expect(context, wrong, "a search that leaves one selected row", List.of("Spot 12"));
+		if (rowButtons(context).stream().anyMatch(label -> label.startsWith("Click again"))) {
+			wrong.add("Delete stayed armed after the search changed the selection: " + rowButtons(context));
+		}
+		DioramaClientTest.typeInto(context, 0, "");
 		context.takeScreenshot("select-09-one-again");
 
 		context.setScreen(() -> null);

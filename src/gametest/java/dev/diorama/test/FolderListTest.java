@@ -15,7 +15,8 @@ import net.minecraft.core.BlockPos;
 /**
  * Picking a folder from the list of folders ({@code folder-list}, issue #244): a click on the
  * folder's name in the waypoint list opens every folder with its count, a click on one shows it, a
- * click anywhere else or Escape only closes the list, the arrows still step, and with more folders
+ * click anywhere else or Escape only closes the list, the arrow keys and Enter pick from it, the
+ * arrow buttons still step, and with more folders
  * than fit on the screen the list scrolls to the last. Only the waypoints and folders made here
  * are checked and removed: other sections leave waypoints of their own.
  */
@@ -100,6 +101,21 @@ final class FolderListTest {
 		if (menu(context) != null || !(context.computeOnClient(mc -> mc.gui.screen()) instanceof WaypointListScreen)) {
 			wrong.add("Escape with the list of folders open didn't just close the list");
 		}
+
+		// The arrow keys go through the open list and Enter picks; other keys reach nothing under it.
+		clickName(context);
+		context.getInput().pressKey(InputConstants.KEY_TAB);
+		context.getInput().pressKey(InputConstants.KEY_DOWN);
+		context.getInput().pressKey(InputConstants.KEY_DOWN);
+		context.waitTicks(2);
+		context.takeScreenshot("folder-list-04b-arrow-keys");
+		context.getInput().pressKey(InputConstants.KEY_RETURN);
+		context.waitTicks(2);
+		if (!folder(context).equals("Shops") || menu(context) != null) {
+			wrong.add("Down twice and Enter from Alex's base showed " + folder(context));
+		}
+		clickName(context);
+		pick(context, "Alex's base", wrong);
 
 		// The arrows step as before.
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), ">")));

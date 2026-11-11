@@ -1,0 +1,11 @@
+# MineColonies and the libraries it needs, for the minecolonies section. It ships for NeoForge
+# 1.21.1 and Forge 1.20.1 only, and on CurseForge only. One line per jar: <node> <url>.
+1.21.1-neoforge https://mediafilez.forgecdn.net/files/9058/295/minecolonies-1.1.1403-1.21.1.jar
+1.21.1-neoforge https://mediafilez.forgecdn.net/files/9556/249/structurize-1.0.839-1.21.1.jar
+1.21.1-neoforge https://mediafilez.forgecdn.net/files/9137/5/blockui-1.0.212-1.21.1-snapshot.jar
+1.21.1-neoforge https://mediafilez.forgecdn.net/files/9394/376/domum-ornamentum-1.0.237-snapshot-main.jar
+1.21.1-neoforge https://mediafilez.forgecdn.net/files/7097/877/multipiston-1.2.58-1.21.1.jar
+1.20.1-forge https://mediafilez.forgecdn.net/files/9058/213/minecolonies-1.20.1-1.1.1301.jar
+1.20.1-forge https://mediafilez.forgecdn.net/files/9556/187/structurize-1.20.1-1.0.825.jar
+1.20.1-forge https://mediafilez.forgecdn.net/files/7606/230/blockui-1.20.1-1.0.194-snapshot.jar
+1.20.1-forge https://mediafilez.forgecdn.net/files/8765/962/domum_ornamentum-1.20.1-1.0.304-snapshot-universal.jar

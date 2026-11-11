@@ -258,7 +258,27 @@ public final class WaypointListScreen extends Screen {
 	private void clickFolderMenu(double x, double y, int button) {
 		FolderMenu menu = this.folderMenu;
 		this.folderMenu = null;
-		FolderMenu.Entry picked = menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y);
+		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
+	}
+
+	/**
+	 * A key while the list of folders is open goes to the list and nowhere else, so nothing under
+	 * it is typed into or pressed: Escape closes it, the arrows and Enter pick from it.
+	 */
+	private void keyFolderMenu(int key) {
+		FolderMenu menu = this.folderMenu;
+		if (menu == null || key == InputConstants.KEY_ESCAPE) {
+			this.folderMenu = null;
+			return;
+		}
+		FolderMenu.Entry picked = menu.keyPressed(key);
+		if (picked != null) {
+			this.folderMenu = null;
+			this.pickFolder(picked);
+		}
+	}
+
+	private void pickFolder(FolderMenu.@Nullable Entry picked) {
 		if (this.menuMoves) {
 			if (picked != null) {
 				this.moveTo(picked.key());
@@ -387,7 +407,12 @@ public final class WaypointListScreen extends Screen {
 			UUID id = this.selected.id;
 			this.selected = java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> w.id.equals(id)).findFirst().orElse(null);
 		}
-		this.marked.removeIf(w -> !this.all.contains(w) && !this.others.contains(w));
+		if (!this.marked.isEmpty()) {
+			java.util.Set<UUID> ids = new java.util.HashSet<>();
+			this.marked.forEach(w -> ids.add(w.id));
+			this.marked.clear();
+			java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> ids.contains(w.id)).forEach(this.marked::add);
+		}
 		if (!this.xaeroRead) {
 			this.xaeroRead = true;
 			this.xaero = XaeroImport.find();
@@ -653,7 +678,10 @@ public final class WaypointListScreen extends Screen {
 			}
 		}
 		// A row the search no longer shows leaves the selection; the buttons go to the last one left.
-		this.marked.retainAll(new java.util.HashSet<>(this.rows));
+		// Fewer rows selected than Delete was clicked for: it's asked again.
+		if (this.marked.retainAll(new java.util.HashSet<>(this.rows))) {
+			this.armed = false;
+		}
 		if (this.selected != null && !this.rows.contains(this.selected)) {
 			this.selected = null;
 			for (Waypoint waypoint : this.marked) {
@@ -1135,8 +1163,8 @@ public final class WaypointListScreen extends Screen {
 	//? if >=1.21.9 {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if (this.folderMenu != null && event.key() == InputConstants.KEY_ESCAPE) {
-			this.folderMenu = null;
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(event.key());
 			return true;
 		}
 		if (DioramaClient.NEW_WAYPOINT.matches(event) && !(this.getFocused() instanceof EditBox)) {
@@ -1180,8 +1208,8 @@ public final class WaypointListScreen extends Screen {
 	//?} else {
 	/*@Override
 	public boolean keyPressed(int key, int scancode, int modifiers) {
-		if (this.folderMenu != null && key == InputConstants.KEY_ESCAPE) {
-			this.folderMenu = null;
+		if (this.folderMenu != null) {
+			this.keyFolderMenu(key);
 			return true;
 		}
 		if (DioramaClient.NEW_WAYPOINT.matches(key, scancode) && !(this.getFocused() instanceof EditBox)) {
@@ -1279,7 +1307,8 @@ public final class WaypointListScreen extends Screen {
 		this.anchor = waypoint;
 		if (twice) {
 			this.edit(waypoint);
-		} else if (waypoint != this.selected) {
+		} else if (waypoint != this.selected || !this.marked.isEmpty()) {
+			// A plain click leaves this row alone selected, also when it was one of several.
 			this.select(waypoint);
 		}
 		return true;
@@ -1340,6 +1369,8 @@ public final class WaypointListScreen extends Screen {
 		int changes = Waystones.changes();
 		if (changes != this.waystoneChanges) {
 			this.waystoneChanges = changes;
+			// The open list of folders has the counts from before: closed, to be opened on the new ones.
+			this.folderMenu = null;
 			WaypointStore store = WaypointStore.get();
 			boolean hasWaystones = store != null && !store.waystones().isEmpty();
 			// A search may have waystones among its rows whatever the folder.

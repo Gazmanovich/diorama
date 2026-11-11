@@ -27,6 +27,30 @@ A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa
 
 Done when every node exits 0, you've seen the screenshots for the sections you changed, and `boat list --all` (plain `boat list` hides stopped VMs) shows none of your VMs, warm ones included.
 
+## Other mods in a run
+
+A test section for another mod (`opac-claims`, `minecolonies`, `waystones`, ...) needs that mod's release jar in the game. `--mods` installs them, the way each loader needs:
+
+```
+python .claude/skills/boat-game-test/boat_run.py 26.3,1.21.1,1.21.1-neoforge --tests opac-claims --mods opac
+```
+
+`--mods` takes one or more of these, comma-separated:
+
+- **A list by name**: `opac` is `mods/opac.txt` beside this file, one `<node> <url>` line per jar. The VM downloads them and keeps them for its next runs. Use this for anything a later task will run again, and commit the list: add the mod's own dependencies as lines too (Fabric API is already there), and take the URLs from Modrinth's or CurseForge's file page for the node's Minecraft version and loader.
+- **A folder, a jar or a URL**, for a one-off: a folder's `<node>/` subfolder is used when it has one, else the jars in it, for every node of the run. Jars on this PC are uploaded each run. Keep them outside the repo, or untracked: other mods' jars are never committed.
+
+A node the list has no line for stops the script before any VM starts. `--mods` installs the mods in the test client only, so it refuses a run with `DIORAMA_REAL_SERVER`.
+
+| Node | How the jars load |
+|---|---|
+| Fabric 26.x | The usual run, with Fabric Loader's `fabric.addMods` |
+| Fabric 1.20.1 to 1.21.11 | `runProductionClientGameTest` instead: Diorama's release jar and the tests on a production install, with an empty game folder each run. The `time:` line and results read the same |
+| NeoForge | The usual run, jars copied into the game's `mods` folder |
+| Forge 1.20.1 | The usual run, jars remapped by ModDevGradle onto the tests' classpath |
+
+`mods.init.gradle.kts` has the reasons. A run without `--mods` loads none of this, and on a warm VM starts without the last run's mods.
+
 ## Size and cost
 
 The plan (`box_20`) includes 555 VM-hours a month, counted at the size's rate: small 0.5x, default 1x, large 2x. Past them, runs are paid from a wallet that holds $0, so they stop. Measured on 2026-10-28 from the warm snapshot, one run each (times on boat.dev vary by a minute between runs):
@@ -64,5 +88,4 @@ It took 64 min on 2026-10-28, most of it booting all 22 nodes one after another;
 - **A killed script leaves its VM running** until its 2-hour lifetime ends. On Ctrl-C the script waits up to 6 min for each node to delete its VM, then deletes anything left with its prefix and the warm VMs it was using; a hard kill (a background command's timeout) skips all that. Either way, look for your prefix and `diorama-warm-<checkout>-` in `boat list --all`.
 - **Warm VMs belong to a worktree**, and only idle ones carry the warm name: a run takes one by renaming it to its own `diorama-test-<random>-<node>`, so while it runs it's cleaned up like any VM of the run, and it gets the warm name back after a run that went well. Two runs from the same worktree at once can't take the same one; the second gets a VM of its own. Each run deletes warm VMs boat.dev has stopped, from any worktree (nothing would ever resume them); it never touches a running one that isn't its own.
 - **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
-- **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
 - **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara.

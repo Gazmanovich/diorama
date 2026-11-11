@@ -1,5 +1,6 @@
 package dev.diorama.waypoint;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.List;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -10,8 +11,9 @@ import org.jspecify.annotations.Nullable;
  * The list of folders that opens under a folder's name, to pick one: every folder on a line of its
  * own with how many waypoints it holds, as Xaero's Minimap picks a waypoint set from a dropdown. It
  * looks like the map's right-click menu ({@link dev.diorama.MapMenu}). The screen that opens it
- * owns it while it's open and hands it the clicks and the mouse wheel; with more folders than fit
- * between its name and the edge of the screen it scrolls.
+ * owns it while it's open and hands it the clicks, the mouse wheel and the keys: the arrow keys go
+ * through the lines and Enter picks. With more folders than fit between its name and the edge of
+ * the screen it scrolls.
  */
 public final class FolderMenu {
 	private static final int ROW = 12;
@@ -36,6 +38,8 @@ public final class FolderMenu {
 	/** How many lines show at once, and the first of them. */
 	private final int shown;
 	private int scroll;
+	/** The line the arrow keys are on, or -1 before one is pressed. */
+	private int cursor = -1;
 
 	/**
 	 * A menu as wide as what it opens from, which spans {@code top} to {@code bottom}: under it, or
@@ -76,6 +80,27 @@ public final class FolderMenu {
 		return row >= 0 && row < this.shown ? this.entries.get(this.scroll + row) : null;
 	}
 
+	/**
+	 * A key while the list is open: the arrows move to the next line, from the current folder's at
+	 * first, and Enter picks that line's folder, which is returned. Null for every other key.
+	 */
+	public @Nullable Entry keyPressed(int key) {
+		if (key == InputConstants.KEY_UP || key == InputConstants.KEY_DOWN) {
+			int from = this.cursor;
+			for (int i = 0; from < 0 && i < this.entries.size(); i++) {
+				if (this.entries.get(i).key().equals(this.current)) {
+					from = i;
+				}
+			}
+			int step = key == InputConstants.KEY_UP ? -1 : 1;
+			this.cursor = from < 0 ? (step > 0 ? 0 : this.entries.size() - 1) : Math.max(0, Math.min(from + step, this.entries.size() - 1));
+			this.scroll = Math.max(this.cursor - this.shown + 1, Math.min(this.scroll, this.cursor));
+			return null;
+		}
+		boolean enter = key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER;
+		return enter && this.cursor >= 0 ? this.entries.get(this.cursor) : null;
+	}
+
 	/** The mouse wheel: a line at a time. */
 	public void scroll(double amount) {
 		this.scroll = Math.max(0, Math.min(this.scroll - (int) Math.signum(amount), this.entries.size() - this.shown));
@@ -91,7 +116,7 @@ public final class FolderMenu {
 		for (int i = 0; i < this.shown; i++) {
 			Entry entry = this.entries.get(this.scroll + i);
 			int top = this.y + 1 + i * ROW;
-			if (entry == hovered) {
+			if (entry == hovered || this.scroll + i == this.cursor) {
 				graphics.fill(this.x + 1, top, this.x + this.width - 1, top + ROW, 0xFF2D3A4E);
 			}
 			int room = right - (this.x + PAD + 2);
