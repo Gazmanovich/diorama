@@ -409,7 +409,7 @@ public final class MapScreen extends Screen {
 		int x = this.width - (caves ? 56 : 26);
 		int y = this.height - 90;
 		this.drawButton.setPosition(x, y - 26);
-		// Only the sky view is saved, so only it can be exported; not while drawing on it.
+		// Only the sky view can be exported; not while drawing on it.
 		MapSession session = MapSession.get();
 		this.export.visible = !caves && !this.draw.active() && this.otherDimension == null && session != null && session.map().savedMap() != null;
 		this.export.setPosition(x, y - 48);
@@ -1309,7 +1309,7 @@ public final class MapScreen extends Screen {
 	}
 
 	/**
-	 * How many tabs show: cave slices aren't saved, so another dimension's map has only Surface, as
+	 * How many tabs show: only the sky view of another dimension's map is shown, so it has only Surface, as
 	 * does a server that turns cave maps off.
 	 */
 	private int tabs() {

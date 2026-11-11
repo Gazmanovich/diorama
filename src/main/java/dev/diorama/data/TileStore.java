@@ -192,7 +192,8 @@ public final class TileStore {
 
 	/** A tile was written: the overview tiles above it are now out of date. */
 	private synchronized void overviewsStale(TileKey key) {
-		if (key.lod() >= TileKey.MAX_LOD) {
+		// Cave slices are only shown close up, so they get no overview tiles.
+		if (key.lod() >= TileKey.MAX_LOD || key.isCave()) {
 			return;
 		}
 		this.staleOverviews.add(key.parent());
@@ -673,7 +674,7 @@ public final class TileStore {
 			}
 			for (Map.Entry<TileKey, Tile> entry : pending.entrySet()) {
 				// Nothing to retry with once the world is closed; store() has logged the failure.
-				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0) {
+				if (this.store(entry.getKey(), entry.getValue()) && entry.getKey().lod() == 0 && !entry.getKey().isCave()) {
 					synchronized (this) {
 						this.staleOverviews.add(entry.getKey().parent());
 					}
@@ -757,7 +758,11 @@ public final class TileStore {
 		}
 	}
 
+	/** A cave slice's tiles are in a folder named by its cut height, as Xaero's World Map keeps a folder per cave layer. */
 	private Path file(TileKey key) {
+		if (key.isCave()) {
+			return this.folder.resolve(Integer.toString(key.layer())).resolve(key.tileU() + "_" + key.tileV() + ".omt");
+		}
 		Path dir = key.lod() == 0 ? this.folder : this.folder.resolve("lod" + key.lod());
 		return dir.resolve(key.tileU() + "_" + key.tileV() + ".omt");
 	}

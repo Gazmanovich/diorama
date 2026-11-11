@@ -21,6 +21,16 @@ public record TileLabel(boolean underRoof, long pitch, boolean fog, Facing facin
 	private static final String UNDER_ROOF = "under-roof";
 	private static final String FOG = "fog";
 
+	/**
+	 * The folder cave slices are saved in, beside the sky view's: they look different by the tilt,
+	 * the way the map faces, whether only seen blocks show ({@code fog}) and whether they're drawn
+	 * with the depth look ({@code depth}), so each of those keeps its own. Never a name
+	 * {@link #parse} takes for a sky view.
+	 */
+	public static String caves(long pitch, Facing facing, boolean fog, boolean depth) {
+		return "caves-" + pitch + (facing == Facing.NORTH ? "" : "-" + facing.id()) + (fog ? "-" + FOG : "") + (depth ? "-depth" : "");
+	}
+
 	public String folder() {
 		String turned = this.facing == Facing.NORTH ? "" : "-" + this.facing.id();
 		if (this.underRoof) {
