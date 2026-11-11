@@ -131,6 +131,8 @@ public final class Settings {
 	/** Pins on the lit portals the map has found ({@link dev.diorama.waypoint.Portals}). */
 	public boolean portalMarkers = false;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
+	/** Which waypoints stand in a beam in the world, where they show there at all. */
+	public Beams waypointBeams = Beams.TEMPORARY;
 	/**
 	 * Waypoints further than this many blocks away leave the world and the minimap; the map still
 	 * shows them all. 0 shows them at any distance. One of {@link #WAYPOINT_DISTANCES}.
@@ -272,6 +274,16 @@ public final class Settings {
 		ALWAYS,
 		DISTANCE,
 		NONE
+	}
+
+	/**
+	 * Which in-world waypoints get a beam: none, the ones the player is heading for right now
+	 * (temporary waypoints and death markers), or all of them.
+	 */
+	public enum Beams {
+		OFF,
+		TEMPORARY,
+		ALL
 	}
 
 	/** Colours the player arrow can take, with their names' keys. */
@@ -424,6 +436,9 @@ public final class Settings {
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
+		}
+		if (settings.waypointBeams == null) {
+			settings.waypointBeams = Beams.TEMPORARY;
 		}
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
