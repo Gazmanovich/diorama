@@ -185,6 +185,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("pin-names")) {
 				PinNamesTest.run(context, world);
 			}
+			if (tests.contains("death-pins")) {
+				DeathPinsTest.run(context, world);
+			}
 			if (tests.contains("waypoint-preview")) {
 				WaypointPreviewTest.run(context, world);
 			}
@@ -3835,7 +3838,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.setScreen(() -> null);
 
-		// Dying leaves a death marker.
+		// Dying leaves a death marker. Respawning may land within reach of it: death-pins tests that.
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = false);
 		world.getServer().runCommand("gamerule show_death_messages false");
 		world.getServer().runCommand("kill @a");
 		context.waitTicks(20);
@@ -3855,6 +3859,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(40);
 		long deathsAfter = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH).count());
 		world.getServer().runCommand("gamerule immediate_respawn false");
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = true);
 		if (deathsAfter != deathsBefore + 1) {
 			throw new AssertionError("Instant respawn left " + (deathsAfter - deathsBefore) + " new death markers instead of 1");
 		}

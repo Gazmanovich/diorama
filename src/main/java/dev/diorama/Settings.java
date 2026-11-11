@@ -112,6 +112,8 @@ public final class Settings {
 	public boolean waypointsOnMap = true;
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
+	/** Death markers go once the player is back within {@link dev.diorama.waypoint.Waypoints#DEATH_REACHED} blocks, as in Xaero's Minimap. */
+	public boolean removeReachedDeaths = true;
 	/** A pin on the bed the player last slept in ({@link dev.diorama.waypoint.Waypoints#watchSleep}). */
 	public boolean bedMarkers = true;
 	/** Pins on the lit portals the map has found ({@link dev.diorama.waypoint.Portals}). */
