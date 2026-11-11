@@ -5039,7 +5039,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Couldn't found a colony through MineColonies' colony manager", e);
 			}
 		});
-		int gold = net.minecraft.ChatFormatting.GOLD.getColor();
+		int gold = net.minecraft.network.chat.TextColor.fromLegacyFormat(net.minecraft.ChatFormatting.GOLD).getValue();
 		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == gold, 600);
 		Diorama.LOGGER.info("MineColonies colony {} reached the map's claims {} ms after it was founded", id, (System.nanoTime() - founded) / 1_000_000);
 		Claims.Claim colony = claimAt(context, chunkX, chunkZ);
@@ -5117,7 +5117,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// A new name and team colour follow.
 		mineColony(world, id, "setName", String.class, "Lakeside");
 		mineColony(world, id, "setColonyColor", net.minecraft.ChatFormatting.class, net.minecraft.ChatFormatting.AQUA);
-		int aqua = net.minecraft.ChatFormatting.AQUA.getColor();
+		int aqua = net.minecraft.network.chat.TextColor.fromLegacyFormat(net.minecraft.ChatFormatting.AQUA).getValue();
 		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == aqua && Claims.get().at(chunkX, chunkZ).name().equals("Lakeside"), 600);
 		openMapOnPlayer(context);
 		lookAtPlayer(context, 2.0, TileKey.SURFACE);

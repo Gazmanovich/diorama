@@ -15,6 +15,7 @@ import net.fabricmc.loader.api.FabricLoader;
 *///?}
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
@@ -234,9 +235,10 @@ public final class MineColonies {
 				if (view == null || !(boolean) hasPermission.invoke(colonyPermissions.invoke(view), mc.player, mapBorder)) {
 					return Optional.empty();
 				}
-				Integer colour = colonyColour.invoke(view) instanceof ChatFormatting team ? team.getColor() : null;
+				// A team colour is one of the game's sixteen chat colours.
+				TextColor colour = colonyColour.invoke(view) instanceof ChatFormatting team ? TextColor.fromLegacyFormat(team) : null;
 				String name = colonyName.invoke(view) instanceof String s ? s : "";
-				return Optional.of(new Claims.Claim(this, colour == null ? 0xFFFFFF : colour & 0xFFFFFF, name, false, true));
+				return Optional.of(new Claims.Claim(this, colour == null ? 0xFFFFFF : colour.getValue() & 0xFFFFFF, name, false, true));
 			} catch (InvocationTargetException e) {
 				Diorama.LOGGER.debug("MineColonies couldn't give a colony", e);
 				return null;
