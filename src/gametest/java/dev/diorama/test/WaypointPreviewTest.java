@@ -101,8 +101,37 @@ final class WaypointPreviewTest {
 		BufferedImage typedShot = shoot(context, "waypoint-preview-6b-typed-position");
 		context.setScreen(() -> null);
 
+		// Empty coordinate boxes mean where the player stands, as in Xaero's (#255): the far-off
+		// waypoint, emptied, shows the player's numbers greyed, stands on spawn's grass and saves there.
+		BlockPos here = context.computeOnClient(mc -> mc.player.blockPosition());
+		context.setScreen(() -> new WaypointEditScreen(null, unmapped, false));
+		context.waitTicks(5);
+		for (int box = 2; box <= 4; box++) {
+			DioramaClientTest.typeInto(context, box, "");
+		}
+		context.runOnClient(mc -> mc.gui.screen().setFocused(null));
+		BufferedImage emptyShot = shoot(context, "waypoint-preview-6c-empty-boxes");
+		String hints = context.computeOnClient(mc -> hints(mc.gui.screen()));
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		String emptied = context.computeOnClient(mc -> mc.gui.screen() == null ? unmapped.x + " " + unmapped.y + " " + unmapped.z : "editor still open");
+		// A new Nether waypoint made in the Overworld with X and Z left empty lands an eighth of
+		// the way, at the player's Y left as typed.
+		Waypoint netherHere = new Waypoint("Nether here", 5, 70, 5, "minecraft:the_nether", PIN);
+		context.setScreen(() -> new WaypointEditScreen(null, netherHere, true));
+		context.waitTicks(5);
+		DioramaClientTest.typeInto(context, 2, "");
+		DioramaClientTest.typeInto(context, 4, "");
+		context.runOnClient(mc -> mc.gui.screen().setFocused(null));
+		BufferedImage netherHereShot = shoot(context, "waypoint-preview-6d-nether-empty-x-z");
+		String netherHints = context.computeOnClient(mc -> hints(mc.gui.screen()));
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		boolean netherSaved = context.computeOnClient(mc -> WaypointStore.get().all().contains(netherHere));
+		context.setScreen(() -> null);
+
 		// Only this section's own: the waypoints section checks its kept ones after rejoining.
-		context.runOnClient(mc -> List.of(gold, nether, roof, unseen, near, unmapped).forEach(WaypointStore.get()::remove));
+		context.runOnClient(mc -> List.of(gold, nether, roof, unseen, near, unmapped, netherHere).forEach(WaypointStore.get()::remove));
 		emptyList(context, "waypoint-preview-7-empty-list-after");
 
 		// Checked after every picture is taken, so a failure still leaves them all.
@@ -139,6 +168,29 @@ final class WaypointPreviewTest {
 		if (typedShare.gold < 0.03) {
 			wrong.add("the preview didn't follow the typed position to the gold platform: " + typedShare);
 		}
+		String spot = here.getX() + " " + here.getY() + " " + here.getZ();
+		if (!hints.equals(spot)) {
+			wrong.add("the empty boxes show " + hints + ", not where the player stands, " + spot);
+		}
+		if (!emptied.equals(spot)) {
+			wrong.add("the waypoint saved with empty boxes is at " + emptied + ", not where the player stands, " + spot);
+		}
+		if (share(context, emptyShot).green < 0.1) {
+			wrong.add("the preview of the emptied waypoint doesn't stand on spawn's grass");
+		}
+		String netherSpot = Math.floorDiv(here.getX(), 8) + " " + Math.floorDiv(here.getZ(), 8);
+		String netherHintsXZ = netherHints.split(" ")[0] + " " + netherHints.split(" ")[2];
+		if (!netherHintsXZ.equals(netherSpot)) {
+			wrong.add("the Nether waypoint's empty X and Z show " + netherHintsXZ + ", not " + netherSpot);
+		}
+		String netherSaid = netherHere.x + " " + netherHere.z;
+		if (!netherSaved || !netherSaid.equals(netherSpot) || netherHere.y != 70) {
+			wrong.add("the Nether waypoint saved with empty X and Z is " + (netherSaved ? "at " + netherSaid + " y " + netherHere.y : "missing")
+				+ ", not at " + netherSpot + " y 70");
+		}
+		if (share(context, netherHereShot).red < 0.1) {
+			wrong.add("the preview of the Nether waypoint with empty X and Z doesn't stand on the Nether");
+		}
 		if (!wrong.isEmpty()) {
 			throw new AssertionError("Waypoint editor previews: " + String.join("; ", wrong));
 		}
@@ -157,6 +209,32 @@ final class WaypointPreviewTest {
 		context.waitTicks(10);
 		context.takeScreenshot(name);
 		context.setScreen(() -> null);
+	}
+
+	/** The X, Y and Z boxes' hints, as shown while a box is empty. */
+	private static String hints(net.minecraft.client.gui.screens.Screen screen) {
+		List<net.minecraft.client.gui.components.EditBox> boxes = DioramaClientTest.editBoxes(screen);
+		StringBuilder out = new StringBuilder();
+		for (int box = 2; box <= 4; box++) {
+			out.append(box > 2 ? " " : "").append(hint(boxes.get(box)));
+		}
+		return out.toString();
+	}
+
+	/** The box's hint: its one text field, found by type as the name differs between mappings. */
+	private static String hint(net.minecraft.client.gui.components.EditBox box) {
+		for (java.lang.reflect.Field field : net.minecraft.client.gui.components.EditBox.class.getDeclaredFields()) {
+			if (field.getType() == net.minecraft.network.chat.Component.class && !java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+				try {
+					field.setAccessible(true);
+					Object hint = field.get(box);
+					return hint == null ? "none" : ((net.minecraft.network.chat.Component) hint).getString();
+				} catch (ReflectiveOperationException e) {
+					throw new IllegalStateException(e);
+				}
+			}
+		}
+		throw new IllegalStateException("EditBox has no hint field");
 	}
 
 	private static Waypoint add(ClientGameTestContext context, Waypoint waypoint) {
