@@ -54,6 +54,11 @@ public final class ShareServer {
 	/** Chunks read at once: one trip to the server thread for the loaded ones, the rest read together. */
 	private static final int BATCH = 16;
 	private static volatile @Nullable ShareServer running;
+	/** The settings the running server locks, dedicated or not; null if it locks none. */
+	private static volatile @Nullable Locked locked;
+
+	private record Locked(MinecraftServer server, ServerLocks locks) {
+	}
 
 	private final MinecraftServer server;
 	private final ShareSettings settings;
@@ -78,9 +83,13 @@ public final class ShareServer {
 	/** The server started; {@code configFolder} is the loader's config folder. */
 	public static void started(MinecraftServer server, Path configFolder) {
 		if (!server.isDedicatedServer()) {
+			// Singleplayer shares nothing, but a modpack's own file can still lock settings.
+			lock(server, ServerLocks.load(configFolder, false));
 			return;
 		}
 		ShareSettings settings = ShareSettings.load(configFolder);
+		// After the share settings, which write the file the first time.
+		lock(server, ServerLocks.load(configFolder, true));
 		ShareServer share = new ShareServer(server, settings);
 		running = share;
 		if (settings.share()) {
@@ -91,7 +100,18 @@ public final class ShareServer {
 			settings.land().key(), settings.kilobytesPerSecond());
 	}
 
+	private static void lock(MinecraftServer server, ServerLocks locks) {
+		locked = locks.any() ? new Locked(server, locks) : null;
+		if (locks.any()) {
+			Diorama.LOGGER.info("Diorama on the server: locking map settings for players with Diorama: {}", locks);
+		}
+	}
+
 	public static void stopped(MinecraftServer server) {
+		Locked locks = locked;
+		if (locks != null && locks.server == server) {
+			locked = null;
+		}
 		ShareServer share = running;
 		if (share != null && share.server == server) {
 			running = null;
@@ -105,6 +125,10 @@ public final class ShareServer {
 	 * Tells them the settings, which also tells their Diorama this server has Diorama.
 	 */
 	public static void listening(ServerPlayer player) {
+		Locked locks = locked;
+		if (locks != null && player.level().getServer() == locks.server) {
+			ShareProtocol.send(player, locks.locks.encode());
+		}
 		ShareServer share = running;
 		if (share == null || player.level().getServer() != share.server) {
 			return;
