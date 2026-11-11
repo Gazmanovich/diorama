@@ -7,6 +7,7 @@ import dev.diorama.render.MapViewport;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -72,10 +73,24 @@ public final class WorldBorderOverlay {
 		WorldBorder border = level.getWorldBorder();
 		Facing facing = Projection.facing();
 		// Turned space, where the map's u is x: the border is a rectangle there too.
-		double ax = facing.x(border.getMinX(), border.getMinZ());
-		double bx = facing.x(border.getMaxX(), border.getMaxZ());
-		double az = facing.z(border.getMinX(), border.getMinZ());
-		double bz = facing.z(border.getMaxX(), border.getMaxZ());
+		//? if >=1.21.9 {
+		// A moving border is where the game draws its wall this frame, between two ticks.
+		float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
+		double minX = border.getMinX(partialTick);
+		double minZ = border.getMinZ(partialTick);
+		double maxX = border.getMaxX(partialTick);
+		double maxZ = border.getMaxZ(partialTick);
+		//?} else {
+		/*// Before 1.21.9 a moving border goes by the clock, so these are this frame's already.
+		double minX = border.getMinX();
+		double minZ = border.getMinZ();
+		double maxX = border.getMaxX();
+		double maxZ = border.getMaxZ();
+		*///?}
+		double ax = facing.x(minX, minZ);
+		double bx = facing.x(maxX, maxZ);
+		double az = facing.z(minX, minZ);
+		double bz = facing.z(maxX, maxZ);
 		double west = Math.min(ax, bx);
 		double east = Math.max(ax, bx);
 		double north = Math.min(az, bz);
@@ -158,10 +173,13 @@ public final class WorldBorderOverlay {
 			if (Float.isNaN(atSouth)) {
 				atSouth = flatGround ? flat : this.groundOr(level, facing, blockX, southBlock, fallback);
 			}
-			// Cut to the view: a side can be millions of blocks long.
-			double start = Math.max(top, Projection.v(atNorth, north));
-			double end = Math.min(bottom, Projection.v(atSouth, south));
-			if (start < end) {
+			// Cut to the view: a side can be millions of blocks long. On a border a few blocks wide
+			// with ground rising to the south, the south end is the higher one on the picture.
+			double northV = Projection.v(atNorth, north);
+			double southV = Projection.v(atSouth, south);
+			double start = Math.max(top, Math.min(northV, southV));
+			double end = Math.min(bottom, Math.max(northV, southV));
+			if (start <= end) {
 				this.show(2 + side, color, new double[] {u, start, u, end}, facing);
 			}
 		}

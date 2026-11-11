@@ -94,12 +94,21 @@ final class WorldBorderTest {
 			double[] northSide = sides.get(0).points;
 			double onStone = vAt(northSide, x0 + 3.5);
 			double expected = Projection.v(roof + 1, north);
-			if (Math.abs(onStone - expected) > 1e-6) {
+			// Not NaN, which is what a line that doesn't reach the stone gives.
+			if (!(Math.abs(onStone - expected) <= 1e-6)) {
 				return "The north side crosses the stone at map row " + onStone + ", not on top of it at " + expected;
 			}
 			double[] westSide = sides.get(2).points;
 			if (westSide[0] != west || westSide[2] != west) {
 				return "The west side is at map column " + westSide[0] + ", not " + west;
+			}
+			// In a cave slice there's no one ground to follow: level, at the player's height.
+			int layer = MapSession.caveLayerFor(at.getY() - 12);
+			MapViewport.View caves = new MapViewport.View(0, 0, 200, 200, Projection.u(at.getX(), at.getZ()), Projection.v(at.getX(), at.getY(), at.getZ()), 2, layer);
+			double[] inCaves = new WorldBorderOverlay().sides(caves, mc.level, mc.player).get(0).points;
+			double level = Projection.v(Math.min(mc.player.getY(), layer), north);
+			if (inCaves.length != 4 || inCaves[1] != level || inCaves[3] != level) {
+				return "The north side in a cave slice should be level at map row " + level + ": " + java.util.Arrays.toString(inCaves);
 			}
 			return null;
 		});
@@ -134,8 +143,13 @@ final class WorldBorderTest {
 		context.runOnClient(mc -> Settings.get().worldBorder = Settings.WorldBorderShown.ALWAYS);
 
 		// A border on the move is the colour the game draws its wall in, and moves on the map.
-		world.getServer().runCommand("worldborder add 32 600");
-		context.waitFor(mc -> mc.level.getWorldBorder().getSize() > SIZE, 200);
+		// The time is in seconds on older versions and ticks on newer ones: either way it's growing for a minute or more.
+		world.getServer().runCommand("worldborder add 320 1200");
+		context.waitFor(mc -> mc.level.getWorldBorder().getSize() > SIZE + 1, 400);
+		double grownWest = context.computeOnClient(mc -> new WorldBorderOverlay().sides(around(at.getX(), at.getY(), at.getZ(), 2), mc.level, mc.player).get(2).points[0]);
+		if (!(grownWest < west - 0.5)) {
+			throw new AssertionError("The west side of a growing border should have moved out from " + west + ", not be at " + grownWest);
+		}
 		BufferedImage growing = map(context, at, 4, TileKey.SURFACE, "border-map-growing");
 		if (count(growing, GREEN) < 400 || count(growing, BLUE) != 0) {
 			throw new AssertionError("A growing border should be green: " + count(growing, GREEN) + " green pixels, " + count(growing, BLUE) + " blue");
