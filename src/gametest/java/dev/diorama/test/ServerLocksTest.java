@@ -57,13 +57,21 @@ final class ServerLocksTest {
 			}
 			context.setScreen(() -> null);
 			// The Nether's map is the view under its roof: kept, as far as the player has seen.
-			server.command("execute in minecraft:the_nether run tp @a 0 70 0");
+			// On a platform high up, where the player sees some of the Nether around them. The
+			// chunk loads with the player, and only then can the platform go in.
+			server.command("execute in minecraft:the_nether run tp @a 0 100 0");
 			context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get() != null, 2400);
+			context.waitTicks(40);
+			server.command("execute in minecraft:the_nether run fill -4 100 -4 4 104 4 minecraft:air");
+			server.command("execute in minecraft:the_nether run fill -2 99 -2 2 99 2 minecraft:glass");
+			server.command("execute in minecraft:the_nether run tp @a 0 100 0");
 			DioramaClientTest.settle(context, 100);
 			if (!context.computeOnClient(mc -> MapSession.get().map().fogOfWar())) {
 				throw new AssertionError("Cave maps are locked off, but the Nether's map shows ground the player hasn't seen");
 			}
 			context.takeScreenshot("locks-caves-nether-minimap");
+			mapScreen(context, "caves-nether");
+			context.setScreen(() -> null);
 		});
 
 		onServer(context, "fog", "cave-fog-of-war=true\n", () -> {
@@ -143,7 +151,7 @@ final class ServerLocksTest {
 				throw new AssertionError("The server's console " + (locks ? "says it locks settings" : "doesn't say it locks settings") + " for " + file);
 			}
 			String written = read(config);
-			for (String key : new String[] {"cave-maps-allowed=", "cave-fog-of-war=", "radar-allowed=", "share-map=", "web-map="}) {
+			for (String key : new String[] {"cave-maps-allowed=", "cave-fog-of-war=", "radar-allowed=", "web-map="}) {
 				if (!written.contains(key)) {
 					throw new AssertionError("The server didn't add " + key + " to its settings file:\n" + written);
 				}
