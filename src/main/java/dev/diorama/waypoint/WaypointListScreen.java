@@ -5,7 +5,6 @@ import dev.diorama.DioramaClient;
 import dev.diorama.MapSession;
 import dev.diorama.render.Pins;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -13,6 +12,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 //? if >=1.21.9 {
 import net.minecraft.client.input.KeyEvent;
@@ -24,10 +24,10 @@ import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The waypoints of one folder, nearest first, in vanilla's in-world list. Every dimension has a
- * folder of its own, made for it; the player can add folders of their own, rename and delete them,
- * and hide any folder from the maps. The folder bar picks the folder, a search box filters its
- * waypoints by name, and New folder and New waypoint sit beside it. Clicking a row selects it and shows
+ * The waypoints of one folder, in vanilla's in-world list. Every dimension has a folder of its own,
+ * made for it; the player can add folders of their own, rename and delete them, and hide any folder
+ * from the maps. The folder bar picks the folder, a search box filters its waypoints by name, and
+ * beside it are the sort order with its direction, New folder and New waypoint. Clicking a row selects it and shows
  * its actions on it: edit, hide or show, teleport (for players allowed to use /tp) and delete,
  * which asks for a second click in place. Double-clicking a row edits it. With no waypoints in
  * this dimension, a pin standing on a piece of the map shows what one is and how to add one.
@@ -35,9 +35,6 @@ import org.jspecify.annotations.Nullable;
  */
 public final class WaypointListScreen extends Screen {
 	private static final int LIST_WIDTH = 340;
-	private static final int SEARCH_WIDTH = 160;
-	private static final int NEW_WIDTH = 100;
-	private static final int NEW_FOLDER_WIDTH = 72;
 	/** Rows are 24 tall with 2 between them, as in vanilla's lists. */
 	private static final int ROW = 24;
 	private static final int PITCH = 26;
@@ -69,15 +66,25 @@ public final class WaypointListScreen extends Screen {
 	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
 	private boolean empty;
 	/**
-	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for a folder of the
-	 * player's own Rename and Delete in red. Delete arms them into one red Click again to delete.
+	 * The folder's buttons at the right end of the folder bar: Hide or Show, then for another
+	 * dimension's folder Show here, or for a folder of the player's own Rename and Delete in red.
+	 * Delete arms them into one red Click again to delete.
 	 */
 	private final List<Button> folderActions = new ArrayList<>();
 	private boolean folderArmed;
-	/** Every waypoint in the folder shown, nearest first. */
+	/** Every waypoint in the folder shown, in the sort order. */
 	private final List<Waypoint> all = new ArrayList<>();
-	/** The ones the search lets through, still nearest first. */
+	/** The ones the search lets through, still in the sort order. */
 	private final List<Waypoint> rows = new ArrayList<>();
+	/** The search box's frame, as wide as the sort and New buttons beside it leave room for. */
+	private int searchWidth;
+	/**
+	 * The sort order, which steps to the next one, and its direction, which reverses it: a caret on
+	 * it points up for the usual way, down for reversed, like the map's slice buttons.
+	 */
+	private @Nullable Button sortOrder;
+	private @Nullable Button sortDirection;
+	private boolean sortReversed;
 	/**
 	 * The selected row's buttons. They're made with the screen and only moved, shown or hidden, and
 	 * they act on whatever is selected when pressed: a button that has gone from view can keep the
@@ -89,6 +96,8 @@ public final class WaypointListScreen extends Screen {
 	private @Nullable Button teleport;
 	private @Nullable Button delete;
 	private final MapPiece piece = new MapPiece(88, 56, 12);
+	/** Where a row's waypoint stands in this dimension, when shown here too: made again in place for each row. */
+	private final Waypoint spotHere = new Waypoint();
 	/** The sample pin on the empty list's piece of map. */
 	private final Waypoint sample = new Waypoint("Home", 0, 0, 0, "", Waypoint.PALETTE[2]);
 	private @Nullable EditBox search;
@@ -215,10 +224,7 @@ public final class WaypointListScreen extends Screen {
 					this.all.add(waypoint);
 				}
 			}
-			// This dimension's waypoints nearest first; any from other dimensions after them, by name.
-			this.all.sort(Comparator.<Waypoint, Boolean>comparing(w -> !w.dimension.equals(here))
-				.thenComparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ()) : 0)
-				.thenComparing(w -> w.shownName().toLowerCase(Locale.ROOT)));
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
@@ -267,6 +273,8 @@ public final class WaypointListScreen extends Screen {
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 				.bounds(cx - 75, newY + this.emptyTop, 150, 20).build());
 			this.search = null;
+			this.sortOrder = null;
+			this.sortDirection = null;
 			this.actions.clear();
 			this.visibility = null;
 			this.confirm = null;
@@ -287,6 +295,20 @@ public final class WaypointListScreen extends Screen {
 				this.rebuildWidgets();
 			}
 		}));
+		// Another dimension's waypoints, shown where the player is as well: Xaero's Minimap switches its
+		// waypoint list to another dimension for the same, and shows them at this one's scale.
+		String from = folder.dimension();
+		if (store != null && here != null && from != null && !from.equals(here)) {
+			Button showHere = this.action(CommonComponents.optionStatus(Component.translatable("diorama.folder.show_here"), store.showsIn(here, from)), () -> {
+				WaypointStore current = WaypointStore.get();
+				if (current != null) {
+					current.setShownIn(here, from, !current.showsIn(here, from));
+					this.rebuildWidgets();
+				}
+			});
+			showHere.setTooltip(Tooltip.create(Component.translatable("diorama.folder.show_here.tooltip", Waypoints.dimensionName(from), Waypoints.dimensionName(here))));
+			this.folderActions.add(showHere);
+		}
 		String custom = folder.custom();
 		if (custom != null) {
 			this.folderActions.add(this.action(Component.translatable("diorama.folder.rename"),
@@ -305,19 +327,38 @@ public final class WaypointListScreen extends Screen {
 		}
 		this.placeFolderButtons();
 
+		// The search row, right to left: New waypoint and New folder, each as wide as its label, then
+		// the sort direction and the sort order, as wide as the longest order's name so it stays put
+		// when stepped. The search box has the rest.
+		Component newWaypoint = Component.translatable("diorama.waypoint.new");
+		Component newFolder = Component.translatable("diorama.folder.new");
+		int newWidth = width(this.font.width(newWaypoint));
+		int newFolderWidth = width(this.font.width(newFolder));
+		int sortWidth = 0;
+		for (WaypointSort sort : WaypointSort.values()) {
+			sortWidth = Math.max(sortWidth, width(this.font.width(Component.translatable(sort.key()))));
+		}
+		int x = left + LIST_WIDTH - newWidth;
+		this.addRenderableWidget(Button.builder(newWaypoint, b -> this.newWaypoint()).bounds(x, SEARCH_Y, newWidth, 20).build());
+		x -= 4 + newFolderWidth;
+		this.addRenderableWidget(Button.builder(newFolder, b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
+			.bounds(x, SEARCH_Y, newFolderWidth, 20).build());
+		x -= 4 + ARROW;
+		this.sortDirection = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.changeSort(false))
+			.createNarration(n -> Component.translatable(this.sortDirectionKey())).bounds(x, SEARCH_Y, ARROW, 20).build());
+		x -= ACTION_GAP + sortWidth;
+		this.sortOrder = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.changeSort(true)).bounds(x, SEARCH_Y, sortWidth, 20).build());
+		this.labelSort(store);
+		this.searchWidth = x - 4 - left;
+
 		// The search box: vanilla's text field frame with the search icon in it, the text right of the icon.
 		String query = this.search != null ? this.search.getValue() : "";
-		EditBox box = new EditBox(this.font, left + 20, SEARCH_Y + 6, SEARCH_WIDTH - 24, 12, Component.translatable("diorama.waypoints.search"));
+		EditBox box = new EditBox(this.font, left + 20, SEARCH_Y + 6, this.searchWidth - 24, 12, Component.translatable("diorama.waypoints.search"));
 		box.setBordered(false);
 		box.setMaxLength(32);
 		box.setValue(query);
 		box.setResponder(text -> this.filter());
 		this.search = this.addRenderableWidget(box);
-		// The two ways to add something sit beside the search box: New folder, then New waypoint.
-		this.addRenderableWidget(Button.builder(Component.translatable("diorama.folder.new"), b -> this.minecraft.gui.setScreen(new WaypointFolderScreen(this, null)))
-			.bounds(left + LIST_WIDTH - NEW_WIDTH - 4 - NEW_FOLDER_WIDTH, SEARCH_Y, NEW_FOLDER_WIDTH, 20).build());
-		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
-			.bounds(left + LIST_WIDTH - NEW_WIDTH, SEARCH_Y, NEW_WIDTH, 20).build());
 		this.actions.clear();
 		this.edit = this.action(Component.translatable("diorama.waypoints.edit"), () -> this.edit(this.selected));
 		this.actions.add(this.edit);
@@ -341,6 +382,85 @@ public final class WaypointListScreen extends Screen {
 		this.visibleRows = Math.max(1, (this.listBottom - LIST_TOP - 2) / PITCH);
 		this.filter();
 		this.setInitialFocus(box);
+	}
+
+	/** Steps to the next sort order or reverses the direction, and sorts the folder again from the top. */
+	private void changeSort(boolean nextOrder) {
+		WaypointStore store = WaypointStore.get();
+		if (store == null) {
+			return;
+		}
+		if (nextOrder) {
+			// The direction stays as it was, as Xaero's keeps Reversed Sort Order apart from Sort By.
+			store.setSort(store.sort().next(), store.sortReversed());
+		} else {
+			store.setSort(store.sort(), !store.sortReversed());
+		}
+		this.labelSort(store);
+		this.resort(store);
+		this.scroll = 0;
+		this.filter();
+	}
+
+	/** Sorts the folder's waypoints again, after the order or something it goes by changed. */
+	private void resort(WaypointStore store) {
+		Entity viewer = MapSession.viewer();
+		if (viewer != null && this.minecraft.level != null) {
+			String here = this.minecraft.level.dimension().identifier().toString();
+			this.all.sort(store.sort().comparator(store.sortReversed(), w -> this.distance(store, here, viewer, w)));
+		}
+	}
+
+	/**
+	 * How far the player is from a waypoint: from its own spot in their dimension, or from where it
+	 * stands here when its dimension is shown here too. NaN for another dimension's.
+	 */
+	private double distance(WaypointStore store, String here, Entity viewer, Waypoint waypoint) {
+		if (waypoint.dimension.equals(here)) {
+			return waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
+		}
+		if (!store.showsIn(here, waypoint.dimension)) {
+			return Double.NaN;
+		}
+		double divider = store.coordinateScale(here) / store.coordinateScale(waypoint.dimension);
+		return waypoint.scaled(divider, this.spotHere).distanceTo(viewer.getX(), viewer.getY(), viewer.getZ());
+	}
+
+	/** The sort order's name on its button, and on both buttons a tooltip saying what comes first. */
+	private void labelSort(@Nullable WaypointStore store) {
+		Button order = this.sortOrder;
+		Button direction = this.sortDirection;
+		if (order == null || direction == null) {
+			return;
+		}
+		WaypointSort sort = store == null ? WaypointSort.DISTANCE : store.sort();
+		boolean reversed = store != null && store.sortReversed();
+		Component name = Component.translatable(sort.key());
+		order.setMessage(name);
+		this.sortReversed = reversed;
+		Tooltip tooltip = Tooltip.create(Component.translatable("diorama.waypoints.sort", name).append("\n")
+			.append(Component.translatable(sort.directionKey(reversed)).withStyle(ChatFormatting.GRAY)));
+		order.setTooltip(tooltip);
+		direction.setTooltip(tooltip);
+	}
+
+	private String sortDirectionKey() {
+		WaypointStore store = WaypointStore.get();
+		return (store == null ? WaypointSort.DISTANCE : store.sort()).directionKey(this.sortReversed);
+	}
+
+	/** The direction button's caret, drawn over the button as {@code MapScreen} draws its slice buttons'. */
+	private void drawSortCaret(GuiGraphicsExtractor graphics) {
+		Button button = this.sortDirection;
+		if (button == null || !button.visible) {
+			return;
+		}
+		int cx = button.getX() + button.getWidth() / 2;
+		int y = button.getY() + (button.getHeight() - 3) / 2;
+		for (int row = 0; row < 3; row++) {
+			int half = this.sortReversed ? 2 - row : row;
+			graphics.fill(cx - half, y + row, cx + half + 1, y + row + 1, 0xFFFFFFFF);
+		}
 	}
 
 	/** Shows the waypoints whose name has the search text in it, any case, and lays the rows out again. */
@@ -424,7 +544,7 @@ public final class WaypointListScreen extends Screen {
 	 * player's own, is Click again to delete: shown alone across the others once Delete is clicked.
 	 */
 	private void placeFolderButtons() {
-		boolean custom = this.folderActions.size() > 1;
+		boolean custom = this.folder().custom() != null;
 		List<Button> buttons = custom ? this.folderActions.subList(0, this.folderActions.size() - 1) : this.folderActions;
 		int span = -ACTION_GAP;
 		for (Button button : buttons) {
@@ -516,6 +636,7 @@ public final class WaypointListScreen extends Screen {
 	public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
 		this.drawBackground(graphics, mouseX, mouseY);
 		super.render(graphics, mouseX, mouseY, a);
+		this.drawSortCaret(graphics);
 	}
 
 	private void drawBackground(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -549,10 +670,11 @@ public final class WaypointListScreen extends Screen {
 		graphics.centeredText(this.font, Component.literal(label), (nameLeft + nameRight) / 2, FOLDER_Y + 6, folderHidden ? HIDDEN : 0xFFFFFFFF);
 		EditBox box = this.search;
 		if (box != null) {
-			ScreenArt.sprite(graphics, box.isFocused() ? ScreenArt.TEXT_FIELD_FOCUSED : ScreenArt.TEXT_FIELD, left, SEARCH_Y, SEARCH_WIDTH, 20);
+			ScreenArt.sprite(graphics, box.isFocused() ? ScreenArt.TEXT_FIELD_FOCUSED : ScreenArt.TEXT_FIELD, left, SEARCH_Y, this.searchWidth, 20);
 			ScreenArt.sprite(graphics, ScreenArt.SEARCH, left + 4, SEARCH_Y + 4, 12, 12);
 			if (box.getValue().isEmpty()) {
-				graphics.text(this.font, Component.translatable("diorama.waypoints.search"), left + 20, SEARCH_Y + 6, SEARCH_HINT, false);
+				// Cut short in a language whose button labels leave the box narrower.
+				graphics.text(this.font, this.fit(Component.translatable("diorama.waypoints.search").getString(), this.searchWidth - 24), left + 20, SEARCH_Y + 6, SEARCH_HINT, false);
 			}
 		}
 		ScreenArt.list(graphics, 0, LIST_TOP, this.width, this.listBottom);
@@ -582,6 +704,11 @@ public final class WaypointListScreen extends Screen {
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
+				double distance = viewer == null || store == null ? Double.NaN : this.distance(store, here, viewer, waypoint);
+				if (!Double.isNaN(distance)) {
+					// Shown here too: how far its spot here is.
+					detail = Math.round(distance) + " m · " + detail;
+				}
 			} else if (viewer != null) {
 				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
 			}
@@ -825,7 +952,7 @@ public final class WaypointListScreen extends Screen {
 			return true;
 		}
 		EditBox box = this.search;
-		if (box != null && x >= left && x < left + SEARCH_WIDTH && y >= SEARCH_Y && y < SEARCH_Y + 20) {
+		if (box != null && x >= left && x < left + this.searchWidth && y >= SEARCH_Y && y < SEARCH_Y + 20) {
 			this.setFocused(box);
 			return true;
 		}
@@ -906,10 +1033,20 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store != null) {
-			store.setVisible(waypoint, !waypoint.visible);
+		if (store == null) {
+			return;
 		}
-		this.placeRowButtons();
+		store.setVisible(waypoint, !waypoint.visible);
+		// Hidden waypoints go last, as in Xaero's: the row moves, and the list follows it so the row
+		// and its buttons stay in view.
+		this.resort(store);
+		this.filter();
+		int index = this.rows.indexOf(waypoint);
+		if (index >= 0 && index < this.scroll) {
+			this.scrollTo(index);
+		} else if (index >= this.scroll + this.visibleRows) {
+			this.scrollTo(index - this.visibleRows + 1);
+		}
 	}
 
 	private void delete(@Nullable Waypoint waypoint) {
@@ -929,6 +1066,19 @@ public final class WaypointListScreen extends Screen {
 		this.minecraft.gui.setScreen(null);
 	}
 
+	//? if >=1.21 {
+	@Override
+	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		super.extractRenderState(graphics, mouseX, mouseY, a);
+		this.drawSortCaret(graphics);
+	}
+	//?}
+
+	/** The sort direction's button, which has a caret for a label. For tests. */
+	public @Nullable Button sortDirection() {
+		return this.sortDirection;
+	}
+
 	/** The waypoint whose row is selected, or null. For tests. */
 	public @Nullable Waypoint selected() {
 		return this.selected;
@@ -939,7 +1089,7 @@ public final class WaypointListScreen extends Screen {
 		return this.folders.isEmpty() ? "" : this.folder().name().getString();
 	}
 
-	/** The rows the search lets through, nearest first. For tests. */
+	/** The rows the search lets through, in the sort order. For tests. */
 	public List<Waypoint> shown() {
 		return List.copyOf(this.rows);
 	}

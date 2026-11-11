@@ -185,8 +185,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("pin-names")) {
 				PinNamesTest.run(context, world);
 			}
+			if (tests.contains("death-pins")) {
+				DeathPinsTest.run(context, world);
+			}
 			if (tests.contains("waypoint-preview")) {
 				WaypointPreviewTest.run(context, world);
+			}
+			if (tests.contains("cross-dimension")) {
+				CrossDimensionTest.run(context, world);
+			}
+			if (tests.contains("waypoint-sort")) {
+				WaypointSortTest.run(context, world);
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
@@ -229,6 +238,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("enlarge")) {
 				enlarge(context);
+			}
+			if (tests.contains("minimap-position")) {
+				MinimapPositionTest.run(context, world);
 			}
 			if (tests.contains("minimap-frames")) {
 				MinimapFrameTest.run(context, world);
@@ -350,6 +362,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("real-server")) {
 			ShareTest.realServer(context);
+		}
+		if (tests.contains("server-locks")) {
+			ServerLocksTest.run(context);
+		}
+		if (tests.contains("server-locks-old-server")) {
+			ServerLocksTest.oldServer(context);
 		}
 		if (tests.contains("shared-map-real")) {
 			SharedMapRealTest.run(context);
@@ -1161,7 +1179,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Moves to a widget and clicks it with the mouse. */
-	private static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+	static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		moveCursor(context, (widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale);
 		holdFrames(context, 6);
@@ -3838,7 +3856,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.setScreen(() -> null);
 
-		// Dying leaves a death marker.
+		// Dying leaves a death marker. Respawning may land within reach of it: death-pins tests that.
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = false);
 		world.getServer().runCommand("gamerule show_death_messages false");
 		world.getServer().runCommand("kill @a");
 		context.waitTicks(20);
@@ -3858,6 +3877,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(40);
 		long deathsAfter = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH).count());
 		world.getServer().runCommand("gamerule immediate_respawn false");
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = true);
 		if (deathsAfter != deathsBefore + 1) {
 			throw new AssertionError("Instant respawn left " + (deathsAfter - deathsBefore) + " new death markers instead of 1");
 		}
@@ -5156,7 +5176,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	private static void openMapOnPlayer(ClientGameTestContext context) {
+	static void openMapOnPlayer(ClientGameTestContext context) {
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		settle(context, 20);
@@ -5200,7 +5220,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Right-clicks the pin of the waypoint at a position. */
-	private static void rightClickPin(ClientGameTestContext context, int[] pos) {
+	static void rightClickPin(ClientGameTestContext context, int[] pos) {
 		double[] at = context.computeOnClient(mc -> {
 			double scale = mc.getWindow().getGuiScale();
 			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
@@ -5255,7 +5275,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks a line of the map's right-click menu with the mouse, the way a player would. */
-	private static void clickMenu(ClientGameTestContext context, String label) {
+	static void clickMenu(ClientGameTestContext context, String label) {
 		double[] at = context.computeOnClient(mc -> {
 			MapMenu menu = mc.gui.screen() instanceof MapScreen map ? map.menu() : null;
 			if (menu == null) {
@@ -5281,7 +5301,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static int menuFrames;
 
 	/** Moves the cursor, gliding there a frame at a time when GIF frames are wanted. */
-	private static void moveCursor(ClientGameTestContext context, double x, double y) {
+	static void moveCursor(ClientGameTestContext context, double x, double y) {
 		int steps = MENU_GIF ? 10 : 1;
 		double[] from = cursor;
 		for (int i = 1; i <= steps; i++) {
@@ -5295,7 +5315,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(1);
 	}
 
-	private static void menuFrame(ClientGameTestContext context) {
+	static void menuFrame(ClientGameTestContext context) {
 		if (MENU_GIF) {
 			context.takeScreenshot(String.format("map-menu-gif-%03d-%d-%d", menuFrames++, Math.round(cursor[0]), Math.round(cursor[1])));
 		}
@@ -5579,7 +5599,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks the middle of a widget with the mouse, the way a player does. */
-	private static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+	static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double[] at = context.computeOnClient(mc -> {
 			double scale = mc.getWindow().getGuiScale();
 			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
@@ -5590,7 +5610,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks the left mouse button at a point given in GUI pixels. */
-	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+	static void clickAtGui(ClientGameTestContext context, double x, double y) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		context.getInput().setCursorPos(x * scale, y * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
@@ -5624,7 +5644,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(3);
 	}
 
-	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
+	static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
 				return button;
@@ -5734,7 +5754,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
 	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
-	 * to its size.
+	 * to its size. With Toggle enlarging on (#306), one press enlarges it until the next press, through
+	 * a screen opening and closing.
 	 */
 	private static void enlarge(ClientGameTestContext context) {
 		context.setScreen(() -> null);
@@ -5780,7 +5801,44 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 10);
 		context.takeScreenshot("enlarge-06-settings");
 		context.setScreen(() -> null);
+		context.runOnClient(mc -> Settings.get().minimapEnlargeToggle = true);
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 40);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged() && !DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("One press with Toggle enlarging on didn't leave the minimap enlarged");
+		}
+		context.takeScreenshot("enlarge-07-toggled-on");
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 5);
+		context.setScreen(() -> null);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Opening and closing a screen shrank the toggled minimap");
+		}
+		context.takeScreenshot("enlarge-08-toggled-after-screen");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("A second press with Toggle enlarging on didn't shrink the minimap");
+		}
+		context.takeScreenshot("enlarge-09-toggled-off");
+		// Held past the key repeat delay, a keyboard keeps clicking: that's still one press.
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		for (int i = 0; i < 5; i++) {
+			context.runOnClient(mc -> net.minecraft.client.KeyMapping.click(InputConstants.getKey("key.keyboard.z")));
+			context.waitTicks(1);
+		}
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Key repeats while holding the enlarge key switched the toggled minimap back");
+		}
+		context.takeScreenshot("enlarge-10-toggled-held");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
 		context.runOnClient(mc -> {
+			Settings.get().minimapEnlargeToggle = false;
 			Settings.get().minimapEnlarged = saved[0];
 			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
 			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
@@ -6450,10 +6508,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

@@ -1,9 +1,11 @@
 package dev.diorama.waypoint;
 
+import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.UUID;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 
@@ -47,7 +49,9 @@ public final class Waypoint {
 	 */
 	public static final String BED_NAME = "Bed";
 	private static final DateTimeFormatter DEATH_TIME = DateTimeFormatter.ofPattern("HH:mm");
-	private static final Pattern DEATH_NAME = Pattern.compile("Death (\\d\\d:\\d\\d)");
+	private static final Pattern DEATH_NAME = Pattern.compile("Death \\d\\d:\\d\\d");
+	/** When a death pin shows it was made: date and time, the way the computer writes them. */
+	private static final DateTimeFormatter DEATH_DATE = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT);
 
 	/** The most letters a pin's initials can have; the pin's head widens to hold more than two. */
 	public static final int MAX_INITIALS = 4;
@@ -74,6 +78,11 @@ public final class Waypoint {
 	public boolean deleted;
 	/** A portal pin the player renamed or moved: it's theirs now, and stays when the portal goes. */
 	public boolean edited;
+	/**
+	 * Set on a copy standing in for this waypoint in another dimension, at that dimension's
+	 * coordinates ({@link WaypointStore#shownIn}): the waypoint itself. Never saved.
+	 */
+	public transient @org.jspecify.annotations.Nullable Waypoint original;
 
 	public Waypoint() {
 	}
@@ -88,18 +97,69 @@ public final class Waypoint {
 		this.color = color;
 	}
 
+	/** The waypoint itself: for a copy shown in another dimension, the one it stands in for. */
+	public Waypoint source() {
+		return this.original != null ? this.original : this;
+	}
+
+	/**
+	 * A copy of this waypoint for a dimension where one block is {@code divider} of this one's, as a
+	 * portal would take the player: the Overworld's waypoints stand in the Nether at an eighth of
+	 * their x and z. The height stays, as in Xaero's Minimap. Faded, so it doesn't pass for one of
+	 * that dimension's own. Made in {@code reuse} when given: a new waypoint costs a random UUID,
+	 * several microseconds, and the maps and the world ask for the copies every frame.
+	 */
+	Waypoint scaled(double divider, @org.jspecify.annotations.Nullable Waypoint reuse) {
+		Waypoint copy = reuse != null ? reuse : new Waypoint();
+		copy.id = this.id;
+		copy.name = this.name;
+		copy.initials = this.initials;
+		copy.icon = this.icon;
+		copy.x = (int) Math.floor(this.x / divider);
+		copy.y = this.y;
+		copy.z = (int) Math.floor(this.z / divider);
+		copy.dimension = this.dimension;
+		int alpha = this.color >>> 24 == 0 ? 0xFF : this.color >>> 24;
+		copy.color = Math.max(1, alpha * 3 / 5) << 24 | this.color & 0xFFFFFF;
+		copy.visible = this.visible;
+		copy.folder = this.folder;
+		copy.kind = this.kind;
+		copy.created = this.created;
+		copy.map = this.map;
+		copy.deleted = this.deleted;
+		copy.edited = this.edited;
+		copy.original = this;
+		return copy;
+	}
+
 	/** Whether the player can edit or delete it here: everything but waystones, which Waystones owns. */
 	public boolean editable() {
 		return this.kind != Kind.WAYSTONE;
 	}
 
-	/** The saved name of a death pin made at {@code time}. */
+	/**
+	 * The saved name of a death pin made at {@code time}. It shows with the date as well
+	 * ({@link #deathDate}), from {@link #created}; the saved name keeps only the time, as it always has.
+	 */
 	public static String deathName(LocalTime time) {
 		return "Death " + time.format(DEATH_TIME);
 	}
 
-	/** The name to show: an automatic pin's own name in the player's language, otherwise the saved one. */
+	/** The date and time a death pin made at {@code millis} shows in its name. */
+	public static String deathDate(long millis) {
+		String date = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DEATH_DATE);
+		// Java puts no-break spaces in some formats (before "PM", say), which the game's font may lack.
+		return date.replace(' ', ' ').replace(' ', ' ');
+	}
+
+	/**
+	 * The name to show: an automatic pin's own name in the player's language, otherwise the saved
+	 * one. A copy shown in another dimension says whose it is: "Home (Overworld)".
+	 */
 	public String shownName() {
+		if (this.original != null) {
+			return Component.translatable("diorama.waypoint.from_dimension", this.original.shownName(), Waypoints.dimensionName(this.dimension)).getString();
+		}
 		switch (this.kind) {
 			case BED -> {
 				// The Bed icon's name, which every language already has.
@@ -108,9 +168,8 @@ public final class Waypoint {
 				}
 			}
 			case DEATH -> {
-				Matcher time = DEATH_NAME.matcher(this.name);
-				if (time.matches()) {
-					return Component.translatable("diorama.waypoint.death", time.group(1)).getString();
+				if (DEATH_NAME.matcher(this.name).matches()) {
+					return Component.translatable("diorama.waypoint.death", deathDate(this.created)).getString();
 				}
 			}
 			case NETHER_PORTAL, END_PORTAL, END_GATEWAY -> {

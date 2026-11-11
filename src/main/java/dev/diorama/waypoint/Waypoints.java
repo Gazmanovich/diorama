@@ -159,6 +159,36 @@ public final class Waypoints {
 		return true;
 	}
 
+	/** How close the player has to come back to a death marker to remove it: Xaero's Minimap's distance. */
+	public static final double DEATH_REACHED = 4;
+	/** A new death marker is left alone this long, as in Xaero's Minimap, so respawning on the spot doesn't take it at once. */
+	private static final long DEATH_GRACE_MS = 5000;
+
+	/**
+	 * Removes the death markers the player has come back to, unless they hid them: those in their
+	 * dimension on the map in use. Called every tick.
+	 */
+	public static void watchDeaths(Minecraft mc) {
+		LocalPlayer player = mc.player;
+		// While the death screen is up, the player still stands where they died. With any screen open
+		// it waits, so a pin doesn't go from under its editor or the waypoint list.
+		if (player == null || !player.isAlive() || mc.gui.screen() != null || !Settings.get().removeReachedDeaths) {
+			return;
+		}
+		WaypointStore store = WaypointStore.get();
+		String dimension = dimension();
+		if (store == null || dimension == null) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		for (Waypoint waypoint : store.all()) {
+			if (waypoint.kind == Waypoint.Kind.DEATH && waypoint.dimension.equals(dimension) && now - waypoint.created > DEATH_GRACE_MS
+				&& store.shown(waypoint) && waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) < DEATH_REACHED) {
+				store.remove(waypoint);
+			}
+		}
+	}
+
 	/** Adds a death marker where the player stands. Called when the server reports their death. */
 	public static void died(LocalPlayer player) {
 		if (!Settings.get().deathMarkers) {

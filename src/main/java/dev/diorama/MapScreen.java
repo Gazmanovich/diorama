@@ -189,7 +189,7 @@ public final class MapScreen extends Screen {
 	private int layerOnOpening() {
 		MapSession session = MapSession.get();
 		Entity viewer = MapSession.viewer();
-		return session != null && viewer != null && Settings.get().autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
+		return session != null && viewer != null && Settings.get().autoCaves && ServerRules.caveMapsAllowed() ? session.autoLayer(viewer) : TileKey.SURFACE;
 	}
 
 	@Override
@@ -327,7 +327,7 @@ public final class MapScreen extends Screen {
 			this.closeOtherMap();
 			this.otherMap = new OtherMap(folder, MapStyle.get(), Projection.facing(), MapLevel.saved(folder));
 		}
-		this.otherMap.map().setFogOfWar(ServerRules.fogOfWar(other.equals("minecraft:the_nether")));
+		this.otherMap.map().setFogOfWar(ServerRules.fogOfWar(other.equals("minecraft:the_nether"), this.otherMap.map().roofless()));
 		return this.otherMap.map();
 	}
 
@@ -352,7 +352,7 @@ public final class MapScreen extends Screen {
 		return dimensionScale(here) / dimensionScale(this.dimension());
 	}
 
-	private static double dimensionScale(String dimension) {
+	public static double dimensionScale(String dimension) {
 		return dimension.equals("minecraft:the_nether") ? NETHER_SCALE : 1;
 	}
 
@@ -498,7 +498,7 @@ public final class MapScreen extends Screen {
 			hovered = Radar.under(this.blips, mouseX, mouseY);
 		}
 		WaypointStore store = WaypointStore.get();
-		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.in(this.dimension()));
+		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.shownIn(this.dimension()));
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Radar.draw(graphics, view, this.blips, true, true);
@@ -839,7 +839,7 @@ public final class MapScreen extends Screen {
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
 			if (pin != null && pin.waypoint().editable()) {
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint(), false));
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
 			} else if (pin != null) {
 				// A waystone can't be edited here: its menu instead.
 				this.openMenu(x, y);
@@ -984,10 +984,16 @@ public final class MapScreen extends Screen {
 		return items;
 	}
 
-	private List<MapMenu.Item> waypointItems(Waypoint waypoint) {
+	/**
+	 * A pin's menu. For another dimension's waypoint shown on this map, the name, position and
+	 * copied coordinates are the pin's, here; everything else acts on the waypoint itself, so
+	 * Teleport takes the player to it in its own dimension, as Xaero's Minimap does.
+	 */
+	private List<MapMenu.Item> waypointItems(Waypoint shown) {
+		Waypoint waypoint = shown.source();
 		List<MapMenu.Item> items = new ArrayList<>();
-		items.add(MapMenu.Item.title(Component.literal(waypoint.shownName())));
-		items.add(MapMenu.Item.info(this.where(waypoint.x, waypoint.y, waypoint.z)));
+		items.add(MapMenu.Item.title(Component.literal(shown.shownName())));
+		items.add(MapMenu.Item.info(this.where(shown.x, shown.y, shown.z)));
 		if (waypoint.editable()) {
 			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
 				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
@@ -996,7 +1002,7 @@ public final class MapScreen extends Screen {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
 		}));
-		items.add(this.copyItem(waypoint.x + " " + waypoint.y + " " + waypoint.z));
+		items.add(this.copyItem(shown.x + " " + shown.y + " " + shown.z));
 		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
@@ -1197,7 +1203,7 @@ public final class MapScreen extends Screen {
 	/** Between the surface and the slice at the player's feet, as C and the tabs do. */
 	private void toggleCaves() {
 		this.menu = null;
-		if (this.otherDimension != null) {
+		if (this.otherDimension != null || !ServerRules.caveMapsAllowed()) {
 			return;
 		}
 		this.gauge.cancel();
@@ -1213,7 +1219,7 @@ public final class MapScreen extends Screen {
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
-		if (this.otherDimension != null) {
+		if (this.otherDimension != null || !ServerRules.caveMapsAllowed()) {
 			return;
 		}
 		if (this.layer == TileKey.SURFACE) {
@@ -1302,9 +1308,12 @@ public final class MapScreen extends Screen {
 		this.tabsEnd = x;
 	}
 
-	/** How many tabs show: cave slices aren't saved, so another dimension's map has only Surface. */
+	/**
+	 * How many tabs show: cave slices aren't saved, so another dimension's map has only Surface, as
+	 * does a server that turns cave maps off.
+	 */
 	private int tabs() {
-		return this.otherDimension == null ? 2 : 1;
+		return this.otherDimension == null && ServerRules.caveMapsAllowed() ? 2 : 1;
 	}
 
 	/** The tab under a point: 0 Surface, 1 Caves, -1 neither. */
@@ -1710,7 +1719,10 @@ public final class MapScreen extends Screen {
 	 * so climbing past a slice edge doesn't swap a map for fog.
 	 */
 	private void followLayer(MapSession session, Entity viewer) {
-		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves) {
+		if (!ServerRules.caveMapsAllowed()) {
+			this.layer = TileKey.SURFACE;
+		}
+		if (this.layerPicked || this.otherDimension != null || !Settings.get().autoCaves || !ServerRules.caveMapsAllowed()) {
 			this.followHoldStart = -1;
 			return;
 		}
