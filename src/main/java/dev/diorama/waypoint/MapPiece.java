@@ -422,7 +422,7 @@ final class MapPiece {
 			this.closeSaved();
 			this.saved = new SavedMap(folder, MapStyle.get(), MapLevel.saved(folder));
 		}
-		this.saved.map().setFogOfWar(ServerRules.fogOfWar(dimension.equals("minecraft:the_nether")));
+		this.saved.map().setFogOfWar(ServerRules.fogOfWar(dimension.equals("minecraft:the_nether"), this.saved.map().roofless()));
 		return this.saved.map();
 	}
 

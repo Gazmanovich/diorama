@@ -357,6 +357,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("real-server")) {
 			ShareTest.realServer(context);
 		}
+		if (tests.contains("server-locks")) {
+			ServerLocksTest.run(context);
+		}
+		if (tests.contains("server-locks-old-server")) {
+			ServerLocksTest.oldServer(context);
+		}
 		if (tests.contains("shared-map-real")) {
 			SharedMapRealTest.run(context);
 		}

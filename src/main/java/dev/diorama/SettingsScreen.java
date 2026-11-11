@@ -81,7 +81,7 @@ public final class SettingsScreen extends Screen {
 		minimap.toggle("compass", () -> s.compass, v -> s.compass = v);
 		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
 		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
-		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
+		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v, ServerRules.caveMapsAllowed() ? null : false);
 		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
 		minimap.toggle("legible_caves", () -> s.legibleCaves, v -> s.legibleCaves = v);
 		minimap.toggle("enlarge_toggle", () -> s.minimapEnlargeToggle, v -> s.minimapEnlargeToggle = v);
@@ -110,8 +110,9 @@ public final class SettingsScreen extends Screen {
 		minimap.lastTwoSideBySide();
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
-		radar.toggle("radar_minimap", () -> s.radarOnMinimap, v -> s.radarOnMinimap = v);
-		radar.toggle("radar_map", () -> s.radarOnMap, v -> s.radarOnMap = v);
+		Boolean radarSet = ServerRules.radarAllowed() ? null : false;
+		radar.toggle("radar_minimap", () -> s.radarOnMinimap, v -> s.radarOnMinimap = v, radarSet);
+		radar.toggle("radar_map", () -> s.radarOnMap, v -> s.radarOnMap = v, radarSet);
 		radar.toggle("players", () -> s.radarPlayers, v -> s.radarPlayers = v);
 		radar.toggle("hostile", () -> s.radarHostile, v -> s.radarHostile = v);
 		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
@@ -168,7 +169,7 @@ public final class SettingsScreen extends Screen {
 		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
 		look.choice("day_night", Settings.DayNight.values(), () -> s.dayNight, v -> s.dayNight = v);
 		look.toggle("rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
-		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
+		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v, ServerRules.fogOfWarForced() ? true : null);
 		look.toggle("saved_chunks", () -> s.mapSavedChunks, v -> s.mapSavedChunks = v);
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
@@ -248,16 +249,27 @@ public final class SettingsScreen extends Screen {
 		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
 		private final java.util.Set<AbstractWidget> tripled = new java.util.HashSet<>();
 		private final java.util.Set<AbstractWidget> headings = new java.util.HashSet<>();
+		/** Whether the tab says which of its settings the server sets. */
+		private boolean serverNoted;
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
 		}
 
 		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set) {
+			this.toggle(key, get, set, null);
+		}
+
+		/**
+		 * A checkbox; with {@code serverSet}, the value the server decides, greyed out at that value.
+		 * The player's own setting stays as saved, for when they leave.
+		 */
+		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set, @Nullable Boolean serverSet) {
 			int column = (CONTENT - COLUMN_GAP) / 2;
+			boolean shown = serverSet != null ? serverSet : get.getAsBoolean();
 			//? if >=1.21 {
 			Checkbox checkbox = Checkbox.builder(Component.translatable("diorama.settings." + key), SettingsScreen.this.font)
-				.selected(get.getAsBoolean())
+				.selected(shown)
 				.maxWidth(column)
 				.onValueChange((box, value) -> {
 					set.accept(value);
@@ -268,7 +280,7 @@ public final class SettingsScreen extends Screen {
 			/*// 1.20.1's checkbox has no builder and tells no one it changed. It's a 20 pixel box with
 			// the label 4 pixels right of it, as wide as both, and no wider than the column.
 			Component label = Component.translatable("diorama.settings." + key);
-			Checkbox checkbox = new Checkbox(0, 0, Math.min(24 + SettingsScreen.this.font.width(label), column), 20, label, get.getAsBoolean()) {
+			Checkbox checkbox = new Checkbox(0, 0, Math.min(24 + SettingsScreen.this.font.width(label), column), 20, label, shown) {
 				@Override
 				public void onPress() {
 					super.onPress();
@@ -278,7 +290,19 @@ public final class SettingsScreen extends Screen {
 			};
 			*///?}
 			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
-			checkbox.setTooltip(tooltip(key));
+			checkbox.setTooltip(serverSet == null ? tooltip(key) : Tooltip.create(Component.empty().append(serverSetLine(false)).append("\n\n")
+				.append(Component.translatable("diorama.settings." + key + ".tooltip"))));
+			if (serverSet != null) {
+				checkbox.active = false;
+				checkbox.setAlpha(0.5F);
+				if (!this.serverNoted) {
+					this.serverNoted = true;
+					// First of the wide ones, so it's the line under the checkboxes.
+					StringWidget note = new StringWidget(serverSetLine(true), SettingsScreen.this.font);
+					this.headings.add(note);
+					this.wide.add(0, note);
+				}
+			}
 			this.checkboxes.add(checkbox);
 		}
 
@@ -417,6 +441,16 @@ public final class SettingsScreen extends Screen {
 				Settings.get().save();
 			}
 		}
+	}
+
+	/**
+	 * Says who set a greyed-out setting: the server the player is on, or in singleplayer the file a
+	 * modpack ships, which the player can change. As the tab's {@code note} or a tooltip's first line.
+	 */
+	private static Component serverSetLine(boolean note) {
+		boolean file = net.minecraft.client.Minecraft.getInstance().hasSingleplayerServer();
+		return Component.translatable("diorama.settings." + (note ? "server_note" : "server_set") + (file ? "_file" : ""))
+			.withStyle(net.minecraft.ChatFormatting.GRAY);
 	}
 
 	private static Tooltip tooltip(String key) {
