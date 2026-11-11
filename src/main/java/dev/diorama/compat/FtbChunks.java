@@ -52,7 +52,18 @@ public final class FtbChunks {
 	private static Method clientManager;
 	private static Method teamById;
 
+	/** No one's: the team the server sends for an unclaimed chunk, or one the player may not see. */
+	private static final UUID NO_TEAM = new UUID(0, 0);
+
 	private FtbChunks() {
+	}
+
+	/** An FTB team, as the owner of the chunks it claims. */
+	public record Team(UUID id) implements Claims.Owner {
+		@Override
+		public @Nullable Optional<Claims.Claim> look() {
+			return team(this.id);
+		}
 	}
 
 	public static boolean installed() {
@@ -143,7 +154,9 @@ public final class FtbChunks {
 			Object chunk = taskChunk.get(task);
 			@SuppressWarnings("unchecked")
 			ResourceKey<Level> key = (ResourceKey<Level>) dimensionKey.get(dimension);
-			Claims.updated(key, chunkX.getInt(chunk), chunkZ.getInt(chunk), (UUID) taskTeam.get(task), chunkForceLoaded.getBoolean(chunk));
+			UUID team = (UUID) taskTeam.get(task);
+			Team owner = team == null || team.equals(NO_TEAM) ? null : new Team(team);
+			Claims.updated(key, chunkX.getInt(chunk), chunkZ.getInt(chunk), Team.class, owner, chunkForceLoaded.getBoolean(chunk));
 		} catch (InvocationTargetException e) {
 			// FTB Chunks itself threw: skip this update, as it would have.
 			Diorama.LOGGER.debug("FTB Chunks couldn't give a chunk's claim", e);
@@ -183,7 +196,7 @@ public final class FtbChunks {
 		UUID id = (UUID) teamId.invoke(team);
 		Object colour = getProperty.invoke(team, colorProperty);
 		Object name = getProperty.invoke(team, nameProperty);
-		return new Claims.Claim(id, colour == null ? 0xFFFFFF : (int) rgb.invoke(colour) & 0xFFFFFF, name instanceof String s ? s : "", false);
+		return new Claims.Claim(new Team(id), colour == null ? 0xFFFFFF : (int) rgb.invoke(colour) & 0xFFFFFF, name instanceof String s ? s : "", false, false);
 	}
 
 	private static void fail(Throwable e) {
