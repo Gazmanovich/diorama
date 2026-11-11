@@ -91,6 +91,7 @@ public final class DioramaClient {
 		Waystones.start();
 		MapSession.tick(mc);
 		Waypoints.watchSleep(mc);
+		Waypoints.watchDeaths(mc);
 		Claims.tick(mc);
 		XaeroNotice.tick(mc);
 		while (OPEN_MAP.consumeClick()) {

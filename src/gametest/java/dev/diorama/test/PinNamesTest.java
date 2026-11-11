@@ -23,7 +23,11 @@ final class PinNamesTest {
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		russianPack(context);
-		context.runOnClient(mc -> Settings.get().portalMarkers = true);
+		// The player respawns by the bed, which may be within reach of the death pin.
+		context.runOnClient(mc -> {
+			Settings.get().portalMarkers = true;
+			Settings.get().removeReachedDeaths = false;
+		});
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		IconWaypointsTest.sleep(context, world, at.offset(3, 0, 0));
 
@@ -55,8 +59,7 @@ final class PinNamesTest {
 		Waypoint death = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH && !before.contains(w.id)).findFirst().orElseThrow());
 		Waypoint portal = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> mine(w, Waypoint.Kind.NETHER_PORTAL, x, z)).findFirst().orElseThrow());
 		expectShown(context, bed, "Кровать");
-		String time = context.computeOnClient(mc -> death.name.substring("Death ".length()));
-		expectShown(context, death, "Смерть " + time);
+		expectShown(context, death, "Смерть " + Waypoint.deathDate(death.created));
 		// Made in English, the portal's pin now reads the game's Russian name for the block.
 		String russianPortal = context.computeOnClient(mc -> net.minecraft.world.level.block.Blocks.NETHER_PORTAL.getName().getString());
 		if (russianPortal.equals("Nether Portal")) {
@@ -84,7 +87,10 @@ final class PinNamesTest {
 		expectShown(context, death, "Lava lake");
 		expectShown(context, portal, "Nether Portal");
 		DioramaClientTest.reloadPacks(context, mc -> mc.getResourcePackRepository().removePack("file/" + PACK));
-		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+		context.runOnClient(mc -> {
+			Settings.get().portalMarkers = false;
+			Settings.get().removeReachedDeaths = true;
+		});
 
 		// Gone again, for the sections after this one, which count pins.
 		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
