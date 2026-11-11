@@ -220,7 +220,7 @@ final class WaypointBeamsTest {
 			double y = waypoint.y + 1.0 + up;
 			float[] screen = context.computeOnClient(mc -> WorldProjection.project(waypoint.x + 0.5, y, waypoint.z + 0.5, shot.getWidth(), shot.getHeight()));
 			if (screen != null && screen[0] >= 0 && screen[1] >= 0 && screen[0] < shot.getWidth() && screen[1] < shot.getHeight()) {
-				points.add(new int[] {Math.round(screen[0]), Math.round(screen[1])});
+				points.add(new int[] {Math.min(shot.getWidth() - 1, Math.round(screen[0])), Math.min(shot.getHeight() - 1, Math.round(screen[1]))});
 			}
 		}
 		if (points.size() < 4) {

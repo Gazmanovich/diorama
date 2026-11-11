@@ -1,6 +1,7 @@
 package dev.diorama;
 
 import dev.diorama.render.Pins;
+import dev.diorama.render.TextSize;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -102,8 +103,10 @@ public final class SettingsScreen extends Screen {
 		int opacities = (Settings.MAX_OPACITY - Settings.MIN_OPACITY) / Settings.OPACITY_STEP + 1;
 		minimap.slider("opacity", (Settings.snapOpacity(s.minimapOpacity) - Settings.MIN_OPACITY) / Settings.OPACITY_STEP, opacities,
 			i -> s.minimapOpacity = Settings.MIN_OPACITY + i * Settings.OPACITY_STEP, i -> Component.literal((Settings.MIN_OPACITY + i * Settings.OPACITY_STEP) + "%"));
-		// Beside Zoom, so the tab doesn't grow: it has no room for another row on a small screen.
-		minimap.lastTwoSideBySide();
+		int[] textSizes = TextSize.sizes();
+		minimap.slider("text_size", nearestIndex(textSizes, s.minimapTextSize), textSizes.length, i -> s.minimapTextSize = textSizes[i], i -> Component.literal(textSizes[i] + "%"));
+		// Three to a row, so the tab doesn't grow: it has no room for another row on a small screen.
+		minimap.lastThreeSideBySide();
 		// Side by side, so the tab stays short enough for a small screen.
 		minimap.choice("shape", Settings.Shape.values(), () -> s.minimapShape, v -> s.minimapShape = v);
 		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
@@ -473,7 +476,7 @@ public final class SettingsScreen extends Screen {
 		return Component.empty().append(name).append(": ").append(value);
 	}
 
-	/** Where in {@code values}, ascending, the one nearest {@code value} is; halfway rounds up, as {@code Pins.scale} does. */
+	/** Where in {@code values}, ascending, the one nearest {@code value} is; halfway rounds up, as {@code Pins.scale} and {@code TextSize.scale} do. */
 	private static int nearestIndex(int[] values, int value) {
 		int nearest = 0;
 		for (int i = 1; i < values.length; i++) {

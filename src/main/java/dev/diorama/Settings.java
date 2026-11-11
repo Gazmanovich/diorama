@@ -87,6 +87,12 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public GameTime gameTime = GameTime.OFF;
+	/**
+	 * How big the compass letters and the lines under the minimap are, in percent of the game's own
+	 * text: {@link #MIN_TEXT_SIZE} to {@link #MAX_TEXT_SIZE}. {@code TextSize.scale} rounds it to
+	 * whole screen pixels.
+	 */
+	public int minimapTextSize = 100;
 	/** Whether the sky view is drawn by day, at night, or as the world's time has it; see {@code NightLook}. */
 	public DayNight dayNight = DayNight.FOLLOW;
 	public boolean autoCaves = true;
@@ -282,6 +288,13 @@ public final class Settings {
 	public static final int SCALE_STEP = 25;
 
 	public static final int MIN_WAYPOINT_SIZE = 25;
+
+	public static final int MIN_TEXT_SIZE = 25;
+	public static final int MAX_TEXT_SIZE = 400;
+
+	private static int clampTextSize(int size) {
+		return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, size));
+	}
 
 	private static int clampWaypointSize(int size) {
 		return Math.max(MIN_WAYPOINT_SIZE, Math.min(MAX_SCALE, size));
@@ -505,6 +518,7 @@ public final class Settings {
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
+		settings.minimapTextSize = clampTextSize(settings.minimapTextSize);
 		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
