@@ -97,11 +97,13 @@ final class WaypointBeamsTest {
 
 		// From close by a beam fades, and is gone at the waypoint; looking up one, it narrows into the sky.
 		for (int away : new int[] {20, 8, 5, 2}) {
-			stand(world, home.x, home.y + 2, home.z + away, 0);
+			// On whatever is there, a tree's top if it comes to that: never inside one.
+			String spot = "tp @a " + (home.x + 0.5) + " " + (surface(context, home.x, home.z + away) + 1) + " " + (home.z + away + 0.5) + " 180 ";
+			world.getServer().runCommand(spot + "0");
 			context.waitTicks(220);
 			context.takeScreenshot("beams-near-" + away);
 			if (away == 8) {
-				stand(world, home.x, home.y + 2, home.z + away, -55);
+				world.getServer().runCommand(spot + "-55");
 				context.waitTicks(220);
 				context.takeScreenshot("beams-look-up");
 			}
