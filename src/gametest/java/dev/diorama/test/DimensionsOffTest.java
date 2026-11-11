@@ -110,6 +110,14 @@ final class DimensionsOffTest {
 		DioramaClientTest.settle(context, 60);
 		DioramaClientTest.openMapOnPlayer(context);
 		context.takeScreenshot("dimensions-off-9-overworld-map");
+		if (mapDimensions(context).contains(NETHER)) {
+			throw new AssertionError("The map offers the Nether's saved map, where the map is off: " + mapDimensions(context));
+		}
+		// On again, its saved map is one the dimension button steps to.
+		context.runOnClient(mc -> Settings.get().mapOffDimensions.clear());
+		if (!mapDimensions(context).contains(NETHER)) {
+			throw new AssertionError("The Nether was mapped while on, but the map doesn't offer it: " + mapDimensions(context));
+		}
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
 			Settings.get().mapOffDimensions.clear();
@@ -207,6 +215,20 @@ final class DimensionsOffTest {
 			throw new AssertionError("The map key should say \"" + message + "\", not \"" + said + "\"");
 		}
 		context.takeScreenshot(screenshot);
+	}
+
+	/** The dimensions the open map's dimension button steps through. */
+	@SuppressWarnings("unchecked")
+	private static java.util.List<String> mapDimensions(ClientGameTestContext context) {
+		return context.computeOnClient(mc -> {
+			try {
+				java.lang.reflect.Method method = dev.diorama.MapScreen.class.getDeclaredMethod("dimensions");
+				method.setAccessible(true);
+				return (java.util.List<String>) method.invoke(mc.gui.screen());
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError(e);
+			}
+		});
 	}
 
 	/** The visible widget of the open screen with this label. */
