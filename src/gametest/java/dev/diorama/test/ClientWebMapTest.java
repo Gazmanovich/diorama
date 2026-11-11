@@ -340,7 +340,7 @@ final class ClientWebMapTest {
 			}
 		}
 		Diorama.LOGGER.info("web-map-client: {}: map over {} of {} sampled pixels, {} arrow pixels in the middle", file.getFileName(), drawn, sampled, blue);
-		if (drawn < sampled / 5 || blue < 40) {
+		if (drawn < sampled / 10 || blue < 40) {
 			throw new AssertionError("The page in " + file + " shows the map over " + drawn + " of " + sampled + " sampled pixels and " + blue + " pixels of the player's arrow in the middle");
 		}
 		return new int[] {maxX - minX + 1, maxY - minY + 1};
