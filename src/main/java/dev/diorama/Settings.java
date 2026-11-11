@@ -193,6 +193,23 @@ public final class Settings {
 	/** Where land claims from FTB Chunks or Open Parties and Claims show, when one is installed. */
 	public ClaimsShown claims = ClaimsShown.ALWAYS;
 
+	/**
+	 * The map in a browser, for a second screen ({@link dev.diorama.web.ClientWebMap}): off, for
+	 * browsers on this computer, or for every device on its network.
+	 */
+	public WebMap webMap = WebMap.OFF;
+	/** The port the web map is served on; the next free one after it if it's taken. Only in the file. */
+	public int webMapPort = DEFAULT_WEB_MAP_PORT;
+
+	public static final int DEFAULT_WEB_MAP_PORT = 8100;
+
+	/** Who can open the web map: nobody, browsers on this computer, or any device on its network. */
+	public enum WebMap {
+		OFF,
+		THIS_COMPUTER,
+		NETWORK
+	}
+
 	/** Where land claims show: nowhere, on the fullscreen map, or on the minimap too. */
 	public enum ClaimsShown {
 		OFF,
@@ -205,6 +222,16 @@ public final class Settings {
 
 	/** Where drawings show: nowhere but draw mode, on the fullscreen map, or on the minimap too. */
 	public enum DrawingsShown {
+		OFF,
+		FULLSCREEN,
+		ALWAYS
+	}
+
+	/** Where the game's world border shows; see {@link WorldBorderOverlay}. */
+	public WorldBorderShown worldBorder = WorldBorderShown.ALWAYS;
+
+	/** Where the world border shows: nowhere, on the fullscreen map, or on the minimap too. */
+	public enum WorldBorderShown {
 		OFF,
 		FULLSCREEN,
 		ALWAYS
@@ -433,11 +460,21 @@ public final class Settings {
 		if (settings.playerNames == null) {
 			settings.playerNames = NameTags.FULLSCREEN;
 		}
+		if (settings.webMap == null) {
+			settings.webMap = WebMap.OFF;
+		}
+		// Ports under 1024 need rights the game doesn't have; a few above it are tried when it's taken.
+		if (settings.webMapPort < 1024 || settings.webMapPort > 65500) {
+			settings.webMapPort = DEFAULT_WEB_MAP_PORT;
+		}
 		if (settings.claims == null) {
 			settings.claims = ClaimsShown.ALWAYS;
 		}
 		if (settings.drawings == null) {
 			settings.drawings = DrawingsShown.ALWAYS;
+		}
+		if (settings.worldBorder == null) {
+			settings.worldBorder = WorldBorderShown.ALWAYS;
 		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
