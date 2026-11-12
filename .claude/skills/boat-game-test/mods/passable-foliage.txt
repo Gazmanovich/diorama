@@ -1,0 +1,10 @@
+# Passable Foliage (9.3.2 on 1.21.1, 8.2.1 on 1.20.1), for the leaves section: it lets players walk
+# through leaves by emptying their collision shape. It needs Kiwi. One line per jar: <node> <url>.
+# No Forge 1.20.1 lines: with these jars the test game stops at start ("diorama_gameshim reads
+# more than one module named mixinextras").
+1.21.1-neoforge https://cdn.modrinth.com/data/uaLW6JVR/versions/YU7X3l1D/PassableFoliage-1.21.1-NeoForge-9.3.2.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/ufdDoWPd/versions/tfwJWC8g/Kiwi-1.21.1-NeoForge-15.8.7.jar
+1.21.1 https://cdn.modrinth.com/data/uaLW6JVR/versions/J2AzgkoB/PassableFoliage-1.21.1-Fabric-9.3.2.jar
+1.21.1 https://cdn.modrinth.com/data/ufdDoWPd/versions/G8gDBRJv/Kiwi-1.21.1-Fabric-15.8.8.jar
+1.20.1 https://cdn.modrinth.com/data/uaLW6JVR/versions/1xNaGFdB/PassableFoliage-1.20.1-fabric-8.2.1.jar
+1.20.1 https://cdn.modrinth.com/data/ufdDoWPd/versions/SjsWkzDP/Kiwi-1.20.1-Fabric-11.10.3.jar
