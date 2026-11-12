@@ -1,0 +1,6 @@
+# Create Aeronautics 1.3.2 with Sable 2.0.6 (the physics mod its ships are made of) and Create
+# 6.0.10, for the aeronautics section. Aeronautics ships for NeoForge 1.21.1 only.
+# One line per jar: <node> <url>.
+1.21.1-neoforge https://cdn.modrinth.com/data/oWaK0Q19/versions/44pLdPGg/create-aeronautics-bundled-1.21.1-1.3.2.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/T9PomCSv/versions/fg9dTRz9/sable-neoforge-1.21.1-2.0.6.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/LNytGWDc/versions/UjX6dr61/create-1.21.1-6.0.10.jar

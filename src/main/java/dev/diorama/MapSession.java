@@ -3,6 +3,7 @@ package dev.diorama;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.compat.SubLevels;
 import dev.diorama.craft.Crafts;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
@@ -314,6 +315,10 @@ public final class MapSession {
 		}
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
+		if (SubLevels.holds(level, cx, cz)) {
+			SubLevels.edited(cx, cz);
+			return;
+		}
 		int surface = current.visibleFromSky(pos) ? MapLevel.CHANGED_SURFACE : 0;
 		int[] box = {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface};
 		current.schedule(cx, cz, CHANGE_DELAY_MS, box);
@@ -341,6 +346,10 @@ public final class MapSession {
 	 */
 	public static void blockEntityChanged(ClientLevel level, BlockPos pos) {
 		if (!Copycats.INSTALLED || current == null || current.level != level) {
+			return;
+		}
+		if (SubLevels.holds(level, pos.getX() >> 4, pos.getZ() >> 4)) {
+			SubLevels.edited(pos.getX() >> 4, pos.getZ() >> 4);
 			return;
 		}
 		ChunkSnapshot snapshot = current.map.worldChunk(pos.getX() >> 4, pos.getZ() >> 4);
@@ -433,6 +442,14 @@ public final class MapSession {
 	 * {x0, y0, z0, x1, y1, z1, visibleFromSky}; null means the whole chunk is new.
 	 */
 	private void schedule(int chunkX, int chunkZ, long delayMs, int @Nullable [] box) {
+		// The chunks a Create Aeronautics ship keeps its blocks in aren't land: the ship is drawn where it flies.
+		if (SubLevels.holds(this.level, chunkX, chunkZ)) {
+			// A chunk of a ship arriving: the ship is read again with it.
+			if (box == null) {
+				SubLevels.edited(chunkX, chunkZ);
+			}
+			return;
+		}
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		long due = System.currentTimeMillis() + delayMs;
 		Pending p = this.pending.get(key);
