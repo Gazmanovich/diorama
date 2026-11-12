@@ -182,25 +182,30 @@ public final class SubLevels {
 			}
 			List<Body> bodies = new ArrayList<>();
 			for (Object ship : ships) {
-				if (ship == null || !renderPose.getDeclaringClass().isInstance(ship) || (boolean) removed.invoke(ship)) {
-					continue;
+				// One ship failing doesn't take the others off the map.
+				try {
+					if (ship == null || !renderPose.getDeclaringClass().isInstance(ship) || (boolean) removed.invoke(ship)) {
+						continue;
+					}
+					// Its chunks are still arriving: read now, it would show part built.
+					if (finalized != null && !(boolean) finalized.invoke(ship)) {
+						continue;
+					}
+					Object box = bounds.invoke(plot.invoke(ship));
+					int[] corners = new int[6];
+					for (int i = 0; i < 6; i++) {
+						corners[i] = (int) CORNER[i].invoke(box);
+					}
+					// Sable's empty box has its corners the wrong way round: a ship whose blocks haven't arrived.
+					if (corners[0] > corners[3] || corners[1] > corners[4] || corners[2] > corners[5] || !(uniqueId.invoke(ship) instanceof UUID id)) {
+						continue;
+					}
+					Held last = held;
+					int bits = last == null ? 0 : last.plotBits;
+					bodies.add(new Ship(id, ship, level, corners, EDITS.get(plotKey(corners[0] >> 4 >> bits, corners[2] >> 4 >> bits))));
+				} catch (ReflectiveOperationException | RuntimeException e) {
+					skip(e);
 				}
-				// Its chunks are still arriving: read now, it would show part built.
-				if (finalized != null && !(boolean) finalized.invoke(ship)) {
-					continue;
-				}
-				Object box = bounds.invoke(plot.invoke(ship));
-				int[] corners = new int[6];
-				for (int i = 0; i < 6; i++) {
-					corners[i] = (int) CORNER[i].invoke(box);
-				}
-				// Sable's empty box has its corners the wrong way round: a ship whose blocks haven't arrived.
-				if (corners[0] > corners[3] || corners[1] > corners[4] || corners[2] > corners[5] || !(uniqueId.invoke(ship) instanceof UUID id)) {
-					continue;
-				}
-				Held last = held;
-				int bits = last == null ? 0 : last.plotBits;
-				bodies.add(new Ship(id, ship, level, corners, EDITS.get(plotKey(corners[0] >> 4 >> bits, corners[2] >> 4 >> bits))));
 			}
 			return bodies;
 		} catch (LinkageError e) {

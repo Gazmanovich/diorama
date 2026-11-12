@@ -115,9 +115,12 @@ public final class Crafts {
 			boolean due = (tick + (craft.id.hashCode() & 0x7FFFFFFF)) % READ_EVERY == 0;
 			boolean changed = body.version() != craft.version && tick - craft.readAt >= READ_CHANGED_AFTER;
 			if (craft.blocks == null || due || back || changed) {
-				craft.version = body.version();
 				craft.readAt = tick;
 				Body.Blocks read = body.read(looks);
+				// A read that failed is asked again, not taken for the new version.
+				if (read != null) {
+					craft.version = body.version();
+				}
 				if (read != null && (craft.blocks == null || !read.blocks().looksLike(craft.blocks.blocks(), looks)
 					|| !java.util.Arrays.equals(read.min(), craft.blocks.min()))) {
 					craft.blocks = read;

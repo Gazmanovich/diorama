@@ -64,6 +64,7 @@ final class AeronauticsTest {
 		world.getServer().runCommand("tp @a " + (x - 10) + " " + (floor + 1) + " " + (z + 12) + " facing " + x + " " + deck + " " + z);
 		context.waitTicks(100);
 		int savedZoom = context.computeOnClient(mc -> Settings.get().zoomStep());
+		Facing savedFacing = context.computeOnClient(mc -> Projection.facing());
 		context.runOnClient(mc -> Settings.get().zoomStep(8));
 		try {
 			photos(context, "01-built", new double[] {x + 0.5, deck, z + 0.5});
@@ -134,7 +135,7 @@ final class AeronauticsTest {
 		} finally {
 			world.getServer().runCommand("sable paused false");
 			context.runOnClient(mc -> Settings.get().zoomStep(savedZoom));
-			FacingTest.turnTo(context, Facing.NORTH);
+			FacingTest.turnTo(context, savedFacing);
 		}
 	}
 
@@ -156,7 +157,6 @@ final class AeronauticsTest {
 				context.takeScreenshot("aeronautics-" + name + "-minimap");
 			}
 		}
-		FacingTest.turnTo(context, Facing.NORTH);
 	}
 
 	private static void look(ClientGameTestContext context, double[] at) {
