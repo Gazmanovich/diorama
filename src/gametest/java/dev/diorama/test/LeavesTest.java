@@ -53,8 +53,6 @@ final class LeavesTest {
 			int x = x0 + 4 + i * 12;
 			world.getServer().runCommand("fill " + x + " " + y + " " + (z0 + 45) + " " + (x + 6) + " " + y + " " + (z0 + 49) + " minecraft:" + plants[i]);
 		}
-		// Animals that spawned on the lawn would stand in the picture.
-		world.getServer().runCommand("kill @e[type=!minecraft:player]");
 		context.waitTicks(40);
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
