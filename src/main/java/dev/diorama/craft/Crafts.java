@@ -254,6 +254,21 @@ public final class Crafts {
 		this.crafts.clear();
 	}
 
+	/** Whether the map has this craft, live or parked. */
+	public boolean has(UUID id) {
+		return this.crafts.containsKey(id);
+	}
+
+	/** The blocks of a craft whose picture of them is drawn on the map now, or null. Client thread. */
+	public Body.@Nullable Blocks shown(UUID id) {
+		Craft craft = this.crafts.get(id);
+		if (craft == null || craft.blocks == null || craft.texture == null || craft.pending != null
+			|| craft.imageFrom == null || craft.imageFrom.blocks() != craft.blocks.blocks()) {
+			return null;
+		}
+		return craft.blocks;
+	}
+
 	/** Draws the crafts and their shadows over a view of the map. Render thread. */
 	public void draw(GuiGraphicsExtractor graphics, MapViewport.View view, float partialTick, float opacity) {
 		this.painter.draw(graphics, view, this.crafts.values(), partialTick, opacity);

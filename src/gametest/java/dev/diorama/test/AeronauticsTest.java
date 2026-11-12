@@ -6,16 +6,19 @@ import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
-import dev.diorama.bake.BlockLooks;
+import dev.diorama.bake.CraftBlocks;
 import dev.diorama.bake.TileKey;
+import dev.diorama.craft.Body;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -24,8 +27,8 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * in the air over a stone floor and made into a ship by Sable's own assemble command, with physics
  * paused so it hangs there. It is photographed on the map and the minimap where it was built,
  * after it's moved, after it's turned and tilted, after a block is placed on its deck, and after
- * it drops to the floor with physics running, and after its blocks are broken. Everything Sable is reached by reflection, so the section builds
- * without it.
+ * it drops to the floor with physics running, and after its blocks are broken. Each time the map must hold a picture of the ship's blocks as
+ * they are. Everything Sable is reached by reflection, so the section builds without it.
  */
 final class AeronauticsTest {
 	private static final String CONTAINER = "dev.ryanhcode.sable.api.sublevel.SubLevelContainer";
@@ -68,13 +71,14 @@ final class AeronauticsTest {
 			world.getServer().runCommand("sable paused true");
 			world.getServer().runCommand("sable assemble area " + (x - 4) + " " + deck + " " + (z - 1) + " " + (x + 4) + " " + (deck + 5) + " " + (z + 2));
 			context.waitFor(mc -> ships(mc).size() == 1, 400);
-			// The one ship there is: Sable's @e is every sub-level.
+			// The commands below say @e, Sable's word for every sub-level: this is the only one.
+			UUID id = context.computeOnClient(mc -> (UUID) call(ships(mc).get(0), "getUniqueId"));
 			context.waitTicks(140);
 			log(context, "assembled");
 			double[] built = where(context);
-			expectDrawn(context, 9, 6, 4);
 			expectUnmapped(context);
 			photos(context, "02-ship", built);
+			expectShown(context, id, 9, 6, 4, 0);
 
 			// Paused physics moves nothing, so it runs for the moment the ship is told to move.
 			world.getServer().runCommand("sable paused false");
@@ -107,6 +111,7 @@ final class AeronauticsTest {
 			context.waitTicks(140);
 			log(context, "built on");
 			photos(context, "05-built-on", where(context));
+			expectShown(context, id, 9, 6, 4, 2);
 
 			// Physics let go: the ship drops to the floor, and the map follows it down.
 			double[] hung = where(context);
@@ -123,6 +128,9 @@ final class AeronauticsTest {
 			context.waitTicks(200);
 			log(context, "broken up");
 			photos(context, "07-gone", last);
+			if (context.computeOnClient(mc -> MapSession.get().crafts().has(id))) {
+				throw new AssertionError("The ship is still on the map after its blocks were broken");
+			}
 		} finally {
 			world.getServer().runCommand("sable paused false");
 			context.runOnClient(mc -> Settings.get().zoomStep(savedZoom));
@@ -196,32 +204,35 @@ final class AeronauticsTest {
 		}
 	}
 
-	/** Diorama must read the one ship, with a grid of this size. A build that draws no ships only says so. */
-	private static void expectDrawn(ClientGameTestContext context, int sizeX, int sizeY, int sizeZ) {
-		String problem = context.computeOnClient(mc -> {
-			Class<?> reader = type("dev.diorama.compat.SubLevels");
-			if (reader == null) {
-				Diorama.LOGGER.info("Aeronautics test: this build has no reader for Sable's ships");
-				return null;
-			}
-			try {
-				List<?> bodies = (List<?>) reader.getMethod("bodies", ClientLevel.class).invoke(null, mc.level);
-				if (bodies.size() != 1) {
-					return "Diorama reads " + bodies.size() + " ships, not 1";
+	/**
+	 * The map must be drawing the ship, from a picture of a grid this size with this many blocks of
+	 * lime wool in it. Asked after the map has been looked at, so the picture has been made.
+	 */
+	private static void expectShown(ClientGameTestContext context, UUID id, int sizeX, int sizeY, int sizeZ, int lime) {
+		String[] problem = {null};
+		for (int i = 0; i < 20; i++) {
+			problem[0] = context.computeOnClient(mc -> {
+				Body.Blocks shown = MapSession.get().crafts().shown(id);
+				if (shown == null) {
+					return MapSession.get().crafts().has(id) ? "The map has the ship but no picture of its blocks as they are" : "The map doesn't have the ship";
 				}
-				dev.diorama.craft.Body.Blocks blocks = ((dev.diorama.craft.Body) bodies.get(0)).read(BlockLooks.get());
-				if (blocks == null) {
-					return "Diorama couldn't read the ship's blocks";
+				CraftBlocks blocks = shown.blocks();
+				int found = 0;
+				for (int cell = 0; cell < blocks.volume(); cell++) {
+					// By name: the field for lime wool isn't the same on every version.
+					if (String.valueOf(Block.BLOCK_STATE_REGISTRY.byId(blocks.state(cell))).contains("lime_wool")) {
+						found++;
+					}
 				}
-				String size = blocks.blocks().sizeX + " " + blocks.blocks().sizeY + " " + blocks.blocks().sizeZ;
-				return size.equals(sizeX + " " + sizeY + " " + sizeZ) ? null : "The ship's grid is " + size;
-			} catch (ReflectiveOperationException e) {
-				return "The reader failed: " + e;
+				String got = blocks.sizeX + " " + blocks.sizeY + " " + blocks.sizeZ + ", " + found + " lime wool";
+				return got.equals(sizeX + " " + sizeY + " " + sizeZ + ", " + lime + " lime wool") ? null : "The ship on the map is " + got;
+			});
+			if (problem[0] == null) {
+				return;
 			}
-		});
-		if (problem != null) {
-			throw new AssertionError(problem);
+			context.waitTicks(20);
 		}
+		throw new AssertionError(problem[0]);
 	}
 
 	/** The far-off chunks the ship keeps its blocks in aren't land, and mustn't be mapped as land. */
@@ -231,7 +242,7 @@ final class AeronauticsTest {
 			return MapSession.get().map().worldChunk(plot[0] >> 4, plot[2] >> 4) != null;
 		});
 		Diorama.LOGGER.info("Aeronautics test: the map {} the chunks the ship's blocks are kept in", mapped ? "holds" : "doesn't hold");
-		if (mapped && type("dev.diorama.compat.SubLevels") != null) {
+		if (mapped) {
 			throw new AssertionError("The map took the chunks the ship's blocks are kept in for land");
 		}
 	}

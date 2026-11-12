@@ -316,7 +316,7 @@ public final class MapSession {
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
 		if (SubLevels.holds(level, cx, cz)) {
-			SubLevels.edited();
+			SubLevels.edited(cx, cz);
 			return;
 		}
 		int surface = current.visibleFromSky(pos) ? MapLevel.CHANGED_SURFACE : 0;
@@ -346,6 +346,10 @@ public final class MapSession {
 	 */
 	public static void blockEntityChanged(ClientLevel level, BlockPos pos) {
 		if (!Copycats.INSTALLED || current == null || current.level != level) {
+			return;
+		}
+		if (SubLevels.holds(level, pos.getX() >> 4, pos.getZ() >> 4)) {
+			SubLevels.edited(pos.getX() >> 4, pos.getZ() >> 4);
 			return;
 		}
 		ChunkSnapshot snapshot = current.map.worldChunk(pos.getX() >> 4, pos.getZ() >> 4);
@@ -440,6 +444,10 @@ public final class MapSession {
 	private void schedule(int chunkX, int chunkZ, long delayMs, int @Nullable [] box) {
 		// The chunks a Create Aeronautics ship keeps its blocks in aren't land: the ship is drawn where it flies.
 		if (SubLevels.holds(this.level, chunkX, chunkZ)) {
+			// A chunk of a ship arriving: the ship is read again with it.
+			if (box == null) {
+				SubLevels.edited(chunkX, chunkZ);
+			}
 			return;
 		}
 		long key = ChunkSnapshot.key(chunkX, chunkZ);

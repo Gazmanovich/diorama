@@ -7,6 +7,8 @@ import dev.diorama.craft.Body;
 import dev.diorama.data.Copycats;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -43,16 +45,22 @@ public final class SubLevels {
 	private static Method plot;
 	private static Method logicalPose;
 	private static Method renderPose;
+	private static @Nullable Method finalized;
+	private static Method plotSize;
 	private static Method bounds;
 	private static final Method[] CORNER = new Method[6];
 	private static Method transform;
-	/** The last level asked about and its container, as the map asks for every chunk it's told of. */
-	private record Held(WeakReference<ClientLevel> level, Object container) {
+	/**
+	 * The last level asked about and its container, as the map asks for every chunk it's told of.
+	 * Both held weakly: the container holds its level, and neither should outlive the world.
+	 * {@code plotBits} turns a chunk coordinate into a plot's.
+	 */
+	private record Held(WeakReference<ClientLevel> level, WeakReference<Object> container, int plotBits) {
 	}
 
-	private static volatile @Nullable Held held;
-	/** Counts the block changes seen inside ships, so they're read again. */
-	private static int edits;
+	private static @Nullable Held held;
+	/** By plot, how many times a ship's blocks may have changed, so that ship is read again. Client thread. */
+	private static final Long2IntMap EDITS = new Long2IntOpenHashMap();
 
 	private SubLevels() {
 	}
@@ -73,6 +81,13 @@ public final class SubLevels {
 				plot = ship.getMethod("getPlot");
 				logicalPose = ship.getMethod("logicalPose");
 				renderPose = Class.forName("dev.ryanhcode.sable.sublevel.ClientSubLevel").getMethod("renderPose", float.class);
+				try {
+					finalized = renderPose.getDeclaringClass().getMethod("isFinalized");
+				} catch (NoSuchMethodException e) {
+					// A ship may then show part built for a moment as its chunks arrive.
+					finalized = null;
+				}
+				plotSize = containers.getMethod("getLogPlotSize");
 				bounds = plot.getReturnType().getMethod("getBoundingBox");
 				String[] corners = {"minX", "minY", "minZ", "maxX", "maxY", "maxZ"};
 				for (int i = 0; i < 6; i++) {
@@ -95,7 +110,7 @@ public final class SubLevels {
 		}
 	}
 
-	/** One ship failing doesn't turn off the rest. */
+	/** A failure that isn't Sable having changed under this class is logged once, and asked again next time. */
 	private static void skip(Exception e) {
 		if (!warned) {
 			warned = true;
@@ -106,11 +121,15 @@ public final class SubLevels {
 	private static @Nullable Object container(ClientLevel level) throws ReflectiveOperationException {
 		Held last = held;
 		if (last != null && last.level.get() == level) {
-			return last.container;
+			Object container = last.container.get();
+			if (container != null) {
+				return container;
+			}
 		}
 		Object container = getContainer.invoke(null, level);
 		if (container != null) {
-			held = new Held(new WeakReference<>(level), container);
+			held = new Held(new WeakReference<>(level), new WeakReference<>(container), (int) plotSize.invoke(container));
+			EDITS.clear();
 		}
 		return container;
 	}
@@ -135,9 +154,20 @@ public final class SubLevels {
 		}
 	}
 
-	/** A block that shows changed in a chunk that {@link #holds} a ship: the ships are read again. */
-	public static void edited() {
-		edits++;
+	/**
+	 * Something a ship shows may have changed in a chunk that {@link #holds} one: a block, a
+	 * copycat's material, or the chunk arriving. That ship is read again. Client thread.
+	 */
+	public static void edited(int chunkX, int chunkZ) {
+		Held last = held;
+		if (last != null) {
+			long key = plotKey(chunkX >> last.plotBits, chunkZ >> last.plotBits);
+			EDITS.put(key, EDITS.get(key) + 1);
+		}
+	}
+
+	private static long plotKey(int plotX, int plotZ) {
+		return (long) plotX << 32 | plotZ & 0xFFFFFFFFL;
 	}
 
 	/** The ships the client has in this level. */
@@ -155,6 +185,10 @@ public final class SubLevels {
 				if (ship == null || !renderPose.getDeclaringClass().isInstance(ship) || (boolean) removed.invoke(ship)) {
 					continue;
 				}
+				// Its chunks are still arriving: read now, it would show part built.
+				if (finalized != null && !(boolean) finalized.invoke(ship)) {
+					continue;
+				}
 				Object box = bounds.invoke(plot.invoke(ship));
 				int[] corners = new int[6];
 				for (int i = 0; i < 6; i++) {
@@ -164,7 +198,9 @@ public final class SubLevels {
 				if (corners[0] > corners[3] || corners[1] > corners[4] || corners[2] > corners[5] || !(uniqueId.invoke(ship) instanceof UUID id)) {
 					continue;
 				}
-				bodies.add(new Ship(id, ship, level, corners, edits));
+				Held last = held;
+				int bits = last == null ? 0 : last.plotBits;
+				bodies.add(new Ship(id, ship, level, corners, EDITS.get(plotKey(corners[0] >> 4 >> bits, corners[2] >> 4 >> bits))));
 			}
 			return bodies;
 		} catch (LinkageError e) {
@@ -176,7 +212,7 @@ public final class SubLevels {
 		}
 	}
 
-	/** {@code box} is the ship's blocks in its plot, min x y z then max x y z; {@code edits} the count when it was listed. */
+	/** {@code box} is the ship's blocks in its plot, min x y z then max x y z; {@code edits} its plot's count when it was listed. */
 	private record Ship(UUID id, Object ship, ClientLevel level, int[] box, int edits) implements Body {
 		@Override
 		public long version() {
