@@ -158,6 +158,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("natural-waters")) {
 				NaturalWatersTest.run(context, world);
 			}
+			if (tests.contains("leaves")) {
+				LeavesTest.run(context, world);
+			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
 			}
