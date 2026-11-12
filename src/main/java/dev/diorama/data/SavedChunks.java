@@ -59,7 +59,8 @@ import org.jspecify.annotations.Nullable;
  * The chunks in the world's save, in singleplayer: where the map gets blocks for places the client
  * never loaded, such as an area a pre-generation tool made. Chunks are read through the game's own
  * server, which owns the files: it hands back chunks it hasn't written yet, and its files never
- * change under a read. Reading is all this does; nothing here loads a chunk into the world.
+ * change under a read. Nothing here loads a chunk into the world; before listing the files it has
+ * the server write the chunks it holds, as its autosave would (see {@link #saveHeldChunks}).
  *
  * <p>Only the region files' headers are read directly, to list the chunks and when each was last
  * saved. The rest parses the save's chunk format, which has stayed the same from 1.18 on, with the
@@ -68,7 +69,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>All reads block, so call them off the render thread, and from one thread at a time.
  */
-public final class SavedChunks {
+public final class SavedChunks implements ChunkSave {
 	private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d{1,8})\\.(-?\\d{1,8})\\.mca");
 	/**
 	 * Chunks kept between reads: with memory to spare, enough for the two columns of tiles nearest,
@@ -86,10 +87,7 @@ public final class SavedChunks {
 	private final ServerLevel serverLevel;
 	private final ChunkMap chunkMap;
 	private final Path regionFolder;
-	private final boolean withLight;
-	private final Codec<PalettedContainer<BlockState>> blockStates;
-	private final Codec<PalettedContainerRO<Holder<Biome>>> biomes;
-	private final int heightBits;
+	private final ChunkTags tags;
 	private final Map<Long, @Nullable SavedChunk> cache = new LinkedHashMap<>(CACHED_CHUNKS, 0.75F, true) {
 		@Override
 		protected boolean removeEldestEntry(Map.Entry<Long, @Nullable SavedChunk> eldest) {
@@ -106,23 +104,8 @@ public final class SavedChunks {
 		this.serverLevel = serverLevel;
 		this.chunkMap = serverLevel.getChunkSource().chunkMap;
 		this.regionFolder = regionFolder;
-		this.withLight = withLight;
 		// The client's registries, so the biomes are the ones the map already knows.
-		//? if >=1.21.9 {
-		this.blockStates = level.palettedContainerFactory().blockStatesContainerCodec();
-		this.biomes = level.palettedContainerFactory().biomeContainerCodec();
-		//?} else {
-		/*this.blockStates = PalettedContainer.codecRW(Block.BLOCK_STATE_REGISTRY, BlockState.CODEC, PalettedContainer.Strategy.SECTION_STATES, Blocks.AIR.defaultBlockState());
-		//? if >=1.21.2 {
-		net.minecraft.core.Registry<Biome> registry = level.registryAccess().lookupOrThrow(Registries.BIOME);
-		Holder<Biome> plains = registry.getOrThrow(Biomes.PLAINS);
-		//?} else {
-		net.minecraft.core.Registry<Biome> registry = level.registryAccess().registryOrThrow(Registries.BIOME);
-		Holder<Biome> plains = registry.getHolderOrThrow(Biomes.PLAINS);
-		//?}
-		this.biomes = PalettedContainer.codecRO(registry.asHolderIdMap(), registry.holderByNameCodec(), PalettedContainer.Strategy.SECTION_BIOMES, plains);
-		*///?}
-		this.heightBits = Mth.ceillog2(level.getHeight() + 1);
+		this.tags = new ChunkTags(level, withLight);
 	}
 
 	/**
@@ -144,6 +127,7 @@ public final class SavedChunks {
 	}
 
 	/** Stops reading; reads in progress return nothing. */
+	@Override
 	public void close() {
 		this.closed = true;
 	}
@@ -168,11 +152,13 @@ public final class SavedChunks {
 		return null;
 	}
 
+	@Override
 	public Level level() {
 		return this.level;
 	}
 
 	/** Whether the server behind this save is still the one running. */
+	@Override
 	public boolean isOpen() {
 		IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
 		return server != null && server.isRunning() && server.getLevel(this.level.dimension()) == this.serverLevel;
@@ -187,7 +173,9 @@ public final class SavedChunks {
 	 * {@code (z << 5) | x}, when the save last wrote it in seconds, or 0 if it has none. Chunks the
 	 * server hasn't written to its files yet are left out until it does.
 	 */
+	@Override
 	public Map<Long, int[]> scan() {
+		this.saveHeldChunks();
 		Map<Long, int[]> regions = new HashMap<>();
 		if (!Files.isDirectory(this.regionFolder)) {
 			return regions;
@@ -207,6 +195,28 @@ public final class SavedChunks {
 			Diorama.LOGGER.warn("Couldn't list the saved chunks in {}", this.regionFolder, e);
 		}
 		return regions;
+	}
+
+	/**
+	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, so the
+	 * files list them: at this listing, or the next if its disk writes are still going. The server
+	 * writes those in time it has to spare and at its autosave; a busy one, such as one Distant
+	 * Horizons has generating chunks near the player, leaves them unwritten for minutes, and the map
+	 * showed a ring of fog round the player with the land beyond it filled in. Xaero's World Map does
+	 * the same before it reads the save.
+	 */
+	private void saveHeldChunks() {
+		try {
+			this.await(this.serverLevel.getServer().submit(() -> {
+				long start = System.nanoTime();
+				this.serverLevel.getChunkSource().save(false);
+				if (Diorama.DEBUG) {
+					Diorama.LOGGER.info("Saved chunks: the server saved its loaded chunks in {} ms", (System.nanoTime() - start) / 100_000 / 10.0);
+				}
+			}));
+		} catch (RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't have the server save its loaded chunks", e);
+		}
 	}
 
 	/** A region file's chunk save times, from its header: 4 KiB of locations, then 4 KiB of times. */
@@ -233,17 +243,13 @@ public final class SavedChunks {
 		}
 	}
 
-	/** What a chunk's save says about it without reading its blocks; see {@link #summary}. */
-	public record Summary(boolean finished, int maxY, int floorY) {
-		private static final Summary UNFINISHED = new Summary(false, Integer.MIN_VALUE, Integer.MIN_VALUE);
-	}
-
 	/**
 	 * Whether the chunk is finished and how high it reaches, from its status and height maps alone,
 	 * or null if the save has none. Much cheaper than {@link #read}.
 	 */
-	public @Nullable Summary summary(int chunkX, int chunkZ) {
-		Summary summary = this.summarize(chunkX, chunkZ);
+	@Override
+	public ChunkTags.@Nullable Summary summary(int chunkX, int chunkZ) {
+		ChunkTags.Summary summary = this.summarize(chunkX, chunkZ);
 		short top = summary == null || !summary.finished() || summary.maxY() <= this.level.getMinY() ? NONE : (short) summary.maxY();
 		this.tops.computeIfAbsent(regionKey(chunkX >> 5, chunkZ >> 5), k -> {
 			short[] tops = new short[1024];
@@ -258,6 +264,7 @@ public final class SavedChunks {
 	 * Bakes ask this of every chunk that could reach into a tile, far more than they read, so the
 	 * answer is kept until {@link #forgetTops}.
 	 */
+	@Override
 	public int top(int chunkX, int chunkZ) {
 		short[] tops = this.tops.get(regionKey(chunkX >> 5, chunkZ >> 5));
 		short top = tops == null ? UNKNOWN : tops[((chunkZ & 31) << 5) | (chunkX & 31)];
@@ -268,7 +275,7 @@ public final class SavedChunks {
 		return top == NONE ? Integer.MIN_VALUE : top;
 	}
 
-	private @Nullable Summary summarize(int chunkX, int chunkZ) {
+	private ChunkTags.@Nullable Summary summarize(int chunkX, int chunkZ) {
 		ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 		CollectFields fields = new CollectFields(
 			new FieldSelector(IntTag.TYPE, "DataVersion"),
@@ -285,47 +292,21 @@ public final class SavedChunks {
 		if (!(fields.getResult() instanceof CompoundTag tag) || tag.isEmpty()) {
 			return null;
 		}
-		if (NbtUtils.getDataVersion(tag, -1) < dataVersion()) {
+		if (NbtUtils.getDataVersion(tag, -1) < ChunkTags.dataVersion()) {
 			// Saved by an older version: its fields only mean what they say once it's upgraded.
 			SavedChunk chunk = this.read(chunkX, chunkZ);
-			return chunk == null ? null : chunk.finished() ? summaryOf(chunk.surface(), chunk.solid()) : Summary.UNFINISHED;
+			return chunk == null ? null : chunk.finished() ? ChunkTags.summaryOf(chunk.surface(), chunk.solid()) : ChunkTags.Summary.UNFINISHED;
 		}
-		if (!finished(tag)) {
-			return Summary.UNFINISHED;
+		if (!ChunkTags.finished(tag)) {
+			return ChunkTags.Summary.UNFINISHED;
 		}
-		CompoundTag heightmaps = compound(tag, "Heightmaps");
-		int[] surface = this.heights(longs(heightmaps, Heightmap.Types.WORLD_SURFACE.getSerializationKey()));
-		int[] solid = this.heights(longs(heightmaps, Heightmap.Types.MOTION_BLOCKING.getSerializationKey()));
-		return surface == null || solid == null ? Summary.UNFINISHED : summaryOf(surface, solid);
-	}
-
-	private static Summary summaryOf(int[] surface, int[] solid) {
-		int top = Integer.MIN_VALUE;
-		int floor = Integer.MAX_VALUE;
-		for (int i = 0; i < 256; i++) {
-			top = Math.max(top, surface[i]);
-			floor = Math.min(floor, solid[i]);
-		}
-		// Water and shallow overhangs can hide blocks below the height map, as in ChunkSnapshot.
-		return new Summary(true, top, floor - 24);
-	}
-
-	/**
-	 * Whether a chunk's blocks are final. A pre-generator's terrain-only chunks aren't: they have
-	 * no trees, ores or villages yet and no light, and look different once the game finishes them.
-	 * A chunk from before 1.18 reads as not even started once upgraded, which only means the game
-	 * has yet to add the new depths under it; {@code below_zero_retrogen} names what it really was.
-	 */
-	private static boolean finished(CompoundTag tag) {
-		String status = string(tag, "Status");
-		if ("empty".equals(status) || "minecraft:empty".equals(status)) {
-			status = string(compound(tag, "below_zero_retrogen"), "target_status");
-			return status.endsWith("heightmaps") || status.endsWith("initialize_light") || status.endsWith("light") || status.endsWith("spawn") || status.endsWith("full");
-		}
-		return status.equals("full") || status.equals("minecraft:full");
+		int[] surface = this.tags.surface(tag);
+		int[] solid = this.tags.solid(tag);
+		return surface == null || solid == null ? ChunkTags.Summary.UNFINISHED : ChunkTags.summaryOf(surface, solid);
 	}
 
 	/** The chunk as saved, or null if the save has none or it can't be read. */
+	@Override
 	public @Nullable SavedChunk read(int chunkX, int chunkZ) {
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		if (this.cache.containsKey(key)) {
@@ -339,16 +320,19 @@ public final class SavedChunks {
 	}
 
 	/** Forgets the region's chunk tops: its file changed. */
+	@Override
 	public void forgetTops(long region) {
 		this.tops.remove(region);
 	}
 
 	/** Lets go of every chunk kept. */
+	@Override
 	public void clear() {
 		this.cache.clear();
 	}
 
 	/** Whether the game's server is falling behind, so it needs the disk and the processor more than the map does. */
+	@Override
 	public boolean serverBehind() {
 		IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
 		if (server == null || Minecraft.getInstance().isPaused()) {
@@ -361,7 +345,6 @@ public final class SavedChunks {
 		*///?}
 	}
 
-	@SuppressWarnings("unchecked")
 	private @Nullable SavedChunk load(int chunkX, int chunkZ) {
 		ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 		try {
@@ -370,135 +353,10 @@ public final class SavedChunks {
 			if (tag == null) {
 				return null;
 			}
-			tag = ((ChunkMapInvoker) this.chunkMap).diorama$upgrade(tag);
-			boolean finished = finished(tag);
-			int count = this.level.getSectionsCount();
-			int minSection = this.level.getMinSectionY();
-			PalettedContainer<BlockState>[] states = new PalettedContainer[count];
-			PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[count];
-			DataLayer[] blockLight = new DataLayer[count];
-			DataLayer[] skyLight = new DataLayer[count];
-			ListTag sections = list(tag, "sections");
-			for (int s = 0; s < sections.size(); s++) {
-				CompoundTag section = compound(sections, s);
-				int i = sectionY(section) - minSection;
-				if (i < 0 || i >= count) {
-					continue;
-				}
-				if (finished) {
-					states[i] = this.blockStates.parse(NbtOps.INSTANCE, compound(section, "block_states")).resultOrPartial(e -> {
-					}).orElse(null);
-				}
-				biomes[i] = this.biomes.parse(NbtOps.INSTANCE, compound(section, "biomes")).resultOrPartial(e -> {
-				}).orElse(null);
-				if (finished) {
-					// Block light lights every view at night; sky light only the view from under a roof.
-					blockLight[i] = light(section, "BlockLight");
-					if (this.withLight) {
-						skyLight[i] = light(section, "SkyLight");
-					}
-				}
-			}
-			CompoundTag heightmaps = compound(tag, "Heightmaps");
-			int[] surface = finished ? this.heights(longs(heightmaps, Heightmap.Types.WORLD_SURFACE.getSerializationKey())) : null;
-			int[] solid = finished ? this.heights(longs(heightmaps, Heightmap.Types.MOTION_BLOCKING.getSerializationKey())) : null;
-			finished &= surface != null && solid != null;
-			return new SavedChunk(chunkX, chunkZ, finished, states, biomes, blockLight, skyLight, finished ? surface : new int[0], finished ? solid : new int[0]);
+			return this.tags.read(chunkX, chunkZ, ((ChunkMapInvoker) this.chunkMap).diorama$upgrade(tag));
 		} catch (RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't read saved chunk {}", pos, e);
 			return null;
 		}
 	}
-
-	/** A saved height map as each column's top block y, or null if it's missing or the wrong size. */
-	private int @Nullable [] heights(long @Nullable [] packed) {
-		if (packed == null) {
-			return null;
-		}
-		try {
-			SimpleBitStorage storage = new SimpleBitStorage(this.heightBits, 256, packed);
-			int[] heights = new int[256];
-			int minY = this.level.getMinY();
-			for (int i = 0; i < 256; i++) {
-				// Saved as the first free y above the column, counted from the bottom of the world.
-				heights[i] = storage.get(i) + minY - 1;
-			}
-			return heights;
-		} catch (RuntimeException e) {
-			return null;
-		}
-	}
-
-	private static @Nullable DataLayer light(CompoundTag section, String name) {
-		byte[] bytes = bytes(section, name);
-		return bytes == null || bytes.length != DataLayer.SIZE ? null : new DataLayer(bytes);
-	}
-
-	private static int dataVersion() {
-		//? if >=1.21.6 {
-		return SharedConstants.getCurrentVersion().dataVersion().version();
-		//?} else {
-		/*return SharedConstants.getCurrentVersion().getDataVersion().getVersion();
-		*///?}
-	}
-
-	// Reading NBT: its getters changed in 1.21.5. A missing value reads as an empty one.
-
-	//? if >=1.21.5 {
-	private static CompoundTag compound(CompoundTag tag, String name) {
-		return tag.getCompoundOrEmpty(name);
-	}
-
-	private static CompoundTag compound(ListTag list, int index) {
-		return list.getCompoundOrEmpty(index);
-	}
-
-	private static ListTag list(CompoundTag tag, String name) {
-		return tag.getListOrEmpty(name);
-	}
-
-	private static String string(CompoundTag tag, String name) {
-		return tag.getStringOr(name, "");
-	}
-
-	private static int sectionY(CompoundTag section) {
-		return section.getByteOr("Y", (byte) 0);
-	}
-
-	private static byte @Nullable [] bytes(CompoundTag tag, String name) {
-		return tag.getByteArray(name).orElse(null);
-	}
-
-	private static long @Nullable [] longs(CompoundTag tag, String name) {
-		return tag.getLongArray(name).orElse(null);
-	}
-	//?} else {
-	/*private static CompoundTag compound(CompoundTag tag, String name) {
-		return tag.getCompound(name);
-	}
-
-	private static CompoundTag compound(ListTag list, int index) {
-		return list.getCompound(index);
-	}
-
-	private static ListTag list(CompoundTag tag, String name) {
-		return tag.getList(name, Tag.TAG_COMPOUND);
-	}
-
-	private static String string(CompoundTag tag, String name) {
-		return tag.getString(name);
-	}
-
-	private static int sectionY(CompoundTag section) {
-		return section.getByte("Y");
-	}
-
-	private static byte @Nullable [] bytes(CompoundTag tag, String name) {
-		return tag.contains(name, Tag.TAG_BYTE_ARRAY) ? tag.getByteArray(name) : null;
-	}
-
-	private static long @Nullable [] longs(CompoundTag tag, String name) {
-		return tag.contains(name, Tag.TAG_LONG_ARRAY) ? tag.getLongArray(name) : null;
-	}
-	*///?}
 }

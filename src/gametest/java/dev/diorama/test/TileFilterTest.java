@@ -64,8 +64,8 @@ final class TileFilterTest {
 		} catch (InterruptedException e) {
 			throw new AssertionError(e);
 		}
-		// The clouds lie over the edge of explored land, see-through, as far in as a chunk or more:
-		// what's checked here is the tiles, so the map is drawn without them.
+		// The fog rolls over the edge of explored land: what's checked here is the tiles, so the map
+		// is drawn without it.
 		context.runOnClient(mc -> MapViewport.hideFogForTests(true));
 		for (Case check : CASES) {
 			DioramaClientTest.setGuiScale(context, check.guiScale);
@@ -208,10 +208,10 @@ final class TileFilterTest {
 	}
 
 	/**
-	 * Which coverage cells around the view the live map has fully mapped. The clouds' haze, their
-	 * shadows and their lean reach onto mapped ground near its edge, which is the fog's business,
-	 * not the filter's: a pixel is compared only with mapped ground all around it, further to the
-	 * south, which the clouds lean over.
+	 * Which coverage cells around the view the live map has fully mapped. The fog's soft edge
+	 * reaches onto mapped ground near its edge, which is the fog's business, not the filter's: a
+	 * pixel is compared only with mapped ground all around it, further to the south, where the
+	 * fog's banks stand up from.
 	 */
 	private record Mapped(double u0, double v0, double cell, int width, int height, int[] unmappedSums) {
 		private static final double AROUND = 48;

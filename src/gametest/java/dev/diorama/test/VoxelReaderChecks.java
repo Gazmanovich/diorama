@@ -21,12 +21,15 @@ public final class VoxelReaderChecks {
 		if (snapshot == null) {
 			throw new AssertionError("No snapshot to check");
 		}
+		// Expected looks come from the map's table. Each reader reads a table of its own that
+		// nothing else asks: one that doesn't work out the looks of the blocks it reads reads empty
+		// looks, and fails here.
 		BlockLooks looks = BlockLooks.get();
-		byte[] kinds = looks.kind;
-		VoxelReader reader = new VoxelReader(source, looks);
+		BlockLooks readerLooks = BlockLooks.detached();
+		VoxelReader reader = new VoxelReader(source, readerLooks);
 		// Asked only whether blocks are solid, a reader builds its masks from the blocks, without
 		// the IDs: this one is never asked for an ID, and tells smaller blocks apart.
-		VoxelReader solidOnly = new VoxelReader(source, looks, true);
+		VoxelReader solidOnly = new VoxelReader(source, BlockLooks.detached(), true);
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
 			var uniform = snapshot.uniformSection(section);
 			var palette = snapshot.section(section);
@@ -41,21 +44,26 @@ public final class VoxelReaderChecks {
 				int y = i >> 8;
 				int z = (i >> 4) & 15;
 				var state = uniform != null ? uniform : palette != null ? palette.get(x, y, z) : Blocks.AIR.defaultBlockState();
-				int expected = Block.BLOCK_STATE_REGISTRY.getId(state);
+				// Numbered as the readers number it, an unnumbered state as its block's default.
+				int stateId = BlockLooks.id(state);
+				int expected = stateId;
 				int wx = (chunkX << 4) + x;
 				int wy = ((snapshot.minSectionY + section) << 4) + y;
 				int wz = (chunkZ << 4) + z;
 				// A filled copycat reads as its look in its material.
 				var material = snapshot.copycatMaterial(wx, wy, wz);
 				if (material != null) {
-					expected = looks.copycat(expected, Block.BLOCK_STATE_REGISTRY.getId(material));
+					expected = looks.copycat(stateId, Block.BLOCK_STATE_REGISTRY.getId(material));
 				}
-				int solid = kinds[expected] == BlockLooks.SOLID ? looks.shape[expected] != 0 ? 2 : 1 : 0;
+				boolean isSolid = looks.kind[looks.ensure(expected)] == BlockLooks.SOLID;
+				int solid = isSolid ? looks.shape[expected] != 0 ? 2 : 1 : 0;
 				if (solidOnly.solid(wx, wy, wz) != solid) {
 					throw new AssertionError("Solid mask without IDs wrong for block state " + expected + " at " + wx + "," + wy + "," + wz);
 				}
-				if (reader.state(wx, wy, wz) != expected
-					|| reader.solid(wx, wy, wz) != (kinds[expected] == BlockLooks.SOLID ? 1 : 0)) {
+				// Filled copycats are numbered per table: the reader's id must name the same look.
+				int read = reader.state(wx, wy, wz);
+				if (read < 0 || material == null && read != stateId || !sameLook(readerLooks, read, looks, expected)
+					|| reader.solid(wx, wy, wz) != (isSolid ? 1 : 0)) {
 					throw new AssertionError("Decoded block state " + expected + " incorrectly at " + wx + "," + wy + "," + wz);
 				}
 			}
@@ -109,11 +117,24 @@ public final class VoxelReaderChecks {
 		}
 	}
 
+	/**
+	 * Whether a look in one table is the same as one in another: every field, outlines by their
+	 * boxes, since tables number filled copycats and outlines each their own way.
+	 */
+	private static boolean sameLook(BlockLooks a, int i, BlockLooks b, int j) {
+		return a.kind[i] == b.kind[j] && a.top[i] == b.top[j] && a.topTinted[i] == b.topTinted[j]
+			&& a.topTintWeight[i] == b.topTintWeight[j] && a.side[i] == b.side[j] && a.sideTinted[i] == b.sideTinted[j]
+			&& a.sideTintWeight[i] == b.sideTintWeight[j] && a.tint[i] == b.tint[j] && a.constantTint[i] == b.constantTint[j]
+			&& a.emission[i] == b.emission[j] && a.spawnOn[i] == b.spawnOn[j] && a.spawnIn[i] == b.spawnIn[j]
+			&& a.wetShape[i] == b.wetShape[j] && java.util.Arrays.equals(a.shapes[a.shape[i]], b.shapes[b.shape[j]]);
+	}
+
 	/** The same chunk in a turned view: each block where the facing puts it, turned with it. */
 	private static void checkTurned(ChunkSource source, ChunkSnapshot snapshot, BlockLooks looks, Facing facing) {
 		TurnedSource turned = new TurnedSource(source, facing);
-		VoxelReader reader = new VoxelReader(turned, looks);
-		VoxelReader solidOnly = new VoxelReader(turned, looks, true);
+		BlockLooks readerLooks = BlockLooks.detached();
+		VoxelReader reader = new VoxelReader(turned, readerLooks);
+		VoxelReader solidOnly = new VoxelReader(turned, BlockLooks.detached(), true);
 		int viewX = facing.blockX(snapshot.chunkX, snapshot.chunkZ);
 		int viewZ = facing.blockZ(snapshot.chunkX, snapshot.chunkZ);
 		for (int section = 0; section < snapshot.sectionCount(); section++) {
@@ -129,13 +150,15 @@ public final class VoxelReaderChecks {
 					throw new AssertionError(facing + " view of " + wx + "," + wz + " is outside the chunk");
 				}
 				var state = uniform != null ? uniform : palette != null ? palette.get(worldX & 15, i >> 8, worldZ & 15) : Blocks.AIR.defaultBlockState();
-				int expected = Block.BLOCK_STATE_REGISTRY.getId(facing.turned(state));
+				int stateId = BlockLooks.id(facing.turned(state));
+				int expected = stateId;
 				var material = snapshot.copycatMaterial(worldX, wy, worldZ);
 				if (material != null) {
-					expected = looks.copycat(expected, Block.BLOCK_STATE_REGISTRY.getId(facing.turned(material)));
+					expected = looks.copycat(stateId, Block.BLOCK_STATE_REGISTRY.getId(facing.turned(material)));
 				}
-				int solid = looks.kind[expected] == BlockLooks.SOLID ? looks.shape[expected] != 0 ? 2 : 1 : 0;
-				if (reader.state(wx, wy, wz) != expected || solidOnly.solid(wx, wy, wz) != solid) {
+				int solid = looks.kind[looks.ensure(expected)] == BlockLooks.SOLID ? looks.shape[expected] != 0 ? 2 : 1 : 0;
+				int read = reader.state(wx, wy, wz);
+				if (read < 0 || material == null && read != stateId || !sameLook(readerLooks, read, looks, expected) || solidOnly.solid(wx, wy, wz) != solid) {
 					throw new AssertionError(facing + " view read block state " + reader.state(wx, wy, wz) + " for " + expected + " at " + wx + "," + wy + "," + wz);
 				}
 			}

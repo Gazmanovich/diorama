@@ -14,8 +14,11 @@
 	},
 	"license": "MIT",
 	"icon": "assets/diorama/icon.png",
-	"environment": "client",
+	"environment": "*",
 	"entrypoints": {
+		"main": [
+			"dev.diorama.fabric.DioramaFabricCommon"
+		],
 		"client": [
 			"dev.diorama.fabric.DioramaFabric"
 		],

@@ -15,6 +15,7 @@ import dev.diorama.XaeroChannels;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
+import dev.diorama.share.ShareClient;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
 import dev.diorama.waypoint.Waystones;
@@ -50,6 +51,15 @@ final class DioramaForgeClient {
 	static void init() {
 		IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
 		DioramaClient.init();
+		// The channel itself is DioramaForge's.
+		ShareClient.init();
+		dev.diorama.share.ShareProtocol.toServer(data -> {
+			net.minecraft.client.multiplayer.ClientPacketListener connection = Minecraft.getInstance().getConnection();
+			if (connection != null) {
+				net.minecraft.network.FriendlyByteBuf buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(data));
+				connection.send(new net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket(dev.diorama.share.ShareProtocol.CHANNEL, buf));
+			}
+		});
 		// The mod list's Config button opens the map settings.
 		ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class,
 			() -> new ConfigScreenHandler.ConfigScreenFactory((mc, parent) -> new SettingsScreen(parent)));
@@ -101,6 +111,7 @@ final class DioramaForgeClient {
 		DrawingStore.onLeave();
 		WorldKey.onJoinOrLeave();
 		XaeroChannels.onJoinOrLeave();
+		ShareClient.onJoinOrLeave();
 		TrackedPlayers.clear();
 		Waystones.clear();
 		Claims.clear();

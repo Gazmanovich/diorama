@@ -24,7 +24,8 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * Portal pins. {@link #checks} runs by default ({@code portal-pins}): one pin on the biggest Nether
  * portal, a pin each on an End portal and a gateway, and what happens to pins as the setting turns,
  * as the player deletes one and as a portal goes out; portals in far chunks read from the save;
- * nothing under fog of war. {@link #photos} is opt-in ({@code portal-photos}): {@link ShowcaseScene}'s
+ * nothing under fog of war; a portal out of its frame is named plainly. {@link #pluginPortals} is
+ * opt-in ({@code portal-plugin}), on a Paper server with the AdvancedPortals plugin. {@link #photos} is opt-in ({@code portal-photos}): {@link ShowcaseScene}'s
  * castle with a portal beside it, for the PR's pictures.
  */
 final class PortalPinsTest {
@@ -34,6 +35,8 @@ final class PortalPinsTest {
 	private static final int SAVED_Z = -3200;
 	/** How long the map may take: a change waits a moment, then a chunk comes up in its queue. */
 	private static final int PIN_TICKS = 200;
+	/** Server commands run in the Overworld; this runs one in the Nether. */
+	private static final String NETHER = "execute in minecraft:the_nether run ";
 
 	private PortalPinsTest() {
 	}
@@ -51,13 +54,25 @@ final class PortalPinsTest {
 		if (big.x < x || big.x > x + 22 || big.z != z || big.y < y || big.y > y + 22) {
 			throw new AssertionError("The pin is off the portal: " + big.x + " " + big.y + " " + big.z);
 		}
+		expectName(context, Waypoint.Kind.NETHER_PORTAL, "Nether Portal", "a portal in obsidian");
 
 		int ex = at.getX() + 8;
 		int ez = at.getZ() + 8;
 		world.getServer().runCommand("fill " + ex + " " + y + " " + ez + " " + (ex + 2) + " " + y + " " + (ez + 2) + " end_portal");
 		expectPins(context, Waypoint.Kind.END_PORTAL, 1, "a three by three End portal");
+		// Issue #311: out of its frame it's some server's or builder's portal, to who knows where.
+		expectName(context, Waypoint.Kind.END_PORTAL, "Portal", "End portal blocks without a frame");
+		world.getServer().runCommand("fill " + (ex - 1) + " " + y + " " + (ez - 1) + " " + (ex + 3) + " " + y + " " + (ez + 3) + " end_portal_frame[eye=true] replace air");
+		expectName(context, Waypoint.Kind.END_PORTAL, "End Portal", "the frame going up around them");
+		if (context.computeOnClient(mc -> WaypointStore.open(WorldKey.current()).all().stream().noneMatch(w -> w.kind == Waypoint.Kind.END_PORTAL && w.name.equals("End Portal")))) {
+			throw new AssertionError("The pin's new name isn't in the file");
+		}
 		world.getServer().runCommand("setblock " + (ex + 20) + " " + y + " " + ez + " end_gateway");
 		expectPins(context, Waypoint.Kind.END_GATEWAY, 1, "a gateway");
+		expectName(context, Waypoint.Kind.END_GATEWAY, "Portal", "a gateway without its bedrock");
+		world.getServer().runCommand("setblock " + (ex + 20) + " " + (y + 1) + " " + ez + " bedrock");
+		world.getServer().runCommand("setblock " + (ex + 20) + " " + (y - 1) + " " + ez + " bedrock");
+		expectName(context, Waypoint.Kind.END_GATEWAY, "End Gateway", "bedrock above and below it");
 
 		// Well apart from the first, so a pin of its own.
 		int second = at.getX() + 50;
@@ -159,10 +174,89 @@ final class PortalPinsTest {
 
 		// Nothing left in the air over spawn for the tests after this one.
 		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 22) + " " + (y + 22) + " " + z + " air");
-		world.getServer().runCommand("fill " + ex + " " + y + " " + ez + " " + (ex + 20) + " " + y + " " + (ez + 2) + " air");
+		world.getServer().runCommand("fill " + (ex - 1) + " " + (y - 1) + " " + (ez - 1) + " " + (ex + 20) + " " + (y + 1) + " " + (ez + 3) + " air");
 		world.getServer().runCommand("setblock " + (second + 1) + " " + (y + 8) + " " + z + " air");
 		context.waitTicks(40);
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+	}
+
+	/**
+	 * Issue #315: a portal on the Nether roof gets a pin of its own, though one under the roof stands
+	 * a few blocks away on the map or straight below it, and breaking it takes only its own pin.
+	 */
+	static void netherRoof(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.runOnClient(mc -> Settings.get().portalMarkers = true);
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
+			&& MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = at.getX() + 4;
+		int z = at.getZ() + 4;
+		// A roof portal alone is found, so what follows is about the two sharing a pin.
+		netherPortal(world, NETHER, x + 60, 128, z, 2, 3);
+		expectNetherPins(context, 1, "a portal alone on the roof");
+		frameBroken(world, NETHER, x + 60, 128, z);
+		expectNetherPins(context, 0, "breaking the lone roof portal");
+		// Under the roof, as high as a portal goes: a pocket just under the bedrock.
+		world.getServer().runCommand(NETHER + "fill " + (x - 1) + " 116 " + (z - 2) + " " + (x + 4) + " 122 " + (z + 2) + " air");
+		netherPortal(world, NETHER, x, 117, z, 2, 3);
+		expectNetherPins(context, 1, "a portal under the roof");
+		// On the roof, ten blocks along, standing on the bedrock: the player in the issue.
+		int roofX = x + 10;
+		netherPortal(world, NETHER, roofX, 128, z, 2, 3);
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + (roofX + 2) + " 128 " + (z + 6));
+		context.waitTicks(40);
+		DioramaClientTest.settle(context, 40);
+		context.setScreen(MapScreen::new);
+		DioramaClientTest.settle(context, 40);
+		context.takeScreenshot("portal-roof-map");
+		context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("portal-roof-list");
+		context.setScreen(() -> null);
+		expectNetherPins(context, 2, "a portal on the roof beside it");
+		if (context.computeOnClient(mc -> netherPins().stream().noneMatch(w -> w.y >= 128 && Math.abs(w.x - roofX - 1) <= 2))) {
+			throw new AssertionError("No pin on the roof portal");
+		}
+		// Breaking the roof portal takes its pin; the one under the roof stays.
+		frameBroken(world, NETHER, roofX, 128, z);
+		expectNetherPins(context, 1, "breaking the roof portal");
+		if (context.computeOnClient(mc -> netherPins().get(0).y >= 128)) {
+			throw new AssertionError("The pin left is the roof portal's");
+		}
+		frameBroken(world, NETHER, x, 117, z);
+		expectNetherPins(context, 0, "breaking the portal under the roof");
+
+		// Straight above one under the roof, in the same chunk: the chunk has a portal on each side.
+		// The one under is wider, so most of the chunk's portal blocks are its.
+		int same = (x + 40) & ~15;
+		world.getServer().runCommand(NETHER + "fill " + (same - 1) + " 116 " + (z - 2) + " " + (same + 6) + " 122 " + (z + 2) + " air");
+		netherPortal(world, NETHER, same, 117, z, 4, 3);
+		expectNetherPins(context, 1, "a wide portal under the roof");
+		netherPortal(world, NETHER, same, 128, z, 2, 3);
+		expectNetherPins(context, 2, "a portal on the roof straight above it, in the same chunk");
+		world.getServer().runCommand(NETHER + "fill " + same + " 117 " + z + " " + (same + 5) + " 121 " + z + " air");
+		frameBroken(world, NETHER, same, 128, z);
+		expectNetherPins(context, 0, "breaking both");
+		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+	}
+
+	private static java.util.List<Waypoint> netherPins() {
+		return WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && w.dimension.equals("minecraft:the_nether")).toList();
+	}
+
+	private static void expectNetherPins(ClientGameTestContext context, int count, String after) {
+		for (int i = 0; ; i++) {
+			int pins = context.computeOnClient(mc -> netherPins().size());
+			if (pins == count) {
+				return;
+			}
+			if (i > PIN_TICKS) {
+				throw new AssertionError(count + " Nether portal pins in the Nether expected after " + after + ", got " + pins);
+			}
+			context.waitTick();
+		}
 	}
 
 	/** A portal in a chunk the client never had, read from the save behind the map. */
@@ -219,12 +313,21 @@ final class PortalPinsTest {
 
 	/** A frame of obsidian and the lit portal in it, with its inside {@code width} by {@code height}, along X. */
 	private static void netherPortal(TestSingleplayerContext world, int x, int y, int z, int width, int height) {
-		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + width + 1) + " " + (y + height + 1) + " " + z + " obsidian");
-		world.getServer().runCommand("fill " + (x + 1) + " " + (y + 1) + " " + z + " " + (x + width) + " " + (y + height) + " " + z + " nether_portal[axis=x]");
+		netherPortal(world, "", x, y, z, width, height);
+	}
+
+	/** The same in a dimension: {@code in} is an {@code execute in} prefix, as {@link #NETHER}. */
+	private static void netherPortal(TestSingleplayerContext world, String in, int x, int y, int z, int width, int height) {
+		world.getServer().runCommand(in + "fill " + x + " " + y + " " + z + " " + (x + width + 1) + " " + (y + height + 1) + " " + z + " obsidian");
+		world.getServer().runCommand(in + "fill " + (x + 1) + " " + (y + 1) + " " + z + " " + (x + width) + " " + (y + height) + " " + z + " nether_portal[axis=x]");
 	}
 
 	private static void frameBroken(TestSingleplayerContext world, int x, int y, int z) {
-		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
+		frameBroken(world, "", x, y, z);
+	}
+
+	private static void frameBroken(TestSingleplayerContext world, String in, int x, int y, int z) {
+		world.getServer().runCommand(in + "fill " + x + " " + y + " " + z + " " + (x + 3) + " " + (y + 4) + " " + z + " air");
 	}
 
 	private static void expectPins(ClientGameTestContext context, Waypoint.Kind kind, int count, String after) {
@@ -238,6 +341,120 @@ final class PortalPinsTest {
 			}
 			context.waitTick();
 		}
+	}
+
+	/** Waits for the one pin of a kind to be saved under a name. */
+	private static void expectName(ClientGameTestContext context, Waypoint.Kind kind, String name, String after) {
+		for (int i = 0; ; i++) {
+			String saved = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == kind).findFirst().map(w -> w.name).orElse("no pin"));
+			if (saved.equals(name)) {
+				return;
+			}
+			if (i > PIN_TICKS) {
+				throw new AssertionError("The " + kind + " pin should be named " + name + " after " + after + ", but it's " + saved);
+			}
+			context.waitTick();
+		}
+	}
+
+	/**
+	 * Issue #311, as the player met it: a Paper server with the AdvancedPortals plugin, whose portals
+	 * are the game's portal blocks in whatever frame the hub's builders liked, leading wherever the
+	 * owner set. Three of those, from the plugin's own files, and, for comparison, an End portal and a Nether portal built the
+	 * game's way. Needs {@code DIORAMA_REAL_SERVER=1 REAL_SERVER_KIND=paper} and the plugin's jar in
+	 * {@code REAL_SERVER_PLUGINS}.
+	 */
+	static void pluginPortals(ClientGameTestContext context) {
+		context.getInput().resizeWindow(1920, 1080);
+		try (RealServer server = RealServer.start(false)) {
+			if (!server.console().contains("AdvancedPortals")) {
+				throw new AssertionError("The server started without the AdvancedPortals plugin");
+			}
+			server.join(context);
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+			context.runOnClient(mc -> Settings.get().portalMarkers = true);
+			String player = context.computeOnClient(mc -> mc.player.getName().getString());
+			BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+			int y = at.getY() + 12;
+			int z = at.getZ();
+			int floor = at.getX() + 8;
+			int wall = floor + 40;
+			int gate = floor + 80;
+			int stronghold = floor - 40;
+			int nether = floor - 80;
+			// The plugin's own files, as its /portal create and /desti create write them.
+			try {
+				java.nio.file.Path plugin = server.folder.resolve("plugins/AdvancedPortals");
+				java.nio.file.Files.createDirectories(plugin.resolve("portals"));
+				java.nio.file.Files.createDirectories(plugin.resolve("desti"));
+				java.nio.file.Files.writeString(plugin.resolve("desti/away.yaml"), "loc:\n  posX: " + (at.getX() + 0.5) + "\n  posY: " + (y + 20.0)
+					+ "\n  posZ: " + (z + 200.5) + "\n  worldName: world\n  yaw: 0.0\n  pitch: 0.0\nargs:\n  name:\n  - away\n");
+				java.nio.file.Files.writeString(plugin.resolve("portals/selector.yaml"), pluginPortal("selector", "END_PORTAL", floor + 1, y, z + 1, floor + 3, y, z + 3));
+				java.nio.file.Files.writeString(plugin.resolve("portals/warps.yaml"), pluginPortal("warps", "END_GATEWAY", wall + 1, y + 1, z, wall + 2, y + 3, z));
+				java.nio.file.Files.writeString(plugin.resolve("portals/survival.yaml"), pluginPortal("survival", "NETHER_PORTAL", gate + 1, y + 1, z, gate + 2, y + 3, z));
+			} catch (java.io.IOException e) {
+				throw new AssertionError(e);
+			}
+			server.command("difficulty peaceful");
+			server.command("time set noon");
+			server.command("portal reload");
+			context.waitTicks(40);
+			server.command("fill " + floor + " " + y + " " + z + " " + (floor + 4) + " " + y + " " + (z + 4) + " quartz_block");
+			server.command("fill " + (floor + 1) + " " + y + " " + (z + 1) + " " + (floor + 3) + " " + y + " " + (z + 3) + " end_portal");
+			server.command("fill " + wall + " " + y + " " + z + " " + (wall + 3) + " " + (y + 4) + " " + z + " quartz_block");
+			server.command("fill " + (wall + 1) + " " + (y + 1) + " " + z + " " + (wall + 2) + " " + (y + 3) + " " + z + " end_gateway");
+			server.command("fill " + gate + " " + y + " " + z + " " + (gate + 3) + " " + (y + 4) + " " + z + " quartz_block");
+			server.command("fill " + (gate + 1) + " " + (y + 1) + " " + z + " " + (gate + 2) + " " + (y + 3) + " " + z + " nether_portal[axis=x]");
+			server.command("fill " + stronghold + " " + y + " " + z + " " + (stronghold + 4) + " " + y + " " + (z + 4) + " end_portal_frame[eye=true]");
+			server.command("fill " + (stronghold + 1) + " " + y + " " + (z + 1) + " " + (stronghold + 3) + " " + y + " " + (z + 3) + " end_portal");
+			server.command("fill " + nether + " " + y + " " + z + " " + (nether + 3) + " " + (y + 4) + " " + z + " obsidian");
+			server.command("fill " + (nether + 1) + " " + (y + 1) + " " + z + " " + (nether + 2) + " " + (y + 3) + " " + z + " nether_portal[axis=x]");
+			for (int i = 0; ; i++) {
+				long pins = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind.isPortal()).count());
+				if (pins == 5) {
+					break;
+				}
+				if (i > 600) {
+					String console = server.console();
+					throw new AssertionError("Five portal pins expected on the plugin's server, got " + pins + "\n" + console.substring(Math.max(0, console.length() - 3000)));
+				}
+				context.waitTick();
+			}
+			DioramaClientTest.settle(context, 60);
+			String names = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind.isPortal())
+				.sorted(java.util.Comparator.comparingInt(w -> w.x)).map(w -> w.shownName() + " (" + w.kind + " at " + w.x + " " + w.y + " " + w.z + ")")
+				.collect(java.util.stream.Collectors.joining(", ")));
+			dev.diorama.Diorama.LOGGER.info("[portal-plugin] pins from west to east: {}", names);
+			context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+			context.waitTicks(5);
+			context.takeScreenshot("portal-plugin-list");
+			context.setScreen(MapScreen::new);
+			context.getInput().setCursorPos(1300, 30);
+			double v = Projection.v(y, z);
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(floor + 2.5, v, 3.0, TileKey.SURFACE));
+			settle(context, 100);
+			context.takeScreenshot("portal-plugin-map");
+			context.setScreen(() -> null);
+
+			// They are the plugin's portals: it lists them.
+			server.commandAndWait("portal list", "Portals: selector, survival, warps", 30);
+
+			String expected = "Nether Portal, End Portal, Portal, Portal, Portal";
+			String saved = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind.isPortal())
+				.sorted(java.util.Comparator.comparingInt(w -> w.x)).map(w -> w.name).collect(java.util.stream.Collectors.joining(", ")));
+			if (!saved.equals(expected)) {
+				throw new AssertionError("Pins from west to east should be " + expected + ", got " + saved);
+			}
+			context.runOnClient(mc -> Settings.get().portalMarkers = false);
+			RealServer.leave(context);
+		}
+	}
+
+	/** An AdvancedPortals portal file: a box of trigger blocks that sends players to the destination "away". */
+	private static String pluginPortal(String name, String trigger, int x1, int y1, int z1, int x2, int y2, int z2) {
+		return "maxLoc:\n  posX: " + x2 + "\n  posY: " + y2 + "\n  posZ: " + z2 + "\n  worldName: world\n"
+			+ "minLoc:\n  posX: " + x1 + "\n  posY: " + y1 + "\n  posZ: " + z1 + "\n  worldName: world\n"
+			+ "args:\n  name:\n  - " + name + "\n  triggerblock:\n  - " + trigger + "\n  destination:\n  - away\n";
 	}
 
 	private static void expectListed(ClientGameTestContext context, int count, String when) {

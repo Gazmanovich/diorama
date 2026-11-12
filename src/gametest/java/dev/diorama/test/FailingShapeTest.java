@@ -26,6 +26,7 @@ final class FailingShapeTest {
 			BlockState lodestone = Blocks.LODESTONE.defaultBlockState();
 			int id = Block.BLOCK_STATE_REGISTRY.getId(lodestone);
 			BlockLooks real = BlockLooks.build();
+			real.ensure(id);
 			BlockLooks looks;
 			try {
 				Object cache = cache().get(lodestone);
@@ -34,6 +35,8 @@ final class FailingShapeTest {
 				collisionShape.set(cache, null);
 				try {
 					looks = BlockLooks.build();
+					// Looks are worked out when first asked for: ask while the shape still fails.
+					looks.ensure(id);
 				} finally {
 					collisionShape.set(cache, shape);
 				}

@@ -20,11 +20,20 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.dimension.DimensionType;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -64,15 +73,34 @@ public final class WaypointStore {
 	private final List<Waypoint> elsewhere = new ArrayList<>();
 	private final Path foldersFile;
 	private Folders folders = new Folders();
+	/**
+	 * Which dimensions' waypoints the player picked in the waypoint list to show in another
+	 * dimension too. Kept until they leave the world, as Xaero's Minimap keeps the dimension its
+	 * waypoint list was switched to, so nothing about it is saved.
+	 */
+	private final Set<ShownIn> shownIn = new LinkedHashSet<>();
+	/** Each dimension's coordinate scale, once known: 8 for the Nether, where a block is eight of the Overworld's. */
+	private final Map<String, Double> scales = new HashMap<>();
+
+	/** The copies {@link #shownIn} made last for each dimension, by the waypoint each stands in for, to be made again in place. */
+	private final Map<String, Map<Waypoint, Waypoint>> copies = new HashMap<>();
+
+	/** {@code from}'s waypoints shown in {@code in}. */
+	private record ShownIn(String in, String from) {
+	}
 
 	/**
-	 * The player's own folders and which folders are hidden, saved beside the waypoints in
-	 * {@code folders.json}. Every dimension has a folder of its own without being listed here.
+	 * The player's own folders, which folders are hidden and the waypoint list's sort order, saved
+	 * beside the waypoints in {@code folders.json}. Every dimension has a folder of its own without
+	 * being listed here.
 	 */
 	private static final class Folders {
 		List<String> custom = new ArrayList<>();
 		/** Folder keys, as {@link #folderKey} makes them. */
 		Set<String> hidden = new LinkedHashSet<>();
+		/** A {@link WaypointSort} by name; none is Distance. Every folder of the world is sorted the same, as Xaero's sorts every set. */
+		@Nullable String sort;
+		boolean sortReversed;
 	}
 
 	private WaypointStore(String worldKey) {
@@ -182,6 +210,94 @@ public final class WaypointStore {
 			out.add(this.withVisibility(waystone));
 		}
 		return out;
+	}
+
+	/**
+	 * What a map or the world shows in a dimension: its waypoints ({@link #in}), then those of each
+	 * dimension picked to show there too, as copies at this dimension's coordinates
+	 * ({@link Waypoint#scaled}). A copy's {@link Waypoint#source} is the waypoint to act on.
+	 */
+	public List<Waypoint> shownIn(String dimension) {
+		List<Waypoint> out = this.in(dimension);
+		// Asked every frame for the player's own dimension, which notes its scale while they're in it.
+		double scale = this.coordinateScale(dimension);
+		Map<Waypoint, Waypoint> previous = this.copies.getOrDefault(dimension, Map.of());
+		Map<Waypoint, Waypoint> made = new IdentityHashMap<>();
+		for (ShownIn pair : this.shownIn) {
+			if (pair.in().equals(dimension)) {
+				double divider = scale / this.coordinateScale(pair.from());
+				for (Waypoint waypoint : this.in(pair.from())) {
+					Waypoint copy = waypoint.scaled(divider, previous.get(waypoint));
+					made.put(waypoint, copy);
+					out.add(copy);
+				}
+			}
+		}
+		if (made.isEmpty()) {
+			this.copies.remove(dimension);
+		} else {
+			this.copies.put(dimension, made);
+		}
+		return out;
+	}
+
+	/** Whether {@code from}'s waypoints are shown in {@code in} too. */
+	public boolean showsIn(String in, String from) {
+		return this.shownIn.contains(new ShownIn(in, from));
+	}
+
+	/** Shows {@code from}'s waypoints in {@code in} too, or stops. */
+	public void setShownIn(String in, String from, boolean shown) {
+		if (shown) {
+			this.shownIn.add(new ShownIn(in, from));
+		} else {
+			this.shownIn.remove(new ShownIn(in, from));
+		}
+	}
+
+	/**
+	 * A dimension's coordinate scale, as its dimension type gives it: the player's own dimension's
+	 * from its level, another's from the singleplayer server, or from the dimension type of the
+	 * same name, which the server sends and which the game's dimensions and most mods' have. 1 for
+	 * one that can't be found, which leaves its waypoints where they are.
+	 */
+	public double coordinateScale(String dimension) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level != null && mc.level.dimension().identifier().toString().equals(dimension)) {
+			double scale = mc.level.dimensionType().coordinateScale();
+			this.scales.put(dimension, scale);
+			return scale;
+		}
+		Double known = this.scales.get(dimension);
+		if (known == null) {
+			known = lookUpScale(mc, dimension);
+			this.scales.put(dimension, known);
+		}
+		return known;
+	}
+
+	private static double lookUpScale(Minecraft mc, String dimension) {
+		var server = mc.getSingleplayerServer();
+		if (server != null) {
+			for (ServerLevel level : server.getAllLevels()) {
+				if (level.dimension().identifier().toString().equals(dimension)) {
+					return level.dimensionType().coordinateScale();
+				}
+			}
+		}
+		if (mc.level != null) {
+			//? if >=1.21.2 {
+			Registry<DimensionType> types = mc.level.registryAccess().lookupOrThrow(Registries.DIMENSION_TYPE);
+			//?} else {
+			/*Registry<DimensionType> types = mc.level.registryAccess().registryOrThrow(Registries.DIMENSION_TYPE);
+			*///?}
+			for (Map.Entry<ResourceKey<DimensionType>, DimensionType> type : types.entrySet()) {
+				if (type.getKey().identifier().toString().equals(dimension)) {
+					return type.getValue().coordinateScale();
+				}
+			}
+		}
+		return 1;
 	}
 
 	/** The known waystones in every dimension, which sit in the Waystones folder. */
@@ -311,6 +427,23 @@ public final class WaypointStore {
 	/** Hides or shows a whole folder on the maps and in the world. */
 	public void setFolderHidden(String key, boolean hidden) {
 		if (hidden ? this.folders.hidden.add(key) : this.folders.hidden.remove(key)) {
+			this.saveFolders();
+		}
+	}
+
+	/** The order the waypoint list shows this world's folders in. */
+	public WaypointSort sort() {
+		return WaypointSort.named(this.folders.sort);
+	}
+
+	public boolean sortReversed() {
+		return this.folders.sortReversed;
+	}
+
+	public void setSort(WaypointSort sort, boolean reversed) {
+		if (sort != this.sort() || reversed != this.folders.sortReversed) {
+			this.folders.sort = sort.name();
+			this.folders.sortReversed = reversed;
 			this.saveFolders();
 		}
 	}
@@ -490,6 +623,8 @@ public final class WaypointStore {
 				if (read.hidden != null) {
 					clean.hidden.addAll(read.hidden);
 				}
+				clean.sort = read.sort;
+				clean.sortReversed = read.sortReversed;
 				this.folders = clean;
 			}
 		} catch (Exception e) {

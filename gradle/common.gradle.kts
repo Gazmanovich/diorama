@@ -16,6 +16,13 @@ tasks.named<ProcessResources>("processResources") {
 	filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml", "META-INF/mods.toml", "diorama.mixins.json")) {
 		expand(props)
 	}
+	// The vanilla colour table made for this jar's Minecraft version (the vanilla-table game test),
+	// under the one name the code reads.
+	val table = "${project.property("minecraft_version")}.dat"
+	exclude { it.path.startsWith("diorama/vanilla/") && it.name != table }
+	filesMatching("diorama/vanilla/$table") {
+		path = "diorama/vanilla_looks.dat"
+	}
 }
 
 tasks.withType<JavaCompile>().configureEach {

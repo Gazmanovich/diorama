@@ -179,7 +179,7 @@ final class CaveSight {
 	}
 
 	private byte read(int x, int y, int z) {
-		int id = BlockLooks.id(this.level.getBlockState(this.pos.set(x, y, z)));
+		int id = this.looks.lookId(this.level.getBlockState(this.pos.set(x, y, z)));
 		return id < this.looks.kind.length && this.looks.kind[id] == BlockLooks.SOLID ? SOLID : OPEN;
 	}
 

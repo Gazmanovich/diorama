@@ -1,12 +1,14 @@
 """Run Diorama's client game tests on boat.dev VMs: software rendering, no GPU. See SKILL.md.
 
 usage: python boat_run.py <node[,node...]> --tests <sections|all> [--type default|large] [--env KEY=VALUE]...
-                           [--warm-minutes N] [--keep]
+                           [--mods <list|folder|jar|url>[,...]] [--warm-minutes N] [--keep]
 
 Each node gets its own VM, started at the same time from the newest warmed snapshot, or the VM an
 earlier run from this checkout left warm. The script sends this working tree (uncommitted changes
 included), runs :<node>:runClientGameTest, copies the results to build/boat-runs/<time>-<node>/,
 and deletes the VM or leaves it warm for the next run. Exits non-zero if any node failed.
+
+--mods runs the tests with other mods' release jars installed (see SKILL.md, "Other mods in a run").
 """
 import argparse
 import concurrent.futures
@@ -23,6 +25,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 SNAPSHOT_PREFIX = 'diorama-gametest-'
@@ -362,6 +365,65 @@ APPLY_OVERLAY = ('set -e; cd ~/diorama; tar xzf ~/overlay.tgz .boat-overlay-dele
                  'rm -f .boat-overlay-deleted; sed -i "s/\\r$//" .claude/skills/boat-game-test/*.sh')
 
 
+def mods_for(node, items):
+    """What --mods names for one node: (jars on this machine, [(file name, URL)] for the VM to
+    download). An item is a list in mods/ by name (or any .txt list: lines of `<node> <url>`), a
+    folder of jars (its <node>/ subfolder when it has one), a jar or a URL. Exits on an item that
+    gives this node nothing: a run that quietly leaves the mod out would pass for the wrong reason."""
+    jars, urls = [], []
+    for item in items:
+        path = Path(item)
+        named = HERE / 'mods' / f'{item}.txt'
+        if item.startswith(('http://', 'https://')):
+            found = [item]
+        elif path.is_dir():
+            folder = path / node if (path / node).is_dir() else path
+            found = sorted(folder.glob('*.jar'))
+        elif path.suffix == '.jar' and path.is_file():
+            found = [path]
+        elif path.suffix == '.txt' and path.is_file() or named.is_file():
+            lines = (path if path.is_file() else named).read_text(encoding='utf-8').splitlines()
+            rows = [line.split() for line in lines if line.strip() and not line.startswith('#')]
+            if any(len(row) != 2 for row in rows):
+                sys.exit(f'--mods {item}: every line is `<node> <url>`')
+            found = [url for listed, url in rows if listed == node]
+        else:
+            sys.exit(f'--mods {item}: not a list in {HERE / "mods"}, a folder, a .jar, a .txt list or a URL')
+        if not found:
+            sys.exit(f'--mods {item}: nothing for {node}')
+        for one in found:
+            if isinstance(one, Path):
+                jars.append(one.resolve())
+            else:
+                name = urllib.parse.unquote(urllib.parse.urlsplit(one).path.rsplit('/', 1)[-1])
+                if not name.endswith('.jar'):
+                    sys.exit(f'--mods {one}: the URL has to end in a .jar file name')
+                urls.append((name, one))
+    names = [j.name for j in jars] + [name for name, _ in urls]
+    twice = sorted({n for n in names if names.count(n) > 1})
+    if twice:
+        sys.exit(f'--mods: {", ".join(twice)} named twice for {node}')
+    return jars, urls
+
+
+def send_mods(node, vm, mods, out):
+    """Leaves ~/mods.tgz on the VM for sandbox.sh: the jars, and urls.txt for the ones it downloads."""
+    jars, urls = mods
+    tgz = out / 'mods.tgz'
+    with tarfile.open(tgz, 'w:gz') as tar:
+        for jar in jars:
+            tar.add(jar, arcname=jar.name)
+        listing = ''.join(f'{name}\t{url}\n' for name, url in urls).encode()
+        info = tarfile.TarInfo('urls.txt')
+        info.size = len(listing)
+        tar.addfile(info, io.BytesIO(listing))
+    sent = boat_retry('scp', tgz.name, f'{vm}:/home/user/mods.tgz', cwd=out, timeout=600)
+    tgz.unlink()
+    if sent.returncode:
+        raise RuntimeError(f'boat scp of the mods failed: {tail(sent)}')
+    say(node, 'other mods: ' + ', '.join([j.name for j in jars] + [name for name, _ in urls]))
+
+
 def wait_for_start_slot():
     """Waits (on `boat limits`, which is free) until the account may start a VM this minute, so a
     start isn't refused: refused starts count against the limits too. Raises when the hour's or
@@ -473,7 +535,9 @@ def push_tree(node, vm, repo, snapshot, reused, out):
     seconds instead of the 15 to 80 a whole push took; a reused VM, whose ~/diorama an earlier run
     changed, gets the whole tree in ~/src, which sandbox.sh copies over ~/diorama."""
     # Results of an earlier run on this VM could pass for this run's.
-    paths = ['/home/user/src', '/home/user/result', '/home/user/result.tgz', '/home/user/overlay.tgz']
+    # And the last run's mods would load in this one.
+    paths = ['/home/user/src', '/home/user/result', '/home/user/result.tgz', '/home/user/overlay.tgz',
+             '/home/user/mods.tgz']
     cleared = boat_retry('exec', vm, '--timeout', '120', '--', 'rm', '-rf', *paths)
     if cleared.returncode:
         raise RuntimeError(f'could not clear the VM: {tail(cleared)}')
@@ -528,6 +592,8 @@ def run_node(node, args, repo, snapshot, start):
         if not args.no_prefetch and not reused:
             boat('exec', vm, '--detach', '--json', '--', 'bash', '-c', PREFETCH.format(node=node))
         script = push_tree(node, vm, repo, snapshot, reused, out)
+        if node in args.mods:
+            send_mods(node, vm, args.mods[node], out)
         pushed = time.time() - start
         say(node, f'pushed after {pushed:.0f} s; running {args.tests}')
         # The tests get what's left after setup, less 2 min to pack the results and 10 to fetch
@@ -600,7 +666,8 @@ def timings(out, node, ready, pushed, launched):
     read off the VM's clock."""
     marks = [
         ('Gradle', first_time(out / 'sandbox.log', 'running :')),
-        ('game start', first_time(out / 'gradle.log', f'Task :{node}:runClientGameTest')),
+        # runProductionClientGameTest with --mods on Fabric up to 1.21.11.
+        ('game start', first_time(out / 'gradle.log', f'Task :{node}:run', 'ClientGameTest')),
         ('world', first_time(out / 'gradle.log', 'Starting integrated minecraft server')),
         ('map warm-up', first_time(out / 'gradle.log', 'joined the game')),
         ('tests', first_time(out / 'gradle.log', 'Map warm-up done')),
@@ -636,6 +703,9 @@ def main():
     parser.add_argument('--type', default='default', choices=['small', 'default', 'large'],
                         help='VM size. default (4 vCPU) unless a run is long: see SKILL.md')
     parser.add_argument('--env', action='append', default=[], help='extra KEY=VALUE for the game, e.g. DIORAMA_GIF=1')
+    parser.add_argument('--mods', default='',
+                        help="other mods' release jars to run with, comma-separated: a list in mods/ by name "
+                             '(opac, minecolonies), a folder of jars, a jar or a URL. See SKILL.md')
     parser.add_argument('--keep', action='store_true', help='stop the VM instead of deleting it, to look around after')
     parser.add_argument('--snapshot', help='saved snapshot to start from (default: the newest diorama-gametest-*)')
     parser.add_argument('--warm-minutes', type=int,
@@ -651,6 +721,10 @@ def main():
     missing = [n for n in nodes if not (repo / 'versions' / n).is_dir()]
     if missing:
         sys.exit(f'no node versions/{", ".join(missing)}')
+    items = [m for m in args.mods.split(',') if m]
+    args.mods = {n: mods_for(n, items) for n in nodes} if items else {}
+    if args.mods and any(e.startswith('DIORAMA_REAL_SERVER=') for e in args.env):
+        sys.exit('--mods only installs the mods in the client: the real server would run without them')
     if args.warm_minutes is None:
         args.warm_minutes = WARM_MINUTES if len(nodes) <= WARM_NODES else 0
     global CHECKOUT

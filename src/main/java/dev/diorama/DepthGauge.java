@@ -241,7 +241,7 @@ final class DepthGauge {
 		if (looks == null) {
 			return false;
 		}
-		byte kind = looks.kind[BlockLooks.id(state)];
+		byte kind = looks.kind[looks.lookId(state)];
 		return kind == BlockLooks.AIR || kind == BlockLooks.PLANT;
 	}
 
@@ -250,7 +250,7 @@ final class DepthGauge {
 		if (looks == null) {
 			return 0xFF7F7F7F;
 		}
-		int id = BlockLooks.id(state);
+		int id = looks.lookId(state);
 		int base = top ? looks.top[id] : looks.side[id];
 		int tinted = top ? looks.topTinted[id] : looks.sideTinted[id];
 		float w = top ? looks.topTintWeight[id] : looks.sideTintWeight[id];

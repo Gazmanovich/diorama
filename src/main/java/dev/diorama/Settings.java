@@ -62,9 +62,21 @@ public final class Settings {
 	/** In GUI pixels. Saved as a number; files from before it was a slider say SMALL, MEDIUM or LARGE. */
 	@JsonAdapter(SizeAdapter.class)
 	public int minimapSize = 96;
+	/** The corner whose edges the minimap is placed by, the nearest to where it was put. */
 	public Corner minimapCorner = Corner.TOP_RIGHT;
+	/**
+	 * How far in from that corner's edges the minimap sits, in GUI pixels: from the side edge to
+	 * the map, and from the top edge to the map or from the bottom edge to the lines under it.
+	 * Files from before the position screen leave them where every corner put it.
+	 */
+	public int minimapOffsetX = MinimapHud.MARGIN;
+	public int minimapOffsetY = MinimapHud.MARGIN;
+	/** Midway across the top or bottom of the screen, as Xaero's Minimap's Centered; {@link #minimapOffsetX} waits for when it isn't. */
+	public boolean minimapCentered = false;
 	/** The minimap's size while the enlarge key is held, in percent of {@link #minimapSize}. */
 	public int minimapEnlarged = 200;
+	/** The enlarge key switches the enlarged size on and off instead of being held (Xaero's "Toggled Enlarged Minimap"). */
+	public boolean minimapEnlargeToggle = false;
 	/** One of {@link #ZOOMS}. Saved as the value, so adding a step doesn't move anyone's zoom. */
 	public double minimapPixelsPerBlock = 2;
 	/** Files from before {@link #minimapPixelsPerBlock} say this instead, a place in the steps as they were. Read once. */
@@ -75,6 +87,12 @@ public final class Settings {
 	public boolean coordinates = true;
 	public boolean biome = true;
 	public GameTime gameTime = GameTime.OFF;
+	/**
+	 * How big the compass letters and the lines under the minimap are, in percent of the game's own
+	 * text: {@link #MIN_TEXT_SIZE} to {@link #MAX_TEXT_SIZE}. {@code TextSize.scale} rounds it to
+	 * whole screen pixels.
+	 */
+	public int minimapTextSize = 100;
 	/** Whether the sky view is drawn by day, at night, or as the world's time has it; see {@code NightLook}. */
 	public DayNight dayNight = DayNight.FOLLOW;
 	public boolean autoCaves = true;
@@ -112,11 +130,15 @@ public final class Settings {
 	public boolean waypointsOnMap = true;
 	public boolean waypointsInWorld = true;
 	public boolean deathMarkers = true;
+	/** Death markers go once the player is back within {@link dev.diorama.waypoint.Waypoints#DEATH_REACHED} blocks, as in Xaero's Minimap. */
+	public boolean removeReachedDeaths = true;
 	/** A pin on the bed the player last slept in ({@link dev.diorama.waypoint.Waypoints#watchSleep}). */
 	public boolean bedMarkers = true;
 	/** Pins on the lit portals the map has found ({@link dev.diorama.waypoint.Portals}). */
 	public boolean portalMarkers = false;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
+	/** Which waypoints stand in a beam in the world, where they show there at all. */
+	public Beams waypointBeams = Beams.TEMPORARY;
 	/**
 	 * Waypoints further than this many blocks away leave the world and the minimap; the map still
 	 * shows them all. 0 shows them at any distance. One of {@link #WAYPOINT_DISTANCES}.
@@ -125,11 +147,13 @@ public final class Settings {
 	/**
 	 * How big pins are drawn in each view, in percent of the size they're drawn at one pixel per GUI
 	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
-	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4.
+	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4. In the world
+	 * the name and distance under a pin follow its size: the game's own text size at
+	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller as the pin is drawn ({@code Pins.textScale}).
 	 */
-	public int waypointMinimapSize = 60;
-	public int waypointMapSize = 60;
-	public int waypointWorldSize = 60;
+	public int waypointMinimapSize = DEFAULT_WAYPOINT_SIZE;
+	public int waypointMapSize = DEFAULT_WAYPOINT_SIZE;
+	public int waypointWorldSize = DEFAULT_WAYPOINT_SIZE;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
@@ -154,6 +178,11 @@ public final class Settings {
 	 */
 	public boolean mapSavedChunks = true;
 	/**
+	 * The IDs of the dimensions where the map is off: no minimap, no map, no waypoints in the
+	 * world, and nothing mapped. For a dimension that's about finding the way without one.
+	 */
+	public java.util.Set<String> mapOffDimensions = new java.util.TreeSet<>();
+	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
 	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
 	 * lighting them from the sun.
@@ -169,8 +198,25 @@ public final class Settings {
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
-	/** Where FTB Chunks' land claims show, when it's installed. */
+	/** Where land claims from FTB Chunks or Open Parties and Claims show, when one is installed. */
 	public ClaimsShown claims = ClaimsShown.ALWAYS;
+
+	/**
+	 * The map in a browser, for a second screen ({@link dev.diorama.web.ClientWebMap}): off, for
+	 * browsers on this computer, or for every device on its network.
+	 */
+	public WebMap webMap = WebMap.OFF;
+	/** The port the web map is served on; the next free one after it if it's taken. Only in the file. */
+	public int webMapPort = DEFAULT_WEB_MAP_PORT;
+
+	public static final int DEFAULT_WEB_MAP_PORT = 8100;
+
+	/** Who can open the web map: nobody, browsers on this computer, or any device on its network. */
+	public enum WebMap {
+		OFF,
+		THIS_COMPUTER,
+		NETWORK
+	}
 
 	/** Where land claims show: nowhere, on the fullscreen map, or on the minimap too. */
 	public enum ClaimsShown {
@@ -184,6 +230,16 @@ public final class Settings {
 
 	/** Where drawings show: nowhere but draw mode, on the fullscreen map, or on the minimap too. */
 	public enum DrawingsShown {
+		OFF,
+		FULLSCREEN,
+		ALWAYS
+	}
+
+	/** Where the game's world border shows; see {@link WorldBorderOverlay}. */
+	public WorldBorderShown worldBorder = WorldBorderShown.ALWAYS;
+
+	/** Where the world border shows: nowhere, on the fullscreen map, or on the minimap too. */
+	public enum WorldBorderShown {
 		OFF,
 		FULLSCREEN,
 		ALWAYS
@@ -234,6 +290,14 @@ public final class Settings {
 	public static final int SCALE_STEP = 25;
 
 	public static final int MIN_WAYPOINT_SIZE = 25;
+	public static final int DEFAULT_WAYPOINT_SIZE = 60;
+
+	public static final int MIN_TEXT_SIZE = 25;
+	public static final int MAX_TEXT_SIZE = 400;
+
+	private static int clampTextSize(int size) {
+		return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, size));
+	}
 
 	private static int clampWaypointSize(int size) {
 		return Math.max(MIN_WAYPOINT_SIZE, Math.min(MAX_SCALE, size));
@@ -258,6 +322,16 @@ public final class Settings {
 		ALWAYS,
 		DISTANCE,
 		NONE
+	}
+
+	/**
+	 * Which in-world waypoints get a beam: none, the ones the player is heading for right now
+	 * (temporary waypoints and death markers), or all of them.
+	 */
+	public enum Beams {
+		OFF,
+		TEMPORARY,
+		ALL
 	}
 
 	/** Colours the player arrow can take, with their names' keys. */
@@ -378,6 +452,8 @@ public final class Settings {
 		if (settings.minimapCorner == null) {
 			settings.minimapCorner = Corner.TOP_RIGHT;
 		}
+		settings.minimapOffsetX = Math.max(MinimapHud.MARGIN, settings.minimapOffsetX);
+		settings.minimapOffsetY = Math.max(MinimapHud.MARGIN, settings.minimapOffsetY);
 		if (settings.dayNight == null) {
 			settings.dayNight = DayNight.FOLLOW;
 		}
@@ -400,16 +476,39 @@ public final class Settings {
 		if (settings.playerNames == null) {
 			settings.playerNames = NameTags.FULLSCREEN;
 		}
+		if (settings.webMap == null) {
+			settings.webMap = WebMap.OFF;
+		}
+		// Ports under 1024 need rights the game doesn't have; a few above it are tried when it's taken.
+		if (settings.webMapPort < 1024 || settings.webMapPort > 65500) {
+			settings.webMapPort = DEFAULT_WEB_MAP_PORT;
+		}
 		if (settings.claims == null) {
 			settings.claims = ClaimsShown.ALWAYS;
 		}
 		if (settings.drawings == null) {
 			settings.drawings = DrawingsShown.ALWAYS;
 		}
+		if (settings.worldBorder == null) {
+			settings.worldBorder = WorldBorderShown.ALWAYS;
+		}
 		if (settings.waypointLabels == null) {
 			settings.waypointLabels = WaypointLabels.AUTO;
 		}
+		if (settings.waypointBeams == null) {
+			settings.waypointBeams = Beams.TEMPORARY;
+		}
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
+		// Hand-edited IDs: trimmed, lower case, and Minecraft's own if they name no mod.
+		java.util.Set<String> off = new java.util.TreeSet<>();
+		if (settings.mapOffDimensions != null) {
+			for (String dimension : settings.mapOffDimensions) {
+				if (dimension != null) {
+					off.addAll(dev.diorama.share.ServerLocks.dimensions(dimension));
+				}
+			}
+		}
+		settings.mapOffDimensions = off;
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		if (settings.minimapZoom != null) {
@@ -422,6 +521,7 @@ public final class Settings {
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
+		settings.minimapTextSize = clampTextSize(settings.minimapTextSize);
 		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);

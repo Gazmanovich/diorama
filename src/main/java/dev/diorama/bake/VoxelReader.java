@@ -58,7 +58,7 @@ public final class VoxelReader {
 
 	private final ChunkSource source;
 	/** The looks the ids are for, which also holds filled copycats' looks; null when only {@link #state} is used. */
-	private final @Nullable BlockLooks looks;
+	private final @Nullable Looks looks;
 	/** {@link BlockLooks#kind}, for {@link #solid}; null when only {@link #state} is used. */
 	private final byte @Nullable [] kinds;
 	/** {@link BlockLooks#shape}, so {@link #solid} can tell blocks smaller than a cube; may be null. */
@@ -93,12 +93,12 @@ public final class VoxelReader {
 		this(source, null);
 	}
 
-	public VoxelReader(ChunkSource source, @Nullable BlockLooks looks) {
+	public VoxelReader(ChunkSource source, @Nullable Looks looks) {
 		this(source, looks, false);
 	}
 
 	/** With {@code shapes}, {@link #solid} tells blocks smaller than a cube apart. */
-	public VoxelReader(ChunkSource source, @Nullable BlockLooks looks, boolean shapes) {
+	public VoxelReader(ChunkSource source, @Nullable Looks looks, boolean shapes) {
 		this.source = source;
 		this.looks = looks;
 		this.kinds = looks == null ? null : looks.kind;
@@ -417,7 +417,7 @@ public final class VoxelReader {
 
 	private static final class Decoded {
 		final ChunkSnapshot snapshot;
-		final @Nullable BlockLooks looks;
+		final @Nullable Looks looks;
 		final @Nullable Section[] sections;
 		/** Per section, every block's id, indexed {@code (y << 8) | (z << 4) | x}; made when {@link #state} first reads it. */
 		final int[][] ids;
@@ -430,7 +430,7 @@ public final class VoxelReader {
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
-		Decoded(ChunkSnapshot snapshot, @Nullable BlockLooks looks) {
+		Decoded(ChunkSnapshot snapshot, @Nullable Looks looks) {
 			this.snapshot = snapshot;
 			this.looks = looks;
 			this.sections = new Section[snapshot.sectionCount()];
@@ -467,7 +467,7 @@ public final class VoxelReader {
 						BlockState state = this.snapshot.state(states, i & 15, i >> 8, i >> 4 & 15);
 						if (state != last) {
 							last = state;
-							f = solidFlags(BlockLooks.bakeId(state), kinds, shapes);
+							f = solidFlags(this.id(state), kinds, shapes);
 						}
 						mask[i >> 6] |= (long) (f & 1) << i;
 						if (f > 1) {
@@ -593,6 +593,11 @@ public final class VoxelReader {
 			return ids;
 		}
 
+		/** The state's id for a bake, with its look worked out when there are looks to read. */
+		private int id(BlockState state) {
+			return this.looks == null ? BlockLooks.bakeId(state) : this.looks.bakeLookId(state);
+		}
+
 		/** What the section holds: {@link #AIR_SECTION} where it has no blocks. */
 		Section section(int index) {
 			if (index < 0 || index >= this.sections.length) {
@@ -615,7 +620,7 @@ public final class VoxelReader {
 			ChunkSnapshot.SectionCopycats copycats = this.looks == null ? null : this.snapshot.copycats(index);
 			if (copycats == null) {
 				if (uniform != null) {
-					return new Section(BlockLooks.bakeId(this.snapshot.turned(uniform)), null, null, null, null);
+					return new Section(this.id(this.snapshot.turned(uniform)), null, null, null, null);
 				}
 				ChunkSnapshot.Packed packed = this.snapshot.packed(index);
 				int[] palette = packed == null ? null : this.paletteIds(packed);
@@ -626,7 +631,7 @@ public final class VoxelReader {
 			int[] ids;
 			if (uniform != null) {
 				ids = new int[4096];
-				Arrays.fill(ids, BlockLooks.bakeId(this.snapshot.turned(uniform)));
+				Arrays.fill(ids, this.id(this.snapshot.turned(uniform)));
 			} else {
 				ids = this.byBlock(index);
 			}
@@ -649,7 +654,7 @@ public final class VoxelReader {
 						BlockState state = this.snapshot.state(states, x, y, z);
 						if (state != lastState) {
 							lastState = state;
-							lastId = BlockLooks.bakeId(state);
+							lastId = this.id(state);
 						}
 						ids[(y << 8) | (z << 4) | x] = lastId;
 					}
@@ -673,7 +678,7 @@ public final class VoxelReader {
 			for (int p = 0; p < size; p++) {
 				BlockState state = packed.palette().valueFor(p);
 				if (state != null) {
-					ids[p] = BlockLooks.bakeId(this.snapshot.turned(state));
+					ids[p] = this.id(this.snapshot.turned(state));
 				}
 			}
 			return ids;

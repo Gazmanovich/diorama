@@ -21,6 +21,15 @@ public record TileLabel(boolean underRoof, long pitch, boolean fog, Facing facin
 	private static final String UNDER_ROOF = "under-roof";
 	private static final String FOG = "fog";
 
+	/**
+	 * The folder the views from on top of a roof are saved in, beside the sky view's: they look
+	 * different by the tilt, the way the map faces and whether only seen blocks show ({@code fog}),
+	 * so each of those keeps its own. Never a name {@link #parse} takes for a sky view.
+	 */
+	public static String onRoof(long pitch, Facing facing, boolean fog) {
+		return "on-roof-" + pitch + (facing == Facing.NORTH ? "" : "-" + facing.id()) + (fog ? "-" + FOG : "");
+	}
+
 	public String folder() {
 		String turned = this.facing == Facing.NORTH ? "" : "-" + this.facing.id();
 		if (this.underRoof) {
