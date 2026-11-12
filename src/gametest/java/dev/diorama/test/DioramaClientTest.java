@@ -115,6 +115,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
+			if (tests.contains("share-settings")) {
+				ShareTest.singleplayer(context);
+			}
 			spawnCell = tests.contains("saved-map") ? knownSpawnCell(context) : null;
 			if (tests.contains("styles")) {
 				styleTour(context, world);
@@ -131,8 +134,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("drawings")) {
 				DrawingTest.run(context, world);
 			}
+			if (tests.contains("world-border")) {
+				WorldBorderTest.run(context, world);
+			}
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
+			}
+			if (tests.contains("waypoint-beams")) {
+				WaypointBeamsTest.run(context, world);
+			}
+			if (tests.contains("waypoint-text-size")) {
+				WaypointTextSizeTest.run(context, world);
+			}
+			if (tests.contains("minimap-text-size")) {
+				MinimapTextSizeTest.run(context, world);
 			}
 			if (tests.contains("waypoint-size")) {
 				WaypointSizeTest.photos(context, world);
@@ -142,6 +157,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("natural-waters")) {
 				NaturalWatersTest.run(context, world);
+			}
+			if (tests.contains("leaves")) {
+				LeavesTest.run(context, world);
 			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
@@ -176,11 +194,41 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("portal-pins")) {
 				PortalPinsTest.checks(context, world);
 			}
+			if (tests.contains("portal-roof")) {
+				PortalPinsTest.netherRoof(context, world);
+			}
 			if (tests.contains("pin-names")) {
 				PinNamesTest.run(context, world);
 			}
+			if (tests.contains("death-pins")) {
+				DeathPinsTest.run(context, world);
+			}
 			if (tests.contains("waypoint-preview")) {
 				WaypointPreviewTest.run(context, world);
+			}
+			if (tests.contains("cross-dimension")) {
+				CrossDimensionTest.run(context, world);
+			}
+			if (tests.contains("dimensions-off")) {
+				DimensionsOffTest.run(context, world);
+			}
+			if (tests.contains("waypoint-sort")) {
+				WaypointSortTest.run(context, world);
+			}
+			if (tests.contains("waypoint-search")) {
+				WaypointSearchTest.run(context, world);
+			}
+			if (tests.contains("folder-list")) {
+				FolderListTest.run(context, world);
+			}
+			if (tests.contains("folder-editor")) {
+				FolderEditTest.run(context, world);
+			}
+			if (tests.contains("waypoint-select")) {
+				WaypointSelectTest.run(context, world);
+			}
+			if (tests.contains("web-map-client")) {
+				ClientWebMapTest.run(context, world);
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
@@ -196,6 +244,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("failing-shape")) {
 				FailingShapeTest.run(context);
+			}
+			if (tests.contains("vanilla-table")) {
+				VanillaTableTest.run(context);
 			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
@@ -215,11 +266,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("zoom-stand-in")) {
 				ZoomStandInTest.run(context, world);
 			}
+			if (tests.contains("far-zoom")) {
+				FarZoomTest.run(context, world);
+			}
 			if (tests.contains("minimap-zoom")) {
 				MinimapZoomTest.ruler(context, world);
 			}
 			if (tests.contains("enlarge")) {
 				enlarge(context);
+			}
+			if (tests.contains("minimap-position")) {
+				MinimapPositionTest.run(context, world);
 			}
 			if (tests.contains("minimap-frames")) {
 				MinimapFrameTest.run(context, world);
@@ -257,14 +314,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("ftb-claims")) {
 				ftbClaims(context, world);
 			}
+			if (tests.contains("opac-claims")) {
+				opacClaims(context, world);
+			}
+			if (tests.contains("minecolonies")) {
+				mineColonies(context, world);
+			}
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
 			}
 			if (tests.contains("pixelmon")) {
 				PixelmonTest.run(context, world);
 			}
+			if (tests.contains("aeronautics")) {
+				AeronauticsTest.run(context, world);
+			}
 			if (tests.contains("roof-caves")) {
 				RoofCavesTest.run(context, world);
+			}
+			if (tests.contains("nether-roof")) {
+				NetherRoofTest.run(context, world);
 			}
 			if (tests.contains("cave-depth")) {
 				CaveDepthTest.run(context, world);
@@ -285,8 +354,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 				waitUntilGenerated(context, world);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
+				if (tests.contains("nether-roof")) {
+					NetherRoofTest.reopened(context, reopened);
+				}
 				if (tests.contains("saved-chunks")) {
 					SavedChunksTest.reopened(context, savedChunksGround);
 				}
@@ -336,7 +408,40 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
 		}
+		if (tests.contains("real-server")) {
+			ShareTest.realServer(context);
+		}
+		if (tests.contains("portal-plugin")) {
+			PortalPinsTest.pluginPortals(context);
+		}
+		if (tests.contains("server-locks")) {
+			ServerLocksTest.run(context);
+		}
+		if (tests.contains("dimensions-off-file")) {
+			DimensionsOffTest.file(context);
+		}
+		if (tests.contains("dimensions-off-server")) {
+			DimensionsOffTest.server(context);
+		}
+		if (tests.contains("server-locks-old-server")) {
+			ServerLocksTest.oldServer(context);
+		}
+		if (tests.contains("shared-map-real")) {
+			SharedMapRealTest.run(context);
+		}
+		if (tests.contains("web-map")) {
+			WebMapTest.run(context);
+		}
+		if (tests.contains("shared-changes")) {
+			SharedChangesTest.run(context);
+		}
 		//? if >=1.21.4 && fabric {
+		if (tests.contains("share-settings")) {
+			ShareTest.settings(context);
+		}
+		if (tests.contains("shared-map")) {
+			SharedMapTest.run(context);
+		}
 		if (tests.contains("xaero-real-server")) {
 			XaeroRealTest.server(context);
 		}
@@ -1131,7 +1236,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Moves to a widget and clicks it with the mouse. */
-	private static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+	static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		moveCursor(context, (widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale);
 		holdFrames(context, 6);
@@ -3808,7 +3913,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		context.setScreen(() -> null);
 
-		// Dying leaves a death marker.
+		// Dying leaves a death marker. Respawning may land within reach of it: death-pins tests that.
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = false);
 		world.getServer().runCommand("gamerule show_death_messages false");
 		world.getServer().runCommand("kill @a");
 		context.waitTicks(20);
@@ -3828,6 +3934,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(40);
 		long deathsAfter = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.DEATH).count());
 		world.getServer().runCommand("gamerule immediate_respawn false");
+		context.runOnClient(mc -> Settings.get().removeReachedDeaths = true);
 		if (deathsAfter != deathsBefore + 1) {
 			throw new AssertionError("Instant respawn left " + (deathsAfter - deathsBefore) + " new death markers instead of 1");
 		}
@@ -4619,7 +4726,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		Diorama.LOGGER.info("FTB claims reached the map's claims {} ms after the commands", (System.nanoTime() - claimed) / 1_000_000);
 		Claims.Claim own = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 1, playerChunkZ + 1));
 		Claims.Claim server = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ));
-		if (own == null || server == null || own.team().equals(server.team()) || server.rgb() != 0xE04040 || !"Spawn".equals(server.name())) {
+		if (own == null || server == null || own.owner().equals(server.owner()) || server.rgb() != 0xE04040 || !"Spawn".equals(server.name())) {
 			throw new AssertionError("Expected the player's claim and Spawn's red claim: " + own + ", " + server);
 		}
 		if (context.computeOnClient(mc -> Claims.get().at(playerChunkX - 2, playerChunkZ)) != null) {
@@ -4749,6 +4856,528 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Couldn't look up FTB Teams' teams", e);
 			}
 			throw new AssertionError("No FTB team named " + name);
+		});
+	}
+
+	/**
+	 * Land claims from Open Parties and Claims, with it installed (opt-in: DIORAMA_TESTS=opac-claims).
+	 * The player claims the chunks round them and marks the middle one for force loading, and claims
+	 * two chunks to the east as server claims, through Open Parties and Claims' own client API, as
+	 * Xaero's World Map does. The map tints each claim in its colour on the ground it covers and
+	 * names it on hover, the minimap shows them, and unclaiming takes the tint away.
+	 */
+	private static void opacClaims(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.available())) {
+			throw new AssertionError("DIORAMA_TESTS=opac-claims needs Open Parties and Claims installed");
+		}
+		// The middle of a chunk, on an open patch far from anything placed before.
+		int cx = 1808 + 8;
+		int cz = -1792 + 8;
+		int x0 = cx - 56;
+		int z0 = cz - 40;
+		int x1 = cx + 88;
+		int z1 = cz + 40;
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		int y = Math.max(72, world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz)));
+		for (int x = x0; x <= x1; x += 16) {
+			for (int z = z0; z <= z1; z += 16) {
+				int xe = Math.min(x1, x + 15);
+				int ze = Math.min(z1, z + 15);
+				world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + xe + " " + (y + 60) + " " + ze + " air");
+				world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + z + " " + xe + " " + (y - 1) + " " + ze + " grass_block");
+			}
+		}
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+
+		int playerChunkX = cx >> 4;
+		int playerChunkZ = cz >> 4;
+		opacLogResults(context);
+		// One request at a time: Open Parties and Claims turns a request down while another is under way.
+		long claimed = System.nanoTime();
+		opacRequest(context, "requestAreaClaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
+		opacWait(context, "the player's claim", mc -> Claims.get().at(playerChunkX - 1, playerChunkZ - 1) != null);
+		Diorama.LOGGER.info("Open Parties and Claims claims reached the map's claims {} ms after the request", (System.nanoTime() - claimed) / 1_000_000);
+		opacRequest(context, "requestAreaForceload", playerChunkX, playerChunkZ, playerChunkX, playerChunkZ, true, false);
+		opacWait(context, "the force loaded middle", mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX, playerChunkZ).forceLoaded());
+		opacRequest(context, "requestAreaClaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
+		opacWait(context, "the server claim", mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) != null);
+		Claims.Claim own = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 1, playerChunkZ + 1));
+		Claims.Claim middle = context.computeOnClient(mc -> Claims.get().at(playerChunkX, playerChunkZ));
+		Claims.Claim server = context.computeOnClient(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ));
+		String player = context.computeOnClient(mc -> mc.player.getName().getString());
+		Diorama.LOGGER.info("Open Parties and Claims claims: own {}, middle {}, server's {}", own, middle, server);
+		if (own == null || server == null || own.owner().equals(server.owner()) || !own.titled() || !own.name().contains(player) || own.forceLoaded()
+			|| !middle.name().contains(player) || middle.name().equals(own.name()) || server.name().contains(player)) {
+			throw new AssertionError("Expected the player's claim, its force loaded middle and a server claim: " + own + ", " + middle + ", " + server);
+		}
+		if (context.computeOnClient(mc -> Claims.get().at(playerChunkX - 2, playerChunkZ)) != null) {
+			throw new AssertionError("A chunk outside the claims shows as claimed");
+		}
+		settle(context, 40);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, true, "the ground under the player");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "the server claim's ground");
+		assertClaimTint(context, cx + 36 + 0.5, y, cz + 0.5, false, "the ground between the claims");
+		assertClaimTint(context, cx + 0.5, y, cz - 28 + 0.5, false, "the ground north of the claim");
+
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS))), 200);
+		settle(context, 20);
+		context.takeScreenshot("opac-claims-01-map");
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("opac-claims-02-map-zoom-1");
+		// Hovering a claimed spot names it, as Open Parties and Claims does: the player's, then the server's.
+		lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		settle(context, 10);
+		double[] spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover");
+		spot = mapPoint(context, 0, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-force-loaded");
+		spot = mapPoint(context, 64, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-server");
+		// Turned off, the claims go.
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> !Claims.get().isEmpty())) {
+			throw new AssertionError("Claims still known with the setting off");
+		}
+		context.takeScreenshot("opac-claims-04-off");
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.ALWAYS);
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null, 600);
+		context.setScreen(() -> null);
+		context.waitTicks(20);
+		context.takeScreenshot("opac-claims-05-minimap");
+
+		// Forgotten, as on joining a server, they're read again from Open Parties and Claims.
+		context.runOnClient(mc -> {
+			Claims.resetSlowestTick();
+			Claims.clear();
+		});
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) != null && Claims.get().at(playerChunkX + 4, playerChunkZ) != null, 200);
+		Diorama.LOGGER.info("Open Parties and Claims claims read again in {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
+
+		// What a big server costs: 400 regions with 64 claims each, 50 owners, made on the server
+		// and sent to the client, then all read again as on joining.
+		int bigX = (cx >> 9) - 30;
+		int bigZ = cz >> 9;
+		int lastX = (bigX + 19) << 5 | 28;
+		int lastZ = (bigZ + 19) << 5 | 28;
+		context.runOnClient(mc -> Claims.resetSlowestTick());
+		long sent = System.nanoTime();
+		opacBigServer(world, bigX, bigZ, true);
+		context.waitFor(mc -> Claims.get().at(lastX, lastZ) != null, 2400);
+		long arrived = (System.nanoTime() - sent) / 1_000_000;
+		String arrivalParts = context.computeOnClient(mc -> Claims.slowestTickParts());
+		long arrival = context.computeOnClient(mc -> Claims.resetSlowestTick());
+		long[] reads = new long[3];
+		for (int k = 0; k < reads.length; k++) {
+			context.runOnClient(mc -> {
+				Claims.resetSlowestTick();
+				Claims.clear();
+			});
+			context.waitFor(mc -> Claims.get().at(lastX, lastZ) != null, 200);
+			reads[k] = context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000;
+		}
+		Diorama.LOGGER.info("Open Parties and Claims big server: 25600 claims in 400 regions on the map {} ms after claiming, slowest tick while they arrived {} us ({}), all read again in {} us",
+			arrived, arrival / 1000, arrivalParts, java.util.Arrays.toString(reads));
+		opacBigServer(world, bigX, bigZ, false);
+		context.waitFor(mc -> Claims.get().at(lastX, lastZ) == null, 2400);
+
+		// Unclaiming takes the tint away.
+		opacRequest(context, "requestAreaUnclaim", playerChunkX - 1, playerChunkZ - 1, playerChunkX + 1, playerChunkZ + 1, false);
+		long unclaimed = System.nanoTime();
+		context.waitFor(mc -> Claims.get().at(playerChunkX, playerChunkZ) == null, 600);
+		Diorama.LOGGER.info("Open Parties and Claims unclaim reached the map's claims {} ms after the request", (System.nanoTime() - unclaimed) / 1_000_000);
+		settle(context, 20);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, false, "the ground under the player after unclaiming");
+		assertClaimTint(context, cx + 64 + 0.5, y, cz + 0.5, true, "the server claim's ground after the player unclaimed");
+		openMapOnPlayer(context);
+		context.waitTicks(40);
+		context.takeScreenshot("opac-claims-06-unclaimed");
+		context.setScreen(() -> null);
+		opacRequest(context, "requestAreaUnclaim", playerChunkX + 3, playerChunkZ, playerChunkX + 4, playerChunkZ, true);
+		context.waitFor(mc -> Claims.get().at(playerChunkX + 4, playerChunkZ) == null, 600);
+		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	/**
+	 * A MineColonies colony's land, with MineColonies installed (opt-in: DIORAMA_TESTS=minecolonies).
+	 * The player founds a colony where they stand, through MineColonies' own colony manager. The map
+	 * tints the colony's land in its team colour and names the colony on hover, the minimap shows
+	 * it, a new name and colour follow, and deleting the colony takes the tint away. With Open
+	 * Parties and Claims installed too, a claim made inside the colony shows as that claim, and the
+	 * chunk goes back to the colony once it's unclaimed.
+	 */
+	private static void mineColonies(ClientGameTestContext context, TestSingleplayerContext world) {
+		if (!context.computeOnClient(mc -> dev.diorama.compat.MineColonies.available())) {
+			throw new AssertionError("DIORAMA_TESTS=minecolonies needs MineColonies installed");
+		}
+		// The middle of a chunk, on an open patch far from anything placed before.
+		int cx = -2800 + 8;
+		int cz = 2400 + 8;
+		int flat = 6 * 16 + 8;
+		int x0 = cx - flat;
+		int z0 = cz - flat;
+		int x1 = cx + flat - 1;
+		int z1 = cz + flat - 1;
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		world.getServer().runCommand("tp @a " + cx + " 200 " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(60);
+		int y = Math.max(72, world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, cx, cz)));
+		for (int x = x0; x <= x1; x += 16) {
+			for (int z = z0; z <= z1; z += 16) {
+				int xe = Math.min(x1, x + 15);
+				int ze = Math.min(z1, z + 15);
+				world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + xe + " " + (y + 60) + " " + ze + " air");
+				world.getServer().runCommand("fill " + x + " " + (y - 1) + " " + z + " " + xe + " " + (y - 1) + " " + ze + " grass_block");
+			}
+		}
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx && mc.player.onGround(), 600);
+		settle(context, 60);
+		int chunkX = cx >> 4;
+		int chunkZ = cz >> 4;
+		if (claimAt(context, chunkX, chunkZ) != null) {
+			throw new AssertionError("The ground is claimed before the colony is founded");
+		}
+
+		context.runOnClient(mc -> Claims.resetSlowestTick());
+		long founded = System.nanoTime();
+		int id = world.getServer().computeOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object manager = managers.getMethod("getInstance").invoke(null);
+				for (java.lang.reflect.Method method : managers.getMethods()) {
+					if (method.getName().equals("createColony") && method.getParameterCount() == 5) {
+						Object colony = method.invoke(manager, server.overworld(), new BlockPos(cx, y, cz), server.getPlayerList().getPlayers().get(0), "Riverside", "");
+						Class<?> colonies = Class.forName("com.minecolonies.api.colony.IColony");
+						colonies.getMethod("setColonyColor", net.minecraft.ChatFormatting.class).invoke(colony, net.minecraft.ChatFormatting.GOLD);
+						return (int) colonies.getMethod("getID").invoke(colony);
+					}
+				}
+				throw new AssertionError("MineColonies has no createColony");
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't found a colony through MineColonies' colony manager", e);
+			}
+		});
+		int gold = net.minecraft.network.chat.TextColor.fromLegacyFormat(net.minecraft.ChatFormatting.GOLD).getValue();
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == gold, 600);
+		Diorama.LOGGER.info("MineColonies colony {} reached the map's claims {} ms after it was founded", id, (System.nanoTime() - founded) / 1_000_000);
+		Claims.Claim colony = claimAt(context, chunkX, chunkZ);
+		if (!colony.titled() || !colony.name().equals("Riverside") || colony.forceLoaded()) {
+			throw new AssertionError("Expected the colony Riverside in gold: " + colony);
+		}
+		// How far the colony's land reaches: the same in every direction, and no further.
+		int reach = 0;
+		while (reach < 12 && colony.equals(claimAt(context, chunkX + reach + 1, chunkZ))) {
+			reach++;
+		}
+		int chunks = 0;
+		for (int x = -12; x <= 12; x++) {
+			for (int z = -12; z <= 12; z++) {
+				if (claimAt(context, chunkX + x, chunkZ + z) != null) {
+					chunks++;
+				}
+			}
+		}
+		int r = reach;
+		Diorama.LOGGER.info("MineColonies colony: {}, reaching {} chunks from its middle, {} chunks in all", colony, reach, chunks);
+		// The same land MineColonies' server gives the colony, chunk for chunk.
+		Set<Long> owned = world.getServer().computeOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object manager = managers.getMethod("getInstance").invoke(null);
+				java.lang.reflect.Method colonyAt = managers.getMethod("getIColony", net.minecraft.world.level.Level.class, BlockPos.class);
+				Set<Long> found = new java.util.HashSet<>();
+				for (int x = -12; x <= 12; x++) {
+					for (int z = -12; z <= 12; z++) {
+						if (colonyAt.invoke(manager, server.overworld(), new BlockPos(cx + x * 16, y, cz + z * 16)) != null) {
+							found.add((long) x << 32 | z & 0xFFFFFFFFL);
+						}
+					}
+				}
+				return found;
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't ask MineColonies' colony manager whose each chunk is", e);
+			}
+		});
+		for (int x = -12; x <= 12; x++) {
+			for (int z = -12; z <= 12; z++) {
+				if (owned.contains((long) x << 32 | z & 0xFFFFFFFFL) != (claimAt(context, chunkX + x, chunkZ + z) != null)) {
+					throw new AssertionError("The map and MineColonies disagree about the chunk " + x + ", " + z + " from the colony's middle: MineColonies has " + owned.size() + " chunks, the map " + chunks);
+				}
+			}
+		}
+		if (owned.size() < 9) {
+			throw new AssertionError("MineColonies gave the colony only " + owned.size() + " chunks");
+		}
+		if (reach < 1 || reach > 4 || claimAt(context, chunkX - reach, chunkZ) == null || claimAt(context, chunkX - reach - 1, chunkZ) != null
+			|| claimAt(context, chunkX, chunkZ + reach) == null || claimAt(context, chunkX, chunkZ + reach + 1) != null) {
+			throw new AssertionError("The colony's land isn't the block of chunks round its middle: it reaches " + reach + " chunks east, " + chunks + " chunks in all");
+		}
+		settle(context, 40);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, true, "the ground under the player");
+		assertClaimTint(context, cx + r * 16 + 0.5, y, cz + 0.5, true, "the colony's easternmost chunk");
+		assertClaimTint(context, cx + (r + 1) * 16 + 0.5, y, cz + 0.5, false, "the ground east of the colony");
+		assertClaimTint(context, cx + 0.5, y, cz - (r + 1) * 16 + 0.5, false, "the ground north of the colony");
+
+		openMapOnPlayer(context);
+		context.waitFor(mc -> claimsShown(new TileKey(TileKey.SURFACE, Math.floorDiv(cx, Projection.TILE_UNITS),
+			Math.floorDiv((int) Math.floor(Projection.v(y, cz)), Projection.TILE_UNITS))), 200);
+		settle(context, 20);
+		context.takeScreenshot("minecolonies-01-map");
+		lookAtPlayer(context, 1.0, TileKey.SURFACE);
+		settle(context, 20);
+		context.takeScreenshot("minecolonies-02-map-zoom-1");
+		// Hovering the colony's land names the colony.
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 10);
+		double[] spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("minecolonies-03-hover");
+		// Turned off, the colony's land goes.
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
+		context.waitTicks(5);
+		if (context.computeOnClient(mc -> !Claims.get().isEmpty())) {
+			throw new AssertionError("Claims still known with the setting off");
+		}
+		context.takeScreenshot("minecolonies-04-off");
+		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.ALWAYS);
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null, 600);
+		context.setScreen(() -> null);
+		// From just inside the colony's east edge, the minimap shows where its land ends.
+		int edge = cx + r * 16 + 2;
+		world.getServer().runCommand("tp @a " + edge + " " + y + " " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == edge, 200);
+		settle(context, 40);
+		context.takeScreenshot("minecolonies-05-minimap");
+		world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+		context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+		context.waitTicks(20);
+
+		// Forgotten, as on joining a server, the colony's land is read again.
+		context.runOnClient(mc -> Claims.clear());
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX + r, chunkZ - r) != null, 200);
+		Diorama.LOGGER.info("MineColonies: slowest tick spent on claims while the colony arrived and was read again {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
+		// With nothing changing, what looking at the colony once a second costs.
+		context.waitTicks(100);
+		Diorama.LOGGER.info("MineColonies: slowest tick spent on claims with nothing changing {} us", context.computeOnClient(mc -> Claims.resetSlowestTick()) / 1000);
+
+		// A new name and team colour follow.
+		mineColony(world, id, "setName", String.class, "Lakeside");
+		mineColony(world, id, "setColonyColor", net.minecraft.ChatFormatting.class, net.minecraft.ChatFormatting.AQUA);
+		int aqua = net.minecraft.network.chat.TextColor.fromLegacyFormat(net.minecraft.ChatFormatting.AQUA).getValue();
+		context.waitFor(mc -> Claims.get().at(chunkX, chunkZ) != null && Claims.get().at(chunkX, chunkZ).rgb() == aqua && Claims.get().at(chunkX, chunkZ).name().equals("Lakeside"), 600);
+		openMapOnPlayer(context);
+		lookAtPlayer(context, 2.0, TileKey.SURFACE);
+		settle(context, 40);
+		spot = mapPoint(context, 20, 2);
+		moveCursor(context, spot[2], spot[3]);
+		context.waitTicks(10);
+		context.takeScreenshot("minecolonies-06-renamed");
+
+		// Beside another claims mod: its claim inside the colony shows as its own, the colony keeps
+		// the rest, and gets the chunk back when the claim goes.
+		if (context.computeOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.available())) {
+			opacLogResults(context);
+			opacRequest(context, "requestAreaClaim", chunkX + 1, chunkZ, chunkX + 1, chunkZ, false);
+			opacWait(context, "claim inside the colony", mc -> Claims.get().at(chunkX + 1, chunkZ) != null && !isColony(Claims.get().at(chunkX + 1, chunkZ)));
+			// From the colony's edge: Open Parties and Claims turns down a claim far from the player.
+			int near = cx + r * 16;
+			world.getServer().runCommand("tp @a " + near + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == near, 200);
+			opacRequest(context, "requestAreaClaim", chunkX + r + 2, chunkZ, chunkX + r + 2, chunkZ, false);
+			opacWait(context, "claim outside the colony", mc -> Claims.get().at(chunkX + r + 2, chunkZ) != null);
+			world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+			// Past the next few looks at the colony, both are still there.
+			context.waitTicks(60);
+			Claims.Claim inside = claimAt(context, chunkX + 1, chunkZ);
+			Claims.Claim outside = claimAt(context, chunkX + r + 2, chunkZ);
+			Claims.Claim rest = claimAt(context, chunkX, chunkZ);
+			Diorama.LOGGER.info("MineColonies beside Open Parties and Claims: inside the colony {}, outside {}, the colony {}", inside, outside, rest);
+			if (inside == null || isColony(inside) || outside == null || !outside.owner().equals(inside.owner())
+				|| !isColony(rest) || claimAt(context, chunkX + r + 1, chunkZ) != null) {
+				throw new AssertionError("Expected the player's claim inside and outside the colony, and the colony's land round it: " + inside + ", " + outside + ", " + rest);
+			}
+			settle(context, 40);
+			assertClaimTint(context, cx + (r + 2) * 16 + 0.5, y, cz + 0.5, true, "the claim outside the colony");
+			assertClaimTint(context, cx + (r + 1) * 16 + 0.5, y, cz + 0.5, false, "the ground between the colony and the claim");
+			lookAtPlayer(context, 1.0, TileKey.SURFACE);
+			settle(context, 20);
+			// Hovering the claim outside the colony names it; the one inside stays in view.
+			spot = mapPoint(context, (r + 2) * 16, 2);
+			moveCursor(context, spot[2], spot[3]);
+			context.waitTicks(10);
+			context.takeScreenshot("minecolonies-07-with-opac");
+			// Open Parties and Claims' claims forgotten, as when it says a dimension changed: the
+			// colony's land stays, and the colony takes its chunk back.
+			context.runOnClient(mc -> Claims.forget(mc.level.dimension(), inside.owner().getClass()));
+			context.waitTicks(5);
+			if (!isColony(claimAt(context, chunkX, chunkZ)) || !isColony(claimAt(context, chunkX - r, chunkZ + r))) {
+				throw new AssertionError("Forgetting Open Parties and Claims' claims took the colony's land with them");
+			}
+			context.waitFor(mc -> isColony(Claims.get().at(chunkX + 1, chunkZ)), 100);
+			// Read again, Open Parties and Claims' claim is back over the colony's chunk.
+			context.runOnClient(mc -> dev.diorama.compat.OpenPartiesAndClaims.cleared());
+			opacWait(context, "claim inside the colony, read again", mc -> Claims.get().at(chunkX + 1, chunkZ) != null && !isColony(Claims.get().at(chunkX + 1, chunkZ)));
+			opacRequest(context, "requestAreaUnclaim", chunkX + 1, chunkZ, chunkX + 1, chunkZ, false);
+			context.waitFor(mc -> isColony(Claims.get().at(chunkX + 1, chunkZ)), 600);
+			world.getServer().runCommand("tp @a " + near + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == near, 200);
+			opacRequest(context, "requestAreaUnclaim", chunkX + r + 2, chunkZ, chunkX + r + 2, chunkZ, false);
+			context.waitFor(mc -> Claims.get().at(chunkX + r + 2, chunkZ) == null, 600);
+			world.getServer().runCommand("tp @a " + cx + " " + y + " " + cz);
+			context.waitFor(mc -> mc.player.blockPosition().getX() == cx, 200);
+			Diorama.LOGGER.info("MineColonies beside Open Parties and Claims: the colony got its chunk back after the claim went");
+		}
+
+		// Deleting the colony takes its land off the map.
+		world.getServer().runOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				managers.getMethod("deleteColonyByDimension", int.class, boolean.class, net.minecraft.resources.ResourceKey.class)
+					.invoke(managers.getMethod("getInstance").invoke(null), id, false, net.minecraft.world.level.Level.OVERWORLD);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't delete the colony through MineColonies' colony manager", e);
+			}
+		});
+		long deleted = System.nanoTime();
+		context.waitFor(mc -> Claims.get().isEmpty(), 600);
+		Diorama.LOGGER.info("MineColonies colony left the map's claims {} ms after it was deleted", (System.nanoTime() - deleted) / 1_000_000);
+		settle(context, 20);
+		assertClaimTint(context, cx + 0.5, y, cz + 0.5, false, "the ground under the player after the colony was deleted");
+		openMapOnPlayer(context);
+		context.waitTicks(40);
+		context.takeScreenshot("minecolonies-08-deleted");
+		context.setScreen(() -> null);
+		world.getServer().runCommand("forceload remove " + x0 + " " + z0 + " " + x1 + " " + z1);
+	}
+
+	private static Claims.Claim claimAt(ClientGameTestContext context, int chunkX, int chunkZ) {
+		return context.computeOnClient(mc -> Claims.get().at(chunkX, chunkZ));
+	}
+
+	private static boolean isColony(Claims.Claim claim) {
+		return claim != null && claim.owner() instanceof dev.diorama.compat.MineColonies.Colony;
+	}
+
+	/** Calls a one-argument setter on a colony, on the server. */
+	private static void mineColony(TestSingleplayerContext world, int id, String setter, Class<?> type, Object value) {
+		world.getServer().runOnServer(server -> {
+			try {
+				Class<?> managers = Class.forName("com.minecolonies.api.colony.IColonyManager");
+				Object colony = managers.getMethod("getColonyByDimension", int.class, net.minecraft.resources.ResourceKey.class)
+					.invoke(managers.getMethod("getInstance").invoke(null), id, net.minecraft.world.level.Level.OVERWORLD);
+				Class.forName("com.minecolonies.api.colony.IColony").getMethod(setter, type).invoke(colony, value);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't change the colony through MineColonies' colony manager", e);
+			}
+		});
+	}
+
+	/** Claims (or unclaims) 64 chunks in each of 20 by 20 regions from {@code regionX, regionZ}, for 50 owners, through Open Parties and Claims' server API. */
+	private static void opacBigServer(TestSingleplayerContext world, int regionX, int regionZ, boolean claim) {
+		world.getServer().runOnServer(server -> {
+			try {
+				Object api = Class.forName("xaero.pac.common.server.api.OpenPACServerAPI").getMethod("get", net.minecraft.server.MinecraftServer.class).invoke(null, server);
+				Object manager = api.getClass().getMethod("getServerClaimsManager").invoke(api);
+				Class<?> claims = Class.forName("xaero.pac.common.server.claims.api.IServerClaimsManagerAPI");
+				net.minecraft.resources.Identifier overworld = net.minecraft.world.level.Level.OVERWORLD.identifier();
+				java.lang.reflect.Method method = claim
+					? claims.getMethod("claim", net.minecraft.resources.Identifier.class, UUID.class, int.class, int.class, int.class, boolean.class)
+					: claims.getMethod("unclaim", net.minecraft.resources.Identifier.class, int.class, int.class);
+				for (int rx = 0; rx < 20; rx++) {
+					for (int rz = 0; rz < 20; rz++) {
+						UUID owner = new UUID(0x0DAC, (rx * 20 + rz) % 50 + 2);
+						for (int i = 0; i < 8; i++) {
+							for (int j = 0; j < 8; j++) {
+								int x = (regionX + rx) << 5 | (i * 4);
+								int z = (regionZ + rz) << 5 | (j * 4);
+								if (claim) {
+									method.invoke(manager, overworld, owner, -1, x, z, false);
+								} else {
+									method.invoke(manager, overworld, x, z);
+								}
+							}
+						}
+					}
+				}
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't change claims through Open Parties and Claims' server API", e);
+			}
+		});
+	}
+
+	/** Waits up to 30 s for a claim request to reach the map. */
+	private static void opacWait(ClientGameTestContext context, String what, java.util.function.Predicate<net.minecraft.client.Minecraft> reached) {
+		for (int tick = 0; !context.computeOnClient(reached::test); tick++) {
+			if (tick > 600) {
+				throw new AssertionError("Open Parties and Claims' " + what + " didn't reach the map (its answers are in the log)");
+			}
+			context.waitTick();
+		}
+	}
+
+	/** Logs Open Parties and Claims' answer to each claim request, so a refused one says why. */
+	private static void opacLogResults(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			try {
+				Object api = Class.forName("xaero.pac.client.api.OpenPACClientAPI").getMethod("get").invoke(null);
+				Object manager = api.getClass().getMethod("getClaimsManager").invoke(api);
+				Object tracker = Class.forName("xaero.pac.client.claims.api.IClientClaimsManagerAPI").getMethod("getClaimResultTracker").invoke(manager);
+				Class<?> listener = Class.forName("xaero.pac.client.claims.tracker.result.api.IClaimsManagerClaimResultListenerAPI");
+				Object proxy = java.lang.reflect.Proxy.newProxyInstance(listener.getClassLoader(), new Class<?>[] {listener}, (p, method, args) -> {
+					if (method.getName().equals("onClaimResult")) {
+						StringBuilder types = new StringBuilder();
+						try {
+							for (Object type : (Iterable<?>) args[0].getClass().getMethod("getResultTypesIterable").invoke(args[0])) {
+								types.append(type).append(' ');
+							}
+						} catch (ReflectiveOperationException e) {
+							types.append(args[0]);
+						}
+						Diorama.LOGGER.info("Open Parties and Claims answered a claim request: {}", types);
+					}
+					return method.getName().equals("equals") ? p == args[0] : method.getName().equals("hashCode") ? System.identityHashCode(p) : null;
+				});
+				Class.forName("xaero.pac.client.claims.tracker.result.api.IClaimsManagerClaimResultTrackerAPI").getMethod("register", listener).invoke(tracker, proxy);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't listen to Open Parties and Claims' answers", e);
+			}
+		});
+	}
+
+	/** Calls one of the claim requests Open Parties and Claims' client API has had since 1.20.1, on the client. */
+	private static void opacRequest(ClientGameTestContext context, String request, Object... args) {
+		context.runOnClient(mc -> {
+			try {
+				Object api = Class.forName("xaero.pac.client.api.OpenPACClientAPI").getMethod("get").invoke(null);
+				Object manager = api.getClass().getMethod("getClaimsManager").invoke(api);
+				Class<?>[] types = new Class<?>[args.length];
+				for (int i = 0; i < args.length; i++) {
+					types[i] = args[i] instanceof Integer ? int.class : boolean.class;
+				}
+				Class.forName("xaero.pac.client.claims.api.IClientClaimsManagerAPI").getMethod(request, types).invoke(manager, args);
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Couldn't ask Open Parties and Claims to " + request, e);
+			}
 		});
 	}
 
@@ -4943,7 +5572,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	private static void openMapOnPlayer(ClientGameTestContext context) {
+	static void openMapOnPlayer(ClientGameTestContext context) {
 		context.setScreen(MapScreen::new);
 		lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		settle(context, 20);
@@ -4987,7 +5616,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Right-clicks the pin of the waypoint at a position. */
-	private static void rightClickPin(ClientGameTestContext context, int[] pos) {
+	static void rightClickPin(ClientGameTestContext context, int[] pos) {
 		double[] at = context.computeOnClient(mc -> {
 			double scale = mc.getWindow().getGuiScale();
 			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
@@ -5042,7 +5671,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks a line of the map's right-click menu with the mouse, the way a player would. */
-	private static void clickMenu(ClientGameTestContext context, String label) {
+	static void clickMenu(ClientGameTestContext context, String label) {
 		double[] at = context.computeOnClient(mc -> {
 			MapMenu menu = mc.gui.screen() instanceof MapScreen map ? map.menu() : null;
 			if (menu == null) {
@@ -5068,7 +5697,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	private static int menuFrames;
 
 	/** Moves the cursor, gliding there a frame at a time when GIF frames are wanted. */
-	private static void moveCursor(ClientGameTestContext context, double x, double y) {
+	static void moveCursor(ClientGameTestContext context, double x, double y) {
 		int steps = MENU_GIF ? 10 : 1;
 		double[] from = cursor;
 		for (int i = 1; i <= steps; i++) {
@@ -5082,7 +5711,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(1);
 	}
 
-	private static void menuFrame(ClientGameTestContext context) {
+	static void menuFrame(ClientGameTestContext context) {
 		if (MENU_GIF) {
 			context.takeScreenshot(String.format("map-menu-gif-%03d-%d-%d", menuFrames++, Math.round(cursor[0]), Math.round(cursor[1])));
 		}
@@ -5366,7 +5995,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks the middle of a widget with the mouse, the way a player does. */
-	private static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+	static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double[] at = context.computeOnClient(mc -> {
 			double scale = mc.getWindow().getGuiScale();
 			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
@@ -5377,7 +6006,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Clicks the left mouse button at a point given in GUI pixels. */
-	private static void clickAtGui(ClientGameTestContext context, double x, double y) {
+	static void clickAtGui(ClientGameTestContext context, double x, double y) {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		context.getInput().setCursorPos(x * scale, y * scale);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
@@ -5411,7 +6040,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(3);
 	}
 
-	private static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
+	static net.minecraft.client.gui.components.Button buttonLabelled(net.minecraft.client.gui.screens.Screen screen, String label) {
 		for (var child : screen.children()) {
 			if (child instanceof net.minecraft.client.gui.components.Button button && button.getMessage().getString().equals(label)) {
 				return button;
@@ -5521,7 +6150,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * The enlarge key (#153), bound by the player since it starts unbound: held, the minimap grows
 	 * to the Enlarged size in its own corner, and stops at what fits the screen; let go, it's back
-	 * to its size.
+	 * to its size. With Toggle enlarging on (#306), one press enlarges it until the next press, through
+	 * a screen opening and closing.
 	 */
 	private static void enlarge(ClientGameTestContext context) {
 		context.setScreen(() -> null);
@@ -5567,7 +6197,44 @@ public class DioramaClientTest implements FabricClientGameTest {
 		settle(context, 10);
 		context.takeScreenshot("enlarge-06-settings");
 		context.setScreen(() -> null);
+		context.runOnClient(mc -> Settings.get().minimapEnlargeToggle = true);
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 40);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged() && !DioramaClient.ENLARGE_MINIMAP.isDown())) {
+			throw new AssertionError("One press with Toggle enlarging on didn't leave the minimap enlarged");
+		}
+		context.takeScreenshot("enlarge-07-toggled-on");
+		context.setScreen(() -> new SettingsScreen(null));
+		settle(context, 5);
+		context.setScreen(() -> null);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Opening and closing a screen shrank the toggled minimap");
+		}
+		context.takeScreenshot("enlarge-08-toggled-after-screen");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("A second press with Toggle enlarging on didn't shrink the minimap");
+		}
+		context.takeScreenshot("enlarge-09-toggled-off");
+		// Held past the key repeat delay, a keyboard keeps clicking: that's still one press.
+		context.getInput().holdKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(2);
+		for (int i = 0; i < 5; i++) {
+			context.runOnClient(mc -> net.minecraft.client.KeyMapping.click(InputConstants.getKey("key.keyboard.z")));
+			context.waitTicks(1);
+		}
+		context.getInput().releaseKey(DioramaClient.ENLARGE_MINIMAP);
+		settle(context, 20);
+		if (!context.computeOnClient(mc -> DioramaClient.minimapEnlarged())) {
+			throw new AssertionError("Key repeats while holding the enlarge key switched the toggled minimap back");
+		}
+		context.takeScreenshot("enlarge-10-toggled-held");
+		context.getInput().pressKey(DioramaClient.ENLARGE_MINIMAP);
+		context.waitTicks(5);
 		context.runOnClient(mc -> {
+			Settings.get().minimapEnlargeToggle = false;
 			Settings.get().minimapEnlarged = saved[0];
 			Settings.get().minimapCorner = Settings.Corner.values()[saved[1]];
 			DioramaClient.ENLARGE_MINIMAP.setKey(InputConstants.UNKNOWN);
@@ -6237,10 +6904,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "waypoint-select", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "portal-pins", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "waypoint-select", "icons", "portal-pins", "portal-roof", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-position", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
@@ -6356,6 +7023,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(2);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(5);
+	}
+
+	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */
+	static void clickAlong(ClientGameTestContext context, String label, double along) {
+		clickAt(context, label, along);
 	}
 
 	/** Clicks a widget this far along it, from 0 at its left edge to 1 at its right. */

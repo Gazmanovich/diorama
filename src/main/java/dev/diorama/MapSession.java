@@ -3,12 +3,14 @@ package dev.diorama;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.compat.SubLevels;
 import dev.diorama.craft.Crafts;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.SavedChunkImport;
+import dev.diorama.share.ShareClient;
 import dev.diorama.waypoint.Portals;
 import dev.diorama.waypoint.WaypointStore;
 import java.nio.file.Path;
@@ -214,6 +216,15 @@ public final class MapSession {
 			current.end();
 			current = null;
 		}
+		if (level != null && ServerRules.mapOff(level.dimension().identifier().toString())) {
+			// The map is off in this dimension: nothing is mapped or saved there, and what was
+			// mapped before stays as it is on disk.
+			if (current != null) {
+				current.end();
+				current = null;
+			}
+			return null;
+		}
 		if (level != null && current == null) {
 			String key = WorldKey.current(level);
 			if (key == null && WorldKey.waiting(level)) {
@@ -304,6 +315,10 @@ public final class MapSession {
 		}
 		int cx = pos.getX() >> 4;
 		int cz = pos.getZ() >> 4;
+		if (SubLevels.holds(level, cx, cz)) {
+			SubLevels.edited(cx, cz);
+			return;
+		}
 		int surface = current.visibleFromSky(pos) ? MapLevel.CHANGED_SURFACE : 0;
 		int[] box = {pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), surface};
 		current.schedule(cx, cz, CHANGE_DELAY_MS, box);
@@ -331,6 +346,10 @@ public final class MapSession {
 	 */
 	public static void blockEntityChanged(ClientLevel level, BlockPos pos) {
 		if (!Copycats.INSTALLED || current == null || current.level != level) {
+			return;
+		}
+		if (SubLevels.holds(level, pos.getX() >> 4, pos.getZ() >> 4)) {
+			SubLevels.edited(pos.getX() >> 4, pos.getZ() >> 4);
 			return;
 		}
 		ChunkSnapshot snapshot = current.map.worldChunk(pos.getX() >> 4, pos.getZ() >> 4);
@@ -423,6 +442,14 @@ public final class MapSession {
 	 * {x0, y0, z0, x1, y1, z1, visibleFromSky}; null means the whole chunk is new.
 	 */
 	private void schedule(int chunkX, int chunkZ, long delayMs, int @Nullable [] box) {
+		// The chunks a Create Aeronautics ship keeps its blocks in aren't land: the ship is drawn where it flies.
+		if (SubLevels.holds(this.level, chunkX, chunkZ)) {
+			// A chunk of a ship arriving: the ship is read again with it.
+			if (box == null) {
+				SubLevels.edited(chunkX, chunkZ);
+			}
+			return;
+		}
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		long due = System.currentTimeMillis() + delayMs;
 		Pending p = this.pending.get(key);
@@ -496,16 +523,23 @@ public final class MapSession {
 	 */
 	private void updateSavedChunks(Minecraft mc) {
 		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
+		boolean singleplayer = mc.getSingleplayerServer() != null;
 		if (this.relight == null) {
-			this.relight = mc.getSingleplayerServer() != null && SavedChunkImport.needsRelight(this.map, this.level);
+			this.relight = singleplayer && SavedChunkImport.needsRelight(this.map, this.level);
 		}
 		// Only for the relighting: done once it has gone through the save.
 		if (this.relight && !fill && this.map.memory() == null && this.savedChunks != null && this.savedChunks.idle()) {
 			this.relight = false;
 		}
-		boolean on = (fill || this.map.memory() != null || this.relight) && mc.getSingleplayerServer() != null;
+		// On a server with Diorama, the land it shares, which only fills in.
+		boolean on = singleplayer ? fill || this.map.memory() != null || this.relight : fill && ShareClient.sharing();
 		if (on && this.savedChunks == null) {
-			this.savedChunks = SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll);
+			this.savedChunks = singleplayer
+				? SavedChunkImport.start(this.map, this.level, this.savedPortals::addAll)
+				: SavedChunkImport.startShared(this.map, this.level, this.savedPortals::addAll);
+			if (this.savedChunks == null) {
+				return;
+			}
 		} else if (!on && this.savedChunks != null) {
 			this.savedChunks.stop();
 			this.savedChunks = null;
@@ -535,7 +569,7 @@ public final class MapSession {
 		int playerChunkX = viewer == null ? 0 : viewer.blockPosition().getX() >> 4;
 		int playerChunkZ = viewer == null ? 0 : viewer.blockPosition().getZ() >> 4;
 		long now = System.currentTimeMillis();
-		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER);
+		boolean fog = ServerRules.fogOfWar(this.level.dimension() == Level.NETHER, this.map.roofless());
 		String dimension = this.level.dimension().identifier().toString();
 		// Under fog of war only what the player has seen shows, and these aren't that.
 		WaypointStore pins = fog ? null : WaypointStore.get();
@@ -544,7 +578,7 @@ public final class MapSession {
 			saved.add(spot);
 		}
 		if (pins != null) {
-			Portals.add(saved, dimension, pins);
+			Portals.add(saved, dimension, pins, this.map.roof());
 		}
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();

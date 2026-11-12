@@ -13,6 +13,14 @@ public interface Body {
 	/** The same from session to session, so a parked craft is still known when it comes back. */
 	UUID id();
 
+	/**
+	 * Changes when its blocks may have: a ship can be built on as it flies. The blocks are read
+	 * again soon after it does. A body whose blocks never change keeps the one value.
+	 */
+	default long version() {
+		return 0;
+	}
+
 	/** Its blocks as they are now, or null if they can't be read. */
 	@Nullable Blocks read(BlockLooks looks);
 

@@ -295,7 +295,7 @@ public final class ChunkSnapshot {
 	 * read, so they show as the empty block.
 	 */
 	@SuppressWarnings("unchecked")
-	private ChunkSnapshot(SavedChunk chunk, @Nullable SavedChunk[] around, Level level) {
+	private ChunkSnapshot(SavedChunk chunk, @Nullable SavedChunk[] around, Level level, int blendRadius) {
 		this.facing = Facing.NORTH;
 		this.base = null;
 		this.views = new ChunkSnapshot[4];
@@ -324,7 +324,7 @@ public final class ChunkSnapshot {
 			}
 		}
 		this.biomeZoomSeed = ((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed();
-		this.blendRadius = Minecraft.getInstance().options.biomeBlendRadius().get();
+		this.blendRadius = blendRadius;
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = level.dimensionType().hasSkyLight();
 		this.blockLight = chunk.blockLight();
@@ -341,9 +341,14 @@ public final class ChunkSnapshot {
 		this.copycats = null;
 	}
 
-	/** A chunk read from the world's save; see the constructor. */
+	/** A chunk read from the world's save, its tints blended as the player's options ask; see the constructor. */
 	public static ChunkSnapshot fromSave(SavedChunk chunk, @Nullable SavedChunk[] around, Level level) {
-		return new ChunkSnapshot(chunk, around, level);
+		return new ChunkSnapshot(chunk, around, level, Minecraft.getInstance().options.biomeBlendRadius().get());
+	}
+
+	/** {@link #fromSave} with the tints blended over {@code blendRadius} blocks, where there are no options: on a server. */
+	public static ChunkSnapshot fromSave(SavedChunk chunk, @Nullable SavedChunk[] around, Level level, int blendRadius) {
+		return new ChunkSnapshot(chunk, around, level, blendRadius);
 	}
 
 	/** {@link #floorY} from the lowest motion-blocking height in the chunk. */

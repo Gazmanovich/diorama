@@ -1,7 +1,6 @@
 package dev.diorama.bake;
 
 import dev.diorama.data.ChunkSnapshot;
-import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.util.ARGB;
@@ -17,16 +16,18 @@ import net.minecraft.world.level.biome.BiomeManager;
  * own and their neighbours', as the game had them when the snapshot was taken.
  */
 public final class BiomeTints {
+	// The game's own resolvers (BiomeColors), written out: that class is the client's, and a
+	// dedicated server blends tints for the web map too.
 	private static final ColorResolver[] RESOLVERS = {
-		BiomeColors.GRASS_COLOR_RESOLVER,
-		BiomeColors.FOLIAGE_COLOR_RESOLVER,
+		Biome::getGrassColor,
+		(biome, x, z) -> biome.getFoliageColor(),
 		//? if >=1.21.5 {
-		BiomeColors.DRY_FOLIAGE_COLOR_RESOLVER,
+		(biome, x, z) -> biome.getDryFoliageColor(),
 		//?} else {
 		/*// Dry foliage (leaf litter) came in 1.21.5; nothing reads this slot before.
-		BiomeColors.FOLIAGE_COLOR_RESOLVER,
+		(biome, x, z) -> biome.getFoliageColor(),
 		*///?}
-		BiomeColors.WATER_COLOR_RESOLVER,
+		(biome, x, z) -> biome.getWaterColor(),
 	};
 	private static final int WATER = 3;
 

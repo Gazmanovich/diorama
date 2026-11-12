@@ -16,6 +16,9 @@ final class Craft {
 	final UUID id;
 	@Nullable Body body;
 	Body.@Nullable Blocks blocks;
+	/** The body's {@link Body#version} when its blocks were last read, and the tick. */
+	long version;
+	long readAt;
 	/** The pose at the end of the last tick, or where it was parked. */
 	final double[] pose = new double[12];
 	boolean posed;

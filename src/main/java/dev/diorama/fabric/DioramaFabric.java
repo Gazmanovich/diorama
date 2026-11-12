@@ -13,6 +13,8 @@ import dev.diorama.XaeroChannels;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
+import dev.diorama.share.ShareClient;
+import dev.diorama.share.ShareProtocol;
 import dev.diorama.waypoint.WaypointHud;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
@@ -25,6 +27,7 @@ import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.event.registry.RegistryIdRemapCallback;
 //? if >=1.21.6 {
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -43,6 +46,28 @@ public final class DioramaFabric implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		DioramaClient.init();
+		ShareClient.init();
+		// The payload type is registered on both sides, in DioramaFabricCommon.
+		//? if >=1.21 {
+		ClientPlayNetworking.registerGlobalReceiver(ShareProtocol.TYPE, (packet, context) -> ShareProtocol.toClient(packet.data()));
+		ShareProtocol.toServer(data -> ClientPlayNetworking.send(new ShareProtocol.Packet(data)));
+		//?} else {
+		/*ClientPlayNetworking.registerGlobalReceiver(ShareProtocol.CHANNEL, (client, handler, buf, sender) -> {
+			// Read here: the buffer is only good until this returns. Handled on the client thread,
+			// unless the player has left by then.
+			byte[] data = ShareProtocol.read(buf).data();
+			client.execute(() -> {
+				if (handler.getConnection().isConnected()) {
+					ShareProtocol.toClient(data);
+				}
+			});
+		});
+		ShareProtocol.toServer(data -> {
+			net.minecraft.network.FriendlyByteBuf buf = net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create();
+			buf.writeBytes(data);
+			ClientPlayNetworking.send(ShareProtocol.CHANNEL, buf);
+		});
+		*///?}
 		for (KeyMapping keyMapping : DioramaClient.KEY_MAPPINGS) {
 			KeyMappingHelper.registerKeyMapping(keyMapping);
 		}
@@ -77,6 +102,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
+			ShareClient.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
@@ -89,6 +115,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
 			XaeroChannels.onJoinOrLeave();
+			ShareClient.onJoinOrLeave();
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();

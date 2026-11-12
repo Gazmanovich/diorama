@@ -56,7 +56,7 @@ final class RedrawTest {
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(A + 24, Projection.v(ground, A + 24), 0.7, TileKey.SURFACE));
 		context.waitFor(mc -> MapSession.get().map().memory().shownTiles() > 0, 400);
 		context.waitTicks(10);
-		context.takeScreenshot("redraw-under-clouds");
+		context.takeScreenshot("redraw-under-fog");
 		rescanAndWait(context);
 		context.waitTicks(40);
 		context.takeScreenshot("redraw-landed");

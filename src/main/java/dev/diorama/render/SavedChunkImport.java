@@ -8,9 +8,12 @@ import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileKey;
+import dev.diorama.data.ChunkSave;
 import dev.diorama.data.ChunkSnapshot;
+import dev.diorama.data.ChunkTags;
 import dev.diorama.data.SavedChunkSource;
 import dev.diorama.data.SavedChunks;
+import dev.diorama.share.SharedChunks;
 import dev.diorama.waypoint.Portals;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -98,7 +101,7 @@ public final class SavedChunkImport {
 	private static final long FOLDER_WAIT_WARN_MS = 30_000;
 
 	private final MapLevel map;
-	private final SavedChunks save;
+	private final ChunkSave save;
 	private final SavedChunkSource source;
 	private final Thread thread;
 	private final ExecutorService workers = Executors.newFixedThreadPool(WORKERS, task -> {
@@ -147,7 +150,7 @@ public final class SavedChunkImport {
 	private int drawnCount;
 	private long drawNanos;
 
-	private SavedChunkImport(MapLevel map, SavedChunks save, Consumer<List<Portals.Spot>> portals) {
+	private SavedChunkImport(MapLevel map, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
 		this.map = map;
 		this.save = save;
 		this.source = new SavedChunkSource(map.world(), save, portals);
@@ -195,9 +198,27 @@ public final class SavedChunkImport {
 	/** Starts drawing the save behind this map, or returns null when there's no save here. */
 	public static @Nullable SavedChunkImport start(MapLevel map, ClientLevel level, Consumer<List<Portals.Spot>> portals) {
 		SavedChunks save = SavedChunks.open(level, map.roofless());
+		return save == null ? null : start(map, save, portals);
+	}
+
+	/**
+	 * Starts drawing the land the server shares onto this map, or returns null when it shares none.
+	 * Only the view from the sky: under a roof the view is a cave view, and those stay the player's.
+	 */
+	public static @Nullable SavedChunkImport startShared(MapLevel map, ClientLevel level, Consumer<List<Portals.Spot>> portals) {
+		if (map.roofless()) {
+			return null;
+		}
+		SharedChunks save = SharedChunks.open(level);
 		if (save == null) {
 			return null;
 		}
+		SavedChunkImport job = start(map, save, portals);
+		save.onChange(job::rescanSoon);
+		return job;
+	}
+
+	private static SavedChunkImport start(MapLevel map, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
 		SavedChunkImport job = new SavedChunkImport(map, save, portals);
 		map.watchLiveChunks(true);
 		job.thread.start();
@@ -251,7 +272,16 @@ public final class SavedChunkImport {
 		return this.idle && !this.rescanAsked;
 	}
 
-	/** For tests: lists the save now rather than at the next listing. */
+	/**
+	 * Asks the server for what's changed in the land it shares, which comes in as tables (see
+	 * {@link #rescanSoon}): chunks saved since they were drawn are drawn again. In singleplayer the
+	 * save is listed every minute anyway.
+	 */
+	public void refresh() {
+		this.save.refresh();
+	}
+
+	/** Lists the save again soon: for tests, and as tables of the land a server shares come in. */
 	public void rescanSoon() {
 		this.rescanAsked = true;
 	}
@@ -390,7 +420,7 @@ public final class SavedChunkImport {
 			this.idle = false;
 			this.rescanAsked = false;
 			this.lastScan = now;
-			this.scannedAt = (int) (now / 1000);
+			this.scannedAt = this.save.now();
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
 			if (progress.back(this.regions)) {
@@ -419,6 +449,9 @@ public final class SavedChunkImport {
 			this.chunksToDo = toDo;
 			this.chunksInSave = inSave;
 			this.chunksDone = 0;
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Saved chunks: listed {} regions, {} with work, {} chunks to draw", this.regions.size(), this.pending.size(), toDo);
+			}
 		}
 		Long next = this.nearestPending();
 		if (next == null) {
@@ -489,6 +522,10 @@ public final class SavedChunkImport {
 			int regionZ = (int) Math.floor(facing.worldZ(u, z)) >> 9;
 			// Its region can get work later, so it's only looked at, once, when there is some.
 			if (this.pending.contains(SavedChunks.regionKey(regionX, regionZ)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
+				// From a server, the blocks behind what's on screen come before anything else.
+				if (this.save.prefetches()) {
+					this.save.prefetch(this.chunksUnder(Set.of(key), regionX, regionZ, facing), true);
+				}
 				return key;
 			}
 		}
@@ -500,7 +537,7 @@ public final class SavedChunkImport {
 		// Everything read from here on, heights too, is at least this recent, which is what makes a
 		// tile drawn below good enough for a chunk saved before then, here or in the region next door.
 		this.source.clear();
-		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
+		int readSince = Math.min(this.scannedAt, this.save.now());
 		Plan plan = this.plans.get(region);
 		if (plan == null || plan.onlyRemembered != this.onlyRemembered || plan.facing != Projection.facing()) {
 			plan = this.plan(region, progress);
@@ -651,6 +688,9 @@ public final class SavedChunkImport {
 					this.pause(3 * nanos / 1_000_000);
 				}
 				return new Drawn(key, taken, nanos, null);
+			} catch (ChunkSave.Late e) {
+				// The server hasn't sent a chunk yet: drawn again later, like a tile a live bake got to first.
+				return new Drawn(key, false, 0, null);
 			} catch (RuntimeException e) {
 				return new Drawn(key, false, 0, e);
 			}
@@ -729,7 +769,7 @@ public final class SavedChunkImport {
 			}
 			int cx = (regionX << 5) | (i & 31);
 			int cz = (regionZ << 5) | (i >> 5);
-			SavedChunks.Summary summary = this.save.summary(cx, cz);
+			ChunkTags.Summary summary = this.save.summary(cx, cz);
 			if (this.stopped()) {
 				// That read may have been cut short, which says nothing about the chunk.
 				return null;
@@ -758,14 +798,51 @@ public final class SavedChunkImport {
 		// Taken from the end: one column of tiles after another, west to east, each north to south, so
 		// the chunks read for a tile serve the tiles beside it.
 		plan.order.sort(Comparator.comparingInt(TileKey::tileU).thenComparingInt(TileKey::tileV).reversed());
+		if (!plan.tiles.isEmpty() && this.save.prefetches()) {
+			this.save.prefetch(this.chunksUnder(plan.tiles.keySet(), regionX, regionZ, plan.facing), false);
+		}
 		return plan;
+	}
+
+	/**
+	 * The chunks drawing {@code tiles} reads, of those in the region and the regions around it, with
+	 * a ring around them for the biomes their edges blend with: west to east, each north to south,
+	 * the way a plan's tiles are drawn.
+	 */
+	private List<Long> chunksUnder(Set<TileKey> tiles, int regionX, int regionZ, Facing facing) {
+		Set<Long> under = new HashSet<>();
+		for (int rx = regionX - 1; rx <= regionX + 1; rx++) {
+			for (int rz = regionZ - 1; rz <= regionZ + 1; rz++) {
+				for (int i = 0; i < 1024; i++) {
+					int cx = (rx << 5) | (i & 31);
+					int cz = (rz << 5) | (i >> 5);
+					ChunkTags.Summary summary = this.save.summary(cx, cz);
+					if (summary == null || !summary.finished()) {
+						continue;
+					}
+					for (TileKey key : this.tilesShowing(cx, cz, summary, facing)) {
+						if (tiles.contains(key)) {
+							for (int dx = -1; dx <= 1; dx++) {
+								for (int dz = -1; dz <= 1; dz++) {
+									under.add(ChunkSnapshot.key(cx + dx, cz + dz));
+								}
+							}
+							break;
+						}
+					}
+				}
+			}
+		}
+		List<Long> ordered = new ArrayList<>(under);
+		ordered.sort(Comparator.comparingInt((Long key) -> (int) (key >> 32)).thenComparingInt(key -> (int) (long) key));
+		return ordered;
 	}
 
 	/**
 	 * The sky view tiles a chunk can show in, as {@link MapLevel} works it out for a newly loaded
 	 * chunk: its own blocks, plus the shadows and sky occlusion they cast on blocks nearby.
 	 */
-	private List<TileKey> tilesShowing(int cx, int cz, SavedChunks.Summary summary, Facing facing) {
+	private List<TileKey> tilesShowing(int cx, int cz, ChunkTags.Summary summary, Facing facing) {
 		int x0 = facing.blockX(cx, cz) << 4;
 		int z0 = facing.blockZ(cx, cz) << 4;
 		int x1 = x0 + 15;

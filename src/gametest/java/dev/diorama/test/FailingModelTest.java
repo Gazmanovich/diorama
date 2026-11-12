@@ -59,6 +59,7 @@ final class FailingModelTest {
 	private static void assertLooksUnchanged(Minecraft mc, BlockState state, Predicate<Method> throwsOn) {
 		int id = Block.BLOCK_STATE_REGISTRY.getId(state);
 		BlockLooks real = BlockLooks.build();
+		real.ensure(id);
 		Object models = models(mc);
 		Field field = modelMap(models);
 		BlockLooks looks;
@@ -86,6 +87,8 @@ final class FailingModelTest {
 			field.set(models, swapped);
 			try {
 				looks = BlockLooks.build();
+				// Looks are worked out when first asked for: ask while the model still fails.
+				looks.ensure(id);
 			} finally {
 				field.set(models, byState);
 			}
