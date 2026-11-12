@@ -11,11 +11,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.NaturalSpawner;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -484,7 +486,10 @@ public abstract class Looks {
 			return AIR;
 		}
 		FluidState fluid = state.getFluidState();
-		boolean noCollision = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+		// Leaves stay blocks when a mod lets players walk through them (Passable Foliage), waterlogged
+		// ones too.
+		boolean noCollision = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty()
+			&& !(state.getBlock() instanceof LeavesBlock) && !state.is(BlockTags.LEAVES);
 		if (!fluid.isEmpty() && noCollision) {
 			return fluid.is(FluidTags.LAVA) ? LAVA : WATER;
 		}
