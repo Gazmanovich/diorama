@@ -23,7 +23,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The moving crafts on one dimension's map: built structures that fly or roll around the world,
- * from whichever {@link Source}s are registered (trains, windmills, pistons), drawn over the
+ * from whichever {@link Source}s are registered (trains, windmills, pistons, airships), drawn over the
  * tiles as their own blocks, live as they move, each with its shadow on the ground.
  * {@link CraftPainter} draws them.
  *
@@ -34,6 +34,8 @@ import org.jspecify.annotations.Nullable;
 public final class Crafts {
 	/** Ticks between reading a live craft's blocks again, in case they changed. */
 	private static final int READ_EVERY = 600;
+	/** Ticks between two reads of a craft whose blocks keep changing, like a ship being built on. */
+	private static final int READ_CHANGED_AFTER = 10;
 	/** Ticks a craft has to stand still before it stays on the map once out of view. */
 	private static final int PARK_AFTER = 100;
 	/** Blocks a craft's origin has to move to count as moving. */
@@ -111,7 +113,10 @@ public final class Crafts {
 			craft.nearSince = -1;
 			// Spread the periodic reads out over ticks, so many crafts don't all copy at once.
 			boolean due = (tick + (craft.id.hashCode() & 0x7FFFFFFF)) % READ_EVERY == 0;
-			if (craft.blocks == null || due || back) {
+			boolean changed = body.version() != craft.version && tick - craft.readAt >= READ_CHANGED_AFTER;
+			if (craft.blocks == null || due || back || changed) {
+				craft.version = body.version();
+				craft.readAt = tick;
 				Body.Blocks read = body.read(looks);
 				if (read != null && (craft.blocks == null || !read.blocks().looksLike(craft.blocks.blocks(), looks)
 					|| !java.util.Arrays.equals(read.min(), craft.blocks.min()))) {
