@@ -14,6 +14,7 @@ import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /**
  * Trees on the map (opt-in: {@code leaves}; with Passable Foliage installed, {@code --mods
@@ -80,8 +81,18 @@ final class LeavesTest {
 				if (looks.kind[looks.lookId(state)] != BlockLooks.SOLID) {
 					out.append(' ').append(BuiltInRegistries.BLOCK.getKey(block)).append(" is kind ").append(looks.kind[looks.lookId(state)]).append(';');
 				}
+				// Under water a walk-through block would otherwise count as the water itself.
+				if (state.hasProperty(BlockStateProperties.WATERLOGGED)) {
+					byte wet = looks.kind[looks.lookId(state.setValue(BlockStateProperties.WATERLOGGED, true))];
+					if (wet != BlockLooks.SOLID) {
+						out.append(" waterlogged ").append(BuiltInRegistries.BLOCK.getKey(block)).append(" is kind ").append(wet).append(';');
+					}
+				}
 			}
 			dev.diorama.Diorama.LOGGER.info("leaves: {} kinds of leaves can be walked through", passable);
+			if (passable == 0 && installed("snownee.passablefoliage.PassableFoliage")) {
+				out.append(" Passable Foliage is installed, but no leaves can be walked through, so its case wasn't checked;");
+			}
 			for (Block block : new Block[] {Blocks.FERN, Blocks.POPPY, Blocks.OAK_SAPLING}) {
 				byte kind = looks.kind[looks.lookId(block.defaultBlockState())];
 				if (kind != BlockLooks.PLANT) {
@@ -92,6 +103,15 @@ final class LeavesTest {
 		});
 		if (!wrong.isEmpty()) {
 			throw new AssertionError("Leaves must draw as blocks (kind " + BlockLooks.SOLID + ") and small plants as thin plants (kind " + BlockLooks.PLANT + "):" + wrong);
+		}
+	}
+
+	private static boolean installed(String className) {
+		try {
+			Class.forName(className, false, LeavesTest.class.getClassLoader());
+			return true;
+		} catch (ClassNotFoundException | LinkageError e) {
+			return false;
 		}
 	}
 

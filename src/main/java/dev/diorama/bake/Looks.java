@@ -488,8 +488,8 @@ public abstract class Looks {
 		FluidState fluid = state.getFluidState();
 		// Leaves stay blocks when a mod lets players walk through them (Passable Foliage), waterlogged
 		// ones too.
-		boolean leaves = state.getBlock() instanceof LeavesBlock || state.is(BlockTags.LEAVES);
-		boolean noCollision = !leaves && state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+		boolean noCollision = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty()
+			&& !(state.getBlock() instanceof LeavesBlock) && !state.is(BlockTags.LEAVES);
 		if (!fluid.isEmpty() && noCollision) {
 			return fluid.is(FluidTags.LAVA) ? LAVA : WATER;
 		}
